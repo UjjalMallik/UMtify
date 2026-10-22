@@ -90,8 +90,8 @@ android {
         abi {
             isEnable = true
             reset()
-            include("armeabi-v7a", "arm64-v8a", "x86_64")
-            isUniversalApk = true
+            include("arm64-v8a")
+            isUniversalApk = false
         }
     }
 
@@ -152,13 +152,15 @@ android {
              * `benchmark` build type below before it ships.
              */
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Null without a keystore to sign with: the build then produces
-            // app-release-unsigned.apk instead of failing outright.
+            // Prefer the configured release key; clean CI checkouts use the
+            // debug key so the production APK remains installable.
             signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
         }
         /*
          * The release build, installable next to the dev and prod apps: same R8,
