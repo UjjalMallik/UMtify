@@ -101,13 +101,6 @@ android {
         getByName("main") { java.srcDir("../wearos/protocol") }
     }
 
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
-        }
-    }
-
     // applicationId can only be overridden per flavor, not per build type, so a
     // dev/prod dimension exists purely to let both sit installed side by side
     // on the same device instead of the dev build overwriting the prod one.

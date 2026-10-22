@@ -11,13 +11,9 @@ object NativeAnalysisLibrary {
     }
 
     val available: Boolean by lazy {
-        runCatching {
-            val install = loader
-            if (install != null) install() else System.loadLibrary(LIBRARY_NAME)
-        }.onFailure { AnalysisLog.warn("Analysis library unavailable; Automix will not run", it) }
+        val install = loader ?: return@lazy false
+        runCatching { install() }
+            .onFailure { AnalysisLog.warn("Analysis library unavailable; Automix will not run", it) }
             .isSuccess
     }
-
-    /** The name both builds give it, so neither spells it out separately. */
-    const val LIBRARY_NAME = "bitchord_analysis"
 }
