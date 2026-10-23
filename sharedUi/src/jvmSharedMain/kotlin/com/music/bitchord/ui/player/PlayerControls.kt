@@ -1,9 +1,9 @@
 package com.music.bitchord.ui.player
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.draw.drawWithContent
@@ -15,23 +15,13 @@ import com.music.bitchord.data.model.creditSegments
 import com.music.bitchord.sharedui.resources.*
 
 import org.jetbrains.compose.resources.DrawableResource
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -43,26 +33,26 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.draw.alpha
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Headphones
-import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -182,7 +172,7 @@ internal fun PlaybackOriginCaption(
 }
 
 /**
- * The seek bar, with elapsed and remaining either side under it and
+ * The wavy seek bar, with elapsed and total either side under it and
  * [centerLabel] — the quality badge — between them.
  */
 @Composable
@@ -193,9 +183,11 @@ internal fun PlayerScrubber(
      */
     shown: () -> Float,
     durationMs: Long,
-    /** A version switch's wait, drawn along the bar — see [ThinSlider.loading]. */
+    /** The wave flows while the music does, and settles flat when it stops. */
+    isPlaying: Boolean,
+    /** A version switch's wait, drawn along the rail — see [WavySeekBar.loading]. */
     loading: Boolean,
-    /** An analysed Automix handoff, drawn as a travelling sheen. */
+    /** An analysed Automix handoff, whose pulse claims the bar. */
     mixing: Boolean,
     transitionWindow: ClosedFloatingPointRange<Float>?,
     onScrub: (Float) -> Unit,
@@ -212,10 +204,11 @@ internal fun PlayerScrubber(
     // One clock for the bar and the "Mixing" label, so they breathe on the same beat.
     val mixPulse = rememberMixPulse({ mixBlend.value }, enabled = !reduceAnimation)
     Column(Modifier.fillMaxWidth()) {
-        ThinSlider(
+        WavySeekBar(
             value = shown,
             onValueChange = onScrub,
             onValueChangeFinished = onScrubFinished,
+            isPlaying = isPlaying,
             loading = loading,
             mixing = mixing,
             mixPulse = mixPulse,
@@ -224,9 +217,9 @@ internal fun PlayerScrubber(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                // The slider's touch target extends well past the drawn bar,
-                // so pull the labels back up under it.
-                .offset(y = (-9).dp),
+                // The bar's touch strip extends past the drawn rail, so pull
+                // the labels back up under it.
+                .offset(y = (-8).dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -238,7 +231,7 @@ internal fun PlayerScrubber(
                     color = LocalPlayerTint.current.copy(alpha = 0.55f),
                 )
                 Text(
-                    text = "-" + formatTime(durationMs - (shown * durationMs).toLong()),
+                    text = formatTime(durationMs),
                     style = MaterialTheme.typography.labelMedium,
                     color = LocalPlayerTint.current.copy(alpha = 0.55f),
                 )
@@ -425,10 +418,13 @@ internal fun SleeveNerdStats(song: Song, modifier: Modifier = Modifier) {
 }
 
 /**
- * Previous, play/pause, next.
+ * Previous, play/pause, next, in the Material 3 shape the player rests on:
+ * two tonal discs flanking a wide filled pill that names what the middle
+ * button will do.
  *
  * [compact] is the landscape player on a phone, where the portrait player's
- * 100dp play target is a third of the window's height on its own.
+ * 64dp discs are a third of the window's height on their own; it shrinks the
+ * whole row rather than only the glyphs, so the three still read as one set.
  */
 @Composable
 internal fun TransportRow(
@@ -447,56 +443,150 @@ internal fun TransportRow(
     onNext: () -> Unit,
     compact: Boolean = false,
 ) {
-    val playSize = if (compact) 58.dp else 74.dp
-    val playTouch = if (compact) 76.dp else 92.dp
-    val skipSize = if (compact) 44.dp else PLAYER_SKIP_ICON_SIZE
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        // SpaceAround, not SpaceEvenly: the outer margins take half a gap, so
-        // the three buttons spread a little further apart from each other.
-        horizontalArrangement = Arrangement.SpaceAround,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TransportGlyph(
-            icon = Res.drawable.ic_player_previous,
-            contentDescription = stringResource(Res.string.widget_previous),
-            size = skipSize,
-            touchSize = PLAYER_SKIP_TOUCH_SIZE,
-            heightScale = PLAYER_SKIP_HEIGHT_SCALE,
-            onClick = onPrevious,
-            enabled = previousEnabled,
-            haptic = Haptic.SkipPrevious,
-        )
-        if (isLoading) {
-            // Same footprint as the play/pause target — a smaller box here
-            // would shunt everything below it on every load.
-            Box(Modifier.size(playTouch), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(
-                    color = Color.White,
-                    strokeWidth = 3.dp,
-                    modifier = Modifier.size(if (compact) 30.dp else 38.dp),
-                )
-            }
-        } else {
-            TransportGlyph(
-                icon = if (isPlaying) Res.drawable.ic_player_pause else Res.drawable.ic_player_play,
-                contentDescription = stringResource(if (isPlaying) Res.string.pause else Res.string.play),
-                size = playSize,
-                touchSize = playTouch,
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val disc = if (compact) 44.dp else 64.dp
+        val gap = if (compact) 8.dp else 14.dp
+        // The pill takes what the two discs leave it, up to a measure where a
+        // label still reads as a button rather than a bar. On a narrow phone
+        // the gap wins first, then the pill, so the row never overflows.
+        val pill = (maxWidth - disc * 2 - gap * 2)
+            .coerceAtMost(if (compact) 124.dp else 200.dp)
+            .coerceAtLeast(96.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TransportDisc(
+                icon = Res.drawable.ic_player_previous,
+                contentDescription = stringResource(Res.string.widget_previous),
+                size = disc,
+                enabled = previousEnabled,
+                onClick = onPrevious,
+                haptic = Haptic.SkipPrevious,
+            )
+            PlayPausePill(
+                isPlaying = isPlaying,
+                isLoading = isLoading,
+                width = pill,
+                height = disc,
+                compact = compact,
                 onClick = onPlayPause,
-                haptic = if (isPlaying) Haptic.Pause else Haptic.Resume,
+            )
+            TransportDisc(
+                icon = Res.drawable.ic_player_next,
+                contentDescription = stringResource(Res.string.widget_next),
+                size = disc,
+                enabled = nextEnabled,
+                onClick = onNext,
+                haptic = Haptic.SkipNext,
             )
         }
-        TransportGlyph(
-            icon = Res.drawable.ic_player_next,
-            contentDescription = stringResource(Res.string.widget_next),
-            size = skipSize,
-            touchSize = PLAYER_SKIP_TOUCH_SIZE,
-            heightScale = PLAYER_SKIP_HEIGHT_SCALE,
-            onClick = onNext,
-            enabled = nextEnabled,
-            haptic = Haptic.SkipNext,
+    }
+}
+
+/** A tonal disc for one end of the transport. */
+@Composable
+private fun TransportDisc(
+    icon: DrawableResource,
+    contentDescription: String,
+    size: Dp,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    haptic: Haptic,
+) {
+    val haptics = rememberHaptics()
+    val scheme = MaterialTheme.colorScheme
+    val contentAlpha by animateFloatAsState(
+        targetValue = if (enabled) 1f else 0.38f,
+        label = "transportDiscAlpha",
+    )
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(scheme.secondaryContainer)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                enabled = enabled,
+            ) {
+                haptics.play(haptic)
+                onClick()
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(icon),
+            contentDescription = contentDescription,
+            tint = scheme.onSecondaryContainer.copy(alpha = contentAlpha),
+            modifier = Modifier.size(size * 0.42f),
         )
+    }
+}
+
+/**
+ * The wide play/pause button: the one filled control on the screen, carrying
+ * its own verb so the middle of the transport never has to be inferred from a
+ * triangle.
+ */
+@Composable
+private fun PlayPausePill(
+    isPlaying: Boolean,
+    isLoading: Boolean,
+    width: Dp,
+    height: Dp,
+    compact: Boolean,
+    onClick: () -> Unit,
+) {
+    val haptics = rememberHaptics()
+    val scheme = MaterialTheme.colorScheme
+    val label = stringResource(if (isPlaying) Res.string.pause else Res.string.play)
+    Box(
+        modifier = Modifier
+            .width(width)
+            .height(height)
+            .clip(RoundedCornerShape(50))
+            .background(scheme.primary)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                enabled = !isLoading,
+            ) {
+                haptics.play(if (isPlaying) Haptic.Pause else Haptic.Resume)
+                onClick()
+            }
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (isLoading) {
+            CircularProgressIndicator(
+                color = scheme.onPrimary,
+                strokeWidth = 2.5.dp,
+                modifier = Modifier.size(if (compact) 22.dp else 26.dp),
+            )
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    painter = painterResource(
+                        if (isPlaying) Res.drawable.ic_player_pause else Res.drawable.ic_player_play,
+                    ),
+                    contentDescription = null,
+                    tint = scheme.onPrimary,
+                    modifier = Modifier.size(if (compact) 22.dp else 26.dp),
+                )
+                Spacer(Modifier.width(if (compact) 7.dp else 9.dp))
+                Text(
+                    text = label,
+                    color = scheme.onPrimary,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = if (compact) 15.sp else 17.sp,
+                    ),
+                    maxLines = 1,
+                )
+            }
+        }
     }
 }
 
@@ -544,424 +634,186 @@ internal fun VolumeRow(
 }
 
 /**
- * Lyrics, the capsule, and the queue — the row both layouts end on.
+ * The row both layouts end on: queue, sleep timer, shuffle, lyrics, repeat, and
+ * a round more menu at the far right.
  *
- * The capsule swaps: output and party normally, the three playback modes while
- * the queue is up, since that is when they are what you are about to reach for.
- * With the queue up the lyrics glyph steps aside and the capsule slides over
- * into its place, leaving the queue glyph — lit — as the way back.
+ * A row of compact tonal keys rather than the old pill-and-glyph pair. Every
+ * key is the same size and sits in the same rhythm, so the eye reads it as one
+ * instrument panel instead of three unrelated controls; the only asymmetry is
+ * the circular menu at the end, which is what makes it read as "and the rest"
+ * rather than one more mode.
+ *
+ * The playback modes are always here, not swapped in only while the queue is
+ * up: shuffle and repeat are things people reach for while a song is playing,
+ * and hiding them behind a panel made them look like queue settings.
+ *
+ * AutoPlay lives in the queue panel, where its tracks are.
  */
 @Composable
-internal fun PlayerActionRow(
+internal fun PlayerActionBar(
     lyricsOpen: Boolean,
     queueOpen: Boolean,
     shuffleEnabled: Boolean,
     repeatMode: Int,
-    autoplayEnabled: Boolean,
     onToggleLyrics: () -> Unit,
     onToggleQueue: () -> Unit,
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
-    onToggleAutoplay: () -> Unit,
-    onOpenOutput: () -> Unit,
-    onListenTogether: () -> Unit,
-    /** Opens [ListenTogetherMembersSheet] rather than settings directly. */
-    onOpenListenTogetherMembers: () -> Unit,
+    onOpenSleepTimer: () -> Unit,
+    onOpenMenu: () -> Unit,
+    /** Briefly an undo arrow after a quality upgrade. */
+    menuIcon: ImageVector = Icons.Rounded.MoreHoriz,
+    modifier: Modifier = Modifier,
 ) {
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        // Sized for the wider of the two capsules — the three-up one — in both
-        // states. Computed for whichever was on screen it would change as they
-        // swap, and the lyrics and queue glyphs would slide with it.
-        val widestRow = BOTTOM_ACTION_SIZE * 2 + pillWidth(3)
-        val edgeInset = ((maxWidth - widestRow) / 4).coerceAtLeast(0.dp)
-        // 0 with the capsule centred between lyrics and queue, 1 with it moved
-        // over to where the lyrics glyph sits. Read only while placing, so the
-        // slide relays out the row and recomposes nothing.
-        val toStart = animateFloatAsState(
-            targetValue = if (queueOpen) 1f else 0f,
-            animationSpec = tween(PILL_SLIDE_MS, easing = FastOutSlowInEasing),
-            label = "playerBottomPillSlide",
-        )
-        Box(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = edgeInset),
-            contentAlignment = Alignment.CenterStart,
-        ) {
-            // Gone while the queue is up: the playback modes take its place, and
-            // the queue glyph, lit, is how you get back.
-            AnimatedVisibility(
-                visible = !queueOpen,
-                enter = fadeIn(tween(180, delayMillis = 120)),
-                exit = fadeOut(tween(120)),
-                modifier = Modifier.align(Alignment.CenterStart),
-            ) {
-                BottomGlyph(
-                    icon = BitChordIcons.LyricsQuote,
-                    contentDescription = stringResource(if (lyricsOpen) Res.string.close_lyrics else Res.string.open_lyrics),
-                    // Lyrics and the queue are two things to show in one place, so
-                    // opening either closes the other; lit to say which is up.
-                    onClick = onToggleLyrics,
-                    highlighted = lyricsOpen,
-                )
-            }
-            AnimatedContent(
-                // Laid out across the whole row and placed by hand: centred, as
-                // it was, at 0, flush with the lyrics glyph's left edge at 1.
-                // Centred off the capsule's *current* width, so it stays centred
-                // through the two-to-three resize on its way over rather than
-                // stepping when the size settles. Nothing in the spare width
-                // takes touches, so the glyphs either side still get theirs.
-                modifier = Modifier.layout { measurable, constraints ->
-                    val placeable = measurable.measure(constraints.copy(minWidth = 0))
-                    layout(constraints.maxWidth, placeable.height) {
-                        val centred = (constraints.maxWidth - placeable.width) / 2f
-                        placeable.place((centred * (1f - toStart.value)).roundToInt(), 0)
-                    }
-                },
-                targetState = queueOpen,
-                transitionSpec = {
-                    (fadeIn(tween(180, delayMillis = 140)) togetherWith fadeOut(tween(140)))
-                        // Unclipped: the capsule's own rounded ends are what
-                        // the eye follows through the width change, and the
-                        // default clip cuts them square while it happens.
-                        .using(SizeTransform(clip = false) { _, _ -> tween(220) })
-                },
-                label = "playerBottomPill",
-            ) { showQueueModes ->
-                if (showQueueModes) {
-                    // Spaced the same as the output/party capsule, so the two
-                    // read as one control growing a segment.
-                    Pill {
-                        PillSegment(
-                            icon = BitChordIcons.Shuffle,
-                            contentDescription = stringResource(
-                                if (shuffleEnabled) Res.string.shuffle_on else Res.string.shuffle_off,
-                            ),
-                            onClick = onToggleShuffle,
-                            highlighted = shuffleEnabled,
-                            haptic = if (shuffleEnabled) Haptic.ToggleOff else Haptic.ToggleOn,
-                            tapWindowMs = SHUFFLE_TAP_WINDOW_MS,
-                        )
-                        PillDivider()
-                        PillSegment(
-                            icon = if (repeatMode == RepeatModes.ONE) null else BitChordIcons.Repeat,
-                            label = if (repeatMode == RepeatModes.ONE) "1" else null,
-                            contentDescription = when (repeatMode) {
-                                RepeatModes.ONE -> stringResource(Res.string.repeat_one)
-                                RepeatModes.ALL -> stringResource(Res.string.repeat_all)
-                                else -> stringResource(Res.string.repeat_off)
-                            },
-                            onClick = onCycleRepeat,
-                            highlighted = repeatMode != RepeatModes.OFF,
-                            // Three states, so the buzz tracks the edges of the
-                            // cycle: leaving off rises, returning to off falls,
-                            // and the step between the two repeat modes is just
-                            // a selection.
-                            haptic = when (repeatMode) {
-                                RepeatModes.OFF -> Haptic.ToggleOn
-                                RepeatModes.ONE -> Haptic.ToggleOff
-                                else -> Haptic.Select
-                            },
-                        )
-                        PillDivider()
-                        PillSegment(
-                            icon = BitChordIcons.Infinity,
-                            contentDescription = stringResource(
-                                if (autoplayEnabled) Res.string.autoplay_on else Res.string.autoplay_off,
-                            ),
-                            onClick = onToggleAutoplay,
-                            highlighted = autoplayEnabled,
-                            haptic = if (autoplayEnabled) Haptic.ToggleOff else Haptic.ToggleOn,
-                            tapWindowMs = AUTOPLAY_TAP_WINDOW_MS,
-                        )
-                    }
-                } else {
-                    OutputPartyPill(
-                        onOutput = onOpenOutput,
-                        onParty = onListenTogether,
-                        onOpenMembers = onOpenListenTogetherMembers,
-                    )
-                }
-            }
-            Box(Modifier.align(Alignment.CenterEnd)) {
-                BottomGlyph(
-                    icon = BitChordIcons.Queue,
-                    contentDescription = stringResource(Res.string.up_next),
-                    onClick = onToggleQueue,
-                    highlighted = queueOpen,
-                    haptic = if (queueOpen) Haptic.Tap else Haptic.Expand,
-                )
-            }
-        }
-    }
-}
-
-/**
- * Translucent circular button used for the track menu and the like control.
- *
- * [active] brightens the disc rather than only the glyph: this sits on album
- * artwork of any colour, and a white icon on a white-ish sleeve has no tint
- * change left to make. The filled heart carries the state as a shape too —
- * see [BitChordIcons.HeartFilled].
- */
-@Composable
-internal fun CircleGlyph(
-    icon: ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit,
-    active: Boolean = false,
-    haptic: Haptic = Haptic.Tap,
-) {
-    val haptics = rememberHaptics()
-    val discAlpha by animateFloatAsState(
-        targetValue = if (active) 0.34f else 0.18f,
-        label = "glyphDisc",
-    )
-    Box(
-        modifier = Modifier
-            .size(34.dp)
-            .clip(CircleShape)
-            .background(LocalPlayerTint.current.copy(alpha = discAlpha))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) {
-                haptics.play(haptic)
-                onClick()
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Crossfade(
-            targetState = icon,
-            animationSpec = tween(durationMillis = 180),
-            label = "playerMenuGlyph",
-        ) { glyph ->
-            Icon(
-                imageVector = glyph,
-                contentDescription = contentDescription,
-                tint = LocalPlayerTint.current,
-                modifier = Modifier.size(19.dp),
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val gap = if (maxWidth < 340.dp) 6.dp else 8.dp
+        val keyHeight = if (maxWidth < 340.dp) 42.dp else 46.dp
+        val queue: @Composable (Modifier) -> Unit = { m ->
+            PlayerTonalKey(
+                icon = BitChordIcons.Queue,
+                contentDescription = stringResource(Res.string.queue),
+                active = queueOpen,
+                onClick = onToggleQueue,
+                haptic = if (queueOpen) Haptic.Tap else Haptic.Expand,
+                modifier = m,
             )
         }
-    }
-}
-
-/**
- * Transport / bottom glyphs. The circular clip belongs on the touch target,
- * never on the [Icon] — clipping the icon itself shaves the corners off wide
- * glyphs like fast-forward and the queue list.
- */
-@Composable
-private fun TransportGlyph(
-    icon: DrawableResource,
-    contentDescription: String,
-    size: androidx.compose.ui.unit.Dp,
-    touchSize: androidx.compose.ui.unit.Dp = size,
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-    haptic: Haptic = Haptic.Tap,
-    /** Vertical squash of the glyph alone; its width and touch box are untouched. */
-    heightScale: Float = 1f,
-) {
-    val haptics = rememberHaptics()
-    // Faded rather than hidden: the row keeps its shape at the ends of a queue.
-    val alpha by animateFloatAsState(
-        targetValue = if (enabled) 1f else 0.3f,
-        label = "transportAlpha",
-    )
-    Box(
-        modifier = Modifier
-            .size(touchSize)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                enabled = enabled,
-            ) {
-                haptics.play(haptic)
-                onClick()
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            painter = painterResource(icon),
-            contentDescription = contentDescription,
-            tint = Color.White.copy(alpha = alpha),
-            modifier = Modifier
-                .size(size)
-                .then(if (heightScale != 1f) Modifier.graphicsLayer { scaleY = heightScale } else Modifier),
-        )
-    }
-}
-
-/** The skip glyphs' width, and their touch box, beside the larger play button. */
-private val PLAYER_SKIP_ICON_SIZE = 53.dp
-private val PLAYER_SKIP_TOUCH_SIZE = 53.dp
-
-/**
- * The skip glyphs are drawn a little flatter than they are wide, so the pair
- * reads lower and longer next to the play button without losing any width.
- */
-private const val PLAYER_SKIP_HEIGHT_SCALE = 0.85f
-
-private val BOTTOM_ACTION_SIZE = 44.dp
-
-/**
- * One half of the output capsule — wider than it is tall, so the capsule reads
- * as a capsule rather than as two circles that have been pushed together.
- */
-// The count reserve is kept on both halves, so entering a party never makes
-// the capsule lopsided or shifts the queue control beside it.
-private val PILL_SEGMENT_WIDTH = 64.dp
-
-/**
- * How long the capsule takes to cross from the middle of the row to the lyrics
- * glyph's place as the queue opens, and back. Long enough to cover the content
- * swap and the resize, so it lands after both rather than before.
- */
-private const val PILL_SLIDE_MS = 320
-
-/**
- * Optical sizes, not equal ones.
- *
- * Headphones is a tall, narrow glyph and Person a taller, narrower one, so
- * drawn at the same nominal size the second reads as the bigger of the two.
- * These are the numbers at which they look like a matched pair.
- */
-private val PILL_HEADPHONES_SIZE = 23.dp
-private val PILL_PARTY_SIZE = 22.dp
-
-/** What a segment's glyph is drawn at when it has no optical quirk to correct. */
-private val PILL_ICON_SIZE = 24.dp
-
-/** How wide a capsule of [segments] comes out, dividers included. */
-private fun pillWidth(segments: Int): Dp =
-    PILL_SEGMENT_WIDTH * segments + 1.dp * (segments - 1)
-
-/**
- * A row of controls joined into one capsule.
- *
- * The join is a hairline rather than a gap, which is what makes several
- * controls read as a single object — the shape the player uses for a set of
- * choices that all answer the same question. There are two: where the sound is
- * going, and how the queue is played.
- */
-@Composable
-private fun Pill(
-    modifier: Modifier = Modifier,
-    content: @Composable RowScope.() -> Unit,
-) {
-    Row(
-        modifier = modifier
-            .height(BOTTOM_ACTION_SIZE)
-            .clip(CircleShape)
-            .background(LocalPlayerTint.current.copy(alpha = 0.12f))
-            .animateContentSize(
-                animationSpec = spring(
-                    dampingRatio = 0.82f,
-                    stiffness = Spring.StiffnessMediumLow,
+        val sleep: @Composable (Modifier) -> Unit = { m ->
+            PlayerTonalKey(
+                icon = Icons.Rounded.Bedtime,
+                contentDescription = stringResource(Res.string.sleep_timer),
+                active = false,
+                onClick = onOpenSleepTimer,
+                modifier = m,
+            )
+        }
+        val shuffle: @Composable (Modifier) -> Unit = { m ->
+            PlayerTonalKey(
+                icon = BitChordIcons.Shuffle,
+                contentDescription = stringResource(
+                    if (shuffleEnabled) Res.string.shuffle_on else Res.string.shuffle_off,
                 ),
-            ),
-        verticalAlignment = Alignment.CenterVertically,
-        content = content,
-    )
-}
-
-@Composable
-private fun PillDivider() {
-    Box(
-        Modifier
-            .width(1.dp)
-            .fillMaxHeight()
-            .background(LocalPlayerTint.current.copy(alpha = 0.20f)),
-    )
-}
-
-/**
- * The two ends of "where is this playing": the output capsule.
- *
- * Both halves answer the same question and so belong to one control rather than
- * two glyphs that happen to sit side by side — headphones for which speaker the
- * sound leaves by, the party for which *people* it reaches.
- *
- * Video vs audio-only used to live here as a third segment; it now lives in
- * the player's own three-dot menu, beside Revert to original and Upgrade
- * quality — the same kind of choice, offered the same way. This capsule is
- * back to the two icons it always otherwise had, at their original spacing.
- */
-@Composable
-private fun OutputPartyPill(
-    onOutput: () -> Unit,
-    onParty: () -> Unit,
-    /** Who's in it, before the settings page — see [ListenTogetherMembersSheet]. */
-    onOpenMembers: () -> Unit,
-) {
-    val badge = rememberPartyBadge()
-    Pill {
-        PillSegment(
-            icon = Icons.Rounded.Headphones,
-            iconSize = PILL_HEADPHONES_SIZE,
-            contentDescription = stringResource(Res.string.audio_output),
-            onClick = onOutput,
-        )
-        PillDivider()
-        PillSegment(
-            // Person rather than Groups: the three-person glyph is drawn half
-            // the height of Headphones and wider than the segment holding it,
-            // so the two halves of the capsule never looked like a pair.
-            icon = Icons.Rounded.Person,
-            iconSize = PILL_PARTY_SIZE,
-            // The count is here and nowhere else: spoken, it is the whole
-            // point of the control; drawn, it would cost the capsule its
-            // symmetry for something the caption below already implies.
-            contentDescription = if (badge.inParty) {
-                stringResource(Res.string.listen_together_open_count, badge.members)
-            } else {
-                stringResource(Res.string.listen_together_open)
-            },
-            // Already in a party, this opens who's in it rather than the
-            // settings page directly; there is nothing to create or join once
-            // there is a party, so [onParty] only ever fires beforehand.
-            onClick = if (badge.inParty) onOpenMembers else onParty,
-            highlighted = badge.inParty,
-            trailingLabel = badge.members.takeIf { badge.inParty }?.toString(),
-        )
+                active = shuffleEnabled,
+                onClick = onToggleShuffle,
+                haptic = if (shuffleEnabled) Haptic.ToggleOff else Haptic.ToggleOn,
+                tapWindowMs = SHUFFLE_TAP_WINDOW_MS,
+                modifier = m,
+            )
+        }
+        val lyrics: @Composable (Modifier) -> Unit = { m ->
+            PlayerTonalKey(
+                icon = BitChordIcons.LyricsQuote,
+                contentDescription = stringResource(
+                    if (lyricsOpen) Res.string.close_lyrics else Res.string.open_lyrics,
+                ),
+                active = lyricsOpen,
+                onClick = onToggleLyrics,
+                modifier = m,
+            )
+        }
+        val repeat: @Composable (Modifier) -> Unit = { m ->
+            PlayerTonalKey(
+                icon = if (repeatMode == RepeatModes.ONE) null else BitChordIcons.Repeat,
+                label = if (repeatMode == RepeatModes.ONE) "1" else null,
+                contentDescription = when (repeatMode) {
+                    RepeatModes.ONE -> stringResource(Res.string.repeat_one)
+                    RepeatModes.ALL -> stringResource(Res.string.repeat_all)
+                    else -> stringResource(Res.string.repeat_off)
+                },
+                active = repeatMode != RepeatModes.OFF,
+                onClick = onCycleRepeat,
+                haptic = when (repeatMode) {
+                    RepeatModes.OFF -> Haptic.ToggleOn
+                    RepeatModes.ONE -> Haptic.ToggleOff
+                    else -> Haptic.Select
+                },
+                modifier = m,
+            )
+        }
+        val more: @Composable (Modifier) -> Unit = { m ->
+            PlayerRoundMenu(
+                icon = menuIcon,
+                contentDescription = stringResource(Res.string.more),
+                onClick = onOpenMenu,
+                modifier = m,
+            )
+        }
+        if (maxWidth < 276.dp) {
+            // A phone on its side leaves the landscape column narrower than one
+            // row of six keys. Two rows of three keep them full size instead of
+            // shaving every target down until the icons crowd their own edges.
+            Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    queue(Modifier.weight(1f).height(keyHeight))
+                    sleep(Modifier.weight(1f).height(keyHeight))
+                    shuffle(Modifier.weight(1f).height(keyHeight))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    lyrics(Modifier.weight(1f).height(keyHeight))
+                    repeat(Modifier.weight(1f).height(keyHeight))
+                    more(Modifier.size(keyHeight))
+                }
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(gap),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                queue(Modifier.weight(1f).height(keyHeight))
+                sleep(Modifier.weight(1f).height(keyHeight))
+                shuffle(Modifier.weight(1f).height(keyHeight))
+                lyrics(Modifier.weight(1f).height(keyHeight))
+                repeat(Modifier.weight(1f).height(keyHeight))
+                more(Modifier.size(keyHeight))
+            }
+        }
     }
 }
 
 /**
- * One control inside a [Pill] — [BottomGlyph]'s twin, squared off.
- *
- * Same behaviour down to the tap window, and deliberately not the same
- * composable: a glyph's highlight is a circle sized to itself, and a segment's
- * has to fill its share of the capsule edge to edge or the join stops reading
- * as one.
+ * One key in the action bar: a softly filled rounded square that lights up in
+ * the theme's secondary container when its mode is on. The hairline border is
+ * what keeps an inactive key from disappearing into a dark sleeve.
  */
 @Composable
-private fun PillSegment(
+private fun PlayerTonalKey(
+    icon: ImageVector?,
     contentDescription: String,
+    active: Boolean,
     onClick: () -> Unit,
-    icon: ImageVector? = null,
-    iconSize: Dp = PILL_ICON_SIZE,
+    modifier: Modifier = Modifier,
     label: String? = null,
-    trailingLabel: String? = null,
-    highlighted: Boolean = false,
     haptic: Haptic = Haptic.Tap,
-    loading: Boolean = false,
-    /** See [BottomGlyph], where the same window means the same thing. */
+    /** The same tap window as the queue's heavy toggles. */
     tapWindowMs: Long = 0L,
-    /** Per-segment override — see [OutputPartyPill]'s three-up capsule. */
-    width: Dp = PILL_SEGMENT_WIDTH,
 ) {
     val haptics = rememberHaptics()
     val lastTap = remember { mutableLongStateOf(-tapWindowMs) }
+    val scheme = MaterialTheme.colorScheme
+    val container by animateColorAsState(
+        targetValue = if (active) scheme.secondaryContainer else Color.White.copy(alpha = 0.07f),
+        animationSpec = tween(180),
+        label = "actionKeyContainer",
+    )
+    val content by animateColorAsState(
+        targetValue = if (active) scheme.onSecondaryContainer else Color.White.copy(alpha = 0.78f),
+        animationSpec = tween(180),
+        label = "actionKeyContent",
+    )
+    val shape = RoundedCornerShape(12.dp)
     Box(
-        modifier = Modifier
-            .width(width)
-            .height(BOTTOM_ACTION_SIZE)
-            .background(if (highlighted) LocalPlayerTint.current.copy(alpha = 0.14f) else Color.Transparent)
+        modifier = modifier
+            .clip(shape)
+            .background(container)
+            .border(
+                width = 1.dp,
+                color = if (active) scheme.onSecondaryContainer.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.13f),
+                shape = shape,
+            )
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-                enabled = !loading,
             ) {
                 val now = uptimeMillis()
                 if (now - lastTap.longValue >= tapWindowMs) {
@@ -973,51 +825,112 @@ private fun PillSegment(
             .semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center,
     ) {
-        val tint = LocalPlayerTint.current.copy(alpha = if (highlighted) 1f else 0.75f)
-        Crossfade(
-            targetState = loading,
-            animationSpec = tween(durationMillis = 200),
-            label = "pillSegmentLoading",
-        ) { isLoading ->
-            if (isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(17.dp),
-                    color = LocalPlayerTint.current,
-                    strokeWidth = 2.dp,
-                )
-            } else if (icon != null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Crossfade(
-                        targetState = icon,
-                        animationSpec = tween(durationMillis = 200),
-                        label = "pillSegmentIcon",
-                    ) { currentIcon ->
-                        Icon(
-                            imageVector = currentIcon,
-                            contentDescription = null,
-                            tint = tint,
-                            modifier = Modifier.size(iconSize),
-                        )
-                    }
-                    if (trailingLabel != null) {
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            text = trailingLabel,
-                            color = tint,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-            } else if (label != null) {
-                Text(
-                    text = label,
-                    color = tint,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = content,
+                modifier = Modifier.size(20.dp),
+            )
+        } else if (label != null) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = content,
+            )
         }
+    }
+}
+
+/** The circular more menu at the end of the action bar. */
+@Composable
+private fun PlayerRoundMenu(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val haptics = rememberHaptics()
+    val scheme = MaterialTheme.colorScheme
+    Box(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(scheme.secondaryContainer.copy(alpha = 0.42f))
+            .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) {
+                haptics.play(Haptic.Tap)
+                onClick()
+            }
+            .semantics { this.contentDescription = contentDescription },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = scheme.onSecondaryContainer,
+            modifier = Modifier.size(21.dp),
+        )
+    }
+}
+
+/**
+ * The two round, tonally filled keys beside the credits — share and like.
+ *
+ * A guest, a local file and a finished download all pass no like key; the
+ * caller decides that before this is ever composed. [active] is the filled
+ * secondary-container state, which is what makes a liked track readable at a
+ * glance without a colour change of the glyph alone.
+ */
+@Composable
+internal fun PlayerSurfaceButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    active: Boolean = false,
+    haptic: Haptic = Haptic.Tap,
+) {
+    val haptics = rememberHaptics()
+    val scheme = MaterialTheme.colorScheme
+    val container by animateColorAsState(
+        targetValue = if (active) {
+            scheme.secondaryContainer
+        } else {
+            scheme.surfaceContainerHighest.copy(alpha = 0.52f)
+        },
+        animationSpec = tween(180),
+        label = "surfaceButtonContainer",
+    )
+    val content by animateColorAsState(
+        targetValue = if (active) scheme.onSecondaryContainer else Color.White.copy(alpha = 0.82f),
+        animationSpec = tween(180),
+        label = "surfaceButtonContent",
+    )
+    Box(
+        modifier = modifier
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(container)
+            .border(1.dp, Color.White.copy(alpha = if (active) 0.10f else 0.16f), CircleShape)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) {
+                haptics.play(haptic)
+                onClick()
+            }
+            .semantics { this.contentDescription = contentDescription },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = content,
+            modifier = Modifier.size(20.dp),
+        )
     }
 }
 
@@ -1037,6 +950,12 @@ internal fun OutputCaption(
     onOpenOutput: () -> Unit,
     /** Who's in it, before the settings page — see [ListenTogetherMembersSheet]. */
     onOpenMembers: () -> Unit,
+    /**
+     * Starts a party when there isn't one. The headphones beside the caption
+     * are the only way in now that the output capsule is gone, so this is a
+     * real control rather than a convenience.
+     */
+    onListenTogether: () -> Unit = {},
 ) {
     val badge = rememberPartyBadge()
     val outputName = rememberAudioOutputName(accountName)
@@ -1069,32 +988,58 @@ internal fun OutputCaption(
         ?.let { stringResource(Res.string.listen_together_jam, it) }
         ?: stringResource(Res.string.listen_together_jam_unnamed)
     val captionModifier = Modifier
-        .fillMaxWidth(0.65f)
+        .widthIn(max = 240.dp)
         .clickable { if (badge.inParty) onOpenMembers() else onOpenOutput() }
-    if (!badge.inParty && isHiResOutput) {
-        ShimmerText(
-            text = outputName,
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
+    val listenTogetherDescription = stringResource(Res.string.listen_together)
+    Row(
+        modifier = Modifier.fillMaxWidth(0.86f),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (!badge.inParty && isHiResOutput) {
+            ShimmerText(
+                text = outputName,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                ),
+                modifier = captionModifier,
+            )
+        } else {
+            Text(
+                text = if (badge.inParty) jamName else outputName,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                color = LocalPlayerTint.current.copy(alpha = 0.55f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
-            ),
-            modifier = captionModifier,
-        )
-    } else {
-        Text(
-            text = if (badge.inParty) jamName else outputName,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-            color = LocalPlayerTint.current.copy(alpha = 0.55f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            modifier = captionModifier,
-        )
+                modifier = captionModifier,
+            )
+        }
+        if (!badge.inParty) {
+            Spacer(Modifier.width(4.dp))
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(LocalPlayerTint.current.copy(alpha = 0.10f))
+                    .clickable(onClick = onListenTogether)
+                    .semantics { contentDescription = listenTogetherDescription },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.Headphones,
+                    contentDescription = null,
+                    tint = LocalPlayerTint.current.copy(alpha = 0.62f),
+                    modifier = Modifier.size(13.dp),
+                )
+            }
+        }
     }
 }
 
-/** The three fields of a party the player draws — see [OutputPartyPill]. */
+/** The three fields of a party the player caption draws. */
 private data class PartyBadge(
     val inParty: Boolean,
     val members: Int,
@@ -1146,68 +1091,6 @@ private fun rememberPartyBadge(): PartyBadge {
     return badges
         .collectAsStateWithLifecycle(initialValue = PlayerPlatform.host.party.value.badge())
         .value
-}
-
-@Composable
-private fun BottomGlyph(
-    icon: ImageVector?,
-    contentDescription: String,
-    onClick: () -> Unit,
-    highlighted: Boolean = false,
-    haptic: Haptic = Haptic.Tap,
-    label: String? = null,
-    /**
-     * Shortest gap between taps that both reach [onClick]. A tap inside the
-     * window of the last one is dropped whole — haptic included, so a swallowed
-     * tap doesn't buzz as though something happened. The default lets every tap
-     * through: only the glyphs whose work is too heavy to repeat at finger speed
-     * ask for a window.
-     */
-    tapWindowMs: Long = 0L,
-) {
-    val haptics = rememberHaptics()
-    // Read only from the click handler, never during composition, so writing it
-    // costs no recomposition. Starts a full window in the past so the first tap
-    // is never the one that gets swallowed.
-    val lastTap = remember { mutableLongStateOf(-tapWindowMs) }
-    Box(
-        modifier = Modifier
-            .size(BOTTOM_ACTION_SIZE)
-            .clip(CircleShape)
-            .background(
-                if (highlighted) LocalPlayerTint.current.copy(alpha = 0.20f) else Color.Transparent,
-            )
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) {
-                val now = uptimeMillis()
-                if (now - lastTap.longValue >= tapWindowMs) {
-                    lastTap.longValue = now
-                    haptics.play(haptic)
-                    onClick()
-                }
-            }
-            .semantics { this.contentDescription = contentDescription },
-        contentAlignment = Alignment.Center,
-    ) {
-        val tint = LocalPlayerTint.current.copy(alpha = if (highlighted) 1f else 0.75f)
-        if (icon != null) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = tint,
-                modifier = Modifier.size(26.dp),
-            )
-        } else if (label != null) {
-            Text(
-                text = label,
-                color = tint,
-                fontSize = 19.sp,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-    }
 }
 
 /** A credit that links somewhere, when [browseId] is known. */

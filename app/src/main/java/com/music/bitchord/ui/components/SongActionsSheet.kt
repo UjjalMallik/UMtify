@@ -144,6 +144,8 @@ fun SongActionsSheet(
     modifier: Modifier = Modifier,
     onRemoveFromPlaylist: (() -> Unit)? = null,
     showSleepTimer: Boolean = false,
+    /** Opens on the timer's presets rather than the row list — see the player's moon. */
+    startWithSleepTimer: Boolean = false,
     /**
      * Sends the playing track back to YouTube's own upload, and keeps it there.
      * Offered for any player item that has one behind it — a substituted copy
@@ -195,7 +197,7 @@ fun SongActionsSheet(
      */
     presentation: SongActionsPresentation = SongActionsPresentation.Sheet,
 ) {
-    var pickingSleepTimer by remember { mutableStateOf(false) }
+    var pickingSleepTimer by remember { mutableStateOf(startWithSleepTimer && showSleepTimer) }
     val menu = presentation == SongActionsPresentation.Menu
     // Read from the thumbnail the row that opened this sheet was already
     // showing, not a larger copy of it: the tint is a blur and a handful of

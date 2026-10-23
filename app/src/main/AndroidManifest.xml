@@ -25,13 +25,6 @@
     -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
-    <!--
-      In-app updates: handing a downloaded APK to the system installer. The
-      per-app "install unknown apps" switch is still the user's to flip; this
-      only lets the request reach the installer.
-    -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-
     <!-- Reading local audio files across the device -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission

@@ -103,10 +103,12 @@ import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.lerp
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
@@ -708,6 +710,10 @@ fun NowPlayingScreen(
     onQueueDragActiveChange: (Boolean) -> Unit = {},
     onClearQueue: () -> Unit,
     onOpenMenu: () -> Unit,
+    /** Sends this track's YouTube link through the system share sheet. */
+    onShare: () -> Unit,
+    /** Opens the track menu already on the sleep-timer choices. */
+    onOpenSleepTimer: () -> Unit,
     onOpenAlbum: (String) -> Unit,
     /**
      * Opens an artist's page. [browseId] is null for anyone but the lead credit:
@@ -1108,12 +1114,14 @@ fun NowPlayingScreen(
     }
     val swipeHintNext by remember { derivedStateOf { swipeSettle.value > 0f } }
 
-    // Signature Apple Music touch: the sleeve shrinks back while paused.
+    // The card lets go of a little of its size while paused — less than the
+    // old full-bleed sleeve did, because a photocard sits in its own space and
+    // a deep shrink reads as the picture retreating rather than settling.
     val artScale by animateFloatAsState(
-        targetValue = if (isPlaying) 1f else 0.86f,
+        targetValue = if (isPlaying) 1f else 0.92f,
         animationSpec = spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessLow,
+            dampingRatio = 0.72f,
+            stiffness = Spring.StiffnessMediumLow,
         ),
         label = "artScale",
     )
@@ -1205,27 +1213,16 @@ fun NowPlayingScreen(
             )
         }
     }
-    val fullBleedArt by PlayerSettings.fullBleedArtwork.collectAsStateWithLifecycle()
-    // Full-bleed is a phone idiom. What the width has to rule out is a player
-    // running a foot wider than the column of controls under it — edge to edge
-    // meaning "a picture, and separately some controls" rather than "the
-    // artwork *is* the player".
-    //
-    // One question for the still cover and the clip both, rather than two that
-    // could disagree — and they did, twice over. Dissolving a TextureView's
-    // bottom edge needs a RenderEffect, so below API 31 the clip was held in its
-    // sleeve while the cover behind it went edge to edge, and the artwork
-    // changed shape the moment a clip arrived. In the other direction the clip
-    // ignored [fullBleedArt] entirely, so turning the setting off still left a
-    // clip running the full screen. CanvasArtworkPlayer masks itself on every
-    // API level now, and both layers answer to this.
-    val spotifyCanvasOnPhone = canvas?.source == CanvasSource.SPOTIFY &&
-        playerFillsWindow(windowWidth)
-    // Spotify Canvas is the player background on a phone, independent of the
-    // still-art full-bleed preference. Other providers and static artwork keep
-    // answering to that preference exactly as before.
-    val heroMode = spotifyCanvasOnPhone ||
-        (fullBleedArt && playerFillsWindow(windowWidth))
+    // The photocard is the player's shape now. Artwork is always the centred
+    // card, so the full-bleed banner — and a Spotify Canvas claiming the whole
+    // screen — is never the presentation here. The backdrop still takes its
+    // colours from the opened mesh and the blurred cover; it just never *is*
+    // the cover.
+    val heroMode = false
+    // Kept as a named false rather than deleting every branch below: the
+    // full-screen canvas, its compact deck and the banner all key off this,
+    // and the photocard path is the one that must be taken now.
+    val spotifyCanvasOnPhone = false
 
     // Whether there's a still image to blow out — a placeholder tile is a card
     // or it is nothing, and going full-bleed with one would just tint the top
@@ -1485,35 +1482,34 @@ fun NowPlayingScreen(
     val onVolumeChange: (Float) -> Unit = volume::drag
     val onVolumeChangeFinished: () -> Unit = volume::release
 
-    // Lyrics, output and queue, with the output name under them — the row both
-    // layouts end on, and the only thing in the landscape player's left column
-    // besides the sleeve.
+    // The row both layouts end on: playback modes, queue, sleep timer and the
+    // track menu, with the output and party line just beneath them.
     val playerActions: @Composable () -> Unit = {
-        PlayerActionRow(
+        PlayerActionBar(
             lyricsOpen = lyricsOpen,
             queueOpen = queueOpen,
             shuffleEnabled = shuffleEnabled,
             repeatMode = repeatMode,
-            autoplayEnabled = autoplayEnabled,
             onToggleLyrics = toggleLyrics,
             onToggleQueue = toggleQueue,
             onToggleShuffle = onToggleShuffle,
             onCycleRepeat = onCycleRepeat,
-            onToggleAutoplay = onToggleAutoplay,
-            onOpenOutput = openAudioOutput,
-            onListenTogether = onListenTogether,
-            onOpenListenTogetherMembers = openListenTogetherMembers,
+            onOpenSleepTimer = onOpenSleepTimer,
+            onOpenMenu = onOpenMenu,
+            menuIcon = if (showRevertCue) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.MoreHoriz,
         )
-        // Keep the current output caption visible in every state.
-        Spacer(Modifier.height(18.dp))
+        // Keep the current output caption visible in every state, and the way
+        // into Listen Together beside it now that the old output pill is gone.
+        Spacer(Modifier.height(12.dp))
         Box(
-            modifier = Modifier.fillMaxWidth().height(20.dp),
+            modifier = Modifier.fillMaxWidth().height(22.dp),
             contentAlignment = Alignment.TopCenter,
         ) {
             OutputCaption(
                 accountName = accountName,
                 onOpenOutput = openAudioOutput,
                 onOpenMembers = openListenTogetherMembers,
+                onListenTogether = onListenTogether,
             )
         }
     }
@@ -1888,9 +1884,8 @@ fun NowPlayingScreen(
                                     song = song,
                                     signedIn = signedIn,
                                     likeStatus = likeStatus,
-                                    showRevertCue = showRevertCue,
+                                    onShare = onShare,
                                     onToggleLike = onToggleLike,
-                                    onOpenMenu = onOpenMenu,
                                     onOpenAlbum = onOpenAlbum,
                                     onOpenArtist = onOpenArtist,
                                 )
@@ -1915,6 +1910,7 @@ fun NowPlayingScreen(
                                 PlayerScrubber(
                                     shown = shown,
                                     durationMs = durationMs,
+                                    isPlaying = isPlaying && position.advancing,
                                     loading = versionAligning || audioVersionSwitching,
                                     mixing = mixing && !scrub.scrubbing,
                                     transitionWindow = transitionWindow
@@ -2032,6 +2028,7 @@ fun NowPlayingScreen(
                             queue = queue,
                             currentIndex = queueIndex,
                             autoplayEnabled = autoplayEnabled,
+                            onToggleAutoplay = onToggleAutoplay,
                             controlsLocked = controlsLocked,
                             onJumpTo = onJumpTo,
                             onRemove = onRemoveFromQueue,
@@ -2652,7 +2649,12 @@ fun NowPlayingScreen(
                             // credits on the deck's exact reveal frame.
                             lerp(collapsedTitleTop, regularTitleTop(), playerDeckReveal.value)
                         } ?: regularTitleTop()
-                        fun titleStart(): Dp = lerp(0.dp, THUMB_SIZE + 12.dp, p())
+                        // The credits sit inside the card's own edges while it is
+                        // a card, then slide in beside the header thumbnail as it
+                        // collapses. Both ends move, so the whole row aligns to
+                        // the photocard rather than to the player's gutters.
+                        fun titleStart(): Dp = lerp(artStart(), THUMB_SIZE + 12.dp, p())
+                        fun titleEnd(): Dp = lerp(artStart(), 0.dp, p())
 
                         // How far down the *screen* the sleeve's bottom edge sits, which
                         // is where the full-bleed banner has to stop for the credits
@@ -2783,11 +2785,66 @@ fun NowPlayingScreen(
                         // The banner's dissolve, firmed up into the cover's hard edge as
                         // it docks.
                         fun sleeveShown(): Float = bannerShown() * dockT()
+                        // The photocard's generous corner, giving way to the
+                        // header thumbnail's tighter one only as the sleeve
+                        // collapses into it.
                         fun sleeveCorner(): Dp {
-                            val corner = 8.dp * (1f - sleeveShown())
+                            val corner = lerp(28.dp, 8.dp, p())
                             val t = dockT()
                             return if (dock == null || t >= 1f) corner else lerp(dock.miniArtCorner(), corner, t)
                         }
+
+                        // The ambient light the card casts: a handful of
+                        // concentric rounded rects in the sleeve's own lifted
+                        // colour, drawn behind it. A real blur would cost a
+                        // render pass and a layer for something that is only
+                        // ever a soft edge; stacked alpha reads the same at
+                        // this spread. It breathes with playback — deeper
+                        // while the music runs — and lets go as the card
+                        // collapses into the header or docks away.
+                        val glowStrength = if (isPlaying) 1f else 0.62f
+                        Box(
+                            modifier = Modifier
+                                .offset { IntOffset(artStart().roundToPx(), artTop().roundToPx()) }
+                                .layout { measurable, _ ->
+                                    val side = artSize().roundToPx()
+                                    val placeable = measurable.measure(Constraints.fixed(side, side))
+                                    layout(side, side) { placeable.place(0, 0) }
+                                }
+                                .graphicsLayer {
+                                    val scale = cardScale()
+                                    scaleX = scale
+                                    scaleY = scale
+                                    translationX = swipeSettle.value * (1f - p())
+                                    alpha = (1f - p()).coerceIn(0f, 1f) * dockFade()
+                                }
+                                .drawBehind {
+                                    val reach = 36.dp.toPx()
+                                    val corner = 28.dp.toPx()
+                                    val layers = 14
+                                    for (index in layers downTo 1) {
+                                        val grow = reach * index / layers
+                                        drawRoundRect(
+                                            color = artworkTint.copy(
+                                                alpha = 0.030f * glowStrength *
+                                                    (1f - index.toFloat() / layers),
+                                            ),
+                                            topLeft = Offset(-grow, -grow),
+                                            size = Size(size.width + grow * 2f, size.height + grow * 2f),
+                                            cornerRadius = CornerRadius(corner + grow * 0.45f),
+                                        )
+                                    }
+                                    // The tight ring is the colour the cover
+                                    // actually carries, not its diluted wash.
+                                    val rim = 3.dp.toPx()
+                                    drawRoundRect(
+                                        color = artworkTint.copy(alpha = 0.12f * glowStrength),
+                                        topLeft = Offset(-rim, -rim),
+                                        size = Size(size.width + rim * 2f, size.height + rim * 2f),
+                                        cornerRadius = CornerRadius(corner + rim),
+                                    )
+                                },
+                        )
 
                         // The sleeve proper — card, banner and thumbnail in turn, see
                         // [sleeveRect]. Separate from the slot below, which keeps the
@@ -2870,8 +2927,12 @@ fun NowPlayingScreen(
                                     // collapse, once the dissolve has all but gone. Let
                                     // go of on the way to the mini player, whose cover
                                     // sits flat in its bar.
+                                    // The card floats: a deeper shadow while the
+                                    // music runs, a shallower one at rest, both
+                                    // letting go as the sleeve docks away.
                                     shadowElevation = if (art.loaded) {
-                                        10.dp.toPx() * (1f - 2f * shown).coerceAtLeast(0f) * dockT()
+                                        (if (isPlaying) 24.dp else 12.dp).toPx() *
+                                            (1f - 2f * shown).coerceAtLeast(0f) * dockT()
                                     } else {
                                         0f
                                     }
@@ -2891,6 +2952,29 @@ fun NowPlayingScreen(
                                         CompositingStrategy.Offscreen
                                     } else {
                                         CompositingStrategy.Auto
+                                    }
+                                }
+                                // The glass edge: a hairline of white light sitting
+                                // just inside the card's own clip, so it follows
+                                // the corner radius exactly. Faded out with the
+                                // card as it becomes the header thumbnail.
+                                .drawWithContent {
+                                    drawContent()
+                                    val edge = 0.15f * (1f - p()).coerceIn(0f, 1f)
+                                    if (edge > 0.001f) {
+                                        val line = 1.dp.toPx()
+                                        drawRoundRect(
+                                            color = Color.White.copy(alpha = edge),
+                                            topLeft = Offset(line / 2f, line / 2f),
+                                            size = Size(
+                                                width = size.width - line,
+                                                height = size.height - line,
+                                            ),
+                                            cornerRadius = CornerRadius(
+                                                with(density) { sleeveCorner().toPx() } - line / 2f,
+                                            ),
+                                            style = Stroke(width = line),
+                                        )
                                     }
                                 }
                                 // The banner dissolves into the backdrop where the
@@ -3163,13 +3247,16 @@ fun NowPlayingScreen(
                                         ).roundToPx(),
                                     )
                                 }
-                                // What `.padding(start = titleStart)` laid out, asked at
-                                // measure time instead of composition.
+                                // What `.padding(start, end)` would have laid out,
+                                // asked at measure time instead of composition.
                                 .layout { measurable, constraints ->
                                     val start = titleStart().roundToPx()
-                                    val placeable = measurable.measure(constraints.offset(horizontal = -start))
+                                    val end = titleEnd().roundToPx()
+                                    val placeable = measurable.measure(
+                                        constraints.offset(horizontal = -(start + end)),
+                                    )
                                     layout(
-                                        constraints.constrainWidth(placeable.width + start),
+                                        constraints.constrainWidth(placeable.width + start + end),
                                         constraints.constrainHeight(placeable.height),
                                     ) { placeable.placeRelative(start, 0) }
                                 }
@@ -3229,7 +3316,8 @@ fun NowPlayingScreen(
                                         MarqueeText(
                                             text = song.title,
                                             style = MaterialTheme.typography.titleLarge.copy(
-                                                fontSize = 20.sp,
+                                                fontSize = 21.sp,
+                                                fontWeight = FontWeight.Bold,
                                             ),
                                             color = Color.White,
                                             enabled = scrolling,
@@ -3249,10 +3337,10 @@ fun NowPlayingScreen(
                                                 artistCredits(song.artist, song.artists, song.artistId)
                                             },
                                             style = MaterialTheme.typography.titleLarge.copy(
-                                                fontWeight = FontWeight.W500,
-                                                fontSize = 20.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                fontSize = 15.sp,
                                             ),
-                                            color = LocalPlayerTint.current.copy(alpha = 0.55f),
+                                            color = LocalPlayerTint.current.copy(alpha = 0.62f),
                                             enabled = scrolling,
                                             // A title that's also scrolling gets to go first —
                                             // starting together reads as clutter, so the artist
@@ -3264,15 +3352,51 @@ fun NowPlayingScreen(
                                 }
                             }
                             Spacer(Modifier.width(10.dp))
-                            // Beside the credits rather than down in the toggle row:
-                            // liking is about *this song*, and the row below is about
-                            // how the queue plays. Guests get nothing to tap, since
-                            // there's no account to record it against — and neither
-                            // does a local file or a finished download, which carries
-                            // no YouTube identity to rate.
+                            // Share and like, in the M3 tonal language of the keys
+                            // below: the two things about *this song* rather than
+                            // about how the queue plays.
+                            //
+                            // With the lyrics up and the half-player put away, Share
+                            // turns into the way into lyric-card picking — the same
+                            // mode a long-press on a line starts, and the same
+                            // contextual swap the old menu glyph made. While picking
+                            // it is the way back out.
+                            val lyricShareMode = lyricsOpen && collapseDone && lyricsShareEnabled &&
+                                !lyrics.isNullOrEmpty() && (!lyricsControlsOpen || lyricPicker.picking)
+                            if (lyricShareMode) {
+                                PlayerSurfaceButton(
+                                    icon = if (lyricPicker.picking) {
+                                        Icons.Rounded.Close
+                                    } else {
+                                        Icons.Rounded.IosShare
+                                    },
+                                    contentDescription = stringResource(
+                                        if (lyricPicker.picking) Res.string.cancel else Res.string.share,
+                                    ),
+                                    onClick = if (lyricPicker.picking) {
+                                        lyricPicker.cancel
+                                    } else {
+                                        lyricPicker.beginPicking
+                                    },
+                                    active = lyricPicker.picking,
+                                    haptic = if (lyricPicker.picking) Haptic.Tap else Haptic.Select,
+                                )
+                                Spacer(Modifier.width(8.dp))
+                            } else if (song.videoId.isNotBlank()) {
+                                PlayerSurfaceButton(
+                                    icon = Icons.Rounded.IosShare,
+                                    contentDescription = stringResource(Res.string.share),
+                                    onClick = onShare,
+                                )
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            // Guests get nothing to tap, since there's no account
+                            // to record a rating against — and neither does a local
+                            // file or a finished download, which carries no YouTube
+                            // identity to rate.
                             if (signedIn && song.localUri == null) {
                                 val liked = likeStatus == LikeStatus.LIKE
-                                CircleGlyph(
+                                PlayerSurfaceButton(
                                     icon = if (liked) BitChordIcons.HeartFilled else BitChordIcons.Heart,
                                     contentDescription = stringResource(
                                         if (liked) Res.string.remove_from_liked else Res.string.like,
@@ -3281,48 +3405,7 @@ fun NowPlayingScreen(
                                     active = liked,
                                     haptic = if (liked) Haptic.ToggleOff else Haptic.ToggleOn,
                                 )
-                                Spacer(Modifier.width(8.dp))
                             }
-                            // While the lyrics are up the menu glyph becomes the share
-                            // entry: the same pick mode a long-press on a line opens,
-                            // only on phones where a card can actually be made. While
-                            // picking it is the way back out again — the bar below
-                            // already holds Share.
-                            // Only once the sleeve has fully collapsed: the moment it starts
-                            // coming back the glyph is the menu again.
-                            // And only while the half player under the lyrics is tucked
-                            // away: with it up, the screen is the player again and the
-                            // glyph is its menu. A pick in progress keeps its Close
-                            // whichever way the controls are.
-                            val lyricsShareGlyphVisible = lyricsOpen && collapseDone && lyricsShareEnabled &&
-                                !lyrics.isNullOrEmpty() && (!lyricsControlsOpen || lyricPicker.picking)
-                            CircleGlyph(
-                                icon = when {
-                                    showRevertCue -> Icons.AutoMirrored.Rounded.Undo
-                                    lyricsShareGlyphVisible && lyricPicker.picking -> Icons.Rounded.Close
-                                    lyricsShareGlyphVisible -> Icons.Rounded.IosShare
-                                    else -> Icons.Rounded.MoreHoriz
-                                },
-                                contentDescription = stringResource(
-                                    when {
-                                        showRevertCue -> Res.string.more
-                                        lyricsShareGlyphVisible && lyricPicker.picking -> Res.string.cancel
-                                        lyricsShareGlyphVisible -> Res.string.share
-                                        else -> Res.string.more
-                                    },
-                                ),
-                                onClick = when {
-                                    showRevertCue -> onOpenMenu
-                                    lyricsShareGlyphVisible && lyricPicker.picking -> lyricPicker.cancel
-                                    lyricsShareGlyphVisible -> lyricPicker.beginPicking
-                                    else -> onOpenMenu
-                                },
-                                haptic = if (lyricsShareGlyphVisible && !showRevertCue) {
-                                    Haptic.Select
-                                } else {
-                                    Haptic.Tap
-                                },
-                            )
                         }
 
                         // [lyricsOpen] asked first: a close has already hidden the
@@ -3474,6 +3557,7 @@ fun NowPlayingScreen(
                                     queue = queue,
                                     currentIndex = queueIndex,
                                     autoplayEnabled = autoplayEnabled,
+                                    onToggleAutoplay = onToggleAutoplay,
                                     controlsLocked = controlsLocked,
                                     onJumpTo = onJumpTo,
                                     onRemove = onRemoveFromQueue,
@@ -3582,6 +3666,7 @@ fun NowPlayingScreen(
                     PlayerScrubber(
                         shown = shown,
                         durationMs = durationMs,
+                        isPlaying = isPlaying && position.advancing,
                         loading = versionSwitching,
                         mixing = mixing && !scrub.scrubbing,
                         // Hidden while scrubbing: the planner is still describing

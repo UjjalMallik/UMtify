@@ -1,6 +1,6 @@
 package com.music.bitchord.data.sources.module
 
-import android.util.Log
+import android.util.Base64
 import com.music.bitchord.data.TrackLog
 import com.dokar.quickjs.QuickJs
 import com.dokar.quickjs.binding.AsyncFunctionBinding
@@ -389,13 +389,14 @@ internal object QuickJsExecutor {
                     val url = resolveUrl(rawUrl, fetchBase)
 
                     TrackLog.d(TAG, "  → fetch $method ${redactModuleUrl(url)}")
-                    val (statusCode, responseBody) = fetchUrlSync(url, method, headersJson, body)
+                    val (statusCode, responseBody, responseBytes) = fetchUrlSync(url, method, headersJson, body)
                     TrackLog.d(TAG, "    HTTP $statusCode (${responseBody.length} bytes)")
 
                     val respObj = JSONObject().apply {
                         put("status", statusCode)
                         put("ok", statusCode in 200..299)
                         put("body", responseBody)
+                        put("bodyBase64", responseBytes)
                     }
                     return respObj.toString()
                 }
@@ -443,7 +444,12 @@ internal object QuickJsExecutor {
                     statusText: raw.ok ? 'OK' : 'Error',
                     json: function() { try { return JSON.parse(respBody); } catch(e) { throw new Error('Invalid JSON: ' + respBody.substring(0, 200)); } },
                     text: function() { return respBody; },
-                    arrayBuffer: function() { throw new Error('Not implemented'); },
+                    arrayBuffer: function() {
+                        var binary = atob(raw.bodyBase64 || '');
+                        var bytes = new Uint8Array(binary.length);
+                        for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                        return bytes.buffer;
+                    },
                     clone: function() { return this; },
                     headers: { get: function(k) { return null; } }
                 };
@@ -478,7 +484,7 @@ internal object QuickJsExecutor {
         method: String,
         headersJson: String,
         body: String?,
-    ): Pair<Int, String> {
+    ): Triple<Int, String, String> {
         val builder = Request.Builder().url(url)
 
         var hasUserAgent = false
@@ -509,8 +515,12 @@ internal object QuickJsExecutor {
         }
 
         syncHttpClient.newCall(builder.build()).execute().use { response ->
-            val responseBody = response.body?.string() ?: ""
-            return response.code to responseBody
+            val responseBody = response.body
+            val bodyBytes = responseBody?.bytes() ?: ByteArray(0)
+            val charset = responseBody?.contentType()?.charset(Charsets.UTF_8) ?: Charsets.UTF_8
+            val bodyText = String(bodyBytes, charset)
+            val responseBase64 = Base64.encodeToString(bodyBytes, Base64.NO_WRAP)
+            return Triple(response.code, bodyText, responseBase64)
         }
     }
 

@@ -52,7 +52,7 @@ import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
 
 /**
- * Same UIAlertController shape as [UpdateAvailableDialog] — frosted card,
+ * Same UIAlertController shape as the other frosted alerts —
  * hairline rules, full-width stacked actions — but with a text field for the
  * one bit of input this alert needs.
  */

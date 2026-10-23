@@ -35,6 +35,7 @@ import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -67,6 +68,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -219,6 +221,12 @@ internal fun InlineQueue(
     currentIndex: Int,
     autoplayEnabled: Boolean,
     /**
+     * Toggles AutoPlay. It lives here now rather than in a capsule at the foot
+     * of the player: its tracks are in this list, and the switch that produces
+     * them belongs beside them.
+     */
+    onToggleAutoplay: () -> Unit,
+    /**
      * Read-only: the party's running order is the host's while this is set, so
      * the queue is here to be looked at and scrolled, not worked.
      */
@@ -363,10 +371,16 @@ internal fun InlineQueue(
                     }
                     queueSection(tracks.context, QueueSection.CONTEXT, drag, controlsLocked, onJumpTo, onRemove)
                 }
-                if (autoplayEnabled || tracks.autoplay.isNotEmpty()) {
-                    item(key = "autoplay-heading") {
-                        AutoplayHeading(hasTracks = tracks.autoplay.isNotEmpty(), modifier = queueMotion())
-                    }
+                item(key = "autoplay-heading") {
+                    AutoplayHeading(
+                        hasTracks = tracks.autoplay.isNotEmpty(),
+                        enabled = autoplayEnabled,
+                        locked = controlsLocked,
+                        onToggle = onToggleAutoplay,
+                        modifier = queueMotion(),
+                    )
+                }
+                if (tracks.autoplay.isNotEmpty()) {
                     queueSection(tracks.autoplay, QueueSection.AUTOPLAY, drag, controlsLocked, onJumpTo, onRemove)
                 }
             }
@@ -457,7 +471,14 @@ private fun QueueClearButton(style: TextStyle, locked: Boolean, onClear: () -> U
 }
 
 @Composable
-private fun AutoplayHeading(hasTracks: Boolean, modifier: Modifier = Modifier) {
+private fun AutoplayHeading(
+    hasTracks: Boolean,
+    enabled: Boolean,
+    locked: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val autoplayDescription = stringResource(Res.string.autoplay)
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -471,7 +492,7 @@ private fun AutoplayHeading(hasTracks: Boolean, modifier: Modifier = Modifier) {
             modifier = Modifier.size(18.dp),
         )
         Spacer(Modifier.width(8.dp))
-        Column {
+        Column(Modifier.weight(1f)) {
             Text(
                 text = stringResource(Res.string.autoplay),
                 style = MaterialTheme.typography.titleMedium,
@@ -485,6 +506,14 @@ private fun AutoplayHeading(hasTracks: Boolean, modifier: Modifier = Modifier) {
                 color = Color.White.copy(alpha = 0.55f),
             )
         }
+        Switch(
+            checked = enabled,
+            onCheckedChange = { onToggle() },
+            enabled = !locked,
+            modifier = Modifier.semantics {
+                contentDescription = autoplayDescription
+            },
+        )
     }
 }
 

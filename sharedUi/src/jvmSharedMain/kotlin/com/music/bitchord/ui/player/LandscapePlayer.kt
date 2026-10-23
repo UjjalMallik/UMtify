@@ -32,8 +32,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Undo
-import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -106,8 +105,8 @@ private const val LANDSCAPE_PANE_FADE_OUT_MS = 140
 /** Which of its three things the player's content column is showing. */
 internal enum class PlayerPane { Main, Lyrics, Queue }
 
-/** The landscape sleeve's corner radius, at rest. */
-internal val LANDSCAPE_ART_CORNER = 10.dp
+/** The landscape sleeve's corner radius, at rest — the same photocard edge. */
+internal val LANDSCAPE_ART_CORNER = 28.dp
 
 /** The landscape sleeve's shape at rest, for a caller with no docking to do. */
 private val LandscapeArtShape = RoundedCornerShape(LANDSCAPE_ART_CORNER)
@@ -403,21 +402,22 @@ internal fun LandscapeMainPane(
 }
 
 /**
- * Title, artist, like and the three-dot menu, for the landscape player.
+ * Title, artist, share and like, for the landscape player.
  *
  * Marquee rather than a plain ellipsis, matching the portrait player: a tablet
  * is wider, not infinitely wide, and a long title truncated on the one surface
  * with room to scroll it would be the odd one out.
+ *
+ * The three-dot menu is not here: it lives in the action bar under the sleeve,
+ * in both layouts.
  */
 @Composable
 internal fun LandscapeCredits(
     song: Song,
     signedIn: Boolean,
     likeStatus: LikeStatus,
-    /** The menu glyph is briefly the undo arrow after a quality upgrade. */
-    showRevertCue: Boolean,
+    onShare: () -> Unit,
     onToggleLike: () -> Unit,
-    onOpenMenu: () -> Unit,
     onOpenAlbum: (String) -> Unit,
     /** Null browse id for anyone but the lead credit — see [NowPlayingScreen]. */
     onOpenArtist: (browseId: String?, name: String) -> Unit,
@@ -460,12 +460,20 @@ internal fun LandscapeCredits(
             }
         }
         Spacer(Modifier.width(10.dp))
+        if (song.videoId.isNotBlank()) {
+            PlayerSurfaceButton(
+                icon = Icons.Rounded.IosShare,
+                contentDescription = stringResource(Res.string.share),
+                onClick = onShare,
+            )
+            Spacer(Modifier.width(8.dp))
+        }
         // Same gate as the portrait player's: no account to like against for a
         // guest, and no YouTube identity to rate a local file or a finished
         // download against either.
         if (signedIn && song.localUri == null) {
             val liked = likeStatus == LikeStatus.LIKE
-            CircleGlyph(
+            PlayerSurfaceButton(
                 icon = if (liked) BitChordIcons.HeartFilled else BitChordIcons.Heart,
                 contentDescription = stringResource(
                     if (liked) Res.string.remove_from_liked else Res.string.like,
@@ -474,13 +482,7 @@ internal fun LandscapeCredits(
                 active = liked,
                 haptic = if (liked) Haptic.ToggleOff else Haptic.ToggleOn,
             )
-            Spacer(Modifier.width(8.dp))
         }
-        CircleGlyph(
-            icon = if (showRevertCue) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.MoreHoriz,
-            contentDescription = stringResource(Res.string.more),
-            onClick = onOpenMenu,
-        )
     }
 }
 

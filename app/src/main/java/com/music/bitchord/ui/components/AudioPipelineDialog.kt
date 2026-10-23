@@ -128,7 +128,7 @@ private fun bitExactVerdict(
  * Displays live, authoritative details for each stage in the audio pipeline:
  * Track Info -> Decoder -> Resampler -> DSP -> Output Device.
  *
- * Same frosted card shape as [LyricsSourcesDialog] and [UpdateAvailableDialog] —
+ * Same frosted card shape as [LyricsSourcesDialog] —
  * header with a title and subtitle, hairline-separated groups, a full-width
  * closing action — fixed to this player's own dark palette rather than the
  * theme-adaptive one those settings dialogs use, since everything else on this
