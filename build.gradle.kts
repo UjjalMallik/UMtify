@@ -32,36 +32,6 @@ buildscript {
         classpath("com.android.tools:r8:8.13.23")
     }
 }
-/*
- * The version of the phone app and of the watch app that ships inside it, in
- * one place. The watch has to move with the phone: it is installed and updated
- * from the phone's own APK (see app/build.gradle.kts), and Android refuses an
- * update whose versionCode is lower than the one installed.
- *
- * No "v" in the name — the versionCode is what installs compare; the "v" is
- * the release tag's alone.
- */
-extra["bitchordVersionCode"] = 28
-extra["bitchordVersionName"] = "1.8.1"
-
-/*
- * Bump this by hand before cutting each sideloaded test build ("beta2",
- * "beta3", ...) and blank it out before cutting the real release. Marks the
- * versionName above as a pre-release, so testers and release tooling can tell
- * a beta apart from the clean release carrying the same number.
- *
- * Applied to release builds as well as debug ones, and that is the whole
- * point of it. A sideloaded beta is a *release* build — signed with the real
- * key, installed over the real package — so leaving the marker off it makes
- * it indistinguishable from the published release. Blanking this line is the
- * one step that turns a beta into a release, so it is the one place to get
- * right.
- *
- * The watch app carries the same marker, keeping a beta watch APK
- * distinguishable from the clean release the phone carries.
- */
-extra["bitchordBetaSuffix"] = "beta1"
-
 plugins {
     id("com.android.application") version "8.10.1" apply false
     id("com.android.library") version "8.10.1" apply false

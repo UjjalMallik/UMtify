@@ -4,7 +4,9 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
@@ -25,8 +27,10 @@ import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import com.music.bitchord.data.model.CARD_ART_PX
+import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.artworkAt
 import com.music.bitchord.ui.player.PlayerPlatform
+import com.music.bitchord.ui.player.rememberRemoteArtworkUrl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.pow
@@ -254,6 +258,139 @@ fun rememberPlayerTones(imageUrl: String?, artPx: Int = CARD_ART_PX): PlayerTone
 
 /** Long enough to read as the record changing colour, short enough not to lag behind it. */
 private const val TONE_FADE_MS = 360
+
+/**
+ * The app-wide Material 3 scheme for the cover of [song].
+ *
+ * The player's own tones have always come from the sleeve; this brings the
+ * same relationship to every other surface, so opening a record changes the
+ * whole app's colour and not only the screen that shows it.
+ */
+@Composable
+fun rememberCoverColorScheme(
+    song: Song?,
+    artPx: Int = CARD_ART_PX,
+): ColorScheme = rememberArtworkColorScheme(rememberRemoteArtworkUrl(song), artPx)
+
+/**
+ * A dark Material 3 scheme derived from the artwork at [imageUrl].
+ *
+ * Two seed colours are read off the sleeve — what it is mostly made of and its
+ * strongest note — and the full tonal set is generated from their hues, so the
+ * primary, the containers and the surfaces all belong to the same record. The
+ * seeds crossfade when the track changes, which carries every role with them;
+ * "Reduce animation" turns that fade into a cut.
+ *
+ * The track of a cover still being decoded keeps the outgoing record's
+ * colours rather than flashing the neutral fallback in between.
+ */
+@Composable
+fun rememberArtworkColorScheme(
+    imageUrl: String?,
+    artPx: Int = CARD_ART_PX,
+): ColorScheme {
+    val reduceAnimation by PlayerPlatform.host.settings.reduceAnimation.collectAsStateWithLifecycle()
+    val seed = rememberArtworkSeed(imageUrl, artPx)
+    // The seed resets to null for every URL not in the cache. Holding the last
+    // one keeps the app in the outgoing record's colours until the incoming
+    // cover has actually been read.
+    var heldSeed by remember { mutableStateOf(seed) }
+    LaunchedEffect(imageUrl, seed) {
+        if (imageUrl == null) heldSeed = null else if (seed != null) heldSeed = seed
+    }
+    val shown = seed ?: heldSeed ?: NEUTRAL_SEED
+    val spec: AnimationSpec<Color> = if (reduceAnimation) snap() else tween(THEME_FADE_MS)
+    val base = animateColorAsState(shown.dominant, spec, label = "themeBase").value
+    val accent = animateColorAsState(shown.vibrant, spec, label = "themeAccent").value
+    // Rebuilt from the animated seeds rather than animating 36 roles, so the
+    // whole scheme moves together and keeps every tonal relationship.
+    return remember(base, accent) { dynamicDarkScheme(base, accent) }
+}
+
+/** Long enough to read as the record changing colour, short enough not to lag. */
+private const val THEME_FADE_MS = 520
+
+/**
+ * Before a cover has been read, and for records without one: the app's
+ * existing near-black look with a trace of violet, so adding colour does not
+ * turn the app into a different app on a cold start.
+ */
+private val NEUTRAL_SEED = Seed(
+    dominant = Color(0xFF4A4550),
+    vibrant = Color(0xFF8B8196),
+    edge = Color(0xFF4A4550),
+    topBandLuminance = 0f,
+)
+
+/**
+ * Builds the tonal palette from the two cover seeds.
+ *
+ * M3's scheme is not an accent plus neutrals: it is a set of roles with fixed
+ * tonal relationships. So saturation and lightness stay in the bands M3 uses
+ * here — pale primaries, dark containers, a surface ladder just above black —
+ * and only the hue, and the artwork's own chroma through
+ * [adaptedArtworkSaturation], come from the sleeve.
+ */
+private fun dynamicDarkScheme(dominant: Color, accent: Color): ColorScheme {
+    fun Color.hasChroma() = chroma() >= TINT_MIN_CHROMA
+    val base = when {
+        dominant.hasChroma() -> dominant
+        accent.hasChroma() -> accent
+        else -> NEUTRAL_SEED.dominant
+    }
+    val highlight = if (accent.hasChroma()) accent else base
+    val tertiarySource = highlight.withHsl(hue = { it + TERTIARY_HUE_SHIFT })
+
+    fun Color.tone(minimum: Float, maximum: Float, lightness: Float) = withHsl(
+        saturation = { adaptedArtworkSaturation(it, minimum, maximum) },
+        lightness = { lightness },
+    )
+
+    val primary = highlight.tone(0.46f, 0.88f, 0.78f)
+    val secondary = base.tone(0.26f, 0.54f, 0.80f)
+    val tertiary = tertiarySource.tone(0.34f, 0.62f, 0.80f)
+    return darkColorScheme(
+        primary = primary,
+        onPrimary = highlight.tone(0.50f, 0.90f, 0.18f),
+        primaryContainer = highlight.tone(0.42f, 0.72f, 0.30f),
+        onPrimaryContainer = highlight.tone(0.28f, 0.58f, 0.90f),
+        inversePrimary = highlight.tone(0.52f, 0.92f, 0.41f),
+        secondary = secondary,
+        onSecondary = base.tone(0.30f, 0.58f, 0.18f),
+        secondaryContainer = base.tone(0.24f, 0.50f, 0.25f),
+        onSecondaryContainer = base.tone(0.22f, 0.48f, 0.90f),
+        tertiary = tertiary,
+        onTertiary = tertiarySource.tone(0.36f, 0.64f, 0.18f),
+        tertiaryContainer = tertiarySource.tone(0.28f, 0.54f, 0.27f),
+        onTertiaryContainer = tertiarySource.tone(0.24f, 0.50f, 0.90f),
+        background = base.tone(0.22f, 0.52f, 0.055f),
+        onBackground = base.tone(0.14f, 0.38f, 0.94f),
+        surface = base.tone(0.22f, 0.50f, 0.07f),
+        onSurface = base.tone(0.14f, 0.36f, 0.93f),
+        surfaceVariant = base.tone(0.18f, 0.42f, 0.18f),
+        onSurfaceVariant = base.tone(0.16f, 0.40f, 0.78f),
+        surfaceTint = primary,
+        inverseSurface = base.tone(0.14f, 0.36f, 0.90f),
+        inverseOnSurface = base.tone(0.18f, 0.44f, 0.12f),
+        error = Color(0xFFFFB4AB),
+        onError = Color(0xFF690005),
+        errorContainer = Color(0xFF93000A),
+        onErrorContainer = Color(0xFFFFDAD6),
+        outline = base.tone(0.14f, 0.32f, 0.36f),
+        outlineVariant = base.tone(0.14f, 0.30f, 0.25f),
+        scrim = Color.Black,
+        surfaceBright = base.tone(0.20f, 0.46f, 0.19f),
+        surfaceDim = base.tone(0.22f, 0.52f, 0.055f),
+        surfaceContainer = base.tone(0.22f, 0.50f, 0.10f),
+        surfaceContainerHigh = base.tone(0.22f, 0.48f, 0.13f),
+        surfaceContainerHighest = base.tone(0.20f, 0.46f, 0.16f),
+        surfaceContainerLow = base.tone(0.22f, 0.50f, 0.085f),
+        surfaceContainerLowest = base.tone(0.24f, 0.52f, 0.04f),
+    )
+}
+
+/** Enough separation for a tertiary that belongs to the cover without echoing it, in degrees. */
+private const val TERTIARY_HUE_SHIFT = 40f
 
 private fun Seed.playerTones(): PlayerTones? {
     val source = listOf(dominant, vibrant).firstOrNull { it.chroma() >= TINT_MIN_CHROMA } ?: return null
@@ -566,10 +703,12 @@ internal fun adaptedArtworkSaturation(source: Float, minimum: Float, maximum: Fl
 private const val CHROMATIC_SATURATION_THRESHOLD = 0.12f
 
 private fun Color.withHsl(
+    hue: (Float) -> Float = { it },
     saturation: (Float) -> Float = { it },
     lightness: (Float) -> Float = { it },
 ): Color {
     val hsl = FloatArray(3).also { ColorUtils.colorToHSL(toArgb(), it) }
+    hsl[0] = ((hue(hsl[0]) % 360f) + 360f) % 360f
     hsl[1] = saturation(hsl[1]).coerceIn(0f, 1f)
     hsl[2] = lightness(hsl[2]).coerceIn(0f, 1f)
     return Color(ColorUtils.HSLToColor(hsl))

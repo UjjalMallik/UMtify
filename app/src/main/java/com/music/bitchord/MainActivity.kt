@@ -212,6 +212,7 @@ import com.music.bitchord.ui.components.SongActionsSheet
 import com.music.bitchord.ui.components.HeldContextMenu
 import com.music.bitchord.ui.components.HeldItem
 import androidx.media3.session.MediaController
+import com.music.bitchord.playback.PlayerState
 import com.music.bitchord.playback.QualityUpgrade
 import com.music.bitchord.playback.rememberMediaController
 import com.music.bitchord.playback.rememberPlayerState
@@ -307,6 +308,7 @@ import com.music.bitchord.ui.replay.ReplayStories
 import com.music.bitchord.ui.replay.ReplayStoryPage
 import com.music.bitchord.ui.replay.rememberReplayState
 import com.music.bitchord.ui.theme.BitChordTheme
+import com.music.bitchord.ui.theme.rememberCoverColorScheme
 import com.music.bitchord.ui.theme.rememberArtworkPalette
 import com.music.bitchord.data.canvas.AppleArtistArtRepository
 import com.music.bitchord.data.canvas.keyColors
@@ -358,12 +360,23 @@ class MainActivity : AppCompatActivity() {
             LaunchedEffect(highPerformance, performanceRefreshRate, composeView) {
                 applyPerformanceMode(highPerformance, performanceRefreshRate, composeView)
             }
+            // Hoisted above the theme because the dynamic palette is built from
+            // the current track: the whole app changes colour with the cover,
+            // not only the player screen that already reads its tones.
+            val controller = rememberMediaController()
+            val player = rememberPlayerState(controller)
+            val dynamicScheme = if (theme == ThemeMode.DYNAMIC) {
+                rememberCoverColorScheme(player.song)
+            } else {
+                null
+            }
             val darkTheme = when (theme) {
                 ThemeMode.SYSTEM -> isSystemInDarkTheme()
                 ThemeMode.LIGHT -> false
                 ThemeMode.DARK -> true
+                ThemeMode.DYNAMIC -> true
             }
-            BitChordTheme(darkTheme = darkTheme) {
+            BitChordTheme(darkTheme = darkTheme, colorScheme = dynamicScheme) {
                 // The glass surfaces sample this layer, and a layer records only
                 // what is drawn into it — which, for BitChord, is a page that
                 // paints no background of its own. Everywhere a page is not
@@ -403,6 +416,8 @@ class MainActivity : AppCompatActivity() {
                         windowWidth = maxWidth,
                         windowHeight = maxHeight,
                         appBackdrop = appBackdrop,
+                        controller = controller,
+                        player = player,
                     )
                 }
                 }
@@ -462,6 +477,9 @@ private fun BitChordApp(
      */
     windowHeight: Dp,
     appBackdrop: LayerBackdrop,
+    /** Bound above the theme so the dynamic scheme can read the current song. */
+    controller: MediaController?,
+    player: PlayerState,
     viewModel: MainViewModel = viewModel(),
 ) {
     val context = LocalContext.current
@@ -902,8 +920,6 @@ private fun BitChordApp(
             viewModel.reloadLocalDetail(com.music.bitchord.data.smb.SmbConfig.BROWSE_ID)
         }
     }
-    val controller = rememberMediaController()
-    val player = rememberPlayerState(controller)
     // A resume in a party is performed on the instant the server schedules, not
     // when it was pressed, and nothing about the player moves in between — so
     // the transport spends that round trip drawn as though the tap never landed.
@@ -2335,9 +2351,10 @@ private fun BitChordApp(
                     // The session applies the jump plan to its own player (see
                     // its seekTo override); editing the queue from here would
                     // round-trip every item through the controller and lose
-                    // their bounded-window metadata.
+                    // their bounded-window metadata. The session also settles
+                    // playWhenReady after the jump, so a paused queue stays
+                    // paused and a playing one carries on.
                     c.seekTo(index, 0L)
-                    c.play()
                 }
             },
             onRemoveFromQueue = { controller?.removeMediaItem(it) },

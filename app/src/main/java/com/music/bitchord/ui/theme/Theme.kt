@@ -2,6 +2,7 @@ package com.music.bitchord.ui.theme
 
 import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -94,10 +95,12 @@ private fun Typography.withFamily(family: FontFamily) = Typography(
 @Composable
 fun BitChordTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    /** The cover-derived scheme of the dynamic theme, or null for the fixed palettes. */
+    colorScheme: ColorScheme? = null,
     content: @Composable () -> Unit,
 ) {
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
+        colorScheme = colorScheme ?: if (darkTheme) DarkColors else LightColors,
         typography = BitChordTypography,
         content = content,
     )

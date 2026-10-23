@@ -35,6 +35,8 @@ Thumbs.db
 keystore.properties
 *.jks
 *.keystore
+# Except the one key every build is signed with, so releases update in place.
+!app/umtify-release.keystore
 
 # Project scratch / debug artifacts
 .shots/

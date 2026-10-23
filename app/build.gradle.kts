@@ -9,17 +9,6 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
-/**
- * Signing details, kept out of the repository in `keystore.properties`
- * (see keystore.properties.example). Absent on a fresh checkout, in which case
- * the release build still runs and simply comes out unsigned rather than
- * failing — only whoever holds the key can produce a shippable APK.
- */
-val signing = Properties().apply {
-    val file = rootProject.file("keystore.properties")
-    if (file.exists()) file.inputStream().use { load(it) }
-}
-
 val localProps = Properties().apply {
     val file = rootProject.file("local.properties")
     if (file.exists()) file.inputStream().use { load(it) }
@@ -53,8 +42,13 @@ val listenTogetherServer: String = (
         ?: "https://bitchord-listen-together.onrender.com"
     ).trim().trimEnd('/')
 
-// See the root build.gradle.kts: one version for the phone and its watch app.
-val betaSuffix = rootProject.extra["bitchordBetaSuffix"] as String
+/*
+ * Every build of this app upgrades over the last one, so versionCode has to
+ * keep climbing. CI numbers its runs sequentially; Android's own installer
+ * takes that number as the version to compare. Local builds use run zero,
+ * which is below anything CI has ever published.
+ */
+val runNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0
 
 android {
     namespace = "com.music.bitchord"
@@ -62,13 +56,15 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.music.bitchord"
+        applicationId = "com.music.umtify"
         // 26 keeps reach wide; real-time blur (RenderEffect) kicks in on API 31+,
         // Haze falls back to a translucent scrim below that.
         minSdk = 26
         targetSdk = 36
-        versionCode = rootProject.extra["bitchordVersionCode"] as Int
-        versionName = rootProject.extra["bitchordVersionName"] as String
+        // 100 leaves headroom below the first published build for a hotfix
+        // that has to sort before CI's run numbering.
+        versionCode = 100 + runNumber
+        versionName = "1.0.$runNumber"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -91,49 +87,42 @@ android {
         }
     }
 
-    // applicationId can only be overridden per flavor, not per build type, so a
-    // dev/prod dimension exists purely to let both sit installed side by side
-    // on the same device instead of the dev build overwriting the prod one.
+    // A dev/prod dimension still selects which source set a build uses, but the
+    // application id is deliberately the same for both: there is one app on the
+    // phone, and every build has to replace the last rather than sit beside it.
     flavorDimensions += "env"
     productFlavors {
         create("dev") {
             dimension = "env"
-            applicationId = "com.dev.bitchord"
-            resValue("string", "app_name", "UMtify Dev")
         }
         create("prod") {
             dimension = "env"
-            // Matches defaultConfig — this is the package already shipped/installed.
         }
     }
 
+    /*
+     * The one key every build is signed with, committed on purpose so that a
+     * CI runner and a local checkout produce APKs that Android treats as the
+     * same app. Losing or changing it means no installed copy can ever be
+     * updated in place again.
+     */
     signingConfigs {
-        // Both halves have to be there, not just the properties file: it *names*
-        // the keystore rather than containing it, and both are gitignored
-        // separately, so a checkout can easily end up with the one and not the
-        // other. A signing config pointing at a keystore that is not on disk
-        // fails the release build outright at validateSigningRelease — which is
-        // exactly the failure the unsigned fallback above exists to avoid, so
-        // the keystore has to be looked for rather than assumed.
-        val store = signing.getProperty("storeFile")?.let { rootProject.file(it) }
-        if (store != null && store.exists()) {
-            create("release") {
-                storeFile = store
-                storePassword = signing.getProperty("storePassword")
-                keyAlias = signing.getProperty("keyAlias")
-                keyPassword = signing.getProperty("keyPassword")
-            }
+        create("release") {
+            storeFile = file("umtify-release.keystore")
+            storePassword = "umtify123"
+            keyAlias = "umtify"
+            keyPassword = "umtify123"
         }
     }
 
     buildTypes {
         debug {
-            if (betaSuffix.isNotEmpty()) versionNameSuffix = "-$betaSuffix"
+            // Same key as release, so a debug build can replace an installed
+            // release (and vice versa) without uninstalling.
+            signingConfig = signingConfigs.getByName("release")
         }
         release {
-            // Carried here too — see [betaSuffix]. A sideloaded beta is a
-            // release build, and it is the one that most needs the marker.
-            if (betaSuffix.isNotEmpty()) versionNameSuffix = "-$betaSuffix"
+            signingConfig = signingConfigs.getByName("release")
             /*
              * On for what it does to speed, not size. Compose is written to be
              * run through R8 — without it every composable keeps the debug-era
@@ -153,23 +142,17 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Prefer the configured release key; clean CI checkouts use the
-            // debug key so the production APK remains installable.
-            signingConfig = signingConfigs.findByName("release")
-                ?: signingConfigs.getByName("debug")
         }
         /*
-         * The release build, installable next to the dev and prod apps: same R8,
-         * same non-debuggable runtime, signed with the debug key under its own
-         * package so it never replaces either. For measuring startup the way
-         * users get it and for checking that shrinking broke nothing — a debug
-         * build is interpreted and verified at runtime and says little about
-         * either. `./gradlew installDevBenchmark`.
+         * The release build without the benchmark package id: same R8, same
+         * non-debuggable runtime and the same signature, so it replaces an
+         * installed build rather than sitting beside it. For measuring startup
+         * the way users get it and for checking that shrinking broke nothing.
+         * `./gradlew installProdBenchmark`.
          */
         create("benchmark") {
             initWith(getByName("release"))
-            signingConfig = signingConfigs.getByName("debug")
-            applicationIdSuffix = ".benchmark"
+            signingConfig = signingConfigs.getByName("release")
             matchingFallbacks += listOf("release")
         }
     }
@@ -439,10 +422,10 @@ val verifyDevInstall = tasks.register("verifyDevInstall") {
             .drop(1)
             .mapNotNull { line -> line.split('\t').takeIf { it.size == 2 && it[1] == "device" }?.get(0) }
         serials.forEach { serial ->
-            logger.lifecycle("verifyDevInstall: compiling com.dev.bitchord on $serial")
+            logger.lifecycle("verifyDevInstall: compiling com.music.umtify on $serial")
             ProcessBuilder(
                 adbPath, "-s", serial, "shell", "cmd", "package", "compile",
-                "-m", "verify", "-f", "com.dev.bitchord",
+                "-m", "verify", "-f", "com.music.umtify",
             ).inheritIO().start().waitFor()
         }
     }

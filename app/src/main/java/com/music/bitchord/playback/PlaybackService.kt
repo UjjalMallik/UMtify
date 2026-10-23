@@ -7525,6 +7525,33 @@ class PlaybackService : MediaLibraryService() {
         }
 
         /**
+         * What the listener had asked for before a track change.
+         *
+         * Read from the phone's own player, never the receiver's: a cast session
+         * keeps the phone paused by design, and its playWhenReady says nothing
+         * about whether skipping on the phone should start sound.
+         */
+        private fun intentToPlay(): Boolean =
+            !cast.active && (super.getPlayWhenReady() || super.isPlaying())
+
+        /**
+         * Carries that intention onto whatever item the player was just moved
+         * to. An online track is not ready the moment it becomes current — its
+         * stream URL is resolved while Media3 prepares — so the intent is put
+         * back as playWhenReady now and playback follows as soon as it is
+         * prepared. A listener who skipped while paused gets the new track
+         * loaded, but not started: playWhenReady stays false.
+         */
+        private fun settleAfterTrackChange(wasPlaying: Boolean) {
+            if (cast.active) return
+            if (super.getPlaybackState() == Player.STATE_IDLE) {
+                super.prepare()
+            }
+            super.setPlayWhenReady(wasPlaying)
+            if (wasPlaying) super.play()
+        }
+
+        /**
          * Whether this device is a listener in a party its host has taken
          * control of — see [ListenTogether.State.controlsLocked].
          *
@@ -7627,7 +7654,9 @@ class PlaybackService : MediaLibraryService() {
                 castPrevious()
                 return
             }
+            val wasPlaying = intentToPlay()
             super.seekToPrevious()
+            settleAfterTrackChange(wasPlaying)
         }
 
         override fun seekToDefaultPosition() {
@@ -7643,7 +7672,9 @@ class PlaybackService : MediaLibraryService() {
         override fun seekToDefaultPosition(mediaItemIndex: Int) {
             if (locked()) return
             onUserIntent()
+            val wasPlaying = intentToPlay()
             super.seekToDefaultPosition(mediaItemIndex)
+            settleAfterTrackChange(wasPlaying)
         }
 
         override fun setMediaItems(mediaItems: List<MediaItem>, resetPosition: Boolean) {
@@ -7742,8 +7773,10 @@ class PlaybackService : MediaLibraryService() {
                 cast.seekTo(positionMs)
                 return
             }
+            val wasPlaying = intentToPlay()
             if (mediaItemIndex <= wrappedPlayer.currentMediaItemIndex) {
                 wrappedPlayer.seekTo(mediaItemIndex, positionMs)
+                settleAfterTrackChange(wasPlaying)
                 return
             }
             // A direct choice of a later queue row bypasses items between
@@ -7760,6 +7793,9 @@ class PlaybackService : MediaLibraryService() {
                 positionMs = positionMs,
                 play = false,
             )
+            // The jump plan prepares an idle player, but says nothing about
+            // whether it should start: that remains the listener's intent.
+            settleAfterTrackChange(wasPlaying)
         }
 
         override fun seekToPreviousMediaItem() {
@@ -7770,21 +7806,27 @@ class PlaybackService : MediaLibraryService() {
                 castPrevious()
                 return
             }
+            val wasPlaying = intentToPlay()
             wrappedPlayer.seekToPrevious()
+            settleAfterTrackChange(wasPlaying)
         }
 
         override fun seekToNextMediaItem() {
             if (locked()) return
             onUserIntent()
             crossfade.onSkipRequested()
+            val wasPlaying = intentToPlay()
             wrappedPlayer.seekToNextMediaItem()
+            settleAfterTrackChange(wasPlaying)
         }
 
         override fun seekToNext() {
             if (locked()) return
             onUserIntent()
             crossfade.onSkipRequested()
+            val wasPlaying = intentToPlay()
             wrappedPlayer.seekToNext()
+            settleAfterTrackChange(wasPlaying)
         }
     }
 

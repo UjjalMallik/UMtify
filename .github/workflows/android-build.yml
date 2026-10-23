@@ -6,6 +6,12 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: write
+
+env:
+  VERSION_NAME: 1.0.${{ github.run_number }}
+
 jobs:
   build-production:
     runs-on: ubuntu-latest
@@ -26,8 +32,24 @@ jobs:
       - name: Build production release APK
         run: ./gradlew assembleProdRelease
 
+      - name: Name the release APK
+        run: |
+          mkdir -p release
+          cp app/build/outputs/apk/prod/release/app-prod-arm64-v8a-release.apk \
+            "release/UMtify-v${VERSION_NAME}-arm64-v8a.apk"
+
       - name: Upload arm64-v8a production APK
         uses: actions/upload-artifact@v4
         with:
           name: android-prod-release-arm64-v8a
-          path: app/build/outputs/apk/prod/release/app-prod-arm64-v8a-release.apk
+          path: release/UMtify-v${{ env.VERSION_NAME }}-arm64-v8a.apk
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION_NAME }}
+          name: UMtify v${{ env.VERSION_NAME }}
+          files: release/UMtify-v${{ env.VERSION_NAME }}-arm64-v8a.apk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

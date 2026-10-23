@@ -2829,6 +2829,12 @@ fun NowPlayingScreen(
                             val t = dockT()
                             return if (dock == null || t >= 1f) corner else lerp(dock.miniArtCorner(), corner, t)
                         }
+                        // The card's rounding belongs to the card. As the sleeve
+                        // becomes the full-bleed banner its corners unwind to
+                        // square, so nothing of the photocard's shape survives on
+                        // an image that is now the screen itself.
+                        fun sleeveChromeCorner(): Dp =
+                            lerp(sleeveCorner(), 0.dp, bannerShare())
 
                         // The ambient light the card casts: a handful of
                         // concentric rounded rects in the sleeve's own lifted
@@ -2852,7 +2858,8 @@ fun NowPlayingScreen(
                                     scaleX = scale
                                     scaleY = scale
                                     translationX = swipeSettle.value * (1f - p())
-                                    alpha = (1f - p()).coerceIn(0f, 1f) * dockFade()
+                                    alpha = (1f - p()).coerceIn(0f, 1f) * dockFade() *
+                                        (1f - bannerShare())
                                 }
                                 .drawBehind {
                                     val reach = 36.dp.toPx()
@@ -2968,11 +2975,12 @@ fun NowPlayingScreen(
                                     // letting go as the sleeve docks away.
                                     shadowElevation = if (art.loaded) {
                                         (if (isPlaying) 24.dp else 12.dp).toPx() *
-                                            (1f - 2f * shown).coerceAtLeast(0f) * dockT()
+                                            (1f - 2f * shown).coerceAtLeast(0f) * dockT() *
+                                            (1f - bannerShare())
                                     } else {
                                         0f
                                     }
-                                    shape = dockFrame.cornerShape(sleeveCorner())
+                                    shape = dockFrame.cornerShape(sleeveChromeCorner())
                                     // What `.shadow` did: it clips only when it casts.
                                     clip = art.loaded
                                 }
@@ -2980,7 +2988,7 @@ fun NowPlayingScreen(
                                     // Clipped a second time, as `.shadow` and then
                                     // `.clip` always did: a card's anti-aliased corners
                                     // come out as they did before the banner moved in.
-                                    shape = dockFrame.cornerShape(sleeveCorner())
+                                    shape = dockFrame.cornerShape(sleeveChromeCorner())
                                     clip = true
                                     // The mask below erases part of what this layer
                                     // drew, which it can only do in a buffer of its own.
@@ -2993,10 +3001,14 @@ fun NowPlayingScreen(
                                 // The glass edge: a hairline of white light sitting
                                 // just inside the card's own clip, so it follows
                                 // the corner radius exactly. Faded out with the
-                                // card as it becomes the header thumbnail.
+                                // card as it becomes the header thumbnail — and
+                                // gone entirely under the banner, where a border
+                                // around a full-screen image would only read as
+                                // the card still being there.
                                 .drawWithContent {
                                     drawContent()
-                                    val edge = 0.15f * (1f - p()).coerceIn(0f, 1f)
+                                    val edge = 0.15f * (1f - p()).coerceIn(0f, 1f) *
+                                        (1f - bannerShare())
                                     if (edge > 0.001f) {
                                         val line = 1.dp.toPx()
                                         drawRoundRect(
@@ -3076,7 +3088,19 @@ fun NowPlayingScreen(
                                         shape = TileShape
                                         clip = share > 0f
                                     }
-                                    .background(Color.Black.copy(alpha = 0.18f)),
+                                    // The empty-state tile's tinted square, not a
+                                    // container for the cover. It is only visible
+                                    // where the still image steps aside for a
+                                    // full-bleed Canvas, and there it must leave
+                                    // with the card: a translucent square over the
+                                    // banner is exactly the ghost this mode is
+                                    // meant not to have.
+                                    .drawBehind {
+                                        val scrim = 0.18f * (1f - bannerShare())
+                                        if (scrim > 0.001f) {
+                                            drawRect(Color.Black.copy(alpha = scrim))
+                                        }
+                                    },
                                 contentAlignment = Alignment.Center,
                             ) {
                                 if (!art.loaded && !canvasRendered) {

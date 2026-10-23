@@ -756,7 +756,7 @@ fun SettingsScreen(
 
         SearchableSettingsGroup(search, header = stringResource(R.string.appearance)) {
             val themeTitle = stringResource(R.string.theme)
-            row(themeTitle, "dark mode", "light mode") {
+            row(themeTitle, "dark mode", "light mode", "dynamic theme", "cover art") {
                 SettingsRow(icon = Icons.Rounded.Brightness4, title = themeTitle)
                 SegmentedControl(
                     options = ThemeMode.entries.map { it.localizedLabel() },
@@ -1904,6 +1904,7 @@ private fun ThemeMode.localizedLabel(): String = stringResource(
         ThemeMode.SYSTEM -> R.string.system
         ThemeMode.LIGHT -> R.string.light
         ThemeMode.DARK -> R.string.dark
+        ThemeMode.DYNAMIC -> R.string.dynamic
     },
 )
 
