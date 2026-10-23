@@ -10,7 +10,6 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -141,6 +140,8 @@ internal fun LandscapePlayerLayout(
     background: @Composable (Modifier) -> Unit,
     /** The sleeve; handed a modifier that already fixes its square size. */
     artwork: @Composable (Modifier) -> Unit,
+    /** The line under the sleeve — the stats pill when it is switched on. */
+    artworkFooter: @Composable () -> Unit = {},
     /** The row under the sleeve, emitted into its column. */
     actions: @Composable () -> Unit,
     /** Credits and transport. [compact] is a phone-height window. */
@@ -192,6 +193,7 @@ internal fun LandscapePlayerLayout(
                     ) {
                         artwork(Modifier.size(minOf(maxWidth, maxHeight)))
                     }
+                    artworkFooter()
                     Spacer(Modifier.height(if (compact) 12.dp else 24.dp))
                     actions()
                 }
@@ -291,7 +293,6 @@ internal fun LandscapeArtwork(
     sleeveShape: () -> Shape = { LandscapeArtShape },
     /** How much of the sleeve's shadow is cast, 1 at rest. */
     shadowFraction: () -> Float = { 1f },
-    overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     val casts = artLoaded || canvasRendered
     Box(modifier = modifier) {
@@ -346,7 +347,6 @@ internal fun LandscapeArtwork(
                 )
             }
         }
-        overlay()
     }
 }
 

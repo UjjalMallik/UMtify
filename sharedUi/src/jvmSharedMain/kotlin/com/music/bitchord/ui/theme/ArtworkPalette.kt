@@ -77,6 +77,47 @@ data class ArtworkPalette(
 data class ArtworkKeyColors(val background: Color, val accent: Color)
 
 /**
+ * The tonal set the player's controls are filled with, read off the sleeve.
+ *
+ * The player does not use the app's `primaryContainer` and `secondaryContainer`
+ * directly any more. Those are theme roles, so every record got the same
+ * purple discs under it; here the pastel and the deeper tone are both the
+ * sleeve's own hue, and only the lightness is ours. The pair is deliberately
+ * split the M3 way — a light container with dark content for the one filled
+ * control, a dark container with light content for everything that sits around
+ * it — so the play pill stays the single brightest thing in the transport.
+ *
+ * [glass] and [onGlass] are the same hue at low opacity, for the keys that are
+ * off: they read as tinted glass rather than as grey holes in the backdrop.
+ */
+@Immutable
+data class PlayerTones(
+    val primaryContainer: Color,
+    val onPrimaryContainer: Color,
+    val secondaryContainer: Color,
+    val onSecondaryContainer: Color,
+    val glass: Color,
+    val onGlass: Color,
+    val outline: Color,
+) {
+    companion object {
+        /**
+         * What the controls are filled with where there is nothing to read:
+         * a neutral sleeve, or one that has not been decoded yet.
+         */
+        val Neutral = PlayerTones(
+            primaryContainer = Color(0xFFF2ECF6),
+            onPrimaryContainer = Color(0xFF1E1726),
+            secondaryContainer = Color(0xFF3A3444),
+            onSecondaryContainer = Color(0xFFEDE6F5),
+            glass = Color.White.copy(alpha = 0.09f),
+            onGlass = Color.White.copy(alpha = 0.82f),
+            outline = Color.White.copy(alpha = 0.16f),
+        )
+    }
+}
+
+/**
  * Pulls [ArtworkPalette] out of the artwork at [imageUrl], or out of
  * [keyColors] when the source already supplied them and there is nothing to
  * decode.
@@ -170,6 +211,81 @@ fun rememberArtworkTopBandLuminance(
 fun rememberPlayerTint(imageUrl: String?, artPx: Int = CARD_ART_PX): Color? {
     val seed = rememberArtworkSeed(imageUrl, artPx)
     return remember(seed) { seed?.playerTint() }
+}
+
+/**
+ * The player's tonal palette for the record at [imageUrl].
+ *
+ * Derives from the same cached decode as [rememberPlayerTint], so the controls
+ * and the secondary text agree about which hue the sleeve is. The colours
+ * crossfade on a song change rather than cutting; artwork already read once is
+ * applied on the first frame, and "Reduce animation" turns the fade into a
+ * cut.
+ */
+@Composable
+fun rememberPlayerTones(imageUrl: String?, artPx: Int = CARD_ART_PX): PlayerTones {
+    val reduceAnimation by PlayerPlatform.host.settings.reduceAnimation.collectAsStateWithLifecycle()
+    val seed = rememberArtworkSeed(imageUrl, artPx)
+    val knownUpFront = remember(imageUrl) { seed != null }
+    val target = seed?.playerTones() ?: PlayerTones.Neutral
+    val spec: AnimationSpec<Color> = if (reduceAnimation || knownUpFront) {
+        snap()
+    } else {
+        tween(TONE_FADE_MS)
+    }
+    return PlayerTones(
+        primaryContainer = animateColorAsState(
+            target.primaryContainer, spec, label = "tonePrimary",
+        ).value,
+        onPrimaryContainer = animateColorAsState(
+            target.onPrimaryContainer, spec, label = "toneOnPrimary",
+        ).value,
+        secondaryContainer = animateColorAsState(
+            target.secondaryContainer, spec, label = "toneSecondary",
+        ).value,
+        onSecondaryContainer = animateColorAsState(
+            target.onSecondaryContainer, spec, label = "toneOnSecondary",
+        ).value,
+        glass = animateColorAsState(target.glass, spec, label = "toneGlass").value,
+        onGlass = animateColorAsState(target.onGlass, spec, label = "toneOnGlass").value,
+        outline = animateColorAsState(target.outline, spec, label = "toneOutline").value,
+    )
+}
+
+/** Long enough to read as the record changing colour, short enough not to lag behind it. */
+private const val TONE_FADE_MS = 360
+
+private fun Seed.playerTones(): PlayerTones? {
+    val source = listOf(dominant, vibrant).firstOrNull { it.chroma() >= TINT_MIN_CHROMA } ?: return null
+    // The filled control: a pastel of the sleeve's hue, pale enough that the
+    // dark on-colour clears contrast on it whatever the artwork was.
+    val pastel = source.withHsl(
+        saturation = { adaptedArtworkSaturation(it, minimum = 0.42f, maximum = 0.85f) },
+        lightness = { 0.82f },
+    )
+    val onPastel = source.withHsl(
+        saturation = { adaptedArtworkSaturation(it, minimum = 0.48f, maximum = 0.90f) },
+        lightness = { 0.16f },
+    )
+    // The discs and active keys: the same hue taken deep, so the play pill
+    // keeps the only light container in the transport.
+    val soft = source.withHsl(
+        saturation = { adaptedArtworkSaturation(it, minimum = 0.26f, maximum = 0.52f) },
+        lightness = { 0.22f },
+    )
+    val onSoft = source.withHsl(
+        saturation = { adaptedArtworkSaturation(it, minimum = 0.16f, maximum = 0.40f) },
+        lightness = { 0.92f },
+    )
+    return PlayerTones(
+        primaryContainer = pastel,
+        onPrimaryContainer = onPastel,
+        secondaryContainer = soft,
+        onSecondaryContainer = onSoft,
+        glass = pastel.copy(alpha = 0.10f),
+        onGlass = onSoft.copy(alpha = 0.82f),
+        outline = onSoft.copy(alpha = 0.18f),
+    )
 }
 
 private fun Seed.playerTint(): Color? {

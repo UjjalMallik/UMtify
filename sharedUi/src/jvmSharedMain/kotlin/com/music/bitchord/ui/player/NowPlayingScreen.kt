@@ -19,6 +19,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.Animatable
 import com.music.bitchord.ui.theme.rememberPlayerTint
+import com.music.bitchord.ui.theme.rememberPlayerTones
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.channels.Channel
 import androidx.compose.animation.core.AnimationVector1D
@@ -295,6 +296,15 @@ private const val MESH_REFRESH_MS = 3_000L
 
 /** The player's side margin. Scrollable panels reach back across it. */
 internal val PLAYER_GUTTER = 30.dp
+/**
+ * The square photocard's side margin. Narrower than [PLAYER_GUTTER] so the
+ * sleeve fills nearly the whole width of a phone — the card is the player's
+ * shape in that mode, and a 30dp gutter around it read as a thumbnail with
+ * room to spare. The panels keep [PLAYER_GUTTER] of their own.
+ */
+private val CARD_ART_GUTTER = 20.dp
+/** Clear air between the sleeve's bottom edge and the stats pill under it. */
+private val STATS_BADGE_GAP = 10.dp
 /**
  * How wide the player's content is ever allowed to get. A sleeve and a volume
  * slider stretched right across a tablet aren't a bigger player, just a coarser
@@ -1213,15 +1223,18 @@ fun NowPlayingScreen(
             )
         }
     }
-    // The photocard is the player's shape now. Artwork is always the centred
-    // card, so the full-bleed banner — and a Spotify Canvas claiming the whole
-    // screen — is never the presentation here. The backdrop still takes its
-    // colours from the opened mesh and the blurred cover; it just never *is*
-    // the cover.
-    val heroMode = false
-    // Kept as a named false rather than deleting every branch below: the
-    // full-screen canvas, its compact deck and the banner all key off this,
-    // and the photocard path is the one that must be taken now.
+    // Which of the two artwork presentations the player wears. With
+    // "Full-screen cover art" on, a window the player fills runs the sleeve
+    // edge to edge behind the status bar and fades it into the controls; with
+    // the setting off, or on a tablet-sized window where going full bleed would
+    // be a banner across the top of a page rather than the page itself, it is
+    // the floating photocard. Both share the same controls, credits and
+    // gestures — only the sleeve's shape changes.
+    val fullBleedArt by PlayerSettings.fullBleedArtwork.collectAsStateWithLifecycle()
+    val heroMode = fullBleedArt && playerFillsWindow(windowWidth)
+    // Spotify's Canvas still never claims the whole screen here. The clip
+    // plays inside whichever sleeve is up; the full-screen Canvas deck below
+    // is dormant until that presentation is decided on its own.
     val spotifyCanvasOnPhone = false
 
     // Whether there's a still image to blow out — a placeholder tile is a card
@@ -1719,7 +1732,17 @@ fun NowPlayingScreen(
         animationSpec = tween(durationMillis = 360, easing = FastOutSlowInEasing),
         label = "playerTint",
     )
-    CompositionLocalProvider(LocalPlayerTint provides playerTint) {
+    // The transport and action keys follow the same sleeve. A full-screen
+    // Canvas hands them the neutral set instead: the video is the backdrop
+    // then, not the cover the tonal roles would otherwise be read from.
+    val playerTones = rememberPlayerTones(
+        imageUrl = if (spotifyCanvasPresentation) null else remoteArt,
+        artPx = ART_PX,
+    )
+    CompositionLocalProvider(
+        LocalPlayerTint provides playerTint,
+        LocalPlayerTones provides playerTones,
+    ) {
         if (landscape) {
             // Paused always wins outright over a scrub in progress — see
             // [ARTWORK_PAUSE_SHRINK_SCALE].
@@ -1859,19 +1882,19 @@ fun NowPlayingScreen(
                                     queueOpen = false
                                     closeLyrics()
                                 },
-                        ) {
-                            // The stats belong to the player, not to the sleeve, so
-                            // they leave it along with the rest of the player.
-                            SleeveNerdStats(
-                                song = song,
-                                modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .padding(horizontal = 10.dp, vertical = 8.dp)
-                                    // Faded with the player rather than flown with
-                                    // the sleeve: the cover in the bar has none.
-                                    .graphicsLayer { alpha = if (panelOpen) 0f else dockFade() },
-                            )
-                        }
+                        )
+                    },
+                    artworkFooter = {
+                        // Under the sleeve rather than on it, and faded with
+                        // the player: the cover in the bar has no stats. A
+                        // panel on the right leaves the sleeve where it is, so
+                        // the footer goes with the rest of the main pane.
+                        NerdStatsBadge(
+                            song = song,
+                            modifier = Modifier
+                                .padding(top = 10.dp)
+                                .graphicsLayer { alpha = if (panelOpen) 0f else dockFade() },
+                        )
                     },
                     actions = playerActions,
                     mainPane = { compact ->
@@ -2485,7 +2508,11 @@ fun NowPlayingScreen(
                                     if (drag != null) verticalDrag(drag.id) { it.consume() }
                                 }
                             }
-                            .padding(horizontal = PLAYER_GUTTER),
+                            // The full-bleed banner supplies its own edges, so
+                            // its column keeps the standard gutter. A card is
+                            // bounded by this padding on both sides, and the
+                            // narrower gutter is what lets it fill the phone.
+                            .padding(horizontal = if (heroMode) PLAYER_GUTTER else CARD_ART_GUTTER),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                     // ---- Top and centre: artwork, then the credits ----
@@ -2498,6 +2525,14 @@ fun NowPlayingScreen(
                     // on screen saying the player is still working.
                     val versionAligning by PlayerSettings.versionAlignmentInProgress.collectAsStateWithLifecycle()
                     val versionSwitching = versionAligning || audioVersionSwitching
+                    // The stats pill is a row of the player when it is on, so
+                    // its height is taken out of the sleeve's budget above it
+                    // and out of the slack the controls would otherwise get.
+                    // Reserving it whether or not the decoder has spoken yet
+                    // keeps the cover from growing and shrinking as the figures
+                    // arrive at the start of each track.
+                    val showNerdStats by PlayerSettings.showNerdStats.collectAsStateWithLifecycle()
+                    val statsSlot = if (showNerdStats) NERD_STATS_BADGE_HEIGHT + STATS_BADGE_GAP else 0.dp
                     // Height the artwork block below turns out not to need, spent by the
                     // controls at the foot of the screen. Filled in from inside the box,
                     // where the sleeve's real size is known; see [lastControlSpread].
@@ -2537,19 +2572,19 @@ fun NowPlayingScreen(
                         // over once the credits row and the gap above it have had
                         // theirs. Sizing it off the width alone is what pushed the
                         // credits down across the scrubber on anything but a phone.
-                        val wantArt = minOf(maxWidth, roomy - ART_TITLE_GAP - HEADER_HEIGHT)
+                        val wantArt = minOf(maxWidth, roomy - ART_TITLE_GAP - HEADER_HEIGHT - statsSlot)
                         // Held to what the box has actually got, for the single frame it
                         // takes the gaps below to catch up with a change in their own
                         // height: a sleeve a few dp under for one frame is a better
                         // failure than a credits row overhanging the lyric strip.
-                        val fullArt = minOf(wantArt, maxHeight - ART_TITLE_GAP - HEADER_HEIGHT)
+                        val fullArt = minOf(wantArt, maxHeight - ART_TITLE_GAP - HEADER_HEIGHT - statsSlot)
                             .coerceAtLeast(THUMB_SIZE)
                         // What's left over once the sleeve, the gap and the credits have
                         // had theirs. A few dp on a phone; the better part of a
                         // centimetre on anything taller, and since the group is centred,
                         // half of it used to land between the credits and the lyric strip
                         // as one wide hole in the middle of the controls.
-                        val slack = (roomy - wantArt - ART_TITLE_GAP - HEADER_HEIGHT)
+                        val slack = (roomy - wantArt - ART_TITLE_GAP - HEADER_HEIGHT - statsSlot)
                             .coerceAtLeast(0.dp)
                         // Handed to the two gaps around the transport row instead, which
                         // is where a tall screen should be doing its breathing.
@@ -2618,7 +2653,7 @@ fun NowPlayingScreen(
                         // the pair sits centred while the queue is closed — in whatever
                         // the controls couldn't take, which on all but the tallest
                         // screens is nothing.
-                        val groupTop = (maxHeight - fullArt - ART_TITLE_GAP - HEADER_HEIGHT)
+                        val groupTop = (maxHeight - fullArt - ART_TITLE_GAP - HEADER_HEIGHT - statsSlot)
                             .coerceAtLeast(0.dp) / 2
                         // Functions of the collapse, called at placement and measure
                         // — see [p]. Composition never reads them.
@@ -2628,7 +2663,8 @@ fun NowPlayingScreen(
                         // player and has to be centred in it; collapsed, it belongs
                         // hard against the left edge with the credits beside it.
                         fun artStart(): Dp = lerp((maxWidth - fullArt) / 2, 0.dp, p())
-                        fun regularTitleTop(): Dp = lerp(groupTop + fullArt + ART_TITLE_GAP, 0.dp, p())
+                        fun regularTitleTop(): Dp =
+                            lerp(groupTop + fullArt + statsSlot + ART_TITLE_GAP, 0.dp, p())
                         // Once Spotify's control deck has left, keep the only remaining
                         // player chrome against the bottom edge instead of stranding it
                         // where the artwork's title normally sits near mid-screen.
@@ -3127,9 +3163,9 @@ fun NowPlayingScreen(
                         }
 
                         // The card's slot: where the sleeve sits as a card, whether or
-                        // not it is being drawn as one. Holds the stats line and takes
-                        // the gestures, both of which belong to the card's place even
-                        // while the artwork runs full bleed around it.
+                        // not it is being drawn as one. Takes the gestures and measures
+                        // the dismiss band, both of which belong to the card's place
+                        // even while the artwork runs full bleed around it.
                         Box(
                             modifier = Modifier
                                 // The lambda overload deliberately: the Dp one reads
@@ -3175,23 +3211,7 @@ fun NowPlayingScreen(
                                         Modifier
                                     },
                                 ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            // Measured stats stay on the sleeve's bottom centre. They
-                            // fade away with Spotify's lower control deck rather than
-                            // following the compact credits to the bottom edge.
-                            WhileShown({ !collapsePastHalf }) {
-                                SleeveNerdStats(
-                                    song = song,
-                                    modifier = Modifier
-                                        .align(Alignment.BottomCenter)
-                                        .padding(horizontal = 10.dp, vertical = 8.dp)
-                                        .graphicsLayer {
-                                            alpha = (1f - p() * 2f) * spotifyChromeAlpha
-                                        },
-                                )
-                            }
-                        }
+                        )
 
                         // Sits in the gap under the sleeve, clear of its rounded
                         // corners and shadow — no box, no clip, nothing for the art
@@ -3222,6 +3242,30 @@ fun NowPlayingScreen(
                                         alpha = (abs(swipeSettle.value) / swipeThreshold)
                                             .coerceIn(0f, 1f) * (1f - p()) * hintAlpha
                                     },
+                            )
+                        }
+
+                        // ---- Stats for nerds ----
+                        // Between the sleeve and the credits, in its own glass
+                        // pill. Placed off the title's top minus the reserved
+                        // slot rather than off the artwork, so it travels up and
+                        // fades with the credits as the sleeve collapses into the
+                        // header instead of being left hovering over the queue.
+                        WhileShown({ !collapsePastHalf }) {
+                            NerdStatsBadge(
+                                song = song,
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .offset {
+                                        IntOffset(
+                                            x = 0,
+                                            y = (
+                                                currentTitleTop() - ART_TITLE_GAP -
+                                                    NERD_STATS_BADGE_HEIGHT
+                                            ).roundToPx(),
+                                        )
+                                    }
+                                    .graphicsLayer { alpha = (1f - p() * 2f) * spotifyChromeAlpha },
                             )
                         }
 

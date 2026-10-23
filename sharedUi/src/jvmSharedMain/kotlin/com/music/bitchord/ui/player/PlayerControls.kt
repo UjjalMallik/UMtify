@@ -51,6 +51,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Bedtime
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material3.CircularProgressIndicator
@@ -87,6 +88,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -97,6 +99,7 @@ import androidx.compose.ui.unit.sp
 import com.music.bitchord.ui.haptics.Haptic
 import com.music.bitchord.ui.haptics.rememberHaptics
 import com.music.bitchord.ui.icons.BitChordIcons
+import com.music.bitchord.ui.theme.PlayerTones
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.bitchord.data.NerdStats
 import com.music.bitchord.data.listentogether.PartyMember
@@ -302,6 +305,16 @@ private const val BADGE_SIZE_BUMP = 0.5f
 internal val LocalPlayerTint = compositionLocalOf { Color.White }
 
 /**
+ * The artwork-derived tonal fills for the transport, the action keys and the
+ * share/like buttons — see [com.music.bitchord.ui.theme.rememberPlayerTones].
+ *
+ * Provided at the same point in the player as [LocalPlayerTint], so both
+ * layouts and every control inside them draw from one set of colours that
+ * change with the record. Neutral wherever it is not provided.
+ */
+internal val LocalPlayerTones = compositionLocalOf { PlayerTones.Neutral }
+
+/**
  * The quality badge between the timestamps — "Lossless", "Hi-Res", a loading
  * shimmer while a lossless source is still being looked for.
  */
@@ -335,12 +348,21 @@ internal fun PlaybackQualityLabel(
     )
 }
 
+/** The pill's height, reserved by the layouts that place it. */
+internal val NERD_STATS_BADGE_HEIGHT = 30.dp
+
 /**
- * Stats for nerds, on the foot of the sleeve: the measured stream, and under
- * it what Automix's analysis is doing. Nothing at all while the setting is off.
+ * Stats for nerds as a glass pill: the measured stream and, when Automix is
+ * on, what its analysis is doing. Nothing at all while the setting is off.
+ *
+ * A pill rather than the loose white lines that used to sit on the foot of the
+ * sleeve: the player now stands it below the artwork, on the page's own
+ * backdrop, where an untethered line reads as stray text. The fill is the
+ * sleeve's own tone at low opacity and the hairline is its lifted pale, so the
+ * badge belongs to the record without competing with the cover above it.
  */
 @Composable
-internal fun SleeveNerdStats(song: Song, modifier: Modifier = Modifier) {
+internal fun NerdStatsBadge(song: Song, modifier: Modifier = Modifier) {
     val showNerdStats by PlayerSettings.showNerdStats.collectAsStateWithLifecycle()
     if (!showNerdStats) return
     val nerdStats by NerdStats.current.collectAsStateWithLifecycle()
@@ -357,63 +379,65 @@ internal fun SleeveNerdStats(song: Song, modifier: Modifier = Modifier) {
     val inParty by remember {
         PlayerPlatform.host.party.map { it.inParty }.distinctUntilChanged()
     }.collectAsStateWithLifecycle(initialValue = PlayerPlatform.host.party.value.inParty)
-    // A plain white line reads fine over the usual dark tile, but a light
-    // stretch of an animated cover — sky, snow, a pale sleeve — washes it out
-    // entirely. The shadow costs nothing on a dark background and is what
-    // keeps it legible on a bright one.
-    val nerdStyle = MaterialTheme.typography.labelSmall.copy(
-        shadow = Shadow(
-            color = Color.Black.copy(alpha = 0.55f),
-            offset = Offset(0f, 1f),
-            blurRadius = 4f,
-        ),
-    )
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = modifier,
+    val measured = nerdStats?.describe()
+    // Only when Automix is actually switched on: otherwise this would report
+    // on analysis nothing is going to use, which is noise rather than a stat.
+    val automix = if (!smartFadeOn) {
+        null
+    } else {
+        when {
+            // Ahead of the video case because it is the broader one: in a party
+            // nothing is analysed for any song, video or not, so naming the
+            // video limitation there would describe a rule that is not the one
+            // in force.
+            inParty -> stringResource(Res.string.automix_stopped_in_party)
+            song.isVideoOrigin -> stringResource(Res.string.automix_not_supported_video)
+            else -> stringResource(
+                Res.string.automix_analysis_status,
+                smartAnalysis.current.localizedLabel(),
+                smartAnalysis.next.localizedLabel(),
+            )
+        }
+    }
+    val line = listOfNotNull(measured, automix)
+        .joinToString(" · ")
+        .takeIf { it.isNotEmpty() }
+        ?: return
+
+    val tones = LocalPlayerTones.current
+    val shape = RoundedCornerShape(50)
+    Row(
+        modifier = modifier
+            .widthIn(max = 340.dp)
+            .height(NERD_STATS_BADGE_HEIGHT)
+            .shadow(6.dp, shape, clip = false)
+            .clip(shape)
+            .background(tones.secondaryContainer.copy(alpha = 0.62f))
+            .border(0.5.dp, tones.primaryContainer.copy(alpha = 0.36f), shape)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
     ) {
-        nerdStats?.describe()?.let { stats ->
-            Text(
-                text = stats,
-                style = nerdStyle,
-                color = Color.White.copy(alpha = 0.65f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-            )
-        }
-        // Only when Automix is actually switched on: otherwise this would
-        // report on analysis nothing is going to use, which is noise rather
-        // than a stat.
-        if (smartFadeOn) {
-            Text(
-                // Both sides always named, even when they agree, so the line
-                // reads the same way every time and the eye can find the half
-                // it wants without re-parsing the sentence.
-                text = when {
-                    // Ahead of the video case because it is the broader one:
-                    // in a party nothing is analysed for any song, video or
-                    // not, so naming the video limitation there would describe
-                    // a rule that is not the one in force.
-                    inParty -> stringResource(Res.string.automix_stopped_in_party)
-                    song.isVideoOrigin ->
-                        stringResource(Res.string.automix_not_supported_video)
-                    else -> stringResource(
-                        Res.string.automix_analysis_status,
-                        smartAnalysis.current.localizedLabel(),
-                        smartAnalysis.next.localizedLabel(),
-                    )
-                },
-                style = nerdStyle,
-                // Dimmer than the measured line above it: that one describes
-                // the audio, this one describes the app, and the ranking
-                // should show.
-                color = Color.White.copy(alpha = 0.5f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-            )
-        }
+        Icon(
+            imageVector = Icons.Rounded.GraphicEq,
+            contentDescription = null,
+            tint = tones.primaryContainer.copy(alpha = 0.88f),
+            modifier = Modifier.size(14.dp),
+        )
+        Spacer(Modifier.width(7.dp))
+        Text(
+            text = line,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Medium,
+                fontSize = 10.sp,
+                letterSpacing = 0.2.sp,
+            ),
+            color = tones.onSecondaryContainer.copy(alpha = 0.92f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Start,
+        )
     }
 }
 
@@ -496,7 +520,7 @@ private fun TransportDisc(
     haptic: Haptic,
 ) {
     val haptics = rememberHaptics()
-    val scheme = MaterialTheme.colorScheme
+    val tones = LocalPlayerTones.current
     val contentAlpha by animateFloatAsState(
         targetValue = if (enabled) 1f else 0.38f,
         label = "transportDiscAlpha",
@@ -505,7 +529,7 @@ private fun TransportDisc(
         modifier = Modifier
             .size(size)
             .clip(CircleShape)
-            .background(scheme.secondaryContainer)
+            .background(tones.secondaryContainer)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -519,7 +543,7 @@ private fun TransportDisc(
         Icon(
             painter = painterResource(icon),
             contentDescription = contentDescription,
-            tint = scheme.onSecondaryContainer.copy(alpha = contentAlpha),
+            tint = tones.onSecondaryContainer.copy(alpha = contentAlpha),
             modifier = Modifier.size(size * 0.42f),
         )
     }
@@ -540,14 +564,14 @@ private fun PlayPausePill(
     onClick: () -> Unit,
 ) {
     val haptics = rememberHaptics()
-    val scheme = MaterialTheme.colorScheme
+    val tones = LocalPlayerTones.current
     val label = stringResource(if (isPlaying) Res.string.pause else Res.string.play)
     Box(
         modifier = Modifier
             .width(width)
             .height(height)
             .clip(RoundedCornerShape(50))
-            .background(scheme.primary)
+            .background(tones.primaryContainer)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -561,7 +585,7 @@ private fun PlayPausePill(
     ) {
         if (isLoading) {
             CircularProgressIndicator(
-                color = scheme.onPrimary,
+                color = tones.onPrimaryContainer,
                 strokeWidth = 2.5.dp,
                 modifier = Modifier.size(if (compact) 22.dp else 26.dp),
             )
@@ -572,13 +596,13 @@ private fun PlayPausePill(
                         if (isPlaying) Res.drawable.ic_player_pause else Res.drawable.ic_player_play,
                     ),
                     contentDescription = null,
-                    tint = scheme.onPrimary,
+                    tint = tones.onPrimaryContainer,
                     modifier = Modifier.size(if (compact) 22.dp else 26.dp),
                 )
                 Spacer(Modifier.width(if (compact) 7.dp else 9.dp))
                 Text(
                     text = label,
-                    color = scheme.onPrimary,
+                    color = tones.onPrimaryContainer,
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold,
                         fontSize = if (compact) 15.sp else 17.sp,
@@ -790,14 +814,14 @@ private fun PlayerTonalKey(
 ) {
     val haptics = rememberHaptics()
     val lastTap = remember { mutableLongStateOf(-tapWindowMs) }
-    val scheme = MaterialTheme.colorScheme
+    val tones = LocalPlayerTones.current
     val container by animateColorAsState(
-        targetValue = if (active) scheme.secondaryContainer else Color.White.copy(alpha = 0.07f),
+        targetValue = if (active) tones.secondaryContainer else tones.glass,
         animationSpec = tween(180),
         label = "actionKeyContainer",
     )
     val content by animateColorAsState(
-        targetValue = if (active) scheme.onSecondaryContainer else Color.White.copy(alpha = 0.78f),
+        targetValue = if (active) tones.onSecondaryContainer else tones.onGlass,
         animationSpec = tween(180),
         label = "actionKeyContent",
     )
@@ -808,7 +832,7 @@ private fun PlayerTonalKey(
             .background(container)
             .border(
                 width = 1.dp,
-                color = if (active) scheme.onSecondaryContainer.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.13f),
+                color = if (active) tones.onSecondaryContainer.copy(alpha = 0.12f) else tones.outline,
                 shape = shape,
             )
             .clickable(
@@ -851,12 +875,12 @@ private fun PlayerRoundMenu(
     modifier: Modifier = Modifier,
 ) {
     val haptics = rememberHaptics()
-    val scheme = MaterialTheme.colorScheme
+    val tones = LocalPlayerTones.current
     Box(
         modifier = modifier
             .clip(CircleShape)
-            .background(scheme.secondaryContainer.copy(alpha = 0.42f))
-            .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape)
+            .background(tones.secondaryContainer.copy(alpha = 0.62f))
+            .border(1.dp, tones.outline, CircleShape)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -870,7 +894,7 @@ private fun PlayerRoundMenu(
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = scheme.onSecondaryContainer,
+            tint = tones.onSecondaryContainer,
             modifier = Modifier.size(21.dp),
         )
     }
@@ -894,27 +918,36 @@ internal fun PlayerSurfaceButton(
     haptic: Haptic = Haptic.Tap,
 ) {
     val haptics = rememberHaptics()
-    val scheme = MaterialTheme.colorScheme
+    val tones = LocalPlayerTones.current
     val container by animateColorAsState(
         targetValue = if (active) {
-            scheme.secondaryContainer
+            tones.secondaryContainer
         } else {
-            scheme.surfaceContainerHighest.copy(alpha = 0.52f)
+            tones.glass
         },
         animationSpec = tween(180),
         label = "surfaceButtonContainer",
     )
     val content by animateColorAsState(
-        targetValue = if (active) scheme.onSecondaryContainer else Color.White.copy(alpha = 0.82f),
+        targetValue = if (active) tones.onSecondaryContainer else tones.onGlass,
         animationSpec = tween(180),
         label = "surfaceButtonContent",
+    )
+    val outline by animateColorAsState(
+        targetValue = if (active) {
+            tones.onSecondaryContainer.copy(alpha = 0.14f)
+        } else {
+            tones.outline
+        },
+        animationSpec = tween(180),
+        label = "surfaceButtonOutline",
     )
     Box(
         modifier = modifier
             .size(42.dp)
             .clip(CircleShape)
             .background(container)
-            .border(1.dp, Color.White.copy(alpha = if (active) 0.10f else 0.16f), CircleShape)
+            .border(1.dp, outline, CircleShape)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -1019,11 +1052,12 @@ internal fun OutputCaption(
         }
         if (!badge.inParty) {
             Spacer(Modifier.width(4.dp))
+            val tones = LocalPlayerTones.current
             Box(
                 modifier = Modifier
                     .size(22.dp)
                     .clip(CircleShape)
-                    .background(LocalPlayerTint.current.copy(alpha = 0.10f))
+                    .background(tones.primaryContainer.copy(alpha = 0.12f))
                     .clickable(onClick = onListenTogether)
                     .semantics { contentDescription = listenTogetherDescription },
                 contentAlignment = Alignment.Center,
@@ -1031,7 +1065,7 @@ internal fun OutputCaption(
                 Icon(
                     Icons.Rounded.Headphones,
                     contentDescription = null,
-                    tint = LocalPlayerTint.current.copy(alpha = 0.62f),
+                    tint = tones.onSecondaryContainer.copy(alpha = 0.62f),
                     modifier = Modifier.size(13.dp),
                 )
             }
