@@ -103,6 +103,8 @@ data class PlayerTones(
     val glass: Color,
     val onGlass: Color,
     val outline: Color,
+    /** The sleeve's own mid-tone, for the transport's tinted ambient shadow. */
+    val accent: Color,
 ) {
     companion object {
         /**
@@ -117,6 +119,7 @@ data class PlayerTones(
             glass = Color.White.copy(alpha = 0.09f),
             onGlass = Color.White.copy(alpha = 0.82f),
             outline = Color.White.copy(alpha = 0.16f),
+            accent = Color(0xFF6E5B7C),
         )
     }
 }
@@ -253,6 +256,7 @@ fun rememberPlayerTones(imageUrl: String?, artPx: Int = CARD_ART_PX): PlayerTone
         glass = animateColorAsState(target.glass, spec, label = "toneGlass").value,
         onGlass = animateColorAsState(target.onGlass, spec, label = "toneOnGlass").value,
         outline = animateColorAsState(target.outline, spec, label = "toneOutline").value,
+        accent = animateColorAsState(target.accent, spec, label = "toneAccent").value,
     )
 }
 
@@ -414,6 +418,12 @@ private fun Seed.playerTones(): PlayerTones? {
         saturation = { adaptedArtworkSaturation(it, minimum = 0.16f, maximum = 0.40f) },
         lightness = { 0.92f },
     )
+    // Vivid enough to read as a coloured shadow rather than a grey one, and
+    // kept on the containers' hue so the transport still belongs to the sleeve.
+    val accent = source.withHsl(
+        saturation = { adaptedArtworkSaturation(it, minimum = 0.50f, maximum = 0.90f) },
+        lightness = { 0.52f },
+    )
     return PlayerTones(
         primaryContainer = pastel,
         onPrimaryContainer = onPastel,
@@ -422,6 +432,7 @@ private fun Seed.playerTones(): PlayerTones? {
         glass = pastel.copy(alpha = 0.10f),
         onGlass = onSoft.copy(alpha = 0.82f),
         outline = onSoft.copy(alpha = 0.18f),
+        accent = accent,
     )
 }
 

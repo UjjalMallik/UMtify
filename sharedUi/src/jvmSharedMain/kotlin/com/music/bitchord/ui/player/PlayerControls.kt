@@ -18,15 +18,19 @@ import org.jetbrains.compose.resources.DrawableResource
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -37,6 +41,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.draw.alpha
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -75,10 +80,12 @@ import androidx.compose.ui.Modifier
 import org.jetbrains.compose.resources.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import org.jetbrains.compose.resources.painterResource
@@ -508,7 +515,7 @@ internal fun TransportRow(
     }
 }
 
-/** A tonal disc for one end of the transport. */
+/** A tonal glass disc for one end of the transport. */
 @Composable
 private fun TransportDisc(
     icon: DrawableResource,
@@ -524,13 +531,57 @@ private fun TransportDisc(
         targetValue = if (enabled) 1f else 0.38f,
         label = "transportDiscAlpha",
     )
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.93f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium,
+        ),
+        label = "transportDiscPressScale",
+    )
+    val elevation by animateDpAsState(
+        targetValue = if (pressed) 3.dp else 8.dp,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium,
+        ),
+        label = "transportDiscPressElevation",
+    )
+    val base = tones.secondaryContainer
+    val fill = Brush.verticalGradient(
+        listOf(
+            lerp(base, Color.White, 0.22f),
+            base.copy(alpha = 0.55f),
+            lerp(base, Color.Black, 0.12f),
+        ),
+    )
+    val rim = Brush.verticalGradient(
+        listOf(
+            Color.White.copy(alpha = 0.45f),
+            Color.White.copy(alpha = 0.08f),
+        ),
+    )
     Box(
         modifier = Modifier
             .size(size)
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            }
+            .shadow(
+                elevation = elevation,
+                shape = CircleShape,
+                clip = false,
+                ambientColor = tones.accent,
+                spotColor = tones.accent,
+            )
             .clip(CircleShape)
-            .background(tones.secondaryContainer)
+            .background(fill)
+            .border(1.dp, rim, CircleShape)
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interactionSource,
                 indication = null,
                 enabled = enabled,
             ) {
@@ -565,14 +616,60 @@ private fun PlayPausePill(
     val haptics = rememberHaptics()
     val tones = LocalPlayerTones.current
     val label = stringResource(if (isPlaying) Res.string.pause else Res.string.play)
+    val shape = RoundedCornerShape(50)
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.93f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium,
+        ),
+        label = "playPillPressScale",
+    )
+    val elevation by animateDpAsState(
+        targetValue = if (pressed) 6.dp else 14.dp,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium,
+        ),
+        label = "playPillPressElevation",
+    )
+    val base = tones.primaryContainer
+    val fill = Brush.verticalGradient(
+        listOf(
+            lerp(base, Color.White, 0.38f),
+            base.copy(alpha = 0.88f),
+            lerp(base, Color.Black, 0.14f),
+        ),
+    )
+    val rim = Brush.verticalGradient(
+        listOf(
+            Color.White.copy(alpha = 0.65f),
+            tones.onPrimaryContainer.copy(alpha = 0.12f),
+            Color.Black.copy(alpha = 0.25f),
+        ),
+    )
     Box(
         modifier = Modifier
             .width(width)
             .height(height)
-            .clip(RoundedCornerShape(50))
-            .background(tones.primaryContainer)
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            }
+            .shadow(
+                elevation = elevation,
+                shape = shape,
+                clip = false,
+                ambientColor = tones.accent,
+                spotColor = tones.accent,
+            )
+            .clip(shape)
+            .background(fill)
+            .border(1.2.dp, rim, shape)
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interactionSource,
                 indication = null,
                 enabled = !isLoading,
             ) {
@@ -582,6 +679,20 @@ private fun PlayPausePill(
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
+        // Convex-glass sheen: catches the light along the top curve, then
+        // dissolves before it reaches the middle. Behind the glyph and label,
+        // so the specular never softens what the button says.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.45f)
+                .align(Alignment.TopCenter)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.White.copy(alpha = 0.45f), Color.Transparent),
+                    ),
+                ),
+        )
         if (isLoading) {
             CircularProgressIndicator(
                 color = tones.onPrimaryContainer,
