@@ -53,7 +53,9 @@ import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Headphones
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.Speaker
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -73,7 +75,6 @@ import androidx.compose.ui.Modifier
 import org.jetbrains.compose.resources.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shadow
@@ -349,17 +350,16 @@ internal fun PlaybackQualityLabel(
 }
 
 /** The pill's height, reserved by the layouts that place it. */
-internal val NERD_STATS_BADGE_HEIGHT = 30.dp
+internal val NERD_STATS_BADGE_HEIGHT = 22.dp
 
 /**
- * Stats for nerds as a glass pill: the measured stream and, when Automix is
- * on, what its analysis is doing. Nothing at all while the setting is off.
+ * Stats for nerds as a whisper of glass: the measured stream and, when Automix
+ * is on, what its analysis is doing. Nothing at all while the setting is off.
  *
- * A pill rather than the loose white lines that used to sit on the foot of the
- * sleeve: the player now stands it below the artwork, on the page's own
- * backdrop, where an untethered line reads as stray text. The fill is the
- * sleeve's own tone at low opacity and the hairline is its lifted pale, so the
- * badge belongs to the record without competing with the cover above it.
+ * Small enough to be read once and then ignored. The surface is a barely-there
+ * white wash over the theme surface rather than a filled chip, and its hairline
+ * is the only thing that separates it from the artwork behind it, so the badge
+ * belongs to the sleeve without competing with it.
  */
 @Composable
 internal fun NerdStatsBadge(song: Song, modifier: Modifier = Modifier) {
@@ -404,36 +404,35 @@ internal fun NerdStatsBadge(song: Song, modifier: Modifier = Modifier) {
         .takeIf { it.isNotEmpty() }
         ?: return
 
-    val tones = LocalPlayerTones.current
     val shape = RoundedCornerShape(50)
     Row(
         modifier = modifier
-            .widthIn(max = 340.dp)
+            .widthIn(max = 320.dp)
             .height(NERD_STATS_BADGE_HEIGHT)
-            .shadow(6.dp, shape, clip = false)
             .clip(shape)
-            .background(tones.secondaryContainer.copy(alpha = 0.62f))
-            .border(0.5.dp, tones.primaryContainer.copy(alpha = 0.36f), shape)
-            .padding(horizontal = 12.dp),
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.16f))
+            .background(Color.White.copy(alpha = 0.08f))
+            .border(0.5.dp, Color.White.copy(alpha = 0.16f), shape)
+            .padding(horizontal = 10.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
         Icon(
             imageVector = Icons.Rounded.GraphicEq,
             contentDescription = null,
-            tint = tones.primaryContainer.copy(alpha = 0.88f),
-            modifier = Modifier.size(14.dp),
+            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+            modifier = Modifier.size(12.dp),
         )
-        Spacer(Modifier.width(7.dp))
+        Spacer(Modifier.width(5.dp))
         Text(
             text = line,
             style = MaterialTheme.typography.labelSmall.copy(
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Medium,
                 fontSize = 10.sp,
-                letterSpacing = 0.2.sp,
+                letterSpacing = 0.3.sp,
             ),
-            color = tones.onSecondaryContainer.copy(alpha = 0.92f),
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Start,
@@ -659,13 +658,12 @@ internal fun VolumeRow(
 
 /**
  * The row both layouts end on: queue, sleep timer, shuffle, lyrics, repeat, and
- * a round more menu at the far right.
+ * the more menu.
  *
- * A row of compact tonal keys rather than the old pill-and-glyph pair. Every
- * key is the same size and sits in the same rhythm, so the eye reads it as one
- * instrument panel instead of three unrelated controls; the only asymmetry is
- * the circular menu at the end, which is what makes it read as "and the rest"
- * rather than one more mode.
+ * Six keys cut from the same glass: one height, one width, one corner, one
+ * hairline. Nothing is singled out by shape — the modes light up instead, in
+ * the theme's accent, so the row reads as one instrument panel and the state of
+ * each mode is legible at a glance.
  *
  * The playback modes are always here, not swapped in only while the queue is
  * up: shuffle and repeat are things people reach for while a song is playing,
@@ -687,11 +685,14 @@ internal fun PlayerActionBar(
     onOpenMenu: () -> Unit,
     /** Briefly an undo arrow after a quality upgrade. */
     menuIcon: ImageVector = Icons.Rounded.MoreHoriz,
+    /** A sleep timer is armed — either a countdown or "after this track". */
+    sleepTimerActive: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        val gap = if (maxWidth < 340.dp) 6.dp else 8.dp
-        val keyHeight = if (maxWidth < 340.dp) 42.dp else 46.dp
+        val gap = 6.dp
+        val keyWidth = 48.dp
+        val keyHeight = 42.dp
         val queue: @Composable (Modifier) -> Unit = { m ->
             PlayerTonalKey(
                 icon = BitChordIcons.Queue,
@@ -706,7 +707,7 @@ internal fun PlayerActionBar(
             PlayerTonalKey(
                 icon = Icons.Rounded.Bedtime,
                 contentDescription = stringResource(Res.string.sleep_timer),
-                active = false,
+                active = sleepTimerActive,
                 onClick = onOpenSleepTimer,
                 modifier = m,
             )
@@ -755,50 +756,62 @@ internal fun PlayerActionBar(
             )
         }
         val more: @Composable (Modifier) -> Unit = { m ->
-            PlayerRoundMenu(
+            PlayerTonalKey(
                 icon = menuIcon,
                 contentDescription = stringResource(Res.string.more),
+                active = false,
                 onClick = onOpenMenu,
                 modifier = m,
             )
         }
-        if (maxWidth < 276.dp) {
+        val keyModifier = Modifier.size(keyWidth, keyHeight)
+        if (maxWidth < keyWidth * 6 + gap * 5) {
             // A phone on its side leaves the landscape column narrower than one
             // row of six keys. Two rows of three keep them full size instead of
-            // shaving every target down until the icons crowd their own edges.
-            Column(verticalArrangement = Arrangement.spacedBy(gap)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    queue(Modifier.weight(1f).height(keyHeight))
-                    sleep(Modifier.weight(1f).height(keyHeight))
-                    shuffle(Modifier.weight(1f).height(keyHeight))
+            // shaving the widths down below the target size.
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(gap),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
+                ) {
+                    queue(keyModifier)
+                    sleep(keyModifier)
+                    shuffle(keyModifier)
                 }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    lyrics(Modifier.weight(1f).height(keyHeight))
-                    repeat(Modifier.weight(1f).height(keyHeight))
-                    more(Modifier.size(keyHeight))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
+                ) {
+                    lyrics(keyModifier)
+                    repeat(keyModifier)
+                    more(keyModifier)
                 }
             }
         } else {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(gap),
+                horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                queue(Modifier.weight(1f).height(keyHeight))
-                sleep(Modifier.weight(1f).height(keyHeight))
-                shuffle(Modifier.weight(1f).height(keyHeight))
-                lyrics(Modifier.weight(1f).height(keyHeight))
-                repeat(Modifier.weight(1f).height(keyHeight))
-                more(Modifier.size(keyHeight))
+                queue(keyModifier)
+                sleep(keyModifier)
+                shuffle(keyModifier)
+                lyrics(keyModifier)
+                repeat(keyModifier)
+                more(keyModifier)
             }
         }
     }
 }
 
 /**
- * One key in the action bar: a softly filled rounded square that lights up in
- * the theme's secondary container when its mode is on. The hairline border is
- * what keeps an inactive key from disappearing into a dark sleeve.
+ * One key in the action bar: a squircle of tinted glass with a hairline edge.
+ * Its mode on, it fills with the accent at low opacity and the glyph takes the
+ * accent's vibrant tone, which is the only difference between an on and an off
+ * key — the shape never changes.
  */
 @Composable
 private fun PlayerTonalKey(
@@ -815,26 +828,28 @@ private fun PlayerTonalKey(
     val haptics = rememberHaptics()
     val lastTap = remember { mutableLongStateOf(-tapWindowMs) }
     val tones = LocalPlayerTones.current
+    val accent = MaterialTheme.colorScheme.primary
     val container by animateColorAsState(
-        targetValue = if (active) tones.secondaryContainer else tones.glass,
+        targetValue = if (active) tones.secondaryContainer.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.08f),
         animationSpec = tween(180),
         label = "actionKeyContainer",
     )
     val content by animateColorAsState(
-        targetValue = if (active) tones.onSecondaryContainer else tones.onGlass,
+        targetValue = if (active) accent else tones.onGlass.copy(alpha = 0.82f),
         animationSpec = tween(180),
         label = "actionKeyContent",
     )
-    val shape = RoundedCornerShape(12.dp)
+    val edge by animateColorAsState(
+        targetValue = if (active) accent.copy(alpha = 0.30f) else Color.White.copy(alpha = 0.12f),
+        animationSpec = tween(180),
+        label = "actionKeyEdge",
+    )
+    val shape = RoundedCornerShape(16.dp)
     Box(
         modifier = modifier
             .clip(shape)
             .background(container)
-            .border(
-                width = 1.dp,
-                color = if (active) tones.onSecondaryContainer.copy(alpha = 0.12f) else tones.outline,
-                shape = shape,
-            )
+            .border(width = 0.5.dp, color = edge, shape = shape)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -863,40 +878,6 @@ private fun PlayerTonalKey(
                 color = content,
             )
         }
-    }
-}
-
-/** The circular more menu at the end of the action bar. */
-@Composable
-private fun PlayerRoundMenu(
-    icon: ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val haptics = rememberHaptics()
-    val tones = LocalPlayerTones.current
-    Box(
-        modifier = modifier
-            .clip(CircleShape)
-            .background(tones.secondaryContainer.copy(alpha = 0.62f))
-            .border(1.dp, tones.outline, CircleShape)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) {
-                haptics.play(Haptic.Tap)
-                onClick()
-            }
-            .semantics { this.contentDescription = contentDescription },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = tones.onSecondaryContainer,
-            modifier = Modifier.size(21.dp),
-        )
     }
 }
 
@@ -971,11 +952,13 @@ internal fun PlayerSurfaceButton(
  * The line under the transport: normally the output, and the party's name
  * whenever there is one.
  *
- * A party overrides the output rather than sitting beside it because the two
- * are not the same kind of fact. "Kushagra's Phone" answers which speaker in
- * this room; once there are four devices playing the same song, the room is no
- * longer what the listener is checking. The tap follows the label — whichever
- * one is on screen is the thing it opens.
+ * A glass capsule with an output icon and a chevron, because the line is also
+ * the way into the output switcher — the shape says so before the caption is
+ * read. A party overrides the output rather than sitting beside it because the
+ * two are not the same kind of fact. "Kushagra's Phone" answers which speaker
+ * in this room; once there are four devices playing the same song, the room is
+ * no longer what the listener is checking. The tap follows the label —
+ * whichever one is on screen is the thing it opens.
  */
 @Composable
 internal fun OutputCaption(
@@ -984,9 +967,9 @@ internal fun OutputCaption(
     /** Who's in it, before the settings page — see [ListenTogetherMembersSheet]. */
     onOpenMembers: () -> Unit,
     /**
-     * Starts a party when there isn't one. The headphones beside the caption
-     * are the only way in now that the output capsule is gone, so this is a
-     * real control rather than a convenience.
+     * Starts a party when there isn't one. The headphones beside the capsule
+     * are the only way in when there isn't a party to open, so this is a real
+     * control rather than a convenience.
      */
     onListenTogether: () -> Unit = {},
 ) {
@@ -1020,42 +1003,70 @@ internal fun OutputCaption(
     val jamName = badge.hostFirstName
         ?.let { stringResource(Res.string.listen_together_jam, it) }
         ?: stringResource(Res.string.listen_together_jam_unnamed)
+    // A pill rather than a bare line: the output is a control, and the icon,
+    // name and chevron together say so before anything is tapped. Both halves
+    // share one glass capsule so the switcher reads as a single destination.
+    val badgeShape = RoundedCornerShape(50)
     val captionModifier = Modifier
         .widthIn(max = 240.dp)
+        .clip(badgeShape)
+        .background(Color.White.copy(alpha = 0.10f))
+        .border(0.5.dp, Color.White.copy(alpha = 0.18f), badgeShape)
         .clickable { if (badge.inParty) onOpenMembers() else onOpenOutput() }
+        .padding(horizontal = 14.dp, vertical = 6.dp)
     val listenTogetherDescription = stringResource(Res.string.listen_together)
     Row(
         modifier = Modifier.fillMaxWidth(0.86f),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (!badge.inParty && isHiResOutput) {
-            ShimmerText(
-                text = outputName,
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center,
-                ),
-                modifier = captionModifier,
+        Row(
+            modifier = captionModifier,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = if (badge.inParty) Icons.Rounded.GraphicEq else Icons.Rounded.Speaker,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                modifier = Modifier.size(12.dp),
             )
-        } else {
-            Text(
-                text = if (badge.inParty) jamName else outputName,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                color = LocalPlayerTint.current.copy(alpha = 0.55f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-                modifier = captionModifier,
+            Spacer(Modifier.width(6.dp))
+            if (!badge.inParty && isHiResOutput) {
+                ShimmerText(
+                    text = outputName,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center,
+                    ),
+                )
+            } else {
+                Text(
+                    text = if (badge.inParty) jamName else outputName,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            Spacer(Modifier.width(6.dp))
+            Icon(
+                imageVector = Icons.Rounded.KeyboardArrowDown,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                modifier = Modifier.size(12.dp),
             )
         }
         if (!badge.inParty) {
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(6.dp))
             val tones = LocalPlayerTones.current
             Box(
                 modifier = Modifier
-                    .size(22.dp)
+                    .size(28.dp)
                     .clip(CircleShape)
                     .background(tones.primaryContainer.copy(alpha = 0.12f))
                     .clickable(onClick = onListenTogether)
@@ -1066,7 +1077,7 @@ internal fun OutputCaption(
                     Icons.Rounded.Headphones,
                     contentDescription = null,
                     tint = tones.onSecondaryContainer.copy(alpha = 0.62f),
-                    modifier = Modifier.size(13.dp),
+                    modifier = Modifier.size(14.dp),
                 )
             }
         }

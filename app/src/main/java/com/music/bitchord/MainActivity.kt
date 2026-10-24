@@ -176,6 +176,7 @@ import com.music.bitchord.playback.QueueCoordinator
 import com.music.bitchord.playback.QueueCoordinator.asQueueEntry
 import com.music.bitchord.playback.QueueShuffle
 import com.music.bitchord.playback.QueueSource
+import com.music.bitchord.playback.SleepTimer
 import com.music.bitchord.playback.cast.CastController
 import com.music.bitchord.data.model.QueueTier
 import com.music.bitchord.playback.autoplayEnabledFor
@@ -687,6 +688,11 @@ private fun BitChordApp(
         browseActions = target
     }
     val autoplay by AppSettings.autoplay.collectAsStateWithLifecycle()
+    // Both halves of the timer: a countdown lives in [SleepTimer.minutes], a
+    // pause-on-track-end in [SleepTimer.afterTrack]. Either one lights the key.
+    val sleepTimerMinutes by SleepTimer.minutes.collectAsStateWithLifecycle()
+    val sleepTimerAfterTrack by SleepTimer.afterTrack.collectAsStateWithLifecycle()
+    val sleepTimerActive = sleepTimerMinutes != null || sleepTimerAfterTrack
     val partyState by ListenTogether.state.collectAsStateWithLifecycle()
     // The same answer the playback service acts on, rather than a second one
     // derived here — see [autoplayEnabledFor]. Drawing the local preference in
@@ -2387,6 +2393,7 @@ private fun BitChordApp(
                 songMenuOrigin = null
                 songActions = song
             },
+            sleepTimerActive = sleepTimerActive,
             onOpenAlbum = { id ->
                 dismissPlayer()
                 showReplay = false
@@ -5102,6 +5109,8 @@ private fun BitChordApp(
         if (showLastfmLogin) {
             var usernameInput by remember { mutableStateOf("") }
             var passwordInput by remember { mutableStateOf("") }
+            var apiKeyInput by remember { mutableStateOf("") }
+            var secretInput by remember { mutableStateOf("") }
             var lastfmError by remember { mutableStateOf<String?>(null) }
             var lastfmLoading by remember { mutableStateOf(false) }
             LastfmLoginAlert(
@@ -5110,31 +5119,47 @@ private fun BitChordApp(
                 onUsernameInputChange = { usernameInput = it },
                 passwordInput = passwordInput,
                 onPasswordInputChange = { passwordInput = it },
+                apiKeyInput = apiKeyInput,
+                onApiKeyInputChange = { apiKeyInput = it },
+                secretInput = secretInput,
+                onSecretInputChange = { secretInput = it },
                 error = lastfmError,
                 loading = lastfmLoading,
                 onSignIn = {
-                    lastfmLoading = true
-                    lastfmError = null
-                    scope.launch {
-                        try {
-                            LastFM.initialize(
-                                apiKey = AppSettings.lastfmApiKey.value,
-                                secret = AppSettings.lastfmSecret.value,
-                            )
-                            LastFM.getMobileSession(usernameInput.trim(), passwordInput)
-                                .onSuccess { auth ->
-                                    AppSettings.setLastfmSessionKey(auth.session.key)
-                                    AppSettings.setLastfmUsername(auth.session.name)
-                                    AppSettings.setLastfmEnabled(true)
-                                    showLastfmLogin = false
-                                }
-                                .onFailure { e ->
-                                    lastfmError = e.message ?: context.getString(R.string.login_failed)
-                                }
-                        } catch (e: Exception) {
-                            lastfmError = e.message ?: context.getString(R.string.login_failed)
-                        } finally {
-                            lastfmLoading = false
+                    // The key and secret are a pair: either both come from the
+                    // dialog or both come from the build/saved configuration.
+                    val customApiKey = apiKeyInput.trim()
+                    val customSecret = secretInput.trim()
+                    val apiKey = customApiKey.ifBlank { AppSettings.lastfmApiKey.value }
+                    val secret = customSecret.ifBlank { AppSettings.lastfmSecret.value }
+                    if (customApiKey.isBlank() != customSecret.isBlank() || apiKey.isBlank() || secret.isBlank()) {
+                        lastfmError = context.getString(R.string.lastfm_credentials_missing)
+                    } else {
+                        lastfmLoading = true
+                        lastfmError = null
+                        scope.launch {
+                            try {
+                                LastFM.initialize(apiKey = apiKey, secret = secret)
+                                LastFM.getMobileSession(usernameInput.trim(), passwordInput)
+                                    .onSuccess { auth ->
+                                        AppSettings.setLastfmSessionKey(auth.session.key)
+                                        AppSettings.setLastfmUsername(auth.session.name)
+                                        AppSettings.setLastfmEnabled(true)
+                                        // Persist a custom pair only once it has
+                                        // actually been accepted, so a typo cannot
+                                        // replace a working configuration.
+                                        if (customApiKey.isNotBlank()) AppSettings.setLastfmApiKey(customApiKey)
+                                        if (customSecret.isNotBlank()) AppSettings.setLastfmSecret(customSecret)
+                                        showLastfmLogin = false
+                                    }
+                                    .onFailure { e ->
+                                        lastfmError = e.message ?: context.getString(R.string.login_failed)
+                                    }
+                            } catch (e: Exception) {
+                                lastfmError = e.message ?: context.getString(R.string.login_failed)
+                            } finally {
+                                lastfmLoading = false
+                            }
                         }
                     }
                 },

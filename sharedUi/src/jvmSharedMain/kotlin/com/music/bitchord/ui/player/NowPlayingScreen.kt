@@ -724,6 +724,8 @@ fun NowPlayingScreen(
     onShare: () -> Unit,
     /** Opens the track menu already on the sleep-timer choices. */
     onOpenSleepTimer: () -> Unit,
+    /** A sleep timer is armed, so its key reads as an active mode. */
+    sleepTimerActive: Boolean = false,
     onOpenAlbum: (String) -> Unit,
     /**
      * Opens an artist's page. [browseId] is null for anyone but the lead credit:
@@ -1510,12 +1512,13 @@ fun NowPlayingScreen(
             onOpenSleepTimer = onOpenSleepTimer,
             onOpenMenu = onOpenMenu,
             menuIcon = if (showRevertCue) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.MoreHoriz,
+            sleepTimerActive = sleepTimerActive,
         )
-        // Keep the current output caption visible in every state, and the way
-        // into Listen Together beside it now that the old output pill is gone.
-        Spacer(Modifier.height(12.dp))
+        // Keep the current output capsule visible in every state, with the way
+        // into Listen Together beside it when there is no party to open.
+        Spacer(Modifier.height(10.dp))
         Box(
-            modifier = Modifier.fillMaxWidth().height(22.dp),
+            modifier = Modifier.fillMaxWidth().height(30.dp),
             contentAlignment = Alignment.TopCenter,
         ) {
             OutputCaption(

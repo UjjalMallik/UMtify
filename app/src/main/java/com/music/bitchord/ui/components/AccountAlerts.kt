@@ -108,6 +108,10 @@ fun LastfmLoginAlert(
     onUsernameInputChange: (String) -> Unit,
     passwordInput: String,
     onPasswordInputChange: (String) -> Unit,
+    apiKeyInput: String,
+    onApiKeyInputChange: (String) -> Unit,
+    secretInput: String,
+    onSecretInputChange: (String) -> Unit,
     error: String?,
     loading: Boolean,
     onSignIn: () -> Unit,
@@ -145,6 +149,30 @@ fun LastfmLoginAlert(
                 value = passwordInput,
                 onValueChange = onPasswordInputChange,
                 placeholder = stringResource(R.string.password),
+                enabled = !loading,
+                isPassword = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
+            )
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = stringResource(R.string.lastfm_credentials_optional),
+                modifier = Modifier.padding(bottom = 8.dp),
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 16.sp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center,
+            )
+            PillTextField(
+                value = apiKeyInput,
+                onValueChange = onApiKeyInputChange,
+                placeholder = stringResource(R.string.lastfm_api_key),
+                enabled = !loading,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+            )
+            Spacer(Modifier.height(8.dp))
+            PillTextField(
+                value = secretInput,
+                onValueChange = onSecretInputChange,
+                placeholder = stringResource(R.string.lastfm_shared_secret),
                 enabled = !loading,
                 isPassword = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
