@@ -103,7 +103,10 @@ data class PlayerTones(
     val glass: Color,
     val onGlass: Color,
     val outline: Color,
-    /** The sleeve's own mid-tone, for the transport's tinted ambient shadow. */
+    /**
+     * The sleeve's mid-tone with its chroma pushed up: the transport's
+     * coloured ambient shadow, liquid wash and refraction rim.
+     */
     val accent: Color,
 ) {
     companion object {
@@ -119,7 +122,7 @@ data class PlayerTones(
             glass = Color.White.copy(alpha = 0.09f),
             onGlass = Color.White.copy(alpha = 0.82f),
             outline = Color.White.copy(alpha = 0.16f),
-            accent = Color(0xFF6E5B7C),
+            accent = Color(0xFF7C4DCC),
         )
     }
 }
@@ -420,8 +423,13 @@ private fun Seed.playerTones(): PlayerTones? {
     )
     // Vivid enough to read as a coloured shadow rather than a grey one, and
     // kept on the containers' hue so the transport still belongs to the sleeve.
+    // Nearly doubled because the pill lays it under a white veil, which would
+    // otherwise wash what chroma it had down to grey.
     val accent = source.withHsl(
-        saturation = { adaptedArtworkSaturation(it, minimum = 0.50f, maximum = 0.90f) },
+        saturation = {
+            (adaptedArtworkSaturation(it, minimum = 0.50f, maximum = 0.90f) * 1.8f)
+                .coerceAtMost(1f)
+        },
         lightness = { 0.52f },
     )
     return PlayerTones(

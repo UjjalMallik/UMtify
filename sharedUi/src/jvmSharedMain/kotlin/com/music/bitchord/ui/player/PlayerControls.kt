@@ -16,15 +16,13 @@ import com.music.bitchord.sharedui.resources.*
 
 import org.jetbrains.compose.resources.DrawableResource
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -41,7 +39,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.draw.alpha
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -78,13 +75,20 @@ import kotlinx.coroutines.flow.map
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import org.jetbrains.compose.resources.stringResource
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -448,6 +452,16 @@ internal fun NerdStatsBadge(song: Song, modifier: Modifier = Modifier) {
 }
 
 /**
+ * The release curve shared by the transport's three buttons: a small
+ * overshoot and settle, like a tapped drop of water finding its shape again.
+ */
+private val JellyEasing = CubicBezierEasing(0.34f, 1.56f, 0.64f, 1f)
+
+/** Quick squeeze in, slower elastic release back out. */
+private const val JELLY_PRESS_MS = 130
+private const val JELLY_RELEASE_MS = 420
+
+/**
  * Previous, play/pause, next, in the Material 3 shape the player rests on:
  * two tonal discs flanking a wide filled pill that names what the middle
  * button will do.
@@ -515,7 +529,12 @@ internal fun TransportRow(
     }
 }
 
-/** A tonal glass disc for one end of the transport. */
+/**
+ * A water-droplet glass marble for one end of the transport: a translucent
+ * radial body whose light gathers at the top-left, a diagonal refraction rim,
+ * and a diffused coloured glow underneath. The glyph is white and doubled — a
+ * blurred copy below it lifts it off the glass.
+ */
 @Composable
 private fun TransportDisc(
     icon: DrawableResource,
@@ -533,53 +552,89 @@ private fun TransportDisc(
     )
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
-    val pressScale by animateFloatAsState(
-        targetValue = if (pressed) 0.93f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium,
-        ),
-        label = "transportDiscPressScale",
+    val squash by animateFloatAsState(
+        targetValue = if (pressed) 1f else 0f,
+        animationSpec = if (pressed) {
+            tween(durationMillis = JELLY_PRESS_MS, easing = FastOutSlowInEasing)
+        } else {
+            tween(durationMillis = JELLY_RELEASE_MS, easing = JellyEasing)
+        },
+        label = "transportDiscJelly",
     )
-    val elevation by animateDpAsState(
-        targetValue = if (pressed) 3.dp else 8.dp,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMedium,
-        ),
-        label = "transportDiscPressElevation",
-    )
-    val base = tones.secondaryContainer
-    val fill = Brush.verticalGradient(
-        listOf(
-            lerp(base, Color.White, 0.22f),
-            base.copy(alpha = 0.55f),
-            lerp(base, Color.Black, 0.12f),
-        ),
-    )
-    val rim = Brush.verticalGradient(
-        listOf(
-            Color.White.copy(alpha = 0.45f),
-            Color.White.copy(alpha = 0.08f),
-        ),
-    )
+    val outline = tones.secondaryContainer
     Box(
         modifier = Modifier
             .size(size)
             .graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
+                scaleX = 1f - 0.06f * squash
+                scaleY = 1f - 0.12f * squash
             }
             .shadow(
-                elevation = elevation,
+                elevation = size * 0.28f,
                 shape = CircleShape,
                 clip = false,
-                ambientColor = tones.accent,
-                spotColor = tones.accent,
+                ambientColor = tones.accent.copy(alpha = 0.22f),
+                spotColor = tones.accent.copy(alpha = 0.22f),
             )
             .clip(CircleShape)
-            .background(fill)
-            .border(1.dp, rim, CircleShape)
+            .drawWithCache {
+                val w = this.size.width
+                val h = this.size.height
+                val r = this.size.minDimension / 2f
+                val stroke = 1.2.dp.toPx()
+                val glintCenter = Offset(w * 0.32f, h * 0.24f)
+                val glintRadius = w * 0.10f
+                // Light enters near the top-left and the body deepens towards
+                // the far rim, as a drop does when it sits on glass.
+                val body = Brush.radialGradient(
+                    colorStops = arrayOf(
+                        0f to lerp(
+                            outline.copy(alpha = 0.12f),
+                            Color.White.copy(alpha = 0.06f),
+                            0.55f,
+                        ),
+                        0.55f to lerp(outline, tones.accent, 0.40f).copy(alpha = 0.24f),
+                        1f to lerp(outline, Color.Black, 0.28f).copy(alpha = 0.42f),
+                    ),
+                    center = Offset(w * 0.45f, h * 0.38f),
+                    radius = w * 0.75f,
+                )
+                val rim = Brush.linearGradient(
+                    colorStops = arrayOf(
+                        0f to Color.White.copy(alpha = 0.65f),
+                        0.45f to Color.White.copy(alpha = 0.06f),
+                        1f to lerp(Color.White, tones.accent, 0.30f).copy(alpha = 0.45f),
+                    ),
+                    start = Offset.Zero,
+                    end = Offset(w, h),
+                )
+                val glint = Brush.radialGradient(
+                    colorStops = arrayOf(
+                        0f to Color.White.copy(alpha = 0.55f),
+                        1f to Color.Transparent,
+                    ),
+                    center = glintCenter,
+                    radius = glintRadius,
+                )
+                onDrawBehind {
+                    drawCircle(brush = body, radius = r)
+                    drawCircle(brush = glint, radius = glintRadius, center = glintCenter)
+                    drawArc(
+                        color = Color.White.copy(alpha = 0.40f),
+                        startAngle = 205f,
+                        sweepAngle = 55f,
+                        useCenter = false,
+                        topLeft = Offset(w * 0.20f, h * 0.12f),
+                        size = Size(w * 0.36f, h * 0.28f),
+                        style = Stroke(width = 1.2.dp.toPx(), cap = StrokeCap.Round),
+                    )
+                    drawCircle(
+                        brush = rim,
+                        radius = r - stroke / 2f,
+                        style = Stroke(width = stroke),
+                    )
+                }
+            }
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -590,12 +645,29 @@ private fun TransportDisc(
             },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            painter = painterResource(icon),
-            contentDescription = contentDescription,
-            tint = tones.onSecondaryContainer.copy(alpha = contentAlpha),
+        Box(
             modifier = Modifier.size(size * 0.42f),
-        )
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painter = painterResource(icon),
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier
+                    .matchParentSize()
+                    .graphicsLayer {
+                        translationY = 2.dp.toPx()
+                        alpha = contentAlpha * 0.35f
+                    }
+                    .blur(6.dp, BlurredEdgeTreatment.Unbounded),
+            )
+            Icon(
+                painter = painterResource(icon),
+                contentDescription = contentDescription,
+                tint = Color.White.copy(alpha = contentAlpha),
+                modifier = Modifier.matchParentSize(),
+            )
+        }
     }
 }
 
@@ -603,6 +675,10 @@ private fun TransportDisc(
  * The wide play/pause button: the one filled control on the screen, carrying
  * its own verb so the middle of the transport never has to be inferred from a
  * triangle.
+ *
+ * Filled like a drop of milk: the sleeve's saturated accent under a thin white
+ * veil, lit along the top inner curve and pooled dark at the bottom, so it
+ * reads inflated rather than painted.
  */
 @Composable
 private fun PlayPausePill(
@@ -619,55 +695,121 @@ private fun PlayPausePill(
     val shape = RoundedCornerShape(50)
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
-    val pressScale by animateFloatAsState(
-        targetValue = if (pressed) 0.93f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium,
-        ),
-        label = "playPillPressScale",
+    val squash by animateFloatAsState(
+        targetValue = if (pressed) 1f else 0f,
+        animationSpec = if (pressed) {
+            tween(durationMillis = JELLY_PRESS_MS, easing = FastOutSlowInEasing)
+        } else {
+            tween(durationMillis = JELLY_RELEASE_MS, easing = JellyEasing)
+        },
+        label = "playPillJelly",
     )
-    val elevation by animateDpAsState(
-        targetValue = if (pressed) 6.dp else 14.dp,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMedium,
-        ),
-        label = "playPillPressElevation",
-    )
-    val base = tones.primaryContainer
-    val fill = Brush.verticalGradient(
-        listOf(
-            lerp(base, Color.White, 0.38f),
-            base.copy(alpha = 0.88f),
-            lerp(base, Color.Black, 0.14f),
-        ),
-    )
-    val rim = Brush.verticalGradient(
-        listOf(
-            Color.White.copy(alpha = 0.65f),
-            tones.onPrimaryContainer.copy(alpha = 0.12f),
-            Color.Black.copy(alpha = 0.25f),
-        ),
+    // Dark, but mixed with the artwork's own on-colour so the ink belongs to
+    // the sleeve; the white drop shadow behind it does the engraving.
+    val ink = lerp(
+        Color(0xFF121316).copy(alpha = 0.78f),
+        tones.onPrimaryContainer.copy(alpha = 0.90f),
+        0.38f,
     )
     Box(
         modifier = Modifier
             .width(width)
             .height(height)
             .graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
+                scaleX = 1f - 0.06f * squash
+                scaleY = 1f - 0.12f * squash
             }
             .shadow(
-                elevation = elevation,
+                elevation = 22.dp,
                 shape = shape,
                 clip = false,
-                ambientColor = tones.accent,
-                spotColor = tones.accent,
+                ambientColor = tones.accent.copy(alpha = 0.28f),
+                spotColor = tones.accent.copy(alpha = 0.28f),
             )
             .clip(shape)
-            .background(fill)
-            .border(1.2.dp, rim, shape)
+            .drawWithCache {
+                val w = this.size.width
+                val h = this.size.height
+                val corner = CornerRadius(h / 2f, h / 2f)
+                val stroke = 1.2.dp.toPx()
+                // The accent, nearly doubled in chroma upstream, at a third
+                // opacity: present through the white veil without becoming the
+                // button's dominant colour.
+                val wash = Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0f to lerp(tones.accent, Color.White, 0.22f).copy(alpha = 0.34f),
+                        0.55f to tones.accent.copy(alpha = 0.30f),
+                        1f to lerp(tones.accent, Color.Black, 0.30f).copy(alpha = 0.38f),
+                    ),
+                    startY = 0f,
+                    endY = h,
+                )
+                val rim = Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0f to Color.White.copy(alpha = 0.60f),
+                        0.5f to Color.White.copy(alpha = 0.20f),
+                        1f to Color.White.copy(alpha = 0.08f),
+                    ),
+                    startY = 0f,
+                    endY = h,
+                )
+                onDrawBehind {
+                    drawRoundRect(brush = wash, cornerRadius = corner)
+                    drawRoundRect(
+                        color = Color.White.copy(alpha = 0.22f),
+                        cornerRadius = corner,
+                    )
+                    // Inset top light across the upper curve …
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0f to Color.White.copy(alpha = 0.65f),
+                                0.40f to Color.Transparent,
+                            ),
+                            startY = 0f,
+                            endY = h * 0.40f,
+                        ),
+                        size = Size(w, h * 0.40f),
+                    )
+                    // … and the tighter capsule catchlight that makes the
+                    // surface look blown rather than flatly washed.
+                    drawRoundRect(
+                        brush = Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0f to Color.White.copy(alpha = 0.50f),
+                                1f to Color.Transparent,
+                            ),
+                            startY = h * 0.08f,
+                            endY = h * 0.30f,
+                        ),
+                        topLeft = Offset(w * 0.14f, h * 0.08f),
+                        size = Size(w * 0.72f, h * 0.22f),
+                        cornerRadius = CornerRadius(h * 0.11f, h * 0.11f),
+                    )
+                    // The underside falls away into the sleeve's colour, which
+                    // gives the pill its inflated cross-section.
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0f to Color.Transparent,
+                                1f to lerp(tones.accent, Color.Black, 0.55f)
+                                    .copy(alpha = 0.28f),
+                            ),
+                            startY = h * 0.65f,
+                            endY = h,
+                        ),
+                        topLeft = Offset(0f, h * 0.65f),
+                        size = Size(w, h * 0.35f),
+                    )
+                    drawRoundRect(
+                        brush = rim,
+                        topLeft = Offset(stroke / 2f, stroke / 2f),
+                        size = Size(w - stroke, h - stroke),
+                        cornerRadius = CornerRadius((h - stroke) / 2f, (h - stroke) / 2f),
+                        style = Stroke(width = stroke),
+                    )
+                }
+            }
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -679,43 +821,51 @@ private fun PlayPausePill(
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
-        // Convex-glass sheen: catches the light along the top curve, then
-        // dissolves before it reaches the middle. Behind the glyph and label,
-        // so the specular never softens what the button says.
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.45f)
-                .align(Alignment.TopCenter)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.White.copy(alpha = 0.45f), Color.Transparent),
-                    ),
-                ),
-        )
         if (isLoading) {
             CircularProgressIndicator(
-                color = tones.onPrimaryContainer,
+                color = ink,
                 strokeWidth = 2.5.dp,
                 modifier = Modifier.size(if (compact) 22.dp else 26.dp),
             )
         } else {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    painter = painterResource(
-                        if (isPlaying) Res.drawable.ic_player_pause else Res.drawable.ic_player_play,
-                    ),
-                    contentDescription = null,
-                    tint = tones.onPrimaryContainer,
+                Box(
                     modifier = Modifier.size(if (compact) 22.dp else 26.dp),
-                )
+                    contentAlignment = Alignment.Center,
+                ) {
+                    // A white copy one dp below the glyph catches the light in
+                    // the groove the dark shape leaves behind.
+                    Icon(
+                        painter = painterResource(
+                            if (isPlaying) Res.drawable.ic_player_pause else Res.drawable.ic_player_play,
+                        ),
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.50f),
+                        modifier = Modifier
+                            .matchParentSize()
+                            .graphicsLayer { translationY = 1.dp.toPx() },
+                    )
+                    Icon(
+                        painter = painterResource(
+                            if (isPlaying) Res.drawable.ic_player_pause else Res.drawable.ic_player_play,
+                        ),
+                        contentDescription = null,
+                        tint = ink,
+                        modifier = Modifier.matchParentSize(),
+                    )
+                }
                 Spacer(Modifier.width(if (compact) 7.dp else 9.dp))
                 Text(
                     text = label,
-                    color = tones.onPrimaryContainer,
+                    color = ink,
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold,
                         fontSize = if (compact) 15.sp else 17.sp,
+                        shadow = Shadow(
+                            color = Color.White.copy(alpha = 0.50f),
+                            offset = Offset(0f, 2f),
+                            blurRadius = 2f,
+                        ),
                     ),
                     maxLines = 1,
                 )
