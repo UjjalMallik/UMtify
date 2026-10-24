@@ -1,5 +1,6 @@
 package com.music.bitchord.ui.player
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.runtime.compositionLocalOf
@@ -16,13 +17,14 @@ import com.music.bitchord.sharedui.resources.*
 
 import org.jetbrains.compose.resources.DrawableResource
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -62,12 +64,14 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -75,8 +79,6 @@ import kotlinx.coroutines.flow.map
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import org.jetbrains.compose.resources.stringResource
-import androidx.compose.ui.draw.BlurredEdgeTreatment
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithCache
@@ -87,7 +89,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.painter.Painter
@@ -451,15 +452,77 @@ internal fun NerdStatsBadge(song: Song, modifier: Modifier = Modifier) {
     }
 }
 
-/**
- * The release curve shared by the transport's three buttons: a small
- * overshoot and settle, like a tapped drop of water finding its shape again.
- */
-private val JellyEasing = CubicBezierEasing(0.34f, 1.56f, 0.64f, 1f)
+/** How long the glass takes to light up under a finger. */
+private const val PRESS_FLASH_MS = 120
 
-/** Quick squeeze in, slower elastic release back out. */
-private const val JELLY_PRESS_MS = 130
-private const val JELLY_RELEASE_MS = 420
+/** How far a skip glyph slides on tap, and how long the slide takes. */
+private const val SKIP_NUDGE_DP = 4f
+private const val SKIP_NUDGE_MS = 120
+
+/** The crossfade between the play and pause contents. */
+private const val PLAY_STATE_FADE_MS = 220
+
+/**
+ * The body of all three transport buttons: a diagonal glass wash that is
+ * almost clear through the middle and carries a faint tint of the sleeve at
+ * both ends. [flash] lifts every layer together under a press.
+ */
+private fun liquidGlassFill(tones: PlayerTones, w: Float, h: Float, flash: Float): Brush {
+    val lift = 0.14f * flash
+    return Brush.linearGradient(
+        colorStops = arrayOf(
+            0f to lerp(
+                Color.White.copy(alpha = 0.18f + lift),
+                tones.accent.copy(alpha = 0.12f + lift),
+                0.40f,
+            ),
+            0.5f to Color.White.copy(alpha = 0.06f + lift),
+            1f to lerp(
+                Color.White.copy(alpha = 0.14f + lift),
+                tones.accent.copy(alpha = 0.15f + lift),
+                0.40f,
+            ),
+        ),
+        start = Offset.Zero,
+        end = Offset(w, h),
+    )
+}
+
+/**
+ * The one hard edge in the glass: a diagonal specular line that catches
+ * bright at the top-left and bottom-right curves and nearly vanishes across
+ * the middle. [flash] drives the whole rim towards white under a press.
+ */
+private fun specularRim(w: Float, h: Float, flash: Float): Brush {
+    fun lit(alpha: Float) = alpha + (1f - alpha) * flash
+    return Brush.linearGradient(
+        colorStops = arrayOf(
+            0f to Color.White.copy(alpha = lit(0.85f)),
+            0.30f to Color.White.copy(alpha = lit(0.18f)),
+            0.55f to Color.White.copy(alpha = lit(0.05f)),
+            0.80f to Color.White.copy(alpha = lit(0.22f)),
+            1f to Color.White.copy(alpha = lit(0.75f)),
+        ),
+        start = Offset.Zero,
+        end = Offset(w, h),
+    )
+}
+
+/**
+ * The diffused inner refraction: brighter where the glass curves away at the
+ * left and right ends, all but gone along the flat middle.
+ */
+private fun innerRefraction(w: Float): Brush =
+    Brush.horizontalGradient(
+        colorStops = arrayOf(
+            0f to Color.White.copy(alpha = 0.12f),
+            0.35f to Color.White.copy(alpha = 0.03f),
+            0.65f to Color.White.copy(alpha = 0.03f),
+            1f to Color.White.copy(alpha = 0.12f),
+        ),
+        startX = 0f,
+        endX = w,
+    )
 
 /**
  * Previous, play/pause, next, in the Material 3 shape the player rests on:
@@ -508,6 +571,7 @@ internal fun TransportRow(
                 enabled = previousEnabled,
                 onClick = onPrevious,
                 haptic = Haptic.SkipPrevious,
+                nudgeDirection = -1f,
             )
             PlayPausePill(
                 isPlaying = isPlaying,
@@ -524,16 +588,17 @@ internal fun TransportRow(
                 enabled = nextEnabled,
                 onClick = onNext,
                 haptic = Haptic.SkipNext,
+                nudgeDirection = 1f,
             )
         }
     }
 }
 
 /**
- * A water-droplet glass marble for one end of the transport: a translucent
- * radial body whose light gathers at the top-left, a diagonal refraction rim,
- * and a diffused coloured glow underneath. The glyph is white and doubled — a
- * blurred copy below it lifts it off the glass.
+ * A disc of optical glass for one end of the transport: an almost clear
+ * diagonal wash, a diffused inner refraction and one sharp specular rim. The
+ * glyph stays crisp white, and a tap slides it a few dps in the skip
+ * direction before it settles back.
  */
 @Composable
 private fun TransportDisc(
@@ -543,6 +608,8 @@ private fun TransportDisc(
     enabled: Boolean,
     onClick: () -> Unit,
     haptic: Haptic,
+    /** -1 for a back slide, +1 for a forward one. */
+    nudgeDirection: Float,
 ) {
     val haptics = rememberHaptics()
     val tones = LocalPlayerTones.current
@@ -552,29 +619,44 @@ private fun TransportDisc(
     )
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
-    val squash by animateFloatAsState(
-        targetValue = if (pressed) 1f else 0f,
-        animationSpec = if (pressed) {
-            tween(durationMillis = JELLY_PRESS_MS, easing = FastOutSlowInEasing)
-        } else {
-            tween(durationMillis = JELLY_RELEASE_MS, easing = JellyEasing)
-        },
-        label = "transportDiscJelly",
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.91f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium,
+        ),
+        label = "transportDiscPressScale",
     )
-    val outline = tones.secondaryContainer
+    val flash by animateFloatAsState(
+        targetValue = if (pressed) 1f else 0f,
+        animationSpec = tween(durationMillis = PRESS_FLASH_MS),
+        label = "transportDiscFlash",
+    )
+    var nudging by remember { mutableStateOf(false) }
+    val nudge by animateFloatAsState(
+        targetValue = if (nudging) 1f else 0f,
+        animationSpec = tween(durationMillis = SKIP_NUDGE_MS),
+        label = "transportDiscNudge",
+    )
+    LaunchedEffect(nudging) {
+        if (nudging) {
+            delay(SKIP_NUDGE_MS.toLong())
+            nudging = false
+        }
+    }
     Box(
         modifier = Modifier
             .size(size)
             .graphicsLayer {
-                scaleX = 1f - 0.06f * squash
-                scaleY = 1f - 0.12f * squash
+                scaleX = pressScale
+                scaleY = pressScale
             }
             .shadow(
-                elevation = size * 0.28f,
+                elevation = 6.dp,
                 shape = CircleShape,
                 clip = false,
-                ambientColor = tones.accent.copy(alpha = 0.22f),
-                spotColor = tones.accent.copy(alpha = 0.22f),
+                ambientColor = Color.Black.copy(alpha = 0.35f),
+                spotColor = Color.Black.copy(alpha = 0.35f),
             )
             .clip(CircleShape)
             .drawWithCache {
@@ -582,51 +664,25 @@ private fun TransportDisc(
                 val h = this.size.height
                 val r = this.size.minDimension / 2f
                 val stroke = 1.2.dp.toPx()
-                val glintCenter = Offset(w * 0.32f, h * 0.24f)
-                val glintRadius = w * 0.10f
-                // Light enters near the top-left and the body deepens towards
-                // the far rim, as a drop does when it sits on glass.
-                val body = Brush.radialGradient(
-                    colorStops = arrayOf(
-                        0f to lerp(
-                            outline.copy(alpha = 0.12f),
-                            Color.White.copy(alpha = 0.06f),
-                            0.55f,
-                        ),
-                        0.55f to lerp(outline, tones.accent, 0.40f).copy(alpha = 0.24f),
-                        1f to lerp(outline, Color.Black, 0.28f).copy(alpha = 0.42f),
-                    ),
-                    center = Offset(w * 0.45f, h * 0.38f),
-                    radius = w * 0.75f,
-                )
-                val rim = Brush.linearGradient(
-                    colorStops = arrayOf(
-                        0f to Color.White.copy(alpha = 0.65f),
-                        0.45f to Color.White.copy(alpha = 0.06f),
-                        1f to lerp(Color.White, tones.accent, 0.30f).copy(alpha = 0.45f),
-                    ),
-                    start = Offset.Zero,
-                    end = Offset(w, h),
-                )
-                val glint = Brush.radialGradient(
-                    colorStops = arrayOf(
-                        0f to Color.White.copy(alpha = 0.55f),
-                        1f to Color.Transparent,
-                    ),
-                    center = glintCenter,
-                    radius = glintRadius,
-                )
+                val fill = liquidGlassFill(tones, w, h, flash)
+                val rim = specularRim(w, h, flash)
+                val inner = innerRefraction(w)
                 onDrawBehind {
-                    drawCircle(brush = body, radius = r)
-                    drawCircle(brush = glint, radius = glintRadius, center = glintCenter)
-                    drawArc(
-                        color = Color.White.copy(alpha = 0.40f),
-                        startAngle = 205f,
-                        sweepAngle = 55f,
-                        useCenter = false,
-                        topLeft = Offset(w * 0.20f, h * 0.12f),
-                        size = Size(w * 0.36f, h * 0.28f),
-                        style = Stroke(width = 1.2.dp.toPx(), cap = StrokeCap.Round),
+                    drawCircle(brush = fill, radius = r)
+                    // Two soft passes inside the perimeter: a wider, fainter
+                    // one for the falloff inward and a tighter one for the
+                    // edge itself. The centre stays untouched.
+                    drawCircle(
+                        brush = inner,
+                        radius = r - 3.6.dp.toPx(),
+                        alpha = 0.35f,
+                        style = Stroke(width = 3.dp.toPx()),
+                    )
+                    drawCircle(
+                        brush = inner,
+                        radius = r - 2.dp.toPx(),
+                        alpha = 0.60f,
+                        style = Stroke(width = 1.6.dp.toPx()),
                     )
                     drawCircle(
                         brush = rim,
@@ -637,37 +693,25 @@ private fun TransportDisc(
             }
             .clickable(
                 interactionSource = interactionSource,
-                indication = null,
+                indication = ripple(color = Color.White.copy(alpha = 0.25f)),
                 enabled = enabled,
             ) {
                 haptics.play(haptic)
+                nudging = true
                 onClick()
             },
         contentAlignment = Alignment.Center,
     ) {
-        Box(
-            modifier = Modifier.size(size * 0.42f),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                painter = painterResource(icon),
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier
-                    .matchParentSize()
-                    .graphicsLayer {
-                        translationY = 2.dp.toPx()
-                        alpha = contentAlpha * 0.35f
-                    }
-                    .blur(6.dp, BlurredEdgeTreatment.Unbounded),
-            )
-            Icon(
-                painter = painterResource(icon),
-                contentDescription = contentDescription,
-                tint = Color.White.copy(alpha = contentAlpha),
-                modifier = Modifier.matchParentSize(),
-            )
-        }
+        Icon(
+            painter = painterResource(icon),
+            contentDescription = contentDescription,
+            tint = Color.White.copy(alpha = contentAlpha),
+            modifier = Modifier
+                .size(size * 0.42f)
+                .graphicsLayer {
+                    translationX = nudge * nudgeDirection * SKIP_NUDGE_DP.dp.toPx()
+                },
+        )
     }
 }
 
@@ -676,9 +720,9 @@ private fun TransportDisc(
  * its own verb so the middle of the transport never has to be inferred from a
  * triangle.
  *
- * Filled like a drop of milk: the sleeve's saturated accent under a thin white
- * veil, lit along the top inner curve and pooled dark at the bottom, so it
- * reads inflated rather than painted.
+ * The same optical glass as the skip discs, stretched into a capsule: almost
+ * clear through the middle, bright at the diagonal corners, with crisp white
+ * content that crossfades between the two states.
  */
 @Composable
 private fun PlayPausePill(
@@ -695,111 +739,69 @@ private fun PlayPausePill(
     val shape = RoundedCornerShape(50)
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
-    val squash by animateFloatAsState(
-        targetValue = if (pressed) 1f else 0f,
-        animationSpec = if (pressed) {
-            tween(durationMillis = JELLY_PRESS_MS, easing = FastOutSlowInEasing)
-        } else {
-            tween(durationMillis = JELLY_RELEASE_MS, easing = JellyEasing)
-        },
-        label = "playPillJelly",
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.91f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium,
+        ),
+        label = "playPillPressScale",
     )
-    // Dark, but mixed with the artwork's own on-colour so the ink belongs to
-    // the sleeve; the white drop shadow behind it does the engraving.
-    val ink = lerp(
-        Color(0xFF121316).copy(alpha = 0.78f),
-        tones.onPrimaryContainer.copy(alpha = 0.90f),
-        0.38f,
+    val flash by animateFloatAsState(
+        targetValue = if (pressed) 1f else 0f,
+        animationSpec = tween(durationMillis = PRESS_FLASH_MS),
+        label = "playPillFlash",
     )
     Box(
         modifier = Modifier
             .width(width)
             .height(height)
             .graphicsLayer {
-                scaleX = 1f - 0.06f * squash
-                scaleY = 1f - 0.12f * squash
+                scaleX = pressScale
+                scaleY = pressScale
             }
             .shadow(
-                elevation = 22.dp,
+                elevation = 6.dp,
                 shape = shape,
                 clip = false,
-                ambientColor = tones.accent.copy(alpha = 0.28f),
-                spotColor = tones.accent.copy(alpha = 0.28f),
+                ambientColor = Color.Black.copy(alpha = 0.35f),
+                spotColor = Color.Black.copy(alpha = 0.35f),
             )
             .clip(shape)
             .drawWithCache {
                 val w = this.size.width
                 val h = this.size.height
-                val corner = CornerRadius(h / 2f, h / 2f)
                 val stroke = 1.2.dp.toPx()
-                // The accent, nearly doubled in chroma upstream, at a third
-                // opacity: present through the white veil without becoming the
-                // button's dominant colour.
-                val wash = Brush.verticalGradient(
-                    colorStops = arrayOf(
-                        0f to lerp(tones.accent, Color.White, 0.22f).copy(alpha = 0.34f),
-                        0.55f to tones.accent.copy(alpha = 0.30f),
-                        1f to lerp(tones.accent, Color.Black, 0.30f).copy(alpha = 0.38f),
-                    ),
-                    startY = 0f,
-                    endY = h,
-                )
-                val rim = Brush.verticalGradient(
-                    colorStops = arrayOf(
-                        0f to Color.White.copy(alpha = 0.60f),
-                        0.5f to Color.White.copy(alpha = 0.20f),
-                        1f to Color.White.copy(alpha = 0.08f),
-                    ),
-                    startY = 0f,
-                    endY = h,
-                )
+                val radius = h / 2f
+                val fill = liquidGlassFill(tones, w, h, flash)
+                val rim = specularRim(w, h, flash)
+                val inner = innerRefraction(w)
                 onDrawBehind {
-                    drawRoundRect(brush = wash, cornerRadius = corner)
                     drawRoundRect(
-                        color = Color.White.copy(alpha = 0.22f),
-                        cornerRadius = corner,
+                        brush = fill,
+                        cornerRadius = CornerRadius(radius, radius),
                     )
-                    // Inset top light across the upper curve …
-                    drawRect(
-                        brush = Brush.verticalGradient(
-                            colorStops = arrayOf(
-                                0f to Color.White.copy(alpha = 0.65f),
-                                0.40f to Color.Transparent,
-                            ),
-                            startY = 0f,
-                            endY = h * 0.40f,
-                        ),
-                        size = Size(w, h * 0.40f),
-                    )
-                    // … and the tighter capsule catchlight that makes the
-                    // surface look blown rather than flatly washed.
+                    // The same two-pass inner refraction as the discs, with
+                    // concentric capsule corners so it follows the shape.
+                    val softInset = 3.6.dp.toPx()
+                    val softRadius = (h - softInset * 2f) / 2f
                     drawRoundRect(
-                        brush = Brush.verticalGradient(
-                            colorStops = arrayOf(
-                                0f to Color.White.copy(alpha = 0.50f),
-                                1f to Color.Transparent,
-                            ),
-                            startY = h * 0.08f,
-                            endY = h * 0.30f,
-                        ),
-                        topLeft = Offset(w * 0.14f, h * 0.08f),
-                        size = Size(w * 0.72f, h * 0.22f),
-                        cornerRadius = CornerRadius(h * 0.11f, h * 0.11f),
+                        brush = inner,
+                        topLeft = Offset(softInset, softInset),
+                        size = Size(w - softInset * 2f, h - softInset * 2f),
+                        cornerRadius = CornerRadius(softRadius, softRadius),
+                        alpha = 0.35f,
+                        style = Stroke(width = 3.dp.toPx()),
                     )
-                    // The underside falls away into the sleeve's colour, which
-                    // gives the pill its inflated cross-section.
-                    drawRect(
-                        brush = Brush.verticalGradient(
-                            colorStops = arrayOf(
-                                0f to Color.Transparent,
-                                1f to lerp(tones.accent, Color.Black, 0.55f)
-                                    .copy(alpha = 0.28f),
-                            ),
-                            startY = h * 0.65f,
-                            endY = h,
-                        ),
-                        topLeft = Offset(0f, h * 0.65f),
-                        size = Size(w, h * 0.35f),
+                    val innerInset = 2.dp.toPx()
+                    val innerRadius = (h - innerInset * 2f) / 2f
+                    drawRoundRect(
+                        brush = inner,
+                        topLeft = Offset(innerInset, innerInset),
+                        size = Size(w - innerInset * 2f, h - innerInset * 2f),
+                        cornerRadius = CornerRadius(innerRadius, innerRadius),
+                        alpha = 0.60f,
+                        style = Stroke(width = 1.6.dp.toPx()),
                     )
                     drawRoundRect(
                         brush = rim,
@@ -812,7 +814,7 @@ private fun PlayPausePill(
             }
             .clickable(
                 interactionSource = interactionSource,
-                indication = null,
+                indication = ripple(color = Color.White.copy(alpha = 0.25f)),
                 enabled = !isLoading,
             ) {
                 haptics.play(if (isPlaying) Haptic.Pause else Haptic.Resume)
@@ -823,52 +825,36 @@ private fun PlayPausePill(
     ) {
         if (isLoading) {
             CircularProgressIndicator(
-                color = ink,
+                color = Color.White,
                 strokeWidth = 2.5.dp,
                 modifier = Modifier.size(if (compact) 22.dp else 26.dp),
             )
         } else {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier.size(if (compact) 22.dp else 26.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    // A white copy one dp below the glyph catches the light in
-                    // the groove the dark shape leaves behind.
+            Crossfade(
+                targetState = isPlaying,
+                animationSpec = tween(durationMillis = PLAY_STATE_FADE_MS),
+                label = "playPauseContent",
+            ) { playing ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         painter = painterResource(
-                            if (isPlaying) Res.drawable.ic_player_pause else Res.drawable.ic_player_play,
+                            if (playing) Res.drawable.ic_player_pause else Res.drawable.ic_player_play,
                         ),
                         contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.50f),
-                        modifier = Modifier
-                            .matchParentSize()
-                            .graphicsLayer { translationY = 1.dp.toPx() },
+                        tint = Color.White,
+                        modifier = Modifier.size(if (compact) 22.dp else 26.dp),
                     )
-                    Icon(
-                        painter = painterResource(
-                            if (isPlaying) Res.drawable.ic_player_pause else Res.drawable.ic_player_play,
+                    Spacer(Modifier.width(if (compact) 7.dp else 9.dp))
+                    Text(
+                        text = stringResource(if (playing) Res.string.pause else Res.string.play),
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 16.sp,
                         ),
-                        contentDescription = null,
-                        tint = ink,
-                        modifier = Modifier.matchParentSize(),
+                        maxLines = 1,
                     )
                 }
-                Spacer(Modifier.width(if (compact) 7.dp else 9.dp))
-                Text(
-                    text = label,
-                    color = ink,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = if (compact) 15.sp else 17.sp,
-                        shadow = Shadow(
-                            color = Color.White.copy(alpha = 0.50f),
-                            offset = Offset(0f, 2f),
-                            blurRadius = 2f,
-                        ),
-                    ),
-                    maxLines = 1,
-                )
             }
         }
     }
