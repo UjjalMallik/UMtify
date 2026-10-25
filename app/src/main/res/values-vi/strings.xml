@@ -155,8 +155,7 @@
     <string name="animated_cover_cellular">Phát ảnh bìa động qua dữ liệu di động</string>
     <string name="replay">Replay</string>
     <string name="replay_subtitle">Bài hát, nghệ sĩ, album và thể loại hàng đầu của bạn</string>
-    <string name="work_out_genres">Phân tích thể loại</string>
-    <string name="export_data">Xuất dữ liệu</string>
+<string name="export_data">Xuất dữ liệu</string>
     <string name="export_data_subtitle">Cài đặt và lịch sử nghe, dưới dạng một tệp JSON</string>
     <string name="import_data">Nhập dữ liệu</string>
     <string name="import_data_subtitle">Thay thế cài đặt và lịch sử trên thiết bị này</string>
@@ -403,10 +402,7 @@
         <item quantity="other">Đã sao chép nhật ký · %1$d dòng</item>
     </plurals>
     <string name="integrate_spotify_canvas">Thiết lập Spotify Canvas</string>
-    <string name="lastfm_login">Đăng nhập Last.fm</string>
-    <string name="lastfm_login_description">Đăng nhập bằng tài khoản Last.fm của bạn để bật tính năng scrobbling.</string>
-    <string name="lastfm_now_playing_subtitle">Cập nhật lên Last.fm nội dung bạn đang nghe</string>
-    <string name="scrobble_primary_artist_only">Chỉ scrobble nghệ sĩ chính</string>
+<string name="scrobble_primary_artist_only">Chỉ scrobble nghệ sĩ chính</string>
     <string name="scrobble_primary_artist_only_subtitle">Chỉ dùng nghệ sĩ đầu tiên khi bản nhạc ghi nhận nhiều nghệ sĩ</string>
     <string name="lead_with_song">Ưu tiên hiển thị bài hát</string>
     <string name="lead_with_song_subtitle">Đặt tên bài hát ở dòng in đậm thay vì tên nghệ sĩ</string>
@@ -415,11 +411,7 @@
     <string name="listenbrainz_token_description">Dán token người dùng ListenBrainz của bạn để bật tính năng scrobbling.</string>
     <string name="listening_history">Lịch sử nghe</string>
     <string name="lyrics_sources_order">Các nguồn được thử theo thứ tự này. Kéo để sắp xếp lại. Nguồn đầu tiên có lời sẽ được sử dụng, trừ khi ưu tiên lời đồng bộ từng từ.</string>
-    <string name="max_delay">Độ trễ tối đa</string>
-    <string name="max_delay_subtitle">Độ trễ scrobble tối đa tính bằng giây</string>
-    <string name="min_song_duration">Thời lượng bài hát tối thiểu</string>
-    <string name="min_song_duration_subtitle">Các bài hát ngắn hơn sẽ không được scrobble</string>
-    <string name="addon_url_description">Dán URL của tiện ích mở rộng — đường dẫn gốc hoặc manifest.json. UMtify sẽ đọc các mục có thể tìm kiếm và phát, sau đó yêu cầu bản nhạc qua giao thức HTTP tiêu chuẩn.</string>
+<string name="addon_url_description">Dán URL của tiện ích mở rộng — đường dẫn gốc hoặc manifest.json. UMtify sẽ đọc các mục có thể tìm kiếm và phát, sau đó yêu cầu bản nhạc qua giao thức HTTP tiêu chuẩn.</string>
     <string name="monthly_listeners">%1$s người nghe hàng tháng</string>
     <string name="name">Tên</string>
     <string name="no_playlists_yet">Chưa có danh sách phát nào. Dùng hàng bên trên để tạo danh sách phát.</string>
@@ -453,22 +445,15 @@
     <string name="save_name">Lưu tên</string>
     <string name="saved_to_downloads">Đã lưu vào mục Tải xuống</string>
     <string name="saved_to_youtube_music_account">Đã lưu vào tài khoản YouTube Music của bạn</string>
-    <string name="scrobble_delay">Độ trễ scrobble</string>
-    <string name="scrobble_delay_subtitle">Thời gian bài hát phát được bao lâu thì scrobble</string>
-    <string name="scrobble_timing">Thời điểm scrobble</string>
-    <string name="scrobble_tracks">Scrobble các bản nhạc</string>
-    <string name="scrobble_tracks_subtitle">Ghi lại lượt phát vào dòng thời gian Last.fm của bạn</string>
-    <string name="scrobbling_footer">Scrobble các lượt nghe của bạn lên Last.fm và ListenBrainz.</string>
-    <string name="scrobbling_paused_footer">Last.fm và ListenBrainz tạm dừng trong bản phát hành này và sẽ trở lại sau. Các kết nối hiện tại vẫn được lưu.</string>
-    <string name="search_this_folder">Tìm kiếm thư mục này</string>
+<string name="scrobbling_footer">Scrobble các lượt nghe của bạn lên ListenBrainz.</string>
+<string name="search_this_folder">Tìm kiếm thư mục này</string>
     <string name="search_this_list">Tìm kiếm danh sách này</string>
     <string name="second_button">Nút thứ hai</string>
     <string name="share">Chia sẻ</string>
     <string name="sharing_as">Đang chia sẻ dưới tên @%1$s</string>
     <string name="sharing_listens">Đang chia sẻ lượt nghe của bạn</string>
     <string name="show_what_playing">Hiển thị nội dung tôi đang phát</string>
-    <string name="signed_in_as">Đã đăng nhập dưới tên %1$s</string>
-    <string name="signing_in">Đang đăng nhập…</string>
+<string name="signing_in">Đang đăng nhập…</string>
     <string name="sleep_timer">Hẹn giờ tắt</string>
     <string name="sources_no_lossless">Không có nguồn nào được bật có thể cung cấp âm thanh Lossless. Hãy thêm tiện ích mở rộng để phát các tệp Lossless mà không cần chuyển mã.</string>
     <string name="sources_order_footer">Nếu một nguồn không có bản nhạc hoặc không thể kết nối, UMtify sẽ thử nguồn tiếp theo. Các nguồn nằm trên YouTube có thể thay thế bản ghi âm của YouTube khi tìm được phiên bản tốt hơn.</string>
@@ -494,8 +479,7 @@
     <string name="status_online_detail">Chấm xanh lục</string>
     <string name="subscribers">%1$s người đăng ký</string>
     <string name="tap_to_connect">Nhấn để kết nối</string>
-    <string name="tap_to_sign_in">Nhấn để đăng nhập</string>
-    <string name="tap_to_sign_in_discord">Nhấn để đăng nhập với Discord</string>
+<string name="tap_to_sign_in_discord">Nhấn để đăng nhập với Discord</string>
     <string name="token">Token</string>
     <string name="turn_off_timer">Tắt hẹn giờ</string>
     <string name="undo_dislike">Bỏ không thích</string>
@@ -653,9 +637,7 @@
     <string name="no_lyrics_sources_enabled">Không có. Sẽ không tải lời bài hát.</string>
     <string name="song_cache_large_subtitle">Lưu tối đa %1$s âm thanh đã tải trên ổ đĩa. Tùy chọn này có thể chiếm dung lượng đáng kể trong bộ nhớ trống của bạn.</string>
     <string name="song_cache_limit_subtitle">Lưu trữ âm thanh đã tải trên đĩa để tua nhanh và phát lại tức thì</string>
-    <string name="replay_genres_enabled_subtitle">Hỏi Last.fm về thể loại của nghệ sĩ. Chỉ tên nghệ sĩ được gửi đi.</string>
-    <string name="replay_genres_disabled_subtitle">Biểu đồ thể loại Replay sẽ ẩn khi tắt tùy chọn này</string>
-    <string name="swipe_plays_next">Vuốt bài hát để phát tiếp theo</string>
+<string name="swipe_plays_next">Vuốt bài hát để phát tiếp theo</string>
     <string name="swipe_adds_to_queue">Khi tắt, vuốt sẽ thêm bài hát vào cuối hàng đợi</string>
     <string name="import_backup_warning">Thao tác này sẽ thay thế cài đặt và lịch sử nghe trên thiết bị bằng nội dung của tệp sao lưu. Hãy xuất dữ liệu hiện tại trước nếu bạn muốn giữ lại.</string>
     <string name="youtube_music_account">Tài khoản YouTube Music</string>
@@ -752,10 +734,6 @@
     <string name="card_songs_format">%1$s bài hát</string>
 
     <string name="lyrics_offset">Lyrics offset</string>
-
-
-
-
 
     <string name="auto_quick_picks">Quick picks</string>
 
@@ -884,17 +862,6 @@
 
     <string name="eq_preset_custom">Custom</string>
 
-
-
-
-
-
-
-
-
-
-
-
     <string name="translation_language">Translation language</string>
 
     <string name="translation_language_description">The language the translate button turns lyrics into.</string>
@@ -910,8 +877,6 @@
     <string name="search_languages">Search languages</string>
 
     <string name="no_languages_match">No languages match</string>
-
-
 
     <string name="audio_pipeline">Audio Pipeline</string>
 
@@ -967,8 +932,6 @@
 
     <string name="pipeline_device_name">Device Name</string>
 
-
-
     <string name="shared_link">Shared link</string>
 
     <string name="song_will_play_next">Song will play next</string>
@@ -980,16 +943,6 @@
     <string name="paxsenix_api_key_configured">PaxSenix API key — configured</string>
 
     <string name="paxsenix_api_key_missing">PaxSenix API key — optional, not configured</string>
-
-
-
-
-
-
-
-
-
-
 
     <string name="listen_together">Listen together</string>
 
@@ -1082,9 +1035,6 @@
     <string name="listen_together_syncing_clock">Measuring the clock…</string>
 
     <string name="listen_together_in_sync">In sync · %1$d ms round trip</string>
-
-
-
 
     <string name="party_queue_full">Queue is full (maximum %d songs in party)</string>
     <string name="listen_together_profile">Your party profile</string>

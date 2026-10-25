@@ -141,7 +141,6 @@ import com.music.bitchord.data.model.SearchHistoryEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.music.bitchord.data.model.durationMillis
-import com.music.bitchord.data.scrobbling.LastFM
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.LibrarySort
 import com.music.bitchord.data.settings.ThemeMode
@@ -228,7 +227,6 @@ import com.music.bitchord.ui.components.FloatingBottomBar
 import com.music.bitchord.ui.components.GlassNavBar
 import com.music.bitchord.ui.components.floatingtabbar.rememberFloatingTabBarScrollConnection
 import com.music.bitchord.ui.components.FrostedTopBar
-import com.music.bitchord.ui.components.LastfmLoginAlert
 import com.music.bitchord.ui.components.LocalAppBackdrop
 import com.music.bitchord.ui.components.LocalLiquidGlassEnabled
 import com.music.bitchord.ui.components.backdrop.backdrops.LayerBackdrop
@@ -602,7 +600,6 @@ private fun BitChordApp(
     var showTranslationLanguage by remember { mutableStateOf(false) }
     var showAccountSelector by remember { mutableStateOf(false) }
     var showListenBrainzLogin by remember { mutableStateOf(false) }
-    var showLastfmLogin by remember { mutableStateOf(false) }
     var showWebDavEditor by remember { mutableStateOf(false) }
     var showSmbEditor by remember { mutableStateOf(false) }
     /**
@@ -2601,7 +2598,6 @@ private fun BitChordApp(
             selectedTab = TAB_HOME
         }
         BackHandler(enabled = showListenBrainzLogin) { showListenBrainzLogin = false }
-        BackHandler(enabled = showLastfmLogin) { showLastfmLogin = false }
         BackHandler(enabled = discordDialog != null) { discordDialog = null }
         BackHandler(enabled = editingSource != null) { editingSource = null }
         BackHandler(enabled = editingPartyServer) { editingPartyServer = false }
@@ -2831,7 +2827,6 @@ private fun BitChordApp(
                             },
                             onSignOut = { viewModel.signOut() },
                             onOpenListenBrainzLogin = { showListenBrainzLogin = true },
-                            onOpenLastfmLogin = { showLastfmLogin = true },
                             onOpenDiscord = { showDiscord = true },
                             onOpenSpotify = { showSpotify = true },
                             contentPadding = listPadding,
@@ -3416,7 +3411,6 @@ private fun BitChordApp(
                                 },
                                 onSignOut = { viewModel.signOut() },
                                 onOpenListenBrainzLogin = { showListenBrainzLogin = true },
-                                onOpenLastfmLogin = { showLastfmLogin = true },
                                 onOpenDiscord = { showDiscord = true },
                                 onOpenSpotify = { showSpotify = true },
                                 contentPadding = listPadding,
@@ -5103,67 +5097,6 @@ private fun BitChordApp(
                     showListenBrainzLogin = false
                 },
                 onDismiss = { showListenBrainzLogin = false },
-            )
-        }
-
-        if (showLastfmLogin) {
-            var usernameInput by remember { mutableStateOf("") }
-            var passwordInput by remember { mutableStateOf("") }
-            var apiKeyInput by remember { mutableStateOf("") }
-            var secretInput by remember { mutableStateOf("") }
-            var lastfmError by remember { mutableStateOf<String?>(null) }
-            var lastfmLoading by remember { mutableStateOf(false) }
-            LastfmLoginAlert(
-                hazeState = hazeState,
-                usernameInput = usernameInput,
-                onUsernameInputChange = { usernameInput = it },
-                passwordInput = passwordInput,
-                onPasswordInputChange = { passwordInput = it },
-                apiKeyInput = apiKeyInput,
-                onApiKeyInputChange = { apiKeyInput = it },
-                secretInput = secretInput,
-                onSecretInputChange = { secretInput = it },
-                error = lastfmError,
-                loading = lastfmLoading,
-                onSignIn = {
-                    // The key and secret are a pair: either both come from the
-                    // dialog or both come from the build/saved configuration.
-                    val customApiKey = apiKeyInput.trim()
-                    val customSecret = secretInput.trim()
-                    val apiKey = customApiKey.ifBlank { AppSettings.lastfmApiKey.value }
-                    val secret = customSecret.ifBlank { AppSettings.lastfmSecret.value }
-                    if (customApiKey.isBlank() != customSecret.isBlank() || apiKey.isBlank() || secret.isBlank()) {
-                        lastfmError = context.getString(R.string.lastfm_credentials_missing)
-                    } else {
-                        lastfmLoading = true
-                        lastfmError = null
-                        scope.launch {
-                            try {
-                                LastFM.initialize(apiKey = apiKey, secret = secret)
-                                LastFM.getMobileSession(usernameInput.trim(), passwordInput)
-                                    .onSuccess { auth ->
-                                        AppSettings.setLastfmSessionKey(auth.session.key)
-                                        AppSettings.setLastfmUsername(auth.session.name)
-                                        AppSettings.setLastfmEnabled(true)
-                                        // Persist a custom pair only once it has
-                                        // actually been accepted, so a typo cannot
-                                        // replace a working configuration.
-                                        if (customApiKey.isNotBlank()) AppSettings.setLastfmApiKey(customApiKey)
-                                        if (customSecret.isNotBlank()) AppSettings.setLastfmSecret(customSecret)
-                                        showLastfmLogin = false
-                                    }
-                                    .onFailure { e ->
-                                        lastfmError = e.message ?: context.getString(R.string.login_failed)
-                                    }
-                            } catch (e: Exception) {
-                                lastfmError = e.message ?: context.getString(R.string.login_failed)
-                            } finally {
-                                lastfmLoading = false
-                            }
-                        }
-                    }
-                },
-                onDismiss = { if (!lastfmLoading) showLastfmLogin = false },
             )
         }
 

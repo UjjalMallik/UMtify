@@ -18,8 +18,6 @@ import com.music.bitchord.data.TelemetryProvenance
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import com.music.bitchord.playback.audio.usb.UsbDirectManager
-import com.music.bitchord.playback.audio.usb.DirectUsbProbeResult
-import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.DeviceInfo
@@ -31,7 +29,6 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
-import androidx.core.net.toUri
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.SonicAudioProcessor
@@ -51,7 +48,6 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.SilenceSkippingAudioProcessor
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
-import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
@@ -67,7 +63,6 @@ import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaLibraryService.LibraryParams
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
@@ -88,7 +83,6 @@ import com.music.bitchord.playback.audio.OutputNegotiator
 import com.music.bitchord.playback.audio.PcmEncoding
 import com.music.bitchord.playback.audio.SourceDescriptor
 import com.music.bitchord.playback.audio.bluetooth.BluetoothAudioTracker
-import com.music.bitchord.playback.audio.bluetooth.BluetoothTelemetry
 import com.music.bitchord.MainActivity
 import com.music.bitchord.data.listentogether.ListenTogether
 import com.music.bitchord.data.listentogether.partyQueueIndexOf
@@ -101,7 +95,6 @@ import com.music.bitchord.data.lyrics.EmbeddedLyrics
 import com.music.bitchord.data.lyrics.LyricLine
 import com.music.bitchord.data.lyrics.LyricsRepository
 import com.music.bitchord.data.model.NOTIFICATION_ART_PX
-import com.music.bitchord.data.model.PlaybackSourceType
 import com.music.bitchord.data.model.SearchFilter
 import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.BrowseItem
@@ -127,12 +120,9 @@ import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.LikeStatus
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.isUnresolvedSpotify
-import com.music.bitchord.data.scrobbling.LastFM
 import com.music.bitchord.data.scrobbling.ListenBrainzManager
-import com.music.bitchord.data.scrobbling.ScrobbleManager
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.EqualizerMode
-import com.music.bitchord.data.settings.OutputPcmMode
 import com.music.bitchord.data.sources.SourceResolver
 import com.music.bitchord.data.sources.SourceStream
 import com.music.bitchord.data.sources.StreamFormat
@@ -665,7 +655,6 @@ class PlaybackService : MediaLibraryService() {
      */
     private var consecutiveErrorSkips = 0
 
-    private var scrobbleManager: ScrobbleManager? = null
     private var listenBrainzSong: Song? = null
 
     private var listenBrainzStartMs: Long = 0L
@@ -887,7 +876,6 @@ class PlaybackService : MediaLibraryService() {
 
             val song = exoPlayer.currentMediaItem?.toSong()
             val durationMs = exoPlayer.duration.takeIf { it > 0 }
-            scrobbleManager?.onPlayerStateChanged(isPlaying, song, durationMs)
 
             // The listening record has to be told a pause happened, not merely
             // stop being told about play: its sampler measures the gap between
@@ -1685,7 +1673,6 @@ class PlaybackService : MediaLibraryService() {
         applySettings(exoPlayer)
         applySettings(sparePlayer)
         observeSettings()
-        observeScrobbling()
         observeDiscord()
         watchSleepTimer()
         val restored = if (PartyPersonalQueueStash.hasStash()) {
@@ -3459,18 +3446,13 @@ class PlaybackService : MediaLibraryService() {
         PlaybackTracker.onTrackChanged(lastPositionSeconds)
         lastPositionSeconds = 0
 
-        // Scrobbling: stop old song, start new song
-        scrobbleManager?.onSongStop()
-        // And the local record, which needs the transition even when the track
-        // id doesn't change: repeat-one plays the same song again, and without
-        // this the second play through is a continuation of the first and is
-        // never counted.
+        // Scrobbling: the outgoing track is closed out on the local record too,
+        // which needs the transition even when the track id doesn't change:
+        // repeat-one plays the same song again, and without this the second play
+        // through is a continuation of the first and is never counted.
         ListeningRecorder.onStopped()
         val newSong = mediaItem?.toSong()
         val durationMs = exoPlayer.duration.takeIf { it > 0 }
-        if (exoPlayer.isPlaying) {
-            scrobbleManager?.onSongStart(newSong, durationMs)
-        }
 
         // ListenBrainz: submit finished for old song, playing_now for new song.
         // The finished listen only counts when the track actually ended —
@@ -6768,94 +6750,6 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
-    private fun observeScrobbling() {
-        // Keep the manager alive while its timing settings change, so updating
-        // a preference does not cancel the current track's scrobble timer.
-        scope.launch {
-            // Explicit <Any, _>: these flows have mixed element types, and letting
-            // the reified vararg combine() infer T lands on an intersection type.
-            combine<Any, ScrobblingSnapshot>(
-                AppSettings.lastfmEnabled,
-                AppSettings.lastfmScrobbleEnabled,
-                AppSettings.lastfmNowPlaying,
-                AppSettings.lastfmPrimaryArtistOnly,
-                AppSettings.lastfmSessionKey,
-                AppSettings.lastfmApiKey,
-                AppSettings.lastfmSecret,
-                AppSettings.lastfmEndpoint,
-                AppSettings.scrobbleMinDuration,
-                AppSettings.scrobbleDelayPercent,
-                AppSettings.scrobbleDelaySeconds,
-            ) { values ->
-                ScrobblingSnapshot(
-                    lastfmEnabled = values[0] as Boolean,
-                    scrobbleEnabled = values[1] as Boolean,
-                    nowPlaying = values[2] as Boolean,
-                    primaryArtistOnly = values[3] as Boolean,
-                    sessionKey = values[4] as String,
-                    apiKey = values[5] as String,
-                    secret = values[6] as String,
-                    endpoint = values[7] as String,
-                    minDuration = values[8] as Int,
-                    delayPercent = values[9] as Float,
-                    delaySeconds = values[10] as Int,
-                )
-            }.collectLatest { snapshot ->
-                val shouldEnable = AppSettings.scrobblingAvailable &&
-                    snapshot.lastfmEnabled &&
-                    snapshot.scrobbleEnabled &&
-                    snapshot.sessionKey.isNotBlank() &&
-                    snapshot.apiKey.isNotBlank() &&
-                    snapshot.secret.isNotBlank()
-
-                if (!shouldEnable) {
-                    scrobbleManager?.destroy()
-                    scrobbleManager = null
-                    return@collectLatest
-                }
-
-                LastFM.configure(
-                    endpoint = snapshot.endpoint.ifBlank { LastFM.DEFAULT_API_ENDPOINT },
-                    apiKey = snapshot.apiKey,
-                    secret = snapshot.secret,
-                    sessionKey = snapshot.sessionKey,
-                )
-                val manager = scrobbleManager ?: ScrobbleManager(scope).also {
-                    scrobbleManager = it
-                }
-                manager.minSongDuration = snapshot.minDuration
-                manager.scrobbleDelayPercent = snapshot.delayPercent
-                manager.scrobbleDelaySeconds = snapshot.delaySeconds
-                manager.useNowPlaying = snapshot.nowPlaying
-                manager.usePrimaryArtistOnly = snapshot.primaryArtistOnly
-
-                player?.let { exoPlayer ->
-                    if (exoPlayer.isPlaying) {
-                        manager.onPlayerStateChanged(
-                            isPlaying = true,
-                            song = exoPlayer.currentMediaItem?.toSong(),
-                            durationMs = exoPlayer.duration.takeIf { it > 0 },
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    private data class ScrobblingSnapshot(
-        val lastfmEnabled: Boolean,
-        val scrobbleEnabled: Boolean,
-        val nowPlaying: Boolean,
-        val primaryArtistOnly: Boolean,
-        val sessionKey: String,
-        val apiKey: String,
-        val secret: String,
-        val endpoint: String,
-        val minDuration: Int,
-        val delayPercent: Float,
-        val delaySeconds: Int,
-    )
-
     // ---- Discord Rich Presence -------------------------------------------------
 
     /**
@@ -6918,9 +6812,9 @@ class PlaybackService : MediaLibraryService() {
         // cosmetic here: the timestamps are wall-clock instants with the rate
         // divided out, so a change to it invalidates a presence already up.
         scope.launch {
-            // Explicit <Any, _> for the same reason as [observeScrobbling]:
-            // mixed element types, and the reified vararg combine() otherwise
-            // infers an intersection type. Compared as a list rather than a
+            // Explicit <Any, _> because these flows have mixed element types,
+            // and the reified vararg combine() otherwise infers an intersection
+            // type. Compared as a list rather than a
             // joined string so two different settings can't stringify alike.
             combine<Any, List<Any>>(
                 AppSettings.discordUseDetails,
@@ -7165,8 +7059,6 @@ class PlaybackService : MediaLibraryService() {
                 }
             }
         }
-        scrobbleManager?.destroy()
-        scrobbleManager = null
         // Last chance to get the current track's minutes onto disk: the scope is
         // cancelled a few lines down and the sampler goes with it.
         ListeningRecorder.onStopped()

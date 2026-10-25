@@ -148,8 +148,7 @@
     <string name="animated_cover_cellular">Воспроизводить анимированную обложку через мобильные данные</string>
     <string name="replay">Replay</string>
     <string name="replay_subtitle">Ваши любимые песни, исполнители, альбомы и жанры</string>
-    <string name="work_out_genres">Определять жанры</string>
-    <string name="export_data">Экспорт данных</string>
+<string name="export_data">Экспорт данных</string>
     <string name="export_data_subtitle">Настройки и история прослушивания в одном файле JSON</string>
     <string name="import_data">Импорт данных</string>
     <string name="import_data_subtitle">Заменяет настройки и историю на этом устройстве</string>
@@ -395,21 +394,14 @@
         <item quantity="many">Журнал скопирован · %1$d строк</item>
     </plurals>
     <string name="integrate_spotify_canvas">Настроить Spotify Canvas</string>
-    <string name="lastfm_login">Вход в Last.fm</string>
-    <string name="lastfm_login_description">Войдите в свой аккаунт Last.fm, чтобы включить скробблинг.</string>
-    <string name="lastfm_now_playing_subtitle">Обновляет Last.fm информацией о том, что вы сейчас слушаете</string>
-    <string name="lead_with_song">Сначала песня</string>
+<string name="lead_with_song">Сначала песня</string>
     <string name="lead_with_song_subtitle">Помещает название на жирную строку вместо исполнителя</string>
     <string name="like">Нравится</string>
     <string name="listenbrainz_token">Токен ListenBrainz</string>
     <string name="listenbrainz_token_description">Вставьте токен пользователя ListenBrainz, чтобы включить скробблинг.</string>
     <string name="listening_history">История прослушивания</string>
     <string name="lyrics_sources_order">Источники пробуются в этом порядке. Перетащите, чтобы изменить порядок. Побеждает первый источник с текстом, если только не приоритизирован текст по слогам.</string>
-    <string name="max_delay">Максимальная задержка</string>
-    <string name="max_delay_subtitle">Максимальная задержка скробблинга в секундах</string>
-    <string name="min_song_duration">Минимальная длительность песни</string>
-    <string name="min_song_duration_subtitle">Более короткие песни не будут скробблиться</string>
-    <string name="monthly_listeners">%1$s слушателей в месяц</string>
+<string name="monthly_listeners">%1$s слушателей в месяц</string>
     <string name="name">Название</string>
     <string name="no_playlists_yet">Пока нет плейлистов. Используйте строку выше, чтобы создать новый.</string>
     <string name="no_tracks_here">Здесь нет треков</string>
@@ -442,22 +434,15 @@
     <string name="save_name">Сохранить название</string>
     <string name="saved_to_downloads">Сохранено в Загрузки</string>
     <string name="saved_to_youtube_music_account">Сохранено в вашем аккаунте YouTube Music</string>
-    <string name="scrobble_delay">Задержка скробблинга</string>
-    <string name="scrobble_delay_subtitle">Насколько далеко в песню скробблить</string>
-    <string name="scrobble_timing">Время скробблинга</string>
-    <string name="scrobble_tracks">Скробблить треки</string>
-    <string name="scrobble_tracks_subtitle">Записывать прослушивания в вашу ленту Last.fm</string>
-    <string name="scrobbling_footer">Отправляйте свои прослушивания в Last.fm и ListenBrainz.</string>
-    <string name="scrobbling_paused_footer">Last.fm и ListenBrainz приостановлены для этого релиза и вернутся позже. Существующие подключения остаются сохранёнными.</string>
-    <string name="search_this_folder">Искать в этой папке</string>
+<string name="scrobbling_footer">Скробблите прослушивания в ListenBrainz.</string>
+<string name="search_this_folder">Искать в этой папке</string>
     <string name="search_this_list">Искать в этом списке</string>
     <string name="second_button">Вторая кнопка</string>
     <string name="share">Поделиться</string>
     <string name="sharing_as">Публикация от имени @%1$s</string>
     <string name="sharing_listens">Публикация ваших прослушиваний</string>
     <string name="show_what_playing">Показывать, что я сейчас слушаю</string>
-    <string name="signed_in_as">Вход выполнен как %1$s</string>
-    <string name="signing_in">Выполняется вход…</string>
+<string name="signing_in">Выполняется вход…</string>
     <string name="sleep_timer">Таймер сна</string>
     <string name="sources_no_lossless">Ни один включённый источник не может предоставить аудио без потерь. Добавьте пользовательский модуль, чтобы воспроизводить доступные файлы без потерь без перекодирования.</string>
     <string name="sources_order_footer">Если у источника нет трека или он недоступен, UMtify пробует следующий. Источники выше YouTube могут заменить его запись, если предоставляют более качественную версию.</string>
@@ -490,8 +475,7 @@
     <string name="status_online_detail">Зелёная точка</string>
     <string name="subscribers">%1$s подписчиков</string>
     <string name="tap_to_connect">Нажмите, чтобы подключить</string>
-    <string name="tap_to_sign_in">Нажмите, чтобы войти</string>
-    <string name="tap_to_sign_in_discord">Нажмите, чтобы войти через Discord</string>
+<string name="tap_to_sign_in_discord">Нажмите, чтобы войти через Discord</string>
     <string name="token">Токен</string>
     <string name="turn_off_timer">Выключить таймер</string>
     <string name="undo_dislike">Отменить «не нравится»</string>
@@ -654,9 +638,7 @@
     <string name="no_lyrics_sources_enabled">Ничего. Текст песен не будет загружаться.</string>
     <string name="song_cache_large_subtitle">Хранит на диске до %1$s загруженного аудио. Это может занять заметную часть свободного места.</string>
     <string name="song_cache_limit_subtitle">Хранит загруженное аудио на диске для мгновенной перемотки и повторного прослушивания</string>
-    <string name="replay_genres_enabled_subtitle">Запрашивает у Last.fm жанры исполнителя. Отправляется только имя исполнителя.</string>
-    <string name="replay_genres_disabled_subtitle">Пока это отключено, график жанров в Replay остаётся скрытым</string>
-    <string name="swipe_plays_next">Свайп песни ставит её следующей</string>
+<string name="swipe_plays_next">Свайп песни ставит её следующей</string>
     <string name="swipe_adds_to_queue">Если отключено, свайп добавляет песню в конец очереди</string>
     <string name="import_backup_warning">Это заменит настройки и историю прослушивания на этом устройстве содержимым файла. Сначала экспортируйте текущие данные, если хотите их сохранить.</string>
     <string name="youtube_music_account">Аккаунт YouTube Music</string>
@@ -785,7 +767,6 @@
 
     <string name="miscellaneous_footer">При включении закрытие приложения из недавних также останавливает воспроизведение музыки.</string>
 
-
     <plurals name="track_count_plural">
         <item quantity="one">%1$d трек</item>
         <item quantity="few">%1$d трека</item>
@@ -818,7 +799,6 @@
     <string name="automix_mode_performance">Производительный</string>
 
     <string name="automix_mode_performance_subtitle">4 потока · самый быстрый анализ · выше нагрев и расход</string>
-
 
     <string name="automix_performance">Производительность Automix</string>
 
@@ -886,7 +866,6 @@
     <string name="output_precision">Точность вывода</string>
 
     <string name="personal">Личный</string>
-
 
     <string name="playlist_action">Плейлист</string>
 
@@ -1029,12 +1008,7 @@
 
     <string name="use_this_profile">Использовать этот профиль</string>
 
-
     <string name="lyrics_offset">Lyrics offset</string>
-
-
-
-
 
     <string name="auto_quick_picks">Quick picks</string>
 
@@ -1171,8 +1145,6 @@
 
     <string name="no_languages_match">No languages match</string>
 
-
-
     <string name="audio_pipeline">Audio Pipeline</string>
     <string name="cast_dialog_title">Cast</string>
     <string name="cast_dialog_subtitle">Play on a Chromecast or Google Cast speaker</string>
@@ -1229,8 +1201,6 @@
 
     <string name="pipeline_device_name">Device Name</string>
 
-
-
     <string name="shared_link">Shared link</string>
 
     <string name="song_will_play_next">Song will play next</string>
@@ -1257,16 +1227,6 @@
     <string name="paxsenix_api_key_configured">PaxSenix API key — configured</string>
 
     <string name="paxsenix_api_key_missing">PaxSenix API key — optional, not configured</string>
-
-
-
-
-
-
-
-
-
-
 
     <string name="source_needs_lossless_output">Нужен выход без потерь · используйте устройство с поддержкой звука без потерь</string>
     <string name="source_needs_lossless_bt_codec">Нужен выход без потерь · Bluetooth работает на %1$s; используйте устройство с поддержкой звука без потерь</string>

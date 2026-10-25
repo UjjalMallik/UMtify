@@ -151,8 +151,7 @@
     <string name="animated_cover_cellular">Mobil veri ile hareketli kapağı oynat</string>
     <string name="replay">Replay</string>
     <string name="replay_subtitle">En çok dinlediğin şarkılar, sanatçılar, albümler ve türler</string>
-    <string name="work_out_genres">Türleri belirle</string>
-    <string name="export_data">Verileri dışa aktar</string>
+<string name="export_data">Verileri dışa aktar</string>
     <string name="export_data_subtitle">Ayarlar ve dinleme geçmişi, tek bir JSON dosyası olarak</string>
     <string name="import_data">Verileri içe aktar</string>
     <string name="import_data_subtitle">Bu cihazdaki ayarları ve geçmişi değiştirir</string>
@@ -403,10 +402,7 @@
         <item quantity="other">Günlük kopyalandı · %1$d satır</item>
     </plurals>
     <string name="integrate_spotify_canvas">Spotify Canvas\'ı kur</string>
-    <string name="lastfm_login">Last.fm girişi</string>
-    <string name="lastfm_login_description">Scrobbling\'i etkinleştirmek için Last.fm hesabınızla giriş yapın.</string>
-    <string name="lastfm_now_playing_subtitle">Last.fm\'i ne dinlediğinle güncelle</string>
-    <string name="scrobble_primary_artist_only">Yalnızca birincil sanatçıyı scrobble et</string>
+<string name="scrobble_primary_artist_only">Yalnızca birincil sanatçıyı scrobble et</string>
     <string name="scrobble_primary_artist_only_subtitle">Bir parçanın birden fazla sanatçısı olduğunda ilk sanatçıyı kullan</string>
     <string name="lead_with_song">Şarkıyla başla</string>
     <string name="lead_with_song_subtitle">Kalın satıra sanatçı yerine başlığı koyar</string>
@@ -415,11 +411,7 @@
     <string name="listenbrainz_token_description">Scrobbling\'i etkinleştirmek için ListenBrainz kullanıcı belirtecinizi yapıştırın.</string>
     <string name="listening_history">Dinleme geçmişi</string>
     <string name="lyrics_sources_order">Kaynaklar bu sırayla denenir. Yeniden sıralamak için sürükleyin. Heceli sözler önceliklendirilmedikçe sözleri olan ilk kaynak kazanır.</string>
-    <string name="max_delay">Maksimum gecikme</string>
-    <string name="max_delay_subtitle">Saniye cinsinden maksimum scrobble gecikmesi</string>
-    <string name="min_song_duration">Minimum şarkı süresi</string>
-    <string name="min_song_duration_subtitle">Daha kısa şarkılar scrobble edilmez</string>
-    <string name="monthly_listeners">%1$s aylık dinleyici</string>
+<string name="monthly_listeners">%1$s aylık dinleyici</string>
     <string name="name">Ad</string>
     <string name="no_playlists_yet">Henüz çalma listesi yok. Bir tane oluşturmak için yukarıdaki satırı kullan.</string>
     <string name="no_tracks_here">Burada parça yok</string>
@@ -452,22 +444,15 @@
     <string name="save_name">Adı kaydet</string>
     <string name="saved_to_downloads">İndirilenlere kaydedildi</string>
     <string name="saved_to_youtube_music_account">YouTube Music hesabına kaydedildi</string>
-    <string name="scrobble_delay">Scrobble gecikmesi</string>
-    <string name="scrobble_delay_subtitle">Bir şarkının ne kadarı çalındığında scrobble edileceği</string>
-    <string name="scrobble_timing">Scrobble zamanlaması</string>
-    <string name="scrobble_tracks">Parçaları scrobble et</string>
-    <string name="scrobble_tracks_subtitle">Çalmaları Last.fm zaman çizelgenize kaydet</string>
-    <string name="scrobbling_footer">Dinlediklerini Last.fm ve ListenBrainz\'e scrobble et.</string>
-    <string name="scrobbling_paused_footer">Last.fm ve ListenBrainz bu sürüm için duraklatıldı ve daha sonra geri dönecek. Mevcut bağlantılar kayıtlı kalır.</string>
-    <string name="search_this_folder">Bu klasörde ara</string>
+<string name="scrobbling_footer">Dinlemelerinizi ListenBrainz\'e scrobble edin.</string>
+<string name="search_this_folder">Bu klasörde ara</string>
     <string name="search_this_list">Bu listede ara</string>
     <string name="second_button">İkinci düğme</string>
     <string name="share">Paylaş</string>
     <string name="sharing_as">@%1$s olarak paylaşılıyor</string>
     <string name="sharing_listens">Dinlemelerin paylaşılıyor</string>
     <string name="show_what_playing">Ne çaldığımı göster</string>
-    <string name="signed_in_as">%1$s olarak giriş yapıldı</string>
-    <string name="signing_in">Giriş yapılıyor…</string>
+<string name="signing_in">Giriş yapılıyor…</string>
     <string name="sleep_timer">Uyku zamanlayıcısı</string>
     <string name="sources_no_lossless">Etkin hiçbir kaynak kayıpsız ses sağlayamıyor. Yeniden kodlama yapmadan mevcut kayıpsız dosyaları çalmak için özel bir modül ekleyin.</string>
     <string name="sources_order_footer">Bir kaynakta parça yoksa veya ulaşılamıyorsa UMtify bir sonrakini dener. YouTube üzerindeki kaynaklar daha iyi bir sürüm döndürdüklerinde onun kaydının yerini alabilir.</string>
@@ -500,8 +485,7 @@
     <string name="status_online_detail">Yeşil nokta</string>
     <string name="subscribers">%1$s abone</string>
     <string name="tap_to_connect">Bağlanmak için dokun</string>
-    <string name="tap_to_sign_in">Giriş yapmak için dokun</string>
-    <string name="tap_to_sign_in_discord">Discord ile giriş yapmak için dokun</string>
+<string name="tap_to_sign_in_discord">Discord ile giriş yapmak için dokun</string>
     <string name="token">Belirteç</string>
     <string name="turn_off_timer">Zamanlayıcıyı kapat</string>
     <string name="undo_dislike">Beğenmemeyi geri al</string>
@@ -659,9 +643,7 @@
     <string name="no_lyrics_sources_enabled">Yok. Sözler alınmayacak.</string>
     <string name="song_cache_large_subtitle">Diskte %1$s\'a kadar indirilen sesi tutar. Bu, boş alanının önemli bir kısmını kaplayabilir.</string>
     <string name="song_cache_limit_subtitle">Anında atlama ve tekrar dinleme için indirilen sesi diskte tutar</string>
-    <string name="replay_genres_enabled_subtitle">Last.fm\'den bir sanatçının türlerini ister. Yalnızca sanatçı adı gönderilir.</string>
-    <string name="replay_genres_disabled_subtitle">Bu kapalıyken Replay tür grafiği gizli kalır</string>
-    <string name="swipe_plays_next">Bir şarkıyı kaydırmak onu sonraki olarak çalar</string>
+<string name="swipe_plays_next">Bir şarkıyı kaydırmak onu sonraki olarak çalar</string>
     <string name="swipe_adds_to_queue">Kapalıyken kaydırmak şarkıyı sıranın sonuna ekler</string>
     <string name="import_backup_warning">Bu, dosyanın içeriğiyle bu cihazın ayarlarını ve dinleme geçmişini değiştirir. Korumak istiyorsan önce mevcut verileri dışa aktar.</string>
     <string name="youtube_music_account">YouTube Music hesabı</string>
@@ -805,7 +787,6 @@
     <string name="vietnamese">Vietnamca</string>
 
     <string name="miscellaneous_footer">Etkinleştirildiğinde, uygulamayı son kullanılanlar ekranından kapatmak müzik çalmayı da durdurur.</string>
-
 
     <string name="add_addon">Eklenti ekle</string>
 
@@ -956,12 +937,7 @@
 
     <string name="upgrade_quality">Kaliteyi yükselt</string>
 
-
     <string name="lyrics_offset">Söz zamanlama ayarı</string>
-
-
-
-
 
     <string name="auto_quick_picks">Hızlı seçimler</string>
 
@@ -1098,10 +1074,6 @@
 
     <string name="no_languages_match">Eşleşen dil yok</string>
 
-
-
-
-
     <string name="audio_pipeline">Ses Hattı</string>
     <string name="cast_dialog_title">Cast</string>
     <string name="cast_dialog_subtitle">Play on a Chromecast or Google Cast speaker</string>
@@ -1158,8 +1130,6 @@
 
     <string name="pipeline_device_name">Cihaz Adı</string>
 
-
-
     <string name="shared_link">Paylaşılan bağlantı</string>
 
     <string name="song_will_play_next">Şarkı sonra çalacak</string>
@@ -1182,16 +1152,6 @@
     <string name="paxsenix_api_key_configured">PaxSenix API anahtarı — yapılandırıldı</string>
 
     <string name="paxsenix_api_key_missing">PaxSenix API anahtarı — isteğe bağlı, yapılandırılmadı</string>
-
-
-
-
-
-
-
-
-
-
 
     <string name="source_needs_lossless_output">Kayıpsız çıkış gerekir · kayıpsız sesi destekleyen bir cihaz kullanın</string>
     <string name="source_needs_lossless_bt_codec">Kayıpsız çıkış gerekir · Bluetooth %1$s kullanıyor; kayıpsız sesi destekleyen bir cihaz kullanın</string>

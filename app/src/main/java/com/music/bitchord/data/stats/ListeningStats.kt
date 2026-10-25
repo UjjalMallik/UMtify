@@ -695,19 +695,6 @@ object ListeningStats {
                     .map { RankedEntry(it.name, it.sub, it.art, it.id, it.ms, it.plays) }
             }
 
-            // Genres are derived rather than stored — see [ArtistFacts]. An
-            // artist with no tag yet simply doesn't vote, which is why this can
-            // be an empty list on a page whose other charts are full.
-            val genreMs = LinkedHashMap<String, Long>()
-            val genrePlays = LinkedHashMap<String, Int>()
-            val genreArt = LinkedHashMap<String, String?>()
-            rankedArtists.forEach { artist ->
-                ArtistFacts.genresFor(artist.title).forEach { genre ->
-                    genreMs[genre] = (genreMs[genre] ?: 0L) + artist.ms
-                    genrePlays[genre] = (genrePlays[genre] ?: 0) + artist.plays
-                    if (genreArt[genre] == null) genreArt[genre] = artist.artworkUrl
-                }
-            }
             // Anything still missing a picture is asked about now, so opening
             // the page is a second way for these to fill in — the first being
             // playing the music, which is no help to someone who has just
@@ -715,19 +702,6 @@ object ListeningStats {
             rankedArtists.take(ARTISTS_TO_RESOLVE)
                 .filter { it.artworkUrl == null || it.browseId == null }
                 .forEach { ArtistFacts.noticed(it.title) }
-
-            val rankedGenres = genreMs.entries
-                .sortedByDescending { it.value }
-                .map {
-                    RankedEntry(
-                        title = it.key,
-                        subtitle = null,
-                        artworkUrl = genreArt[it.key],
-                        browseId = null,
-                        ms = it.value,
-                        plays = genrePlays[it.key] ?: 0,
-                    )
-                }
 
             val busiest = days.entries.maxByOrNull { it.value }
             return ReplaySummary(
@@ -738,7 +712,7 @@ object ListeningStats {
                 songs = rankedSongs,
                 artists = rankedArtists,
                 albums = rankedAlbums,
-                genres = rankedGenres,
+                genres = emptyList(),
                 hourOfDay = hours.toList(),
                 busiestDay = busiest?.key,
                 busiestDayMs = busiest?.value ?: 0L,

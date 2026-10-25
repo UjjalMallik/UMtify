@@ -100,104 +100,6 @@ fun ListenBrainzTokenAlert(
     }
 }
 
-@OptIn(ExperimentalHazeMaterialsApi::class)
-@Composable
-fun LastfmLoginAlert(
-    hazeState: HazeState,
-    usernameInput: String,
-    onUsernameInputChange: (String) -> Unit,
-    passwordInput: String,
-    onPasswordInputChange: (String) -> Unit,
-    apiKeyInput: String,
-    onApiKeyInputChange: (String) -> Unit,
-    secretInput: String,
-    onSecretInputChange: (String) -> Unit,
-    error: String?,
-    loading: Boolean,
-    onSignIn: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertScaffold(hazeState = hazeState, onDismiss = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 19.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                text = stringResource(R.string.lastfm_login),
-                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp, fontWeight = FontWeight.W600),
-                color = MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center,
-            )
-            Text(
-                text = error ?: stringResource(R.string.lastfm_login_description),
-                modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 17.sp),
-                color = if (error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center,
-            )
-            PillTextField(
-                value = usernameInput,
-                onValueChange = onUsernameInputChange,
-                placeholder = stringResource(R.string.username),
-                enabled = !loading,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-            )
-            Spacer(Modifier.height(8.dp))
-            PillTextField(
-                value = passwordInput,
-                onValueChange = onPasswordInputChange,
-                placeholder = stringResource(R.string.password),
-                enabled = !loading,
-                isPassword = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
-            )
-            Spacer(Modifier.height(14.dp))
-            Text(
-                text = stringResource(R.string.lastfm_credentials_optional),
-                modifier = Modifier.padding(bottom = 8.dp),
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 16.sp),
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                textAlign = TextAlign.Center,
-            )
-            PillTextField(
-                value = apiKeyInput,
-                onValueChange = onApiKeyInputChange,
-                placeholder = stringResource(R.string.lastfm_api_key),
-                enabled = !loading,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-            )
-            Spacer(Modifier.height(8.dp))
-            PillTextField(
-                value = secretInput,
-                onValueChange = onSecretInputChange,
-                placeholder = stringResource(R.string.lastfm_shared_secret),
-                enabled = !loading,
-                isPassword = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(
-                    onDone = { if (usernameInput.isNotBlank() && passwordInput.isNotBlank()) onSignIn() },
-                ),
-            )
-        }
-        AlertRule()
-        AlertAction(
-            label = if (loading) stringResource(R.string.signing_in) else stringResource(R.string.sign_in),
-            emphasised = true,
-            onClick = onSignIn,
-            enabled = !loading && usernameInput.isNotBlank() && passwordInput.isNotBlank(),
-        )
-        AlertRule()
-        AlertAction(
-            label = stringResource(R.string.cancel),
-            emphasised = false,
-            onClick = onDismiss,
-            enabled = !loading,
-        )
-    }
-}
-
 /**
  * Manual token entry, for when the in-app login can't run — a WebView an OEM
  * has broken, or a token lifted from a desktop client.
@@ -551,8 +453,7 @@ fun ServerEditorHost(
  * [status] is the one thing here that no other alert in the file needs:
  * testing an address has *three* outcomes rather than the usual two, and "it
  * answered, but not with something this app can use" is the one worth reading
- * — so a result replaces the description in place, coloured by [statusIsGood],
- * the way [LastfmLoginAlert] surfaces a failed sign-in.
+ * — so a result replaces the description in place, coloured by [statusIsGood].
  */
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable

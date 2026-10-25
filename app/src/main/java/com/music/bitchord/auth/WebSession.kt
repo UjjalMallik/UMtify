@@ -90,9 +90,8 @@ object BrowserSession {
      * Forgets the Google login the in-app browser is holding.
      *
      * Google's cookies only, by name, rather than [CookieManager.removeAllCookies]:
-     * the same jar holds the Discord and Last.fm logins from their own in-app
-     * browsers, and signing out of YouTube Music is not a reason to sign out of
-     * those. There is no per-domain removal in the API, so each cookie is
+     * the same jar holds the Discord login from its own in-app browser, and
+     * signing out of YouTube Music is not a reason to sign out of that. There is
      * overwritten with an expired one of the same name.
      */
     fun clearGoogleCookies() {

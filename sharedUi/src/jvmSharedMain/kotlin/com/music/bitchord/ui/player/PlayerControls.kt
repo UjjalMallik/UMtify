@@ -81,16 +81,18 @@ import androidx.compose.ui.Modifier
 import org.jetbrains.compose.resources.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import org.jetbrains.compose.resources.painterResource
@@ -122,6 +124,7 @@ import com.music.bitchord.data.model.Song
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /**
  * How long the shuffle glyph ignores further taps after one lands.
@@ -462,67 +465,132 @@ private const val SKIP_NUDGE_MS = 120
 /** The crossfade between the play and pause contents. */
 private const val PLAY_STATE_FADE_MS = 220
 
+/** How long the liquid takes to flatten after a pause. */
+private const val WAVE_SETTLE_MS = 350
+
+/** One full sweep of the waves, and one breath of the rim glow. */
+private const val WAVE_PERIOD_MS = 3200
+private const val GLOW_PERIOD_MS = 1800
+
+private const val TAU = 6.2831855f
+
 /**
- * The body of all three transport buttons: a diagonal glass wash that is
- * almost clear through the middle and carries a faint tint of the sleeve at
- * both ends. [flash] lifts every layer together under a press.
+ * The Mica sheen: a soft white wash along the very top edge that dissolves by
+ * a third of the way down, leaving the middle of the glass clear.
  */
-private fun liquidGlassFill(tones: PlayerTones, w: Float, h: Float, flash: Float): Brush {
-    val lift = 0.14f * flash
-    return Brush.linearGradient(
+private fun micaSheen(flash: Float): Brush =
+    Brush.verticalGradient(
         colorStops = arrayOf(
-            0f to lerp(
-                Color.White.copy(alpha = 0.18f + lift),
-                tones.accent.copy(alpha = 0.12f + lift),
-                0.40f,
-            ),
-            0.5f to Color.White.copy(alpha = 0.06f + lift),
-            1f to lerp(
-                Color.White.copy(alpha = 0.14f + lift),
-                tones.accent.copy(alpha = 0.15f + lift),
-                0.40f,
-            ),
+            0f to Color.White.copy(alpha = 0.22f + 0.08f * flash),
+            0.35f to Color.Transparent,
+            1f to Color.Transparent,
         ),
-        start = Offset.Zero,
-        end = Offset(w, h),
+    )
+
+/** The curved inner highlight that lifts the bottom 15% of the glass. */
+private fun micaBottomLift(flash: Float): Brush =
+    Brush.verticalGradient(
+        colorStops = arrayOf(
+            0f to Color.Transparent,
+            0.85f to Color.Transparent,
+            1f to Color.White.copy(alpha = 0.10f + 0.04f * flash),
+        ),
+    )
+
+/**
+ * The polished outer rim: bright along the top and the left/right curves,
+ * settling to a quiet line at the bottom edge. [flash] drives it white under
+ * a press and [glow] breathes while the pill is playing.
+ */
+private fun micaRim(flash: Float, glow: Float): Brush {
+    fun lit(alpha: Float) = (alpha + (1f - alpha) * flash + glow * 0.16f).coerceIn(0f, 1f)
+    return Brush.verticalGradient(
+        colorStops = arrayOf(
+            0f to Color.White.copy(alpha = lit(0.75f)),
+            0.25f to Color.White.copy(alpha = lit(0.65f)),
+            0.55f to Color.White.copy(alpha = lit(0.42f)),
+            1f to Color.White.copy(alpha = lit(0.20f)),
+        ),
+    )
+}
+
+/** The 1dp rim just inside the edge that reads as the thickness of the glass. */
+private fun micaInsetRim(flash: Float): Brush {
+    fun lit(alpha: Float) = (alpha + (1f - alpha) * flash * 0.7f).coerceIn(0f, 1f)
+    return Brush.verticalGradient(
+        colorStops = arrayOf(
+            0f to Color.White.copy(alpha = lit(0.30f)),
+            0.55f to Color.White.copy(alpha = lit(0.14f)),
+            1f to Color.White.copy(alpha = lit(0.06f)),
+        ),
     )
 }
 
 /**
- * The one hard edge in the glass: a diagonal specular line that catches
- * bright at the top-left and bottom-right curves and nearly vanishes across
- * the middle. [flash] drives the whole rim towards white under a press.
+ * Two slow sine waves filling the lower half of the pill. [level] is the
+ * animated amplitude: at 0 the liquid is gone and the glass reads clear.
  */
-private fun specularRim(w: Float, h: Float, flash: Float): Brush {
-    fun lit(alpha: Float) = alpha + (1f - alpha) * flash
-    return Brush.linearGradient(
-        colorStops = arrayOf(
-            0f to Color.White.copy(alpha = lit(0.85f)),
-            0.30f to Color.White.copy(alpha = lit(0.18f)),
-            0.55f to Color.White.copy(alpha = lit(0.05f)),
-            0.80f to Color.White.copy(alpha = lit(0.22f)),
-            1f to Color.White.copy(alpha = lit(0.75f)),
+private fun DrawScope.drawLiquidWaves(accent: Color, level: Float, phase: Float) {
+    if (level <= 0.01f) return
+    val w = size.width
+    val h = size.height
+    val backBase = h * 0.66f
+    val frontBase = h * 0.74f
+    val amplitude = h * 0.11f * level
+
+    fun wavePath(cycles: Float, offset: Float, speed: Float, baseline: Float): Path {
+        val path = Path()
+        fun yAt(x: Float): Float =
+            baseline + sin((x / w) * cycles * TAU + offset + phase * speed * TAU) * amplitude
+        path.moveTo(0f, yAt(0f))
+        val step = w / 64f
+        var x = step
+        while (x <= w) {
+            path.lineTo(x, yAt(x))
+            x += step
+        }
+        path.lineTo(w, h)
+        path.lineTo(0f, h)
+        path.close()
+        return path
+    }
+
+    drawPath(
+        path = wavePath(cycles = 1.6f, offset = 0f, speed = 1f, baseline = backBase),
+        brush = Brush.verticalGradient(
+            0f to Color.White.copy(alpha = 0.14f * level),
+            1f to Color.Transparent,
+            startY = backBase - amplitude,
+            endY = h,
         ),
-        start = Offset.Zero,
-        end = Offset(w, h),
+    )
+    drawPath(
+        path = wavePath(cycles = 1.25f, offset = 2.1f, speed = -1f, baseline = frontBase),
+        brush = Brush.verticalGradient(
+            0f to accent.copy(alpha = 0.22f * level),
+            1f to accent.copy(alpha = 0.02f * level),
+            startY = frontBase - amplitude,
+            endY = h,
+        ),
     )
 }
 
-/**
- * The diffused inner refraction: brighter where the glass curves away at the
- * left and right ends, all but gone along the flat middle.
- */
-private fun innerRefraction(w: Float): Brush =
-    Brush.horizontalGradient(
-        colorStops = arrayOf(
-            0f to Color.White.copy(alpha = 0.12f),
-            0.35f to Color.White.copy(alpha = 0.03f),
-            0.65f to Color.White.copy(alpha = 0.03f),
-            1f to Color.White.copy(alpha = 0.12f),
-        ),
-        startX = 0f,
-        endX = w,
-    )
+/** Three slim bars that dance with the same phase as the waves. */
+private fun DrawScope.drawEqualizer(level: Float, phase: Float) {
+    if (level <= 0.01f) return
+    val barWidth = size.width * 0.22f
+    val gap = (size.width - barWidth * 3f) / 2f
+    repeat(3) { index ->
+        val pulse = (sin(phase * 2f * TAU + index * 2.1f) + 1f) / 2f
+        val barHeight = size.height * (0.22f + 0.78f * pulse) * level
+        drawRoundRect(
+            color = Color.White.copy(alpha = 0.9f * level),
+            topLeft = Offset(index * (barWidth + gap), size.height - barHeight),
+            size = Size(barWidth, barHeight),
+            cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f),
+        )
+    }
+}
 
 /**
  * Previous, play/pause, next, in the Material 3 shape the player rests on:
@@ -595,10 +663,11 @@ internal fun TransportRow(
 }
 
 /**
- * A disc of optical glass for one end of the transport: an almost clear
- * diagonal wash, a diffused inner refraction and one sharp specular rim. The
- * glyph stays crisp white, and a tap slides it a few dps in the skip
- * direction before it settles back.
+ * A disc of Mica glass for one end of the transport: a uniform tint of the
+ * sleeve, a top sheen, a bottom lift and one polished rim. The interior has no
+ * radial or off-centre marks, so it reads as a single piece of glass. The
+ * glyph stays crisp white, and a tap slides it a few dps in the skip direction
+ * before it settles back.
  */
 @Composable
 private fun TransportDisc(
@@ -660,29 +729,23 @@ private fun TransportDisc(
             )
             .clip(CircleShape)
             .drawWithCache {
-                val w = this.size.width
-                val h = this.size.height
                 val r = this.size.minDimension / 2f
                 val stroke = 1.2.dp.toPx()
-                val fill = liquidGlassFill(tones, w, h, flash)
-                val rim = specularRim(w, h, flash)
-                val inner = innerRefraction(w)
+                val sheen = micaSheen(flash)
+                val lift = micaBottomLift(flash)
+                val inset = micaInsetRim(flash)
+                val rim = micaRim(flash, glow = 0f)
                 onDrawBehind {
-                    drawCircle(brush = fill, radius = r)
-                    // Two soft passes inside the perimeter: a wider, fainter
-                    // one for the falloff inward and a tighter one for the
-                    // edge itself. The centre stays untouched.
+                    // Two uniform fills make the Mica tint: the sleeve's accent
+                    // under a white frost, with nothing off-centre in either.
+                    drawCircle(color = tones.accent.copy(alpha = 0.14f + 0.05f * flash), radius = r)
+                    drawCircle(color = Color.White.copy(alpha = 0.10f + 0.05f * flash), radius = r)
+                    drawCircle(brush = sheen, radius = r)
+                    drawCircle(brush = lift, radius = r)
                     drawCircle(
-                        brush = inner,
-                        radius = r - 3.6.dp.toPx(),
-                        alpha = 0.35f,
-                        style = Stroke(width = 3.dp.toPx()),
-                    )
-                    drawCircle(
-                        brush = inner,
-                        radius = r - 2.dp.toPx(),
-                        alpha = 0.60f,
-                        style = Stroke(width = 1.6.dp.toPx()),
+                        brush = inset,
+                        radius = r - 1.7.dp.toPx(),
+                        style = Stroke(width = 1.dp.toPx()),
                     )
                     drawCircle(
                         brush = rim,
@@ -720,9 +783,10 @@ private fun TransportDisc(
  * its own verb so the middle of the transport never has to be inferred from a
  * triangle.
  *
- * The same optical glass as the skip discs, stretched into a capsule: almost
- * clear through the middle, bright at the diagonal corners, with crisp white
- * content that crossfades between the two states.
+ * The same Mica glass as the skip discs, stretched into a capsule. While music
+ * plays, two slow waves fill its lower half, a three-bar figure dances beside
+ * the label and the rim breathes; pausing settles every one of those to rest,
+ * leaving clear glass around the word "Play".
  */
 @Composable
 private fun PlayPausePill(
@@ -752,6 +816,30 @@ private fun PlayPausePill(
         animationSpec = tween(durationMillis = PRESS_FLASH_MS),
         label = "playPillFlash",
     )
+    val waveLevel = animateFloatAsState(
+        targetValue = if (isPlaying) 1f else 0f,
+        animationSpec = tween(durationMillis = WAVE_SETTLE_MS),
+        label = "playPillWaveLevel",
+    )
+    val liquid = rememberInfiniteTransition(label = "playPillLiquid")
+    val wavePhase = liquid.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = WAVE_PERIOD_MS, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "playPillWavePhase",
+    )
+    val breathe = liquid.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = GLOW_PERIOD_MS, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "playPillGlow",
+    )
     Box(
         modifier = Modifier
             .width(width)
@@ -771,44 +859,31 @@ private fun PlayPausePill(
             .drawWithCache {
                 val w = this.size.width
                 val h = this.size.height
-                val stroke = 1.2.dp.toPx()
                 val radius = h / 2f
-                val fill = liquidGlassFill(tones, w, h, flash)
-                val rim = specularRim(w, h, flash)
-                val inner = innerRefraction(w)
+                val sheen = micaSheen(flash)
+                val lift = micaBottomLift(flash)
+                val inset = micaInsetRim(flash)
                 onDrawBehind {
                     drawRoundRect(
-                        brush = fill,
+                        color = tones.accent.copy(alpha = 0.14f + 0.05f * flash),
                         cornerRadius = CornerRadius(radius, radius),
                     )
-                    // The same two-pass inner refraction as the discs, with
-                    // concentric capsule corners so it follows the shape.
-                    val softInset = 3.6.dp.toPx()
-                    val softRadius = (h - softInset * 2f) / 2f
                     drawRoundRect(
-                        brush = inner,
-                        topLeft = Offset(softInset, softInset),
-                        size = Size(w - softInset * 2f, h - softInset * 2f),
-                        cornerRadius = CornerRadius(softRadius, softRadius),
-                        alpha = 0.35f,
-                        style = Stroke(width = 3.dp.toPx()),
+                        color = Color.White.copy(alpha = 0.10f + 0.05f * flash),
+                        cornerRadius = CornerRadius(radius, radius),
                     )
-                    val innerInset = 2.dp.toPx()
-                    val innerRadius = (h - innerInset * 2f) / 2f
+                    drawRoundRect(brush = sheen, cornerRadius = CornerRadius(radius, radius))
+                    drawRoundRect(brush = lift, cornerRadius = CornerRadius(radius, radius))
+                    val insetPx = 1.7.dp.toPx()
                     drawRoundRect(
-                        brush = inner,
-                        topLeft = Offset(innerInset, innerInset),
-                        size = Size(w - innerInset * 2f, h - innerInset * 2f),
-                        cornerRadius = CornerRadius(innerRadius, innerRadius),
-                        alpha = 0.60f,
-                        style = Stroke(width = 1.6.dp.toPx()),
-                    )
-                    drawRoundRect(
-                        brush = rim,
-                        topLeft = Offset(stroke / 2f, stroke / 2f),
-                        size = Size(w - stroke, h - stroke),
-                        cornerRadius = CornerRadius((h - stroke) / 2f, (h - stroke) / 2f),
-                        style = Stroke(width = stroke),
+                        brush = inset,
+                        topLeft = Offset(insetPx, insetPx),
+                        size = Size(w - insetPx * 2f, h - insetPx * 2f),
+                        cornerRadius = CornerRadius(
+                            (h - insetPx * 2f) / 2f,
+                            (h - insetPx * 2f) / 2f,
+                        ),
+                        style = Stroke(width = 1.dp.toPx()),
                     )
                 }
             }
@@ -823,6 +898,36 @@ private fun PlayPausePill(
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
+        Spacer(
+            Modifier
+                .matchParentSize()
+                .drawBehind {
+                    drawLiquidWaves(
+                        accent = tones.accent,
+                        level = waveLevel.value,
+                        phase = wavePhase.value,
+                    )
+                },
+        )
+        Spacer(
+            Modifier
+                .matchParentSize()
+                .drawBehind {
+                    // The rim sits over the liquid and takes its breath from
+                    // it: full white while playing, a quiet line when paused.
+                    val stroke = 1.2.dp.toPx()
+                    drawRoundRect(
+                        brush = micaRim(flash, glow = breathe.value * waveLevel.value),
+                        topLeft = Offset(stroke / 2f, stroke / 2f),
+                        size = Size(size.width - stroke, size.height - stroke),
+                        cornerRadius = CornerRadius(
+                            (size.height - stroke) / 2f,
+                            (size.height - stroke) / 2f,
+                        ),
+                        style = Stroke(width = stroke),
+                    )
+                },
+        )
         if (isLoading) {
             CircularProgressIndicator(
                 color = Color.White,
@@ -854,6 +959,20 @@ private fun PlayPausePill(
                         ),
                         maxLines = 1,
                     )
+                    if (playing) {
+                        Spacer(Modifier.width(if (compact) 6.dp else 8.dp))
+                        Spacer(
+                            Modifier
+                                .width(13.dp)
+                                .height(15.dp)
+                                .drawBehind {
+                                    drawEqualizer(
+                                        level = waveLevel.value,
+                                        phase = wavePhase.value,
+                                    )
+                                },
+                        )
+                    }
                 }
             }
         }

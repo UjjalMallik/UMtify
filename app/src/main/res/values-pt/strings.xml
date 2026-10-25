@@ -140,8 +140,7 @@
     <string name="animated_cover_cellular">Reproduzir capa animada com dados móveis</string>
     <string name="replay">Replay</string>
     <string name="replay_subtitle">Suas músicas, artistas, álbuns e gêneros mais ouvidos</string>
-    <string name="work_out_genres">Calcular gêneros</string>
-    <string name="export_data">Exportar dados</string>
+<string name="export_data">Exportar dados</string>
     <string name="export_data_subtitle">Configurações e histórico de audição, em um arquivo JSON</string>
     <string name="import_data">Importar dados</string>
     <string name="import_data_subtitle">Substitui as configurações e o histórico deste dispositivo</string>
@@ -342,21 +341,14 @@
     <string name="song_count_with_duration">%1$s, %2$s</string>
     <string name="song_count_with_hours_minutes">%1$s, %2$s %3$d minutos</string>
     <string name="integrate_spotify_canvas">Configurar o Spotify Canvas</string>
-    <string name="lastfm_login">Login no Last.fm</string>
-    <string name="lastfm_login_description">Faça login com sua conta do Last.fm para ativar o scrobbling.</string>
-    <string name="lastfm_now_playing_subtitle">Atualize o Last.fm com o que você está ouvindo</string>
-    <string name="lead_with_song">Destacar a música</string>
+<string name="lead_with_song">Destacar a música</string>
     <string name="lead_with_song_subtitle">Coloca o título na linha em negrito em vez do artista</string>
     <string name="like">Curtir</string>
     <string name="listenbrainz_token">Token do ListenBrainz</string>
     <string name="listenbrainz_token_description">Cole o token de usuário do ListenBrainz para ativar o scrobbling.</string>
     <string name="listening_history">Histórico de reprodução</string>
     <string name="lyrics_sources_order">As fontes são testadas nesta ordem. Arraste para reordená-las. A primeira fonte com letras ganha, a menos que letras por sílaba sejam priorizadas.</string>
-    <string name="max_delay">Atraso máximo</string>
-    <string name="max_delay_subtitle">Atraso máximo de scrobble em segundos</string>
-    <string name="min_song_duration">Duração mínima da música</string>
-    <string name="min_song_duration_subtitle">Músicas mais curtas não farão scrobble</string>
-    <string name="monthly_listeners">%1$s ouvintes mensais</string>
+<string name="monthly_listeners">%1$s ouvintes mensais</string>
     <string name="name">Nome</string>
     <string name="no_playlists_yet">Nenhuma playlist ainda. Use a linha acima para criar uma.</string>
     <string name="no_tracks_here">Nenhuma faixa aqui</string>
@@ -389,22 +381,15 @@
     <string name="save_name">Salvar nome</string>
     <string name="saved_to_downloads">Salvo em Downloads</string>
     <string name="saved_to_youtube_music_account">Salvo na sua conta do YouTube Music</string>
-    <string name="scrobble_delay">Atraso do scrobble</string>
-    <string name="scrobble_delay_subtitle">Até que ponto em uma música fazer scrobble</string>
-    <string name="scrobble_timing">Tempo de scrobble</string>
-    <string name="scrobble_tracks">Fazer scrobble das faixas</string>
-    <string name="scrobble_tracks_subtitle">Registrar reproduções em sua linha do tempo do Last.fm</string>
-    <string name="scrobbling_footer">Faça scrobble das suas reproduções para o Last.fm e ListenBrainz.</string>
-    <string name="scrobbling_paused_footer">Last.fm e ListenBrainz estão pausados para esta versão e retornarão mais tarde. As conexões existentes permanecem salvas.</string>
-    <string name="search_this_folder">Pesquisar nesta pasta</string>
+<string name="scrobbling_footer">Faça scrobble das suas reproduções no ListenBrainz.</string>
+<string name="search_this_folder">Pesquisar nesta pasta</string>
     <string name="search_this_list">Pesquisar nesta lista</string>
     <string name="second_button">Segundo botão</string>
     <string name="share">Compartilhar</string>
     <string name="sharing_as">Compartilhando como @%1$s</string>
     <string name="sharing_listens">Compartilhando o que você ouve</string>
     <string name="show_what_playing">Mostrar o que estou ouvindo</string>
-    <string name="signed_in_as">Conectado como %1$s</string>
-    <string name="signing_in">Fazendo login…</string>
+<string name="signing_in">Fazendo login…</string>
     <string name="sleep_timer">Temporizador de sono</string>
     <string name="sources_no_lossless">Nenhuma fonte habilitada pode fornecer áudio lossless. Adicione um módulo personalizado para tocar arquivos lossless sem transcodificação.</string>
     <string name="sources_order_footer">Se uma fonte não tiver a faixa, o UMtify tenta a próxima. Fontes acima do YouTube podem substituí-lo quando encontram uma versão melhor.</string>
@@ -440,8 +425,7 @@
     <string name="status_online_detail">Ponto verde</string>
     <string name="subscribers">%1$s inscritos</string>
     <string name="tap_to_connect">Toque para conectar</string>
-    <string name="tap_to_sign_in">Toque para fazer login</string>
-    <string name="tap_to_sign_in_discord">Toque para fazer login com o Discord</string>
+<string name="tap_to_sign_in_discord">Toque para fazer login com o Discord</string>
     <string name="token">Token</string>
     <string name="turn_off_timer">Desligar temporizador</string>
     <string name="undo_dislike">Desfazer Não Curtir</string>
@@ -582,9 +566,7 @@
     <string name="no_lyrics_sources_enabled">Nenhuma. As letras não serão baixadas.</string>
     <string name="song_cache_large_subtitle">Mantém até %1$s de áudio em disco. Isso pode usar bastante espaço.</string>
     <string name="song_cache_limit_subtitle">Mantém áudio em disco para navegação instantânea e replays</string>
-    <string name="replay_genres_enabled_subtitle">Pede os gêneros de um artista ao Last.fm. Apenas o nome do artista é enviado.</string>
-    <string name="replay_genres_disabled_subtitle">O gráfico de gêneros do Replay ficará oculto</string>
-    <string name="swipe_plays_next">Deslizar uma música toca em seguida</string>
+<string name="swipe_plays_next">Deslizar uma música toca em seguida</string>
     <string name="swipe_adds_to_queue">Quando desativado, deslizar adiciona ao fim da fila</string>
     <string name="import_backup_warning">Isso substituirá os dados deste dispositivo. Exporte seus dados atuais se quiser mantê-los.</string>
     <string name="youtube_music_account">Conta do YouTube Music</string>
@@ -764,7 +746,6 @@
 
     <string name="miscellaneous_footer">Quando ativado, fechar o app pela tela de apps recentes também interrompe a reprodução de música.</string>
 
-
     <plurals name="track_count_plural">
         <item quantity="one">%1$d faixa</item>
         <item quantity="other">%1$d faixas</item>
@@ -795,7 +776,6 @@
     <string name="automix_mode_performance">Desempenho</string>
 
     <string name="automix_mode_performance_subtitle">4 threads · análise mais rápida · maior uso de bateria e calor</string>
-
 
     <string name="automix_performance">Desempenho do Automix</string>
 
@@ -863,7 +843,6 @@
     <string name="output_precision">Precisão de saída</string>
 
     <string name="personal">Pessoal</string>
-
 
     <string name="playlist_action">Playlist</string>
 
@@ -1006,12 +985,7 @@
 
     <string name="use_this_profile">Usar este perfil</string>
 
-
     <string name="lyrics_offset">Lyrics offset</string>
-
-
-
-
 
     <string name="auto_quick_picks">Quick picks</string>
 
@@ -1148,8 +1122,6 @@
 
     <string name="no_languages_match">No languages match</string>
 
-
-
     <string name="audio_pipeline">Audio Pipeline</string>
     <string name="cast_dialog_title">Cast</string>
     <string name="cast_dialog_subtitle">Play on a Chromecast or Google Cast speaker</string>
@@ -1206,8 +1178,6 @@
 
     <string name="pipeline_device_name">Device Name</string>
 
-
-
     <string name="shared_link">Shared link</string>
 
     <string name="song_will_play_next">Song will play next</string>
@@ -1230,16 +1200,6 @@
     <string name="paxsenix_api_key_configured">PaxSenix API key — configured</string>
 
     <string name="paxsenix_api_key_missing">PaxSenix API key — optional, not configured</string>
-
-
-
-
-
-
-
-
-
-
 
     <string name="source_needs_lossless_output">Precisa de uma saída sem perdas · use um dispositivo compatível com áudio sem perdas</string>
     <string name="source_needs_lossless_bt_codec">Precisa de uma saída sem perdas · o Bluetooth está em %1$s; use um dispositivo compatível com áudio sem perdas</string>

@@ -138,8 +138,7 @@
     <string name="animated_cover_cellular">मोबाइल डेटा पर एनिमेटेड कवर चलाएं</string>
     <string name="replay">Replay</string>
     <string name="replay_subtitle">आपके टॉप गाने, कलाकार, एल्बम और शैलियां</string>
-    <string name="work_out_genres">शैलियों का पता लगाएं</string>
-    <string name="export_data">डेटा एक्सपोर्ट करें</string>
+<string name="export_data">डेटा एक्सपोर्ट करें</string>
     <string name="export_data_subtitle">सेटिंग्स और सुनने का इतिहास, एक JSON फ़ाइल के रूप में</string>
     <string name="import_data">डेटा इंपोर्ट करें</string>
     <string name="import_data_subtitle">इस डिवाइस की सेटिंग्स और इतिहास बदल देता है</string>
@@ -376,21 +375,14 @@
         <item quantity="other">लॉग कॉपी किया गया · %1$d लाइनें</item>
     </plurals>
     <string name="integrate_spotify_canvas">Spotify Canvas सेट अप करें</string>
-    <string name="lastfm_login">Last.fm लॉगिन</string>
-    <string name="lastfm_login_description">स्क्रॉबलिंग चालू करने के लिए अपने Last.fm खाते से साइन इन करें।</string>
-    <string name="lastfm_now_playing_subtitle">आप जो सुन रहे हैं उससे Last.fm अपडेट करें</string>
-    <string name="lead_with_song">गाने को आगे रखें</string>
+<string name="lead_with_song">गाने को आगे रखें</string>
     <string name="lead_with_song_subtitle">कलाकार की जगह शीर्षक को बोल्ड लाइन पर रखता है</string>
     <string name="like">पसंद</string>
     <string name="listenbrainz_token">ListenBrainz टोकन</string>
     <string name="listenbrainz_token_description">स्क्रॉबलिंग चालू करने के लिए अपना ListenBrainz यूज़र टोकन पेस्ट करें।</string>
     <string name="listening_history">सुनने का इतिहास</string>
     <string name="lyrics_sources_order">स्रोत इसी क्रम में आज़माए जाते हैं। क्रम बदलने के लिए खींचें। जब तक सिलेबल लिरिक्स को प्राथमिकता न दी जाए, लिरिक्स वाला पहला स्रोत इस्तेमाल होता है।</string>
-    <string name="max_delay">अधिकतम देरी</string>
-    <string name="max_delay_subtitle">सेकंड में अधिकतम स्क्रॉबल देरी</string>
-    <string name="min_song_duration">गाने की न्यूनतम अवधि</string>
-    <string name="min_song_duration_subtitle">इससे छोटे गाने स्क्रॉबल नहीं होंगे</string>
-    <string name="monthly_listeners">%1$s मासिक श्रोता</string>
+<string name="monthly_listeners">%1$s मासिक श्रोता</string>
     <string name="name">नाम</string>
     <string name="no_playlists_yet">अभी तक कोई प्लेलिस्ट नहीं है। एक बनाने के लिए ऊपर दी गई पंक्ति का इस्तेमाल करें।</string>
     <string name="no_tracks_here">यहां कोई ट्रैक नहीं है</string>
@@ -423,22 +415,15 @@
     <string name="save_name">नाम सेव करें</string>
     <string name="saved_to_downloads">डाउनलोड्स में सेव किया गया</string>
     <string name="saved_to_youtube_music_account">आपके YouTube Music खाते में सेव किया गया</string>
-    <string name="scrobble_delay">स्क्रॉबल देरी</string>
-    <string name="scrobble_delay_subtitle">गाने में कितनी देर बाद उसे स्क्रॉबल करना है</string>
-    <string name="scrobble_timing">स्क्रॉबल टाइमिंग</string>
-    <string name="scrobble_tracks">ट्रैक स्क्रॉबल करें</string>
-    <string name="scrobble_tracks_subtitle">अपनी Last.fm टाइमलाइन पर प्ले लॉग करें</string>
-    <string name="scrobbling_footer">अपनी सुनी चीज़ों को Last.fm और ListenBrainz पर स्क्रॉबल करें।</string>
-    <string name="scrobbling_paused_footer">इस रिलीज़ के लिए Last.fm और ListenBrainz को रोक दिया गया है और वे बाद में वापस आएंगे। मौजूदा कनेक्शन सेव रहेंगे।</string>
-    <string name="search_this_folder">इस फ़ोल्डर में खोजें</string>
+<string name="scrobbling_footer">अपने सुने हुए ट्रैक ListenBrainz पर स्क्रॉबल करें।</string>
+<string name="search_this_folder">इस फ़ोल्डर में खोजें</string>
     <string name="search_this_list">इस लिस्ट में खोजें</string>
     <string name="second_button">दूसरा बटन</string>
     <string name="share">शेयर करें</string>
     <string name="sharing_as">@%1$s के रूप में शेयर हो रहा है</string>
     <string name="sharing_listens">आपकी सुनी चीज़ें शेयर हो रही हैं</string>
     <string name="show_what_playing">मैं क्या चला रहा हूं, यह दिखाएं</string>
-    <string name="signed_in_as">%1$s के रूप में साइन इन है</string>
-    <string name="signing_in">साइन इन हो रहा है…</string>
+<string name="signing_in">साइन इन हो रहा है…</string>
     <string name="sleep_timer">स्लीप टाइमर</string>
     <string name="sources_no_lossless">कोई भी चालू स्रोत लॉसलेस ऑडियो नहीं दे सकता। बिना ट्रांसकोडिंग के उपलब्ध लॉसलेस फ़ाइलें चलाने के लिए कस्टम मॉड्यूल जोड़ें।</string>
     <string name="sources_order_footer">अगर किसी स्रोत के पास कोई ट्रैक नहीं है या उस तक पहुंचा नहीं जा सकता, तो UMtify अगला स्रोत आज़माता है। YouTube से ऊपर के स्रोत बेहतर वर्शन मिलने पर उसकी रिकॉर्डिंग बदल सकते हैं।</string>
@@ -471,8 +456,7 @@
     <string name="status_online_detail">हरा डॉट</string>
     <string name="subscribers">%1$s सब्सक्राइबर</string>
     <string name="tap_to_connect">कनेक्ट करने के लिए टैप करें</string>
-    <string name="tap_to_sign_in">साइन इन करने के लिए टैप करें</string>
-    <string name="tap_to_sign_in_discord">Discord से साइन इन करने के लिए टैप करें</string>
+<string name="tap_to_sign_in_discord">Discord से साइन इन करने के लिए टैप करें</string>
     <string name="token">टोकन</string>
     <string name="turn_off_timer">टाइमर बंद करें</string>
     <string name="undo_dislike">नापसंद वापस लें</string>
@@ -629,9 +613,7 @@
     <string name="no_lyrics_sources_enabled">कोई नहीं। लिरिक्स नहीं लिए जाएंगे।</string>
     <string name="song_cache_large_subtitle">डिस्क पर %1$s तक डाउनलोड किया गया ऑडियो रखता है। इससे आपकी खाली जगह का एक बड़ा हिस्सा इस्तेमाल हो सकता है।</string>
     <string name="song_cache_limit_subtitle">तुरंत सीक करने और दोबारा सुनने के लिए डाउनलोड किया गया ऑडियो डिस्क पर रखता है</string>
-    <string name="replay_genres_enabled_subtitle">किसी कलाकार की शैलियों के लिए Last.fm से पूछता है। केवल कलाकार का नाम भेजा जाता है।</string>
-    <string name="replay_genres_disabled_subtitle">यह बंद रहने पर Replay शैली चार्ट छिपा रहता है</string>
-    <string name="swipe_plays_next">किसी गाने को स्वाइप करने पर वह आगे चलता है</string>
+<string name="swipe_plays_next">किसी गाने को स्वाइप करने पर वह आगे चलता है</string>
     <string name="swipe_adds_to_queue">बंद होने पर, स्वाइप करने से गाना कतार के आखिर में जुड़ जाता है</string>
     <string name="import_backup_warning">इससे इस डिवाइस की सेटिंग्स और सुनने का इतिहास फ़ाइल की सामग्री से बदल जाता है। अगर मौजूदा डेटा रखना चाहते हैं तो पहले उसे एक्सपोर्ट करें।</string>
     <string name="youtube_music_account">YouTube Music खाता</string>
@@ -759,7 +741,6 @@
 
     <string name="miscellaneous_footer">चालू होने पर, हाल के ऐप्स स्क्रीन से ऐप बंद करने पर संगीत प्लेबैक भी रुक जाएगा।</string>
 
-
     <plurals name="track_count_plural">
         <item quantity="one">%1$d ट्रैक</item>
         <item quantity="other">%1$d ट्रैक</item>
@@ -790,7 +771,6 @@
     <string name="automix_mode_performance">उच्च प्रदर्शन</string>
 
     <string name="automix_mode_performance_subtitle">4 थ्रेड्स · सबसे तेज़ विश्लेषण · अधिक बैटरी उपयोग</string>
-
 
     <string name="automix_performance">Automix प्रदर्शन</string>
 
@@ -858,7 +838,6 @@
     <string name="output_precision">आउटपुट परिशुद्धता</string>
 
     <string name="personal">व्यक्तिगत</string>
-
 
     <string name="playlist_action">प्लेलिस्ट</string>
 
@@ -1001,12 +980,7 @@
 
     <string name="use_this_profile">इस प्रोफ़ाइल का उपयोग करें</string>
 
-
     <string name="lyrics_offset">Lyrics offset</string>
-
-
-
-
 
     <string name="auto_quick_picks">Quick picks</string>
 
@@ -1143,8 +1117,6 @@
 
     <string name="no_languages_match">No languages match</string>
 
-
-
     <string name="audio_pipeline">Audio Pipeline</string>
     <string name="cast_dialog_title">Cast</string>
     <string name="cast_dialog_subtitle">Play on a Chromecast or Google Cast speaker</string>
@@ -1201,8 +1173,6 @@
 
     <string name="pipeline_device_name">Device Name</string>
 
-
-
     <string name="shared_link">Shared link</string>
 
     <string name="song_will_play_next">Song will play next</string>
@@ -1225,16 +1195,6 @@
     <string name="paxsenix_api_key_configured">PaxSenix API key — configured</string>
 
     <string name="paxsenix_api_key_missing">PaxSenix API key — optional, not configured</string>
-
-
-
-
-
-
-
-
-
-
 
     <string name="source_needs_lossless_output">लॉसलेस आउटपुट चाहिए · लॉसलेस सपोर्ट करने वाला डिवाइस इस्तेमाल करें</string>
     <string name="source_needs_lossless_bt_codec">लॉसलेस आउटपुट चाहिए · Bluetooth %1$s पर है; लॉसलेस सपोर्ट करने वाला डिवाइस इस्तेमाल करें</string>

@@ -55,7 +55,6 @@ import com.music.bitchord.R
 import com.music.bitchord.data.model.ROW_ART_PX
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.artworkAt
-import com.music.bitchord.data.stats.ArtistFacts
 import com.music.bitchord.data.stats.ReplayPeriod
 import com.music.bitchord.data.stats.ReplaySummary
 import com.music.bitchord.ui.components.PAGE_GUTTER
@@ -116,7 +115,6 @@ fun ReplayScreen(
     val topSongs = stringResource(R.string.top_songs)
     val topArtists = stringResource(R.string.top_artists)
     val topAlbums = stringResource(R.string.top_albums)
-    val topGenres = stringResource(R.string.top_genres)
 
     // Library cards open this same page, but category cards should land on the
     // corresponding chart rather than making the user find it again. Wait for
@@ -217,24 +215,6 @@ fun ReplayScreen(
                             onOpenAlbum(album.browseId, album.title, album.subtitle, album.artworkUrl)
                         },
                     )
-                    if (summary.genres.isNotEmpty()) {
-                        chart(
-                            key = "genres",
-                            title = topGenres,
-                            rows = summary.genreRows(CHART_LENGTH),
-                            dark = dark,
-                            onClick = {},
-                        )
-                    } else if (ArtistFacts.genresAvailable) {
-                        item("genres-pending") {
-                            Note(
-                                text = stringResource(R.string.genres_pending),
-                                dark = dark,
-                                modifier = Modifier.padding(horizontal = PAGE_GUTTER + 4.dp),
-                            )
-                        }
-                    }
-
                     item("habits") { Habits(summary, dark) }
                     item("share") {
                         ReplayActionRow(

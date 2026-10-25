@@ -14,26 +14,6 @@ val localProps = Properties().apply {
     if (file.exists()) file.inputStream().use { load(it) }
 }
 /*
- * Last.fm credentials. A build can override them through local.properties or
- * the environment; when it doesn't, the app's own registered application key is
- * the default so the login screen works in a fresh checkout. The custom fields
- * in the login dialog remain the escape hatch for a key that has to change
- * without a rebuild.
- */
-val lastfmApiKey: String = (
-    localProps.getProperty("LASTFM_API_KEY")
-        ?: System.getenv("LASTFM_API_KEY")
-        ?: ""
-    ).trim().ifBlank { "4cb074db48f3b98f79bf7281b63e79b2" }
-val lastfmSecret: String = (
-    localProps.getProperty("LASTFM_SHARED_SECRET")
-        ?: localProps.getProperty("LASTFM_SECRET")
-        ?: System.getenv("LASTFM_SHARED_SECRET")
-        ?: System.getenv("LASTFM_SECRET")
-        ?: ""
-    ).trim().ifBlank { "316e7c443050a4b88513c8353f8b1f40" }
-
-/*
  * Where Listen Together's party server lives. Not a credential — it is a public
  * URL, and every device in a party has to be pointed at the same one — but it is
  * deployment-specific rather than a property of the source, which is what puts
@@ -77,10 +57,6 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Last.fm credentials: local/env overrides, with the app's own key as
-        // the default. See the top of this file.
-        buildConfigField("String", "LASTFM_API_KEY", "\"${lastfmApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
-        buildConfigField("String", "LASTFM_SECRET", "\"${lastfmSecret.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
         buildConfigField(
             "String",
             "LISTEN_TOGETHER_SERVER",

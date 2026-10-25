@@ -140,8 +140,7 @@
     <string name="animated_cover_cellular">הפעלת עטיפה מונפשת ברשת הסלולרית</string>
     <string name="replay">Replay</string>
     <string name="replay_subtitle">השירים, האמנים, האלבומים והז\'אנרים המובילים שלך</string>
-    <string name="work_out_genres">חישוב ז\'אנרים</string>
-    <string name="export_data">ייצוא נתונים</string>
+<string name="export_data">ייצוא נתונים</string>
     <string name="export_data_subtitle">הגדרות והיסטוריית האזנה, כקובץ JSON אחד</string>
     <string name="import_data">ייבוא נתונים</string>
     <string name="import_data_subtitle">מחליף את ההגדרות וההיסטוריה במכשיר זה</string>
@@ -341,21 +340,14 @@
     <string name="song_count_with_duration">%1$s, %2$s</string>
     <string name="song_count_with_hours_minutes">%1$s, %2$s %3$d דקות</string>
     <string name="integrate_spotify_canvas">הגדר Spotify Canvas</string>
-    <string name="lastfm_login">התחברות ל-Last.fm</string>
-    <string name="lastfm_login_description">היכנס עם חשבון Last.fm שלך כדי להפעיל scrobbling.</string>
-    <string name="lastfm_now_playing_subtitle">עדכן את Last.fm במה שאתה מאזין לו</string>
-    <string name="lead_with_song">התחל עם השיר</string>
+<string name="lead_with_song">התחל עם השיר</string>
     <string name="lead_with_song_subtitle">שם את הכותרת בשורה המודגשת במקום את שם האמן</string>
     <string name="like">לייק</string>
     <string name="listenbrainz_token">אסימון ListenBrainz</string>
     <string name="listenbrainz_token_description">הדבק את אסימון המשתמש של ListenBrainz כדי להפעיל scrobbling.</string>
     <string name="listening_history">היסטוריית האזנה</string>
     <string name="lyrics_sources_order">המקורות נבדקים בסדר זה. גרור כדי לשנות סדר. המקור הראשון עם מילים מנצח, אלא אם ניתנת עדיפות למילים לפי הברות.</string>
-    <string name="max_delay">השהיה מקסימלית</string>
-    <string name="max_delay_subtitle">עיכוב scrobble מקסימלי בשניות</string>
-    <string name="min_song_duration">משך שיר מינימלי</string>
-    <string name="min_song_duration_subtitle">שירים קצרים יותר לא יתועדו</string>
-    <string name="monthly_listeners">%1$s מאזינים חודשיים</string>
+<string name="monthly_listeners">%1$s מאזינים חודשיים</string>
     <string name="name">שם</string>
     <string name="no_playlists_yet">עדיין אין רשימות השמעה. השתמש בשורה למעלה כדי ליצור אחת.</string>
     <string name="no_tracks_here">אין כאן רצועות</string>
@@ -388,22 +380,15 @@
     <string name="save_name">שמור שם</string>
     <string name="saved_to_downloads">נשמר בהורדות</string>
     <string name="saved_to_youtube_music_account">נשמר בחשבון ה-YouTube Music שלך</string>
-    <string name="scrobble_delay">השהיית scrobble</string>
-    <string name="scrobble_delay_subtitle">כמה רחוק בתוך השיר כדי לתעד</string>
-    <string name="scrobble_timing">תזמון scrobble</string>
-    <string name="scrobble_tracks">תיעוד רצועות</string>
-    <string name="scrobble_tracks_subtitle">רשום הפעלות לציר הזמן של Last.fm שלך</string>
-    <string name="scrobbling_footer">תעד את ההאזנות שלך ל-Last.fm ו-ListenBrainz.</string>
-    <string name="scrobbling_paused_footer">Last.fm ו-ListenBrainz מושהים בגרסה זו ויחזרו מאוחר יותר. חיבורים קיימים נשארים שמורים.</string>
-    <string name="search_this_folder">חפש בתיקייה זו</string>
+<string name="scrobbling_footer">שלח את ההאזנות שלך ל-ListenBrainz.</string>
+<string name="search_this_folder">חפש בתיקייה זו</string>
     <string name="search_this_list">חפש ברשימה זו</string>
     <string name="second_button">כפתור שני</string>
     <string name="share">שתף</string>
     <string name="sharing_as">משתף כ-@%1$s</string>
     <string name="sharing_listens">משתף את ההאזנות שלך</string>
     <string name="show_what_playing">הראה מה אני מנגן</string>
-    <string name="signed_in_as">מחובר כ-%1$s</string>
-    <string name="signing_in">מתחבר…</string>
+<string name="signing_in">מתחבר…</string>
     <string name="sleep_timer">טיימר שינה</string>
     <string name="sources_no_lossless">שום מקור מופעל אינו יכול לספק שמע ללא אובדן נתונים. הוסף מודול מותאם אישית כדי להפעיל קבצים זמינים ללא אובדן נתונים ללא המרה.</string>
     <string name="sources_order_footer">אם למקור אין רצועה, UMtify מנסה את הבא. מקורות מעל YouTube יכולים להחליפו כשהם מוצאים גרסה טובה יותר.</string>
@@ -439,8 +424,7 @@
     <string name="status_online_detail">נקודה ירוקה</string>
     <string name="subscribers">%1$s מנויים</string>
     <string name="tap_to_connect">הקש כדי להתחבר</string>
-    <string name="tap_to_sign_in">הקש כדי להיכנס</string>
-    <string name="tap_to_sign_in_discord">הקש כדי להיכנס עם דיסקורד</string>
+<string name="tap_to_sign_in_discord">הקש כדי להיכנס עם דיסקורד</string>
     <string name="token">אסימון</string>
     <string name="turn_off_timer">כבה טיימר</string>
     <string name="undo_dislike">בטל לא אוהב</string>
@@ -581,9 +565,7 @@
     <string name="no_lyrics_sources_enabled">אין. מילים לא יורדו.</string>
     <string name="song_cache_large_subtitle">שומר עד %1$s של שמע שהורד בכונן. זה יכול לתפוס נתח משמעותי מהמקום הפנוי שלך.</string>
     <string name="song_cache_limit_subtitle">שומר שמע שהורד בכונן לחיפוש מיידי ולהשמעות חוזרות</string>
-    <string name="replay_genres_enabled_subtitle">מבקש מ-Last.fm את הז\'אנרים של האמן. רק שם האמן נשלח.</string>
-    <string name="replay_genres_disabled_subtitle">תרשים הז\'אנרים של Replay נשאר מוסתר כל עוד זה כבוי</string>
-    <string name="swipe_plays_next">החלקה של שיר מנגנת אותו בהמשך</string>
+<string name="swipe_plays_next">החלקה של שיר מנגנת אותו בהמשך</string>
     <string name="swipe_adds_to_queue">כאשר מושבת, החלקה מוסיפה את השיר לסוף התור</string>
     <string name="import_backup_warning">זה מחליף את ההגדרות והיסטוריית ההאזנה של מכשיר זה בתוכן הקובץ. ייצא את הנתונים הנוכחיים תחילה אם תרצה לשמור אותם.</string>
     <string name="youtube_music_account">חשבון YouTube Music</string>
@@ -764,7 +746,6 @@
 
     <string name="miscellaneous_footer">כשמופעל, סגירת האפליקציה ממסך האפליקציות האחרונות תעצור גם את השמעת המוזיקה.</string>
 
-
     <plurals name="track_count_plural">
         <item quantity="one">רצועה %1$d</item>
         <item quantity="other">%1$d רצועות</item>
@@ -795,7 +776,6 @@
     <string name="automix_mode_performance">ביצועים</string>
 
     <string name="automix_mode_performance_subtitle">4 תהליכונים · ניתוח מהיר ביותר · שימוש מוגבר בסוללה</string>
-
 
     <string name="automix_performance">ביצועי Automix</string>
 
@@ -863,7 +843,6 @@
     <string name="output_precision">דיוק פלט</string>
 
     <string name="personal">אישי</string>
-
 
     <string name="playlist_action">פלייליסט</string>
 
@@ -1006,12 +985,7 @@
 
     <string name="use_this_profile">השתמש בפרופיל זה</string>
 
-
     <string name="lyrics_offset">Lyrics offset</string>
-
-
-
-
 
     <string name="auto_quick_picks">Quick picks</string>
 
@@ -1148,8 +1122,6 @@
 
     <string name="no_languages_match">No languages match</string>
 
-
-
     <string name="audio_pipeline">Audio Pipeline</string>
     <string name="cast_dialog_title">Cast</string>
     <string name="cast_dialog_subtitle">Play on a Chromecast or Google Cast speaker</string>
@@ -1206,8 +1178,6 @@
 
     <string name="pipeline_device_name">Device Name</string>
 
-
-
     <string name="shared_link">Shared link</string>
 
     <string name="song_will_play_next">Song will play next</string>
@@ -1230,16 +1200,6 @@
     <string name="paxsenix_api_key_configured">PaxSenix API key — configured</string>
 
     <string name="paxsenix_api_key_missing">PaxSenix API key — optional, not configured</string>
-
-
-
-
-
-
-
-
-
-
 
     <string name="source_needs_lossless_output">דורש פלט ללא אובדן · השתמשו במכשיר שתומך באודיו ללא אובדן</string>
     <string name="source_needs_lossless_bt_codec">דורש פלט ללא אובדן · ה‑Bluetooth משתמש ב‑%1$s; השתמשו במכשיר שתומך באודיו ללא אובדן</string>

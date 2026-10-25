@@ -133,8 +133,7 @@
     <string name="animated_cover_cellular">在移动数据下播放动态封面</string>
     <string name="replay">Replay</string>
     <string name="replay_subtitle">你的热门歌曲、艺人、专辑和流派</string>
-    <string name="work_out_genres">推算流派</string>
-    <string name="export_data">导出数据</string>
+<string name="export_data">导出数据</string>
     <string name="export_data_subtitle">将设置和收听记录导出为一个 JSON 文件</string>
     <string name="import_data">导入数据</string>
     <string name="import_data_subtitle">替换此设备上的设置和记录</string>
@@ -362,21 +361,14 @@
         <item quantity="other">日志已复制 · %1$d 行</item>
     </plurals>
     <string name="integrate_spotify_canvas">设置 Spotify Canvas</string>
-    <string name="lastfm_login">Last.fm 登录</string>
-    <string name="lastfm_login_description">使用你的 Last.fm 账号登录以启用 Scrobbling。</string>
-    <string name="lastfm_now_playing_subtitle">将你正在收听的内容更新到 Last.fm</string>
-    <string name="lead_with_song">优先显示歌曲</string>
+<string name="lead_with_song">优先显示歌曲</string>
     <string name="lead_with_song_subtitle">将歌曲标题显示在粗体行，而不是艺人名</string>
     <string name="like">喜欢</string>
     <string name="listenbrainz_token">ListenBrainz 令牌</string>
     <string name="listenbrainz_token_description">粘贴你的 ListenBrainz 用户令牌以启用 Scrobbling。</string>
     <string name="listening_history">收听记录</string>
     <string name="lyrics_sources_order">系统会按此顺序尝试各个来源。拖动即可调整顺序。除非优先使用逐字歌词，否则会采用第一个找到歌词的来源。</string>
-    <string name="max_delay">最大延迟</string>
-    <string name="max_delay_subtitle">Scrobble 的最大延迟（秒）</string>
-    <string name="min_song_duration">最短歌曲时长</string>
-    <string name="min_song_duration_subtitle">短于此时长的歌曲不会被 Scrobble</string>
-    <string name="monthly_listeners">%1$s 位月度听众</string>
+<string name="monthly_listeners">%1$s 位月度听众</string>
     <string name="name">名称</string>
     <string name="no_playlists_yet">还没有播放列表，使用上方的选项创建一个吧。</string>
     <string name="no_tracks_here">这里没有曲目</string>
@@ -409,22 +401,15 @@
     <string name="save_name">保存名称</string>
     <string name="saved_to_downloads">已保存到 Downloads</string>
     <string name="saved_to_youtube_music_account">已保存到你的 YouTube Music 账号</string>
-    <string name="scrobble_delay">Scrobble 延迟</string>
-    <string name="scrobble_delay_subtitle">歌曲播放到什么进度时进行 Scrobble</string>
-    <string name="scrobble_timing">Scrobble 时机</string>
-    <string name="scrobble_tracks">Scrobble 曲目</string>
-    <string name="scrobble_tracks_subtitle">将播放记录同步到你的 Last.fm 时间线</string>
-    <string name="scrobbling_footer">将你的收听记录 Scrobble 到 Last.fm 和 ListenBrainz。</string>
-    <string name="scrobbling_paused_footer">Last.fm 和 ListenBrainz 在此版本中已暂停，稍后会恢复。已有的连接仍会保留。</string>
-    <string name="search_this_folder">搜索此文件夹</string>
+<string name="scrobbling_footer">将你的收听记录同步到 ListenBrainz。</string>
+<string name="search_this_folder">搜索此文件夹</string>
     <string name="search_this_list">搜索此列表</string>
     <string name="second_button">第二个按钮</string>
     <string name="share">分享</string>
     <string name="sharing_as">以 @%1$s 身份分享</string>
     <string name="sharing_listens">正在分享你的收听记录</string>
     <string name="show_what_playing">显示我正在播放的内容</string>
-    <string name="signed_in_as">已登录为 %1$s</string>
-    <string name="signing_in">正在登录…</string>
+<string name="signing_in">正在登录…</string>
     <string name="sleep_timer">睡眠定时器</string>
     <string name="sources_no_lossless">已启用的来源均无法提供无损音频。添加自定义模块即可播放可用的无损文件，而无需转码。</string>
     <string name="sources_order_footer">如果某个来源没有该曲目或无法访问，UMtify 会尝试下一个来源。排在 YouTube 之前的来源如果返回更好的版本，可以替换其录音。</string>
@@ -457,8 +442,7 @@
     <string name="status_online_detail">绿色圆点</string>
     <string name="subscribers">%1$s 位订阅者</string>
     <string name="tap_to_connect">点按以连接</string>
-    <string name="tap_to_sign_in">点按以登录</string>
-    <string name="tap_to_sign_in_discord">点按以使用 Discord 登录</string>
+<string name="tap_to_sign_in_discord">点按以使用 Discord 登录</string>
     <string name="token">令牌</string>
     <string name="turn_off_timer">关闭定时器</string>
     <string name="undo_dislike">撤销不喜欢</string>
@@ -610,9 +594,7 @@
     <string name="no_lyrics_sources_enabled">无。将不会获取歌词。</string>
     <string name="song_cache_large_subtitle">最多在磁盘上保留 %1$s 的已下载音频，这可能会占用较多可用空间。</string>
     <string name="song_cache_limit_subtitle">将已下载的音频保留在磁盘上，以便即时跳转和重播</string>
-    <string name="replay_genres_enabled_subtitle">向 Last.fm 请求艺人的流派信息，仅会发送艺人名称。</string>
-    <string name="replay_genres_disabled_subtitle">关闭此项时，Replay 的流派图表将保持隐藏</string>
-    <string name="swipe_plays_next">滑动歌曲后将其设为下一首播放</string>
+<string name="swipe_plays_next">滑动歌曲后将其设为下一首播放</string>
     <string name="swipe_adds_to_queue">关闭后，滑动会将歌曲添加到播放队列末尾</string>
     <string name="import_backup_warning">这将用文件中的内容替换此设备上的设置和收听记录。如果想保留当前数据，请先将其导出。</string>
     <string name="youtube_music_account">YouTube Music 账号</string>
@@ -739,7 +721,6 @@
 
     <string name="miscellaneous_footer">启用后，从最近任务界面关闭应用也会停止音乐播放。</string>
 
-
     <plurals name="track_count_plural">
         <item quantity="other">%1$d 首曲目</item>
     </plurals>
@@ -769,7 +750,6 @@
     <string name="automix_mode_performance">高性能</string>
 
     <string name="automix_mode_performance_subtitle">4 个线程 · 分析最快 · 发热和耗电较高</string>
-
 
     <string name="automix_performance">Automix 性能</string>
 
@@ -837,7 +817,6 @@
     <string name="output_precision">输出精度</string>
 
     <string name="personal">个人</string>
-
 
     <string name="playlist_action">播放列表</string>
 
@@ -980,12 +959,7 @@
 
     <string name="use_this_profile">使用此资料</string>
 
-
     <string name="lyrics_offset">Lyrics offset</string>
-
-
-
-
 
     <string name="auto_quick_picks">Quick picks</string>
 
@@ -1122,8 +1096,6 @@
 
     <string name="no_languages_match">No languages match</string>
 
-
-
     <string name="audio_pipeline">Audio Pipeline</string>
     <string name="cast_dialog_title">Cast</string>
     <string name="cast_dialog_subtitle">Play on a Chromecast or Google Cast speaker</string>
@@ -1180,8 +1152,6 @@
 
     <string name="pipeline_device_name">Device Name</string>
 
-
-
     <string name="shared_link">Shared link</string>
 
     <string name="song_will_play_next">Song will play next</string>
@@ -1202,16 +1172,6 @@
     <string name="paxsenix_api_key_configured">PaxSenix API key — configured</string>
 
     <string name="paxsenix_api_key_missing">PaxSenix API key — optional, not configured</string>
-
-
-
-
-
-
-
-
-
-
 
     <string name="source_needs_lossless_output">需要无损输出 · 请使用支持无损的设备</string>
     <string name="source_needs_lossless_bt_codec">需要无损输出 · 蓝牙当前为 %1$s；请使用支持无损的设备</string>

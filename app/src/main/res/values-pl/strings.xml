@@ -141,8 +141,7 @@
     <string name="animated_cover_cellular">Odtwarzaj animowaną okładkę w sieci komórkowej</string>
     <string name="replay">Replay</string>
     <string name="replay_subtitle">Twoje top utwory, artyści, albumy i gatunki</string>
-    <string name="work_out_genres">Gatunki do ćwiczeń</string>
-    <string name="export_data">Wyeksportuj dane</string>
+<string name="export_data">Wyeksportuj dane</string>
     <string name="export_data_subtitle">Ustawienia i historia słuchania jako jeden plik JSON</string>
     <string name="import_data">Importuj dane</string>
     <string name="import_data_subtitle">Zastępuje ustawienia i historię na tym urządzeniu</string>
@@ -338,21 +337,14 @@
     <string name="song_count_with_duration">%1$s, %2$s</string>
     <string name="song_count_with_hours_minutes">%1$s, %2$s %3$d minut</string>
     <string name="integrate_spotify_canvas">Skonfiguruj Spotify Canvas</string>
-    <string name="lastfm_login">Logowanie do Last.fm</string>
-    <string name="lastfm_login_description">Zaloguj się za pomocą konta Last.fm, aby włączyć scrobbling.</string>
-    <string name="lastfm_now_playing_subtitle">Aktualizuj Last.fm tym, czego słuchasz</string>
-    <string name="lead_with_song">Podkreśl piosenkę</string>
+<string name="lead_with_song">Podkreśl piosenkę</string>
     <string name="lead_with_song_subtitle">Umieszcza tytuł na pogrubionej linii zamiast artysty</string>
     <string name="like">Lubię</string>
     <string name="listenbrainz_token">Token ListenBrainz</string>
     <string name="listenbrainz_token_description">Wklej token użytkownika ListenBrainz, aby włączyć scrobbling.</string>
     <string name="listening_history">Historia odtwarzania</string>
     <string name="lyrics_sources_order">Źródła są sprawdzane w tej kolejności. Przeciągnij, aby zmienić ich kolejność. Pierwsze źródło z tekstami wygrywa, chyba że preferowane są teksty zsynchronizowane do sylab.</string>
-    <string name="max_delay">Maksymalne opóźnienie</string>
-    <string name="max_delay_subtitle">Maksymalne opóźnienie scrobble w sekundach</string>
-    <string name="min_song_duration">Minimalny czas trwania piosenki</string>
-    <string name="min_song_duration_subtitle">Krótsze utwory nie będą scrobblowane</string>
-    <string name="monthly_listeners">%1$s słuchaczy miesięcznie</string>
+<string name="monthly_listeners">%1$s słuchaczy miesięcznie</string>
     <string name="name">Nazwa</string>
     <string name="no_playlists_yet">Brak playlist. Użyj rzędu powyżej, by jedną stworzyć.</string>
     <string name="no_tracks_here">Nie ma tu utworów</string>
@@ -385,22 +377,15 @@
     <string name="save_name">Zapisz nazwę</string>
     <string name="saved_to_downloads">Zapisano w Pobranych</string>
     <string name="saved_to_youtube_music_account">Zapisano na twoim koncie YouTube Music</string>
-    <string name="scrobble_delay">Opóźnienie scrobblingu</string>
-    <string name="scrobble_delay_subtitle">Jak daleko w piosence, aby to scrobblować</string>
-    <string name="scrobble_timing">Czasowanie scrobblingu</string>
-    <string name="scrobble_tracks">Scrobbluj utwory</string>
-    <string name="scrobble_tracks_subtitle">Zapisuj odtworzenia na swojej osi czasu Last.fm</string>
-    <string name="scrobbling_footer">Scrobbluj to, czego słuchasz, do Last.fm i ListenBrainz.</string>
-    <string name="scrobbling_paused_footer">Last.fm i ListenBrainz są wstrzymane w tej wersji i powrócą później. Istniejące połączenia pozostają zapisane.</string>
-    <string name="search_this_folder">Przeszukaj ten folder</string>
+<string name="scrobbling_footer">Scrobbluj swoje odtworzenia do ListenBrainz.</string>
+<string name="search_this_folder">Przeszukaj ten folder</string>
     <string name="search_this_list">Przeszukaj tę listę</string>
     <string name="second_button">Drugi przycisk</string>
     <string name="share">Udostępnij</string>
     <string name="sharing_as">Udostępnianie jako @%1$s</string>
     <string name="sharing_listens">Udostępnianie tego, co słuchasz</string>
     <string name="show_what_playing">Pokaż co odtwarzam</string>
-    <string name="signed_in_as">Zalogowano jako %1$s</string>
-    <string name="signing_in">Logowanie…</string>
+<string name="signing_in">Logowanie…</string>
     <string name="sleep_timer">Wyłącznik czasowy</string>
     <string name="sources_no_lossless">Żadne włączone źródło nie może dostarczyć bezstratnego dźwięku. Dodaj moduł niestandardowy, aby odtwarzać dostępne pliki bezstratne bez transkodowania.</string>
     <string name="sources_order_footer">Jeśli źródło nie ma utworu lub jest niedostępne, UMtify próbuje następne. Źródła przed YouTube mogą je zastąpić, gdy znajdą lepszą wersję.</string>
@@ -436,8 +421,7 @@
     <string name="status_online_detail">Zielona kropka</string>
     <string name="subscribers">%1$s subskrybentów</string>
     <string name="tap_to_connect">Stuknij, by połączyć</string>
-    <string name="tap_to_sign_in">Stuknij, by zalogować</string>
-    <string name="tap_to_sign_in_discord">Stuknij, aby zalogować się przez Discord</string>
+<string name="tap_to_sign_in_discord">Stuknij, aby zalogować się przez Discord</string>
     <string name="token">Token</string>
     <string name="turn_off_timer">Wyłącz minutnik</string>
     <string name="undo_dislike">Cofnij Nie lubię</string>
@@ -580,9 +564,7 @@
     <string name="no_lyrics_sources_enabled">Brak. Teksty nie zostaną pobrane.</string>
     <string name="song_cache_large_subtitle">Zachowuje maksymalnie %1$s pobranego dźwięku na dysku. To może zająć znaczną część wolnego miejsca.</string>
     <string name="song_cache_limit_subtitle">Trzyma pobrany dźwięk na dysku do natychmiastowego przeglądania i odtwarzania</string>
-    <string name="replay_genres_enabled_subtitle">Pobiera z Last.fm gatunki artysty. Wysłane zostaje tylko imię/nazwa artysty.</string>
-    <string name="replay_genres_disabled_subtitle">Wykres gatunków Replay pozostaje ukryty z powodu wyłączonej funkcji</string>
-    <string name="swipe_plays_next">Przeciągnięcie utworu doda do odtworzenia na następnym miejscu</string>
+<string name="swipe_plays_next">Przeciągnięcie utworu doda do odtworzenia na następnym miejscu</string>
     <string name="swipe_adds_to_queue">Jeżeli jest wyłączone, przeciągnięcie powoduje dodanie go na sam koniec kolejki</string>
     <string name="import_backup_warning">To zamieni te dane z danymi na tym urządzeniu. Wyeksportuj istniejące, jeżeli nie chcesz ich stracić.</string>
     <string name="youtube_music_account">Konto YouTube Music</string>
@@ -795,7 +777,6 @@
 
     <string name="miscellaneous_footer">Po włączeniu, zamknięcie aplikacji z listy ostatnio używanych aplikacji zatrzyma odtwarzanie muzyki.</string>
 
-
     <plurals name="track_count_plural">
         <item quantity="one">%1$d utwór</item>
         <item quantity="few">%1$d utwory</item>
@@ -828,7 +809,6 @@
     <string name="automix_mode_performance">Wydajność</string>
 
     <string name="automix_mode_performance_subtitle">4 wątki · najszybsza analiza · większe zużycie baterii</string>
-
 
     <string name="automix_performance">Wydajność Automix</string>
 
@@ -896,7 +876,6 @@
     <string name="output_precision">Precyzja wyjścia</string>
 
     <string name="personal">Osobisty</string>
-
 
     <string name="playlist_action">Playlista</string>
 
@@ -1039,12 +1018,7 @@
 
     <string name="use_this_profile">Użyj tego profilu</string>
 
-
     <string name="lyrics_offset">Lyrics offset</string>
-
-
-
-
 
     <string name="auto_quick_picks">Quick picks</string>
 
@@ -1183,8 +1157,6 @@
 
     <string name="no_languages_match">No languages match</string>
 
-
-
     <string name="audio_pipeline">Audio Pipeline</string>
     <string name="cast_dialog_title">Cast</string>
     <string name="cast_dialog_subtitle">Play on a Chromecast or Google Cast speaker</string>
@@ -1241,8 +1213,6 @@
 
     <string name="pipeline_device_name">Device Name</string>
 
-
-
     <string name="shared_link">Shared link</string>
 
     <string name="song_will_play_next">Song will play next</string>
@@ -1265,16 +1235,6 @@
     <string name="paxsenix_api_key_configured">PaxSenix API key — configured</string>
 
     <string name="paxsenix_api_key_missing">PaxSenix API key — optional, not configured</string>
-
-
-
-
-
-
-
-
-
-
 
     <string name="source_needs_lossless_output">Wymaga wyjścia bezstratnego · użyj urządzenia obsługującego dźwięk bezstratny</string>
     <string name="source_needs_lossless_bt_codec">Wymaga wyjścia bezstratnego · Bluetooth używa %1$s; użyj urządzenia obsługującego dźwięk bezstratny</string>

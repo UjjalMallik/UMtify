@@ -133,8 +133,7 @@
     <string name="animated_cover_cellular">モバイルデータでアニメーションカバーを再生</string>
     <string name="replay">Replay</string>
     <string name="replay_subtitle">よく聴いた曲、アーティスト、アルバム、ジャンル</string>
-    <string name="work_out_genres">ジャンルを推定</string>
-    <string name="export_data">データをエクスポート</string>
+<string name="export_data">データをエクスポート</string>
     <string name="export_data_subtitle">設定と再生履歴を1つのJSONファイルとして保存</string>
     <string name="import_data">データをインポート</string>
     <string name="import_data_subtitle">このデバイスの設定と履歴を置き換えます</string>
@@ -362,21 +361,14 @@
         <item quantity="other">ログをコピーしました · %1$d行</item>
     </plurals>
     <string name="integrate_spotify_canvas">Spotify Canvasを設定</string>
-    <string name="lastfm_login">Last.fmログイン</string>
-    <string name="lastfm_login_description">Last.fmアカウントでログインするとスクロブリングが有効になります。</string>
-    <string name="lastfm_now_playing_subtitle">今聴いているものをLast.fmに反映します</string>
-    <string name="lead_with_song">曲名を先頭に</string>
+<string name="lead_with_song">曲名を先頭に</string>
     <string name="lead_with_song_subtitle">太字の行にアーティストではなく曲名を表示します</string>
     <string name="like">高評価</string>
     <string name="listenbrainz_token">ListenBrainzトークン</string>
     <string name="listenbrainz_token_description">スクロブリングを有効にするには、ListenBrainzのユーザートークンを貼り付けてください。</string>
     <string name="listening_history">再生履歴</string>
     <string name="lyrics_sources_order">ソースはこの順番で試されます。ドラッグして並べ替えられます。音節単位の歌詞が優先されていない限り、歌詞が見つかった最初のソースが採用されます。</string>
-    <string name="max_delay">最大遅延</string>
-    <string name="max_delay_subtitle">スクロブルまでの最大遅延（秒）</string>
-    <string name="min_song_duration">最小の曲の長さ</string>
-    <string name="min_song_duration_subtitle">これより短い曲はスクロブルされません</string>
-    <string name="monthly_listeners">月間リスナー数 %1$s人</string>
+<string name="monthly_listeners">月間リスナー数 %1$s人</string>
     <string name="name">名前</string>
     <string name="no_playlists_yet">プレイリストはまだありません。上の行から作成してください。</string>
     <string name="no_tracks_here">ここにはトラックがありません</string>
@@ -409,22 +401,15 @@
     <string name="save_name">名前を保存</string>
     <string name="saved_to_downloads">ダウンロードに保存済み</string>
     <string name="saved_to_youtube_music_account">YouTube Musicアカウントに保存済み</string>
-    <string name="scrobble_delay">スクロブル遅延</string>
-    <string name="scrobble_delay_subtitle">曲のどの時点でスクロブルするか</string>
-    <string name="scrobble_timing">スクロブルのタイミング</string>
-    <string name="scrobble_tracks">トラックをスクロブル</string>
-    <string name="scrobble_tracks_subtitle">再生をLast.fmのタイムラインに記録します</string>
-    <string name="scrobbling_footer">再生した曲をLast.fmとListenBrainzにスクロブルします。</string>
-    <string name="scrobbling_paused_footer">Last.fmとListenBrainzは今回のリリースでは一時停止しており、後日再開されます。既存の連携は保存されたままです。</string>
-    <string name="search_this_folder">このフォルダ内を検索</string>
+<string name="scrobbling_footer">再生した曲をListenBrainzにスクロブルします。</string>
+<string name="search_this_folder">このフォルダ内を検索</string>
     <string name="search_this_list">このリスト内を検索</string>
     <string name="second_button">2つ目のボタン</string>
     <string name="share">共有</string>
     <string name="sharing_as">@%1$sとして共有中</string>
     <string name="sharing_listens">再生履歴を共有中</string>
     <string name="show_what_playing">再生中の曲を表示する</string>
-    <string name="signed_in_as">%1$sとしてログイン済み</string>
-    <string name="signing_in">ログイン中…</string>
+<string name="signing_in">ログイン中…</string>
     <string name="sleep_timer">スリープタイマー</string>
     <string name="sources_no_lossless">有効なソースの中にロスレスオーディオを提供できるものがありません。トランスコードなしでロスレスファイルを再生するにはカスタムモジュールを追加してください。</string>
     <string name="sources_order_footer">ソースにトラックがない、またはアクセスできない場合、UMtifyは次のソースを試します。YouTubeより上のソースは、より良いバージョンが見つかった場合にその録音を置き換えられます。</string>
@@ -457,8 +442,7 @@
     <string name="status_online_detail">緑のドット</string>
     <string name="subscribers">登録者数 %1$s人</string>
     <string name="tap_to_connect">タップして接続</string>
-    <string name="tap_to_sign_in">タップしてログイン</string>
-    <string name="tap_to_sign_in_discord">タップしてDiscordでログイン</string>
+<string name="tap_to_sign_in_discord">タップしてDiscordでログイン</string>
     <string name="token">トークン</string>
     <string name="turn_off_timer">タイマーをオフにする</string>
     <string name="undo_dislike">低評価を取り消す</string>
@@ -610,9 +594,7 @@
     <string name="no_lyrics_sources_enabled">なし。歌詞は取得されません。</string>
     <string name="song_cache_large_subtitle">ダウンロードした音声を最大%1$sまでディスクに保持します。空き容量をかなり使用することがあります。</string>
     <string name="song_cache_limit_subtitle">即座にシークや再生ができるよう、ダウンロードした音声をディスクに保持します</string>
-    <string name="replay_genres_enabled_subtitle">Last.fmにアーティストのジャンルを問い合わせます。送信されるのはアーティスト名のみです。</string>
-    <string name="replay_genres_disabled_subtitle">オフの間はReplayのジャンルグラフが表示されません</string>
-    <string name="swipe_plays_next">曲をスワイプすると次に再生します</string>
+<string name="swipe_plays_next">曲をスワイプすると次に再生します</string>
     <string name="swipe_adds_to_queue">オフにすると、スワイプした曲は再生キューの末尾に追加されます</string>
     <string name="import_backup_warning">これによりこのデバイスの設定と再生履歴がファイルの内容で置き換えられます。保持したい場合は先に現在のデータをエクスポートしてください。</string>
     <string name="youtube_music_account">YouTube Musicアカウント</string>
@@ -738,7 +720,6 @@
     <string name="vietnamese">ベトナム語</string>
 
     <string name="miscellaneous_footer">オンにすると、最近のアプリ画面からアプリを終了した際に音楽の再生も停止します。</string>
-
 
     <string name="switch_account">アカウントを切り替える</string>
 
@@ -885,7 +866,6 @@
 
     <string name="card_songs_format">%1$s 曲</string>
 
-
     <plurals name="track_count_plural">
         <item quantity="other">%1$d 曲</item>
     </plurals>
@@ -907,7 +887,6 @@
     <string name="automix_mode_performance">高パフォーマンス</string>
 
     <string name="automix_mode_performance_subtitle">4 スレッド · 最速分析 · 発熱とバッテリー消費が高くなります</string>
-
 
     <string name="automix_performance">Automix パフォーマンス</string>
 
@@ -941,7 +920,6 @@
     <string name="liquid_glass_subtitle">フローティング ナビゲーション バーの屈折ガラス効果。Android 12 以降のみ。</string>
 
     <string name="liquid_glass_unavailable">Android 12 以降が必要です</string>
-
 
     <string name="playlist_action">プレイリスト</string>
 
@@ -981,12 +959,7 @@
 
     <string name="use_this_channel">このチャンネルを使用</string>
 
-
     <string name="lyrics_offset">Lyrics offset</string>
-
-
-
-
 
     <string name="auto_quick_picks">Quick picks</string>
 
@@ -1123,8 +1096,6 @@
 
     <string name="no_languages_match">No languages match</string>
 
-
-
     <string name="audio_pipeline">Audio Pipeline</string>
     <string name="cast_dialog_title">Cast</string>
     <string name="cast_dialog_subtitle">Play on a Chromecast or Google Cast speaker</string>
@@ -1181,8 +1152,6 @@
 
     <string name="pipeline_device_name">Device Name</string>
 
-
-
     <string name="shared_link">Shared link</string>
 
     <string name="song_will_play_next">Song will play next</string>
@@ -1203,16 +1172,6 @@
     <string name="paxsenix_api_key_configured">PaxSenix API key — configured</string>
 
     <string name="paxsenix_api_key_missing">PaxSenix API key — optional, not configured</string>
-
-
-
-
-
-
-
-
-
-
 
     <string name="source_needs_lossless_output">ロスレス出力が必要 · ロスレス対応のデバイスを使用してください</string>
     <string name="source_needs_lossless_bt_codec">ロスレス出力が必要 · Bluetoothは%1$sです。ロスレス対応のデバイスを使用してください</string>

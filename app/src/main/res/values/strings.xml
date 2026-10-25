@@ -191,8 +191,7 @@
     <string name="animated_cover_cellular">Play animated cover over cellular</string>
     <string name="replay">Replay</string>
     <string name="replay_subtitle">Your top songs, artists, albums and genres</string>
-    <string name="work_out_genres">Work out genres</string>
-    <string name="export_data">Export data</string>
+<string name="export_data">Export data</string>
     <string name="export_data_subtitle">Settings and listening history, as one JSON file</string>
     <string name="import_data">Import data</string>
     <string name="import_data_subtitle">Replaces the settings and history on this device</string>
@@ -572,14 +571,7 @@
         <item quantity="other">Log copied · %1$d lines</item>
     </plurals>
     <string name="integrate_spotify_canvas">Set up Spotify Canvas</string>
-    <string name="lastfm_login">Last.fm login</string>
-    <string name="lastfm_login_description">Sign in with your Last.fm account to enable scrobbling.</string>
-    <string name="lastfm_credentials_optional">Using your own Last.fm application? Enter its API key and shared secret. Leave both empty to use the built-in one.</string>
-    <string name="lastfm_api_key">API key (optional)</string>
-    <string name="lastfm_shared_secret">Shared secret (optional)</string>
-    <string name="lastfm_credentials_missing">Enter a Last.fm API key and shared secret.</string>
-    <string name="lastfm_now_playing_subtitle">Update Last.fm with what you are listening to</string>
-    <string name="scrobble_primary_artist_only">Only scrobble primary artist</string>
+<string name="scrobble_primary_artist_only">Only scrobble primary artist</string>
     <string name="scrobble_primary_artist_only_subtitle">Use the first artist when a track credits multiple artists</string>
     <string name="lead_with_song">Lead with the song</string>
     <string name="lead_with_song_subtitle">Puts the title on the bold line instead of the artist</string>
@@ -591,11 +583,7 @@
     <string name="paxsenix_api_key">PaxSenix API key</string>
     <string name="paxsenix_api_key_configured">PaxSenix API key — configured</string>
     <string name="paxsenix_api_key_missing">PaxSenix API key — optional, not configured</string>
-    <string name="max_delay">Maximum delay</string>
-    <string name="max_delay_subtitle">Maximum scrobble delay in seconds</string>
-    <string name="min_song_duration">Minimum song duration</string>
-    <string name="min_song_duration_subtitle">Shorter songs will not scrobble</string>
-    <string name="addon_url_description">Paste the addon’s URL — either its root or its manifest.json. UMtify reads what it can search and stream, then asks it for tracks over plain HTTP.</string>
+<string name="addon_url_description">Paste the addon’s URL — either its root or its manifest.json. UMtify reads what it can search and stream, then asks it for tracks over plain HTTP.</string>
     <string name="monthly_listeners">%1$s monthly listeners</string>
     <string name="name">Name</string>
     <string name="no_playlists_yet">No playlists yet. Use the row above to create one.</string>
@@ -629,22 +617,15 @@
     <string name="save_order">Save</string>
     <string name="saved_to_downloads">Saved to Downloads</string>
     <string name="saved_to_youtube_music_account">Saved to your YouTube Music account</string>
-    <string name="scrobble_delay">Scrobble delay</string>
-    <string name="scrobble_delay_subtitle">How far into a song to scrobble it</string>
-    <string name="scrobble_timing">Scrobble timing</string>
-    <string name="scrobble_tracks">Scrobble tracks</string>
-    <string name="scrobble_tracks_subtitle">Log plays to your Last.fm timeline</string>
-    <string name="scrobbling_footer">Scrobble your listens to Last.fm and ListenBrainz.</string>
-    <string name="scrobbling_paused_footer">Last.fm and ListenBrainz are paused for this release and will return later. Existing connections remain saved.</string>
-    <string name="search_this_folder">Search this folder</string>
+<string name="scrobbling_footer">Scrobble your listens to ListenBrainz.</string>
+<string name="search_this_folder">Search this folder</string>
     <string name="search_this_list">Search this list</string>
     <string name="second_button">Second button</string>
     <string name="share">Share</string>
     <string name="sharing_as">Sharing as @%1$s</string>
     <string name="sharing_listens">Sharing your listens</string>
     <string name="show_what_playing">Show what I am playing</string>
-    <string name="signed_in_as">Signed in as %1$s</string>
-    <string name="signing_in">Signing in…</string>
+<string name="signing_in">Signing in…</string>
     <string name="sleep_timer">Sleep timer</string>
     <string name="sources_no_lossless">No enabled source can provide lossless audio. Add an addon to play lossless files without transcoding.</string>
     <string name="sources_order_footer">If a source does not have a track or cannot be reached, UMtify tries the next one. Sources above YouTube can replace its recording when they return a better version.</string>
@@ -677,8 +658,7 @@
     <string name="status_online_detail">Green dot</string>
     <string name="subscribers">%1$s subscribers</string>
     <string name="tap_to_connect">Tap to connect</string>
-    <string name="tap_to_sign_in">Tap to sign in</string>
-    <string name="tap_to_sign_in_discord">Tap to sign in with Discord</string>
+<string name="tap_to_sign_in_discord">Tap to sign in with Discord</string>
     <string name="token">Token</string>
     <string name="turn_off_timer">Turn off timer</string>
     <string name="undo_dislike">Undo dislike</string>
@@ -845,9 +825,7 @@
     <string name="no_lyrics_sources_enabled">None. Lyrics will not be fetched.</string>
     <string name="song_cache_large_subtitle">Keeps up to %1$s of downloaded audio on disk. This can take a noticeable share of your free space.</string>
     <string name="song_cache_limit_subtitle">Keeps downloaded audio on disk for instant seeking and replays</string>
-    <string name="replay_genres_enabled_subtitle">Asks Last.fm for an artist’s genres. Only the artist name is sent.</string>
-    <string name="replay_genres_disabled_subtitle">The Replay genre chart stays hidden while this is off</string>
-    <string name="swipe_plays_next">Swiping a song plays it next</string>
+<string name="swipe_plays_next">Swiping a song plays it next</string>
     <string name="swipe_adds_to_queue">When disabled, swiping adds the song to the end of the queue</string>
     <string name="import_backup_warning">This replaces this device’s settings and listening history with the contents of the file. Export the current data first if you want to keep it.</string>
     <string name="youtube_music_account">YouTube Music account</string>
@@ -1088,7 +1066,6 @@
 
     <string name="shelf_artists_on_the_rise">Artists on the rise</string>
 
-
     <string name="shelf_top_tunes_right_now">Top tunes right now</string>
 
     <string name="shelf_concerts">Concerts</string>
@@ -1110,7 +1087,6 @@
     <string name="shelf_recents">Recents</string>
 
     <string name="subscriptions">Subscriptions</string>
-
 
     <string name="card_views_format">%1$s views</string>
 

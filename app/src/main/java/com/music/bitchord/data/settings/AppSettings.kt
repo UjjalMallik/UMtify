@@ -7,7 +7,6 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import androidx.media3.common.Player
-import com.music.bitchord.BuildConfig
 import com.music.bitchord.auth.AuthStore
 import com.music.bitchord.data.canvas.SpotifyToken
 import com.music.bitchord.data.lyrics.LyricsSource
@@ -544,20 +543,6 @@ object AppSettings {
      */
     val showCacheFolder = MutableStateFlow(false)
 
-    // ── Replay ──────────────────────────────────────────────────────────────
-
-    /**
-     * Whether Replay may work out a genre chart.
-     *
-     * Its own switch because it is the one part of Replay that isn't purely
-     * local: everything else on that page is counted on this device and never
-     * leaves it, while a genre has to be looked up by artist name — see
-     * [ArtistFacts][com.music.bitchord.data.stats.ArtistFacts]. On by default,
-     * since it sends a name and nothing else and the answer is what makes a
-     * quarter of the page exist; off, the genre chart simply isn't drawn.
-     */
-    val replayGenres = MutableStateFlow(true)
-
     // ── Library ─────────────────────────────────────────────────────────────
 
     /** Hides short clips, recorder output and non-music formats from Local Music. */
@@ -630,18 +615,6 @@ object AppSettings {
     /** One release gate shared by the settings UI and the playback service. */
     val scrobblingAvailable = true
 
-    val lastfmEnabled = MutableStateFlow(false)
-    val lastfmUsername = MutableStateFlow("")
-    val lastfmSessionKey = MutableStateFlow("")
-    val lastfmApiKey = MutableStateFlow("")
-    val lastfmSecret = MutableStateFlow("")
-    val lastfmEndpoint = MutableStateFlow("")
-    val lastfmScrobbleEnabled = MutableStateFlow(false)
-    val lastfmNowPlaying = MutableStateFlow(false)
-    val lastfmPrimaryArtistOnly = MutableStateFlow(false)
-    val scrobbleMinDuration = MutableStateFlow(30)
-    val scrobbleDelayPercent = MutableStateFlow(0.5f)
-    val scrobbleDelaySeconds = MutableStateFlow(180)
     val listenBrainzEnabled = MutableStateFlow(false)
     val listenBrainzToken = MutableStateFlow("")
     val listenBrainzPrimaryArtistOnly = MutableStateFlow(false)
@@ -899,23 +872,10 @@ object AppSettings {
         com.music.bitchord.data.lyrics.PaxSenix.setApiKey(paxSenixApiKey.value)
         audioCacheLimitBytes.value = clampCacheLimit(prefs.getLong(KEY_CACHE_LIMIT, DEFAULT_CACHE_LIMIT_BYTES))
         showCacheFolder.value = prefs.getBoolean(KEY_SHOW_CACHE_FOLDER, false)
-        lastfmEnabled.value = prefs.getBoolean(KEY_LASTFM_ENABLED, false)
-        lastfmUsername.value = prefs.getString(KEY_LASTFM_USERNAME, "").orEmpty()
-        lastfmSessionKey.value = prefs.getString(KEY_LASTFM_SESSION_KEY, "").orEmpty()
-        lastfmApiKey.value = prefs.getString(KEY_LASTFM_API_KEY, "").orEmpty().ifBlank { BuildConfig.LASTFM_API_KEY }
-        lastfmSecret.value = prefs.getString(KEY_LASTFM_SECRET, "").orEmpty().ifBlank { BuildConfig.LASTFM_SECRET }
-        lastfmEndpoint.value = prefs.getString(KEY_LASTFM_ENDPOINT, "").orEmpty()
-        lastfmScrobbleEnabled.value = prefs.getBoolean(KEY_LASTFM_SCROBBLE_ENABLED, false)
-        lastfmNowPlaying.value = prefs.getBoolean(KEY_LASTFM_NOW_PLAYING, false) && lastfmScrobbleEnabled.value
-        lastfmPrimaryArtistOnly.value = prefs.getBoolean(KEY_LASTFM_PRIMARY_ARTIST_ONLY, false)
-        scrobbleMinDuration.value = prefs.getInt(KEY_SCROBBLE_MIN_DURATION, 30)
-        scrobbleDelayPercent.value = prefs.getFloat(KEY_SCROBBLE_DELAY_PERCENT, 0.5f)
-        scrobbleDelaySeconds.value = prefs.getInt(KEY_SCROBBLE_DELAY_SECONDS, 180)
         listenBrainzEnabled.value = prefs.getBoolean(KEY_LISTENBRAINZ_ENABLED, false)
         listenBrainzToken.value = prefs.getString(KEY_LISTENBRAINZ_TOKEN, "").orEmpty()
         listenBrainzPrimaryArtistOnly.value = prefs.getBoolean(KEY_LISTENBRAINZ_PRIMARY_ARTIST_ONLY, false)
         spotifySpdcToken.value = prefs.getString(KEY_SPOTIFY_SPDC_TOKEN, "").orEmpty()
-        replayGenres.value = prefs.getBoolean(KEY_REPLAY_GENRES, true)
         filterNonMusicAudio.value = prefs.getBoolean(KEY_FILTER_NON_MUSIC_AUDIO, true)
         localMusicSort.value = readLocalMusicSort(KEY_LOCAL_MUSIC_SORT)
         downloadedMusicSort.value = readLocalMusicSort(KEY_DOWNLOADED_MUSIC_SORT)
@@ -1494,55 +1454,10 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_SHOW_CACHE_FOLDER, value).apply()
     }
 
-    fun setLastfmEnabled(value: Boolean) {
-        lastfmEnabled.value = value
-        prefs.edit().putBoolean(KEY_LASTFM_ENABLED, value).apply()
-    }
-
-    fun setLastfmUsername(value: String) {
-        lastfmUsername.value = value
-        prefs.edit().putString(KEY_LASTFM_USERNAME, value).apply()
-    }
-
-    fun setLastfmSessionKey(value: String) {
-        lastfmSessionKey.value = value
-        prefs.edit().putString(KEY_LASTFM_SESSION_KEY, value).apply()
-    }
-
-    fun setLastfmApiKey(value: String) {
-        lastfmApiKey.value = value
-        prefs.edit().putString(KEY_LASTFM_API_KEY, value).apply()
-    }
-
-    fun setLastfmSecret(value: String) {
-        lastfmSecret.value = value
-        prefs.edit().putString(KEY_LASTFM_SECRET, value).apply()
-    }
-
-    fun setLastfmEndpoint(value: String) {
-        lastfmEndpoint.value = value
-        prefs.edit().putString(KEY_LASTFM_ENDPOINT, value).apply()
-    }
-
     fun setSpotifySpdcToken(value: String) {
         spotifySpdcToken.value = value
         prefs.edit().putString(KEY_SPOTIFY_SPDC_TOKEN, value).apply()
         SpotifyToken.invalidate()
-    }
-
-    fun setLastfmScrobbleEnabled(value: Boolean) {
-        lastfmScrobbleEnabled.value = value
-        if (!value) lastfmNowPlaying.value = false
-        prefs.edit()
-            .putBoolean(KEY_LASTFM_SCROBBLE_ENABLED, value)
-            .putBoolean(KEY_LASTFM_NOW_PLAYING, if (value) lastfmNowPlaying.value else false)
-            .apply()
-    }
-
-    fun setLastfmNowPlaying(value: Boolean) {
-        if (!lastfmScrobbleEnabled.value && value) return
-        lastfmNowPlaying.value = value
-        prefs.edit().putBoolean(KEY_LASTFM_NOW_PLAYING, value).apply()
     }
 
     fun setOutputPcmMode(value: OutputPcmMode) {
@@ -1568,26 +1483,6 @@ object AppSettings {
     fun setExportDownloads(value: Boolean) {
         exportDownloads.value = value
         prefs.edit().putBoolean(KEY_EXPORT_DOWNLOADS, value).apply()
-    }
-
-    fun setLastfmPrimaryArtistOnly(value: Boolean) {
-        lastfmPrimaryArtistOnly.value = value
-        prefs.edit().putBoolean(KEY_LASTFM_PRIMARY_ARTIST_ONLY, value).apply()
-    }
-
-    fun setScrobbleMinDuration(value: Int) {
-        scrobbleMinDuration.value = value
-        prefs.edit().putInt(KEY_SCROBBLE_MIN_DURATION, value).apply()
-    }
-
-    fun setScrobbleDelayPercent(value: Float) {
-        scrobbleDelayPercent.value = value
-        prefs.edit().putFloat(KEY_SCROBBLE_DELAY_PERCENT, value).apply()
-    }
-
-    fun setScrobbleDelaySeconds(value: Int) {
-        scrobbleDelaySeconds.value = value
-        prefs.edit().putInt(KEY_SCROBBLE_DELAY_SECONDS, value).apply()
     }
 
     fun setListenBrainzEnabled(value: Boolean) {
@@ -1680,11 +1575,6 @@ object AppSettings {
     fun setDiscordInfoDismissed(value: Boolean) {
         discordInfoDismissed.value = value
         prefs.edit().putBoolean(KEY_DISCORD_INFO_DISMISSED, value).apply()
-    }
-
-    fun setReplayGenres(value: Boolean) {
-        replayGenres.value = value
-        prefs.edit().putBoolean(KEY_REPLAY_GENRES, value).apply()
     }
 
     fun setFilterNonMusicAudio(value: Boolean) {
@@ -1936,9 +1826,6 @@ object AppSettings {
      * See [exportPrefs].
      */
     private val SECRETS = setOf(
-        KEY_LASTFM_SESSION_KEY,
-        KEY_LASTFM_API_KEY,
-        KEY_LASTFM_SECRET,
         KEY_LISTENBRAINZ_TOKEN,
         KEY_SPOTIFY_SPDC_TOKEN,
         KEY_PAXSENIX_API_KEY,
@@ -2049,7 +1936,6 @@ object AppSettings {
     private const val KEY_LYRICS_SOURCE_ORDER = "lyrics_source_order"
     private const val KEY_PRIORITIZE_SYLLABLE_SYNC = "prioritize_syllable_sync"
     private const val KEY_PAXSENIX_API_KEY = "paxsenix_api_key"
-    private const val KEY_REPLAY_GENRES = "replay_genres"
     private const val KEY_FILTER_NON_MUSIC_AUDIO = "filter_non_music_audio"
     private const val KEY_SHOW_CACHE_FOLDER = "show_cache_folder"
     private const val KEY_LOCAL_MUSIC_SORT = "local_music_sort"
@@ -2068,18 +1954,6 @@ object AppSettings {
     private const val KEY_SMB_USERNAME = "smb_username"
     private const val KEY_PINNED_PLAYLISTS = "pinned_playlists"
 
-    private const val KEY_LASTFM_ENABLED = "lastfm_enabled"
-    private const val KEY_LASTFM_USERNAME = "lastfm_username"
-    private const val KEY_LASTFM_SESSION_KEY = "lastfm_session_key"
-    private const val KEY_LASTFM_API_KEY = "lastfm_api_key"
-    private const val KEY_LASTFM_SECRET = "lastfm_secret"
-    private const val KEY_LASTFM_ENDPOINT = "lastfm_endpoint"
-    private const val KEY_LASTFM_SCROBBLE_ENABLED = "lastfm_scrobble_enabled"
-    private const val KEY_LASTFM_NOW_PLAYING = "lastfm_now_playing"
-    private const val KEY_LASTFM_PRIMARY_ARTIST_ONLY = "lastfm_primary_artist_only"
-    private const val KEY_SCROBBLE_MIN_DURATION = "scrobble_min_duration"
-    private const val KEY_SCROBBLE_DELAY_PERCENT = "scrobble_delay_percent"
-    private const val KEY_SCROBBLE_DELAY_SECONDS = "scrobble_delay_seconds"
     private const val KEY_LISTENBRAINZ_ENABLED = "listenbrainz_enabled"
     private const val KEY_LISTENBRAINZ_TOKEN = "listenbrainz_token"
     private const val KEY_LISTENBRAINZ_PRIMARY_ARTIST_ONLY = "listenbrainz_primary_artist_only"

@@ -133,8 +133,7 @@
     <string name="animated_cover_cellular">Putar sampul animasi lewat data seluler</string>
     <string name="replay">Replay</string>
     <string name="replay_subtitle">Lagu, artis, album, dan genre teratas Anda</string>
-    <string name="work_out_genres">Hitung genre</string>
-    <string name="export_data">Ekspor data</string>
+<string name="export_data">Ekspor data</string>
     <string name="export_data_subtitle">Pengaturan dan riwayat mendengarkan, sebagai satu file JSON</string>
     <string name="import_data">Impor data</string>
     <string name="import_data_subtitle">Mengganti pengaturan dan riwayat di perangkat ini</string>
@@ -362,21 +361,14 @@
         <item quantity="other">Log disalin · %1$d baris</item>
     </plurals>
     <string name="integrate_spotify_canvas">Siapkan Spotify Canvas</string>
-    <string name="lastfm_login">Login Last.fm</string>
-    <string name="lastfm_login_description">Masuk dengan akun Last.fm Anda untuk mengaktifkan scrobbling.</string>
-    <string name="lastfm_now_playing_subtitle">Perbarui Last.fm dengan apa yang sedang Anda dengarkan</string>
-    <string name="lead_with_song">Utamakan lagu</string>
+<string name="lead_with_song">Utamakan lagu</string>
     <string name="lead_with_song_subtitle">Menempatkan judul pada baris tebal, bukan artis</string>
     <string name="like">Suka</string>
     <string name="listenbrainz_token">Token ListenBrainz</string>
     <string name="listenbrainz_token_description">Tempel token pengguna ListenBrainz Anda untuk mengaktifkan scrobbling.</string>
     <string name="listening_history">Riwayat mendengarkan</string>
     <string name="lyrics_sources_order">Sumber dicoba dalam urutan ini. Seret untuk mengatur ulang urutannya. Sumber pertama yang memiliki lirik akan digunakan, kecuali lirik per suku kata diprioritaskan.</string>
-    <string name="max_delay">Penundaan maksimum</string>
-    <string name="max_delay_subtitle">Penundaan scrobble maksimum dalam detik</string>
-    <string name="min_song_duration">Durasi lagu minimum</string>
-    <string name="min_song_duration_subtitle">Lagu yang lebih pendek tidak akan di-scrobble</string>
-    <string name="monthly_listeners">%1$s pendengar bulanan</string>
+<string name="monthly_listeners">%1$s pendengar bulanan</string>
     <string name="name">Nama</string>
     <string name="no_playlists_yet">Belum ada playlist. Gunakan baris di atas untuk membuat satu.</string>
     <string name="no_tracks_here">Tidak ada trek di sini</string>
@@ -409,22 +401,15 @@
     <string name="save_name">Simpan nama</string>
     <string name="saved_to_downloads">Disimpan ke Unduhan</string>
     <string name="saved_to_youtube_music_account">Disimpan ke akun YouTube Music Anda</string>
-    <string name="scrobble_delay">Penundaan scrobble</string>
-    <string name="scrobble_delay_subtitle">Seberapa jauh ke dalam lagu untuk melakukan scrobble</string>
-    <string name="scrobble_timing">Waktu scrobble</string>
-    <string name="scrobble_tracks">Scrobble trek</string>
-    <string name="scrobble_tracks_subtitle">Catat putaran ke linimasa Last.fm Anda</string>
-    <string name="scrobbling_footer">Scrobble apa yang Anda dengarkan ke Last.fm dan ListenBrainz.</string>
-    <string name="scrobbling_paused_footer">Last.fm dan ListenBrainz dijeda untuk rilisan ini dan akan kembali nanti. Koneksi yang ada tetap tersimpan.</string>
-    <string name="search_this_folder">Cari di folder ini</string>
+<string name="scrobbling_footer">Scrobble pendengaran Anda ke ListenBrainz.</string>
+<string name="search_this_folder">Cari di folder ini</string>
     <string name="search_this_list">Cari di daftar ini</string>
     <string name="second_button">Tombol kedua</string>
     <string name="share">Bagikan</string>
     <string name="sharing_as">Berbagi sebagai @%1$s</string>
     <string name="sharing_listens">Membagikan yang Anda dengarkan</string>
     <string name="show_what_playing">Tampilkan apa yang sedang saya putar</string>
-    <string name="signed_in_as">Masuk sebagai %1$s</string>
-    <string name="signing_in">Sedang masuk…</string>
+<string name="signing_in">Sedang masuk…</string>
     <string name="sleep_timer">Timer tidur</string>
     <string name="sources_no_lossless">Tidak ada sumber aktif yang dapat menyediakan audio lossless. Tambahkan modul kustom untuk memutar file lossless yang tersedia tanpa transcoding.</string>
     <string name="sources_order_footer">Jika suatu sumber tidak memiliki trek atau tidak dapat dijangkau, UMtify mencoba sumber berikutnya. Sumber di atas YouTube dapat menggantikan rekamannya saat menghasilkan versi yang lebih baik.</string>
@@ -457,8 +442,7 @@
     <string name="status_online_detail">Titik hijau</string>
     <string name="subscribers">%1$s pelanggan</string>
     <string name="tap_to_connect">Ketuk untuk menghubungkan</string>
-    <string name="tap_to_sign_in">Ketuk untuk masuk</string>
-    <string name="tap_to_sign_in_discord">Ketuk untuk masuk dengan Discord</string>
+<string name="tap_to_sign_in_discord">Ketuk untuk masuk dengan Discord</string>
     <string name="token">Token</string>
     <string name="turn_off_timer">Matikan timer</string>
     <string name="undo_dislike">Batalkan tidak suka</string>
@@ -610,9 +594,7 @@
     <string name="no_lyrics_sources_enabled">Tidak ada. Lirik tidak akan diambil.</string>
     <string name="song_cache_large_subtitle">Menyimpan hingga %1$s audio yang diunduh di disk. Ini dapat memakan porsi ruang kosong yang cukup besar.</string>
     <string name="song_cache_limit_subtitle">Menyimpan audio yang diunduh di disk untuk pencarian posisi dan pemutaran ulang instan</string>
-    <string name="replay_genres_enabled_subtitle">Meminta genre artis dari Last.fm. Hanya nama artis yang dikirim.</string>
-    <string name="replay_genres_disabled_subtitle">Grafik genre Replay tetap tersembunyi selama ini nonaktif</string>
-    <string name="swipe_plays_next">Menggeser lagu memutarnya berikutnya</string>
+<string name="swipe_plays_next">Menggeser lagu memutarnya berikutnya</string>
     <string name="swipe_adds_to_queue">Saat dinonaktifkan, menggeser menambahkan lagu ke akhir antrean</string>
     <string name="import_backup_warning">Ini akan mengganti pengaturan dan riwayat mendengarkan perangkat ini dengan isi file tersebut. Ekspor data saat ini terlebih dahulu jika ingin menyimpannya.</string>
     <string name="youtube_music_account">Akun YouTube Music</string>
@@ -739,7 +721,6 @@
 
     <string name="miscellaneous_footer">Jika diaktifkan, menutup aplikasi dari layar aplikasi terbaru juga akan menghentikan pemutaran musik.</string>
 
-
     <plurals name="track_count_plural">
         <item quantity="other">%1$d lagu</item>
     </plurals>
@@ -769,7 +750,6 @@
     <string name="automix_mode_performance">Performa</string>
 
     <string name="automix_mode_performance_subtitle">4 thread · analisis tercepat · penggunaan baterai lebih tinggi</string>
-
 
     <string name="automix_performance">Performa Automix</string>
 
@@ -837,7 +817,6 @@
     <string name="output_precision">Presisi output</string>
 
     <string name="personal">Pribadi</string>
-
 
     <string name="playlist_action">Playlist</string>
 
@@ -980,12 +959,7 @@
 
     <string name="use_this_profile">Gunakan profil ini</string>
 
-
     <string name="lyrics_offset">Lyrics offset</string>
-
-
-
-
 
     <string name="auto_quick_picks">Quick picks</string>
 
@@ -1122,8 +1096,6 @@
 
     <string name="no_languages_match">No languages match</string>
 
-
-
     <string name="audio_pipeline">Audio Pipeline</string>
     <string name="cast_dialog_title">Cast</string>
     <string name="cast_dialog_subtitle">Play on a Chromecast or Google Cast speaker</string>
@@ -1180,8 +1152,6 @@
 
     <string name="pipeline_device_name">Device Name</string>
 
-
-
     <string name="shared_link">Shared link</string>
 
     <string name="song_will_play_next">Song will play next</string>
@@ -1202,16 +1172,6 @@
     <string name="paxsenix_api_key_configured">PaxSenix API key — configured</string>
 
     <string name="paxsenix_api_key_missing">PaxSenix API key — optional, not configured</string>
-
-
-
-
-
-
-
-
-
-
 
     <string name="source_needs_lossless_output">Perlu output lossless · gunakan perangkat yang mendukung lossless</string>
     <string name="source_needs_lossless_bt_codec">Perlu output lossless · Bluetooth memakai %1$s; gunakan perangkat yang mendukung lossless</string>
