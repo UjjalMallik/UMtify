@@ -488,51 +488,63 @@ private const val WAVE_PERIOD_MS = 3200
 private const val TAU = 6.2831855f
 
 /**
- * The frosted body: two full-size vertical gradients, white over the sleeve's
- * accent. Both cover the entire clipped shape, so no smaller circle is ever
- * painted inside the button.
+ * The clear glass body: white only. The catchlight at the top edge, a quiet
+ * upper mid, then a sharp drop to a near-clear body at the 42% gloss horizon —
+ * that step is what reads as a curved wet-glass reflection rather than a flat
+ * white wash. The lower body stays almost clear and the bottom edge catches the
+ * light again.
+ *
+ * The sleeve's accent is deliberately absent here; see [glassAccentVeil]. One
+ * tinted full-size layer at even a quarter opacity is what turned these buttons
+ * solid purple, brown or red on a bright cover.
  */
-private fun glassBodyWhite(): Brush =
+private fun glassBody(): Brush =
     Brush.verticalGradient(
         colorStops = arrayOf(
-            0f to Color.White.copy(alpha = 0.38f),
-            0.45f to Color.White.copy(alpha = 0.18f),
-            0.85f to Color.White.copy(alpha = 0.14f),
-            1f to Color.White.copy(alpha = 0.26f),
+            0f to Color.White.copy(alpha = 0.34f),
+            0.38f to Color.White.copy(alpha = 0.12f),
+            0.42f to Color.White.copy(alpha = 0.04f),
+            0.85f to Color.White.copy(alpha = 0.06f),
+            1f to Color.White.copy(alpha = 0.20f),
         ),
-    )
-
-private fun glassBodyAccent(accent: Color): Brush =
-    Brush.verticalGradient(
-        colorStops = arrayOf(
-            0f to accent.copy(alpha = 0.25f),
-            0.45f to accent.copy(alpha = 0.22f),
-            0.85f to accent.copy(alpha = 0.25f),
-            1f to accent.copy(alpha = 0.30f),
-        ),
-    )
-
-/** The glossy lip across the top third of the glass. */
-private fun glassTopSheen(): Brush =
-    Brush.verticalGradient(
-        colorStops = arrayOf(
-            0f to Color.White.copy(alpha = 0.32f),
-            0.35f to Color.Transparent,
-        ),
-    )
-
-/** The polished outer rim, bright at the top and still visible at the bottom. */
-private fun glassRim(): Brush =
-    Brush.verticalGradient(
-        0f to Color.White.copy(alpha = 0.85f),
-        0.5f to Color.White.copy(alpha = 0.25f),
-        1f to Color.White.copy(alpha = 0.50f),
     )
 
 /**
- * One pass of the button's glass, confined to its own clipped shape: a solid
- * frosted body, the waves when the pill is playing, the top sheen and one crisp
- * 1.5dp rim. There is no inset ring, radial gradient or nested circle.
+ * The sleeve's own hue, at the barest whisper in the lower body. Five percent
+ * is the ceiling: enough that the glass belongs to the cover, never enough to
+ * paint over it.
+ */
+private fun glassAccentVeil(accent: Color): Brush =
+    Brush.verticalGradient(
+        colorStops = arrayOf(
+            0f to Color.Transparent,
+            0.55f to Color.Transparent,
+            0.85f to accent.copy(alpha = 0.05f),
+            1f to accent.copy(alpha = 0.03f),
+        ),
+    )
+
+/**
+ * The crystal's specular rim: a hard 90% catchlight along the top arc, a thin
+ * bright line down the sides and a second, softer reflection at the bottom
+ * curve. Drawn inset by half its width so the whole stroke stays inside the
+ * clipped shape.
+ */
+private fun glassRim(): Brush =
+    Brush.verticalGradient(
+        colorStops = arrayOf(
+            0f to Color.White.copy(alpha = 0.90f),
+            0.35f to Color.White.copy(alpha = 0.22f),
+            0.70f to Color.White.copy(alpha = 0.12f),
+            1f to Color.White.copy(alpha = 0.55f),
+        ),
+    )
+
+/**
+ * One pass of the button's glass, confined to its own clipped shape: the clear
+ * white body, a whisper of the sleeve in its lower fifth, the waves when the
+ * pill is playing, and one crisp 1.5dp specular rim. There is no inset ring,
+ * radial gradient, nested circle or full-size accent fill.
  */
 private fun DrawScope.drawTransportGlass(
     accent: Color,
@@ -542,10 +554,9 @@ private fun DrawScope.drawTransportGlass(
     wavePhase: Float = 0f,
 ) {
     val radius = CornerRadius(cornerRadius, cornerRadius)
-    drawRoundRect(brush = glassBodyWhite(), cornerRadius = radius)
-    drawRoundRect(brush = glassBodyAccent(accent), cornerRadius = radius)
+    drawRoundRect(brush = glassBody(), cornerRadius = radius)
+    drawRoundRect(brush = glassAccentVeil(accent), cornerRadius = radius)
     drawLiquidWaves(accent = accent, level = waveLevel, phase = wavePhase)
-    drawRoundRect(brush = glassTopSheen(), cornerRadius = radius)
     val inset = borderWidth / 2f
     drawRoundRect(
         brush = glassRim(),
@@ -557,8 +568,11 @@ private fun DrawScope.drawTransportGlass(
 }
 
 /**
- * Two slow sine waves filling the lower half of the pill. [level] is the
- * animated amplitude: at 0 the liquid is gone and the glass reads clear.
+ * Two slow sine waves filling the lower half of the pill: clear liquid sloshing
+ * inside crystal. The back wave is plain white at 12%, the front one carries
+ * only a 10% hint of the sleeve — enough to tint the liquid, not enough to
+ * paint the glass. [level] is the animated amplitude: at 0 the liquid is gone
+ * and the glass reads clear.
  */
 private fun DrawScope.drawLiquidWaves(accent: Color, level: Float, phase: Float) {
     if (level <= 0.01f) return
@@ -588,7 +602,7 @@ private fun DrawScope.drawLiquidWaves(accent: Color, level: Float, phase: Float)
     drawPath(
         path = wavePath(cycles = 1.6f, offset = 0f, speed = 1f, baseline = backBase),
         brush = Brush.verticalGradient(
-            0f to Color.White.copy(alpha = 0.14f * level),
+            0f to Color.White.copy(alpha = 0.12f * level),
             1f to Color.Transparent,
             startY = backBase - amplitude,
             endY = h,
@@ -597,8 +611,8 @@ private fun DrawScope.drawLiquidWaves(accent: Color, level: Float, phase: Float)
     drawPath(
         path = wavePath(cycles = 1.25f, offset = 2.1f, speed = -1f, baseline = frontBase),
         brush = Brush.verticalGradient(
-            0f to accent.copy(alpha = 0.22f * level),
-            1f to accent.copy(alpha = 0.02f * level),
+            0f to accent.copy(alpha = 0.10f * level),
+            1f to Color.Transparent,
             startY = frontBase - amplitude,
             endY = h,
         ),
@@ -693,11 +707,12 @@ internal fun TransportRow(
 }
 
 /**
- * A disc of solid, frosted glass for one end of the transport: a white and
- * accent vertical body, one top sheen and a single crisp rim, all drawn inside
- * the clipped circle. There are no shadows, radial gradients or inner circles,
- * so the interior stays one even piece of glass. The glyph stays crisp white,
- * and a tap slides it a few dps in the skip direction before it settles back.
+ * A disc of clear crystal glass for one end of the transport: a white glass
+ * body with a sharp gloss horizon, a whisper of the sleeve low down and one
+ * crisp specular rim, all drawn inside the clipped circle. There are no
+ * shadows, radial gradients or inner circles, so the interior stays one even
+ * piece of glass. The glyph stays crisp white, and a tap slides it a few dps in
+ * the skip direction before it settles back.
  */
 @Composable
 private fun TransportDisc(

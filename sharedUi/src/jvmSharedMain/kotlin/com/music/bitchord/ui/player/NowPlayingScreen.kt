@@ -118,9 +118,9 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.scale
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerInputChange
@@ -175,8 +175,11 @@ import dev.chrisbanes.haze.ExperimentalHazeApi
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.PI
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 
 /** Collapsed-header geometry, shared by the layout and its animation. */
@@ -321,8 +324,180 @@ private val CARD_ART_GUTTER = 20.dp
  * it as the artwork breathing.
  */
 private const val AURA_TURN_SECONDS = 9f
-/** How far the two breathing ripples travel out past the card's edge. */
-private val AURA_RIPPLE_REACH = 18.dp
+/**
+ * How far past the card's edge the ribbon's centre line sits. With the wave
+ * below, the aura lives in the 6–12dp band around the artwork: wide enough to
+ * read as a halo, far too narrow to reach the "Playing from…" header above or
+ * the quality badge under it.
+ */
+private val AURA_REACH = 9.dp
+/**
+ * The ribbon's peak displacement either way. Three dp is a 6dp crest-to-trough
+ * ripple, which fills that band without ever leaving it.
+ */
+private val AURA_WAVE_AMPLITUDE = 3.dp
+/** Perimeter samples per ribbon; enough for a smooth curve at any card size. */
+private const val AURA_WAVE_SAMPLES = 220
+/** One turn, in radians, for the perimeter wave. */
+private const val AURA_TAU = 6.2831855f
+
+/**
+ * A closed ribbon that follows a rounded rectangle [reach] past its edge,
+ * undulating by [amplitude] on a two-harmonic sine.
+ *
+ * Sampled along the perimeter rather than by angle from the centre: that keeps
+ * the wave evenly paced down the straight sides and around the 28dp corners,
+ * and gives every point the edge's own outward normal to travel along. The
+ * result is one smooth closed path — nothing rotated, no polygon corners, and
+ * nothing that can wander into the header or the badge while the phase moves.
+ * [phaseRadians] advances while the music plays; at zero amplitude the ribbon
+ * lies flat against the card border.
+ */
+private fun wavyCardRibbon(
+    width: Float,
+    height: Float,
+    cornerRadius: Float,
+    reach: Float,
+    amplitude: Float,
+    phaseRadians: Float,
+): Path {
+    val halfWidth = width / 2f
+    val halfHeight = height / 2f
+    val radius = cornerRadius.coerceIn(0f, minOf(halfWidth, halfHeight)).coerceAtLeast(0.01f)
+    val straightX = (halfWidth - radius).coerceAtLeast(0f)
+    val straightY = (halfHeight - radius).coerceAtLeast(0f)
+    val horizontalRun = straightX * 2f
+    val verticalRun = straightY * 2f
+    val quarterArc = radius * (PI.toFloat() / 2f)
+    val perimeter = horizontalRun * 2f + verticalRun * 2f + quarterArc * 4f
+    if (perimeter <= 0f) return Path()
+
+    fun shiftedPoint(
+        x: Float,
+        y: Float,
+        normalX: Float,
+        normalY: Float,
+        theta: Float,
+    ): Offset {
+        val wave = 0.6f * sin(theta * 6f + phaseRadians) +
+            0.4f * cos(theta * 4f - phaseRadians * 1.3f)
+        val push = reach + amplitude * wave
+        return Offset(x + normalX * push, y + normalY * push)
+    }
+
+    fun arcPoint(
+        centerX: Float,
+        centerY: Float,
+        startRadians: Float,
+        distance: Float,
+        theta: Float,
+    ): Offset {
+        val angle = startRadians + distance / radius
+        val normalX = cos(angle)
+        val normalY = sin(angle)
+        return shiftedPoint(
+            x = centerX + normalX * radius,
+            y = centerY + normalY * radius,
+            normalX = normalX,
+            normalY = normalY,
+            theta = theta,
+        )
+    }
+
+    val points = ArrayList<Offset>(AURA_WAVE_SAMPLES)
+    for (index in 0 until AURA_WAVE_SAMPLES) {
+        val distance = perimeter * index / AURA_WAVE_SAMPLES
+        val theta = AURA_TAU * distance / perimeter
+        points += when {
+            distance < horizontalRun ->
+                shiftedPoint(-straightX + distance, -halfHeight, 0f, -1f, theta)
+
+            distance < horizontalRun + quarterArc ->
+                arcPoint(
+                    centerX = straightX,
+                    centerY = -straightY,
+                    startRadians = -PI.toFloat() / 2f,
+                    distance = distance - horizontalRun,
+                    theta = theta,
+                )
+
+            distance < horizontalRun + quarterArc + verticalRun ->
+                shiftedPoint(
+                    halfWidth,
+                    -straightY + (distance - horizontalRun - quarterArc),
+                    1f,
+                    0f,
+                    theta,
+                )
+
+            distance < horizontalRun + quarterArc * 2f + verticalRun ->
+                arcPoint(
+                    centerX = straightX,
+                    centerY = straightY,
+                    startRadians = 0f,
+                    distance = distance - horizontalRun - quarterArc - verticalRun,
+                    theta = theta,
+                )
+
+            distance < horizontalRun * 2f + quarterArc * 2f + verticalRun ->
+                shiftedPoint(
+                    straightX - (distance - horizontalRun - quarterArc * 2f - verticalRun),
+                    halfHeight,
+                    0f,
+                    1f,
+                    theta,
+                )
+
+            distance < horizontalRun * 2f + quarterArc * 3f + verticalRun ->
+                arcPoint(
+                    centerX = -straightX,
+                    centerY = straightY,
+                    startRadians = PI.toFloat() / 2f,
+                    distance = distance - horizontalRun * 2f - quarterArc * 2f - verticalRun,
+                    theta = theta,
+                )
+
+            distance < horizontalRun * 2f + quarterArc * 3f + verticalRun * 2f ->
+                shiftedPoint(
+                    -halfWidth,
+                    straightY - (distance - horizontalRun * 2f - quarterArc * 3f - verticalRun),
+                    -1f,
+                    0f,
+                    theta,
+                )
+
+            else ->
+                arcPoint(
+                    centerX = -straightX,
+                    centerY = -straightY,
+                    startRadians = PI.toFloat(),
+                    distance = distance - horizontalRun * 2f - quarterArc * 3f - verticalRun * 2f,
+                    theta = theta,
+                )
+        }
+    }
+
+    // Quadratic segments through the midpoints: the sampled polygon is turned
+    // into a curve with no corners of its own, and closing it joins the last
+    // sample to the first without a seam.
+    val path = Path()
+    val first = points.first()
+    val last = points.last()
+    path.moveTo((last.x + first.x) / 2f, (last.y + first.y) / 2f)
+    for (index in points.indices) {
+        val current = points[index]
+        val next = points[(index + 1) % points.size]
+        path.quadraticBezierTo(
+            current.x,
+            current.y,
+            (current.x + next.x) / 2f,
+            (current.y + next.y) / 2f,
+        )
+    }
+    path.close()
+    return path
+}
+
 /** Clear air between the sleeve's bottom edge and the stats pill under it. */
 private val STATS_BADGE_GAP = 10.dp
 /**
@@ -2937,50 +3112,61 @@ fun NowPlayingScreen(
                                     // light around.
                                     if (!heroMode && auraIntensity > 0.01f) {
                                         val lit = auraIntensity
-                                        val phase = auraPhase.floatValue
-                                        // Two ripples half a cycle apart: one is
-                                        // leaving the edge as the other is born,
-                                        // so the card reads as breathing rather
-                                        // than as blinking.
-                                        val rippleReach = AURA_RIPPLE_REACH.toPx()
-                                        val rippleStroke = 1.4.dp.toPx()
-                                        for (index in 0 until 2) {
-                                            val travel = (phase * 2f + index * 0.5f) % 1f
-                                            val grow = rippleReach * (0.05f + travel * 0.95f)
-                                            val strength = (1f - travel) * lit
-                                            drawRoundRect(
-                                                color = playerTones.accent.copy(alpha = 0.22f * strength),
-                                                topLeft = Offset(-grow, -grow),
-                                                size = Size(size.width + grow * 2f, size.height + grow * 2f),
-                                                cornerRadius = CornerRadius(corner + grow * 0.65f),
-                                                style = Stroke(width = rippleStroke * (0.7f + travel * 1.2f)),
-                                            )
-                                        }
-                                        // The travelling border: a sweep of the
-                                        // sleeve's vibrant accent, its pastel
-                                        // and one white glint, rotated whole.
-                                        // Drawn entirely outside the card so the
-                                        // cover never clips half of it.
-                                        val sweep = 1.6.dp.toPx()
-                                        val center = Offset(size.width / 2f, size.height / 2f)
-                                        rotate(degrees = phase * 360f, pivot = center) {
-                                            drawRoundRect(
-                                                brush = Brush.sweepGradient(
-                                                    0f to Color.Transparent,
-                                                    0.18f to playerTones.accent.copy(alpha = 0.18f * lit),
-                                                    0.34f to Color.White.copy(alpha = 0.65f * lit),
-                                                    0.44f to playerTones.primaryContainer.copy(alpha = 0.32f * lit),
-                                                    0.62f to playerTones.accent.copy(alpha = 0.14f * lit),
-                                                    0.86f to Color.Transparent,
-                                                    1f to Color.Transparent,
-                                                    center = center,
-                                                ),
-                                                topLeft = Offset(-sweep, -sweep),
-                                                size = Size(size.width + sweep * 2f, size.height + sweep * 2f),
-                                                cornerRadius = CornerRadius(corner + sweep),
-                                                style = Stroke(width = sweep),
-                                            )
-                                        }
+                                        val phase = auraPhase.floatValue * AURA_TAU
+                                        // A continuous ribbon that hugs the
+                                        // rounded square, rather than the old
+                                        // expanding rectangles: those read as a
+                                        // broken polygon, and at their widest
+                                        // reached into the header above and the
+                                        // quality badge below. This one stays in
+                                        // the 6–12dp band around the card.
+                                        val ribbon = wavyCardRibbon(
+                                            width = size.width,
+                                            height = size.height,
+                                            cornerRadius = corner,
+                                            reach = AURA_REACH.toPx(),
+                                            amplitude = AURA_WAVE_AMPLITUDE.toPx() * lit,
+                                            phaseRadians = phase,
+                                        )
+                                        // A soft wash behind the ribbon. It is
+                                        // painted behind the sleeve, so only
+                                        // the ring outside the artwork shows.
+                                        drawPath(
+                                            path = ribbon,
+                                            color = playerTones.accent.copy(alpha = 0.12f * lit),
+                                        )
+                                        // The ribbon itself: the sleeve's
+                                        // accent, one white glint and the
+                                        // deeper secondary tone, swept round
+                                        // the four sides as it undulates.
+                                        drawPath(
+                                            path = ribbon,
+                                            brush = Brush.sweepGradient(
+                                                0f to playerTones.accent.copy(alpha = 0.35f * lit),
+                                                0.34f to Color.White.copy(alpha = 0.25f * lit),
+                                                0.67f to playerTones.secondaryContainer.copy(alpha = 0.30f * lit),
+                                                1f to playerTones.accent.copy(alpha = 0.35f * lit),
+                                                center = Offset(size.width / 2f, size.height / 2f),
+                                            ),
+                                            style = Stroke(width = 3.dp.toPx()),
+                                        )
+                                        // A second ribbon drifting the other
+                                        // way, so the two weave across each
+                                        // other's crests instead of moving as
+                                        // one painted outline.
+                                        val counterFlow = wavyCardRibbon(
+                                            width = size.width,
+                                            height = size.height,
+                                            cornerRadius = corner,
+                                            reach = AURA_REACH.toPx(),
+                                            amplitude = AURA_WAVE_AMPLITUDE.toPx() * lit,
+                                            phaseRadians = -phase * 0.8f,
+                                        )
+                                        drawPath(
+                                            path = counterFlow,
+                                            color = Color.White.copy(alpha = 0.35f * lit),
+                                            style = Stroke(width = 1.8.dp.toPx()),
+                                        )
                                     }
                                     // The tight ring is the colour the cover
                                     // actually carries, not its diluted wash.
