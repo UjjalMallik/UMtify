@@ -9,16 +9,22 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.music.bitchord.data.SongEditStore
 import com.music.bitchord.data.canvas.CanvasArtwork
 import com.music.bitchord.data.canvas.CanvasRepository
 import com.music.bitchord.data.listentogether.ListenTogether
 import com.music.bitchord.data.lyrics.LyricLine
 import com.music.bitchord.data.lyrics.LyricsTranslation
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.model.SongEdit
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.LastPlayerScreen
 import com.music.bitchord.playback.AudioOutputStatus
@@ -94,6 +100,38 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     @Composable
     override fun rememberRemoteArtworkUrl(song: Song?): String? =
         com.music.bitchord.ui.components.rememberRemoteArtworkUrl(song)
+
+    @Composable
+    override fun rememberOriginalArtworkUrl(song: Song?): String? =
+        com.music.bitchord.ui.components.rememberRemoteArtworkUrl(song, ignoreCustom = true)
+
+    override val songEdits: StateFlow<Map<String, SongEdit>> get() = SongEditStore.edits
+
+    override fun setSongEdit(songId: String, edit: SongEdit) = SongEditStore.set(songId, edit)
+
+    override fun clearSongEdit(songId: String) = SongEditStore.clear(songId)
+
+    override suspend fun saveSongCover(songId: String, coverUri: String): String? =
+        SongEditStore.saveCover(app, songId, coverUri)
+
+    override fun deleteSongCover(path: String?) = SongEditStore.deleteCover(path)
+
+    @Composable
+    override fun rememberCoverPicker(onPicked: (String) -> Unit): () -> Unit {
+        // PickVisualMedia, not GetContent: it is the system photo picker on
+        // current Android and falls back to the document picker below it, and
+        // it grants access to just the one image the listener chose.
+        val launcher = rememberLauncherForActivityResult(
+            ActivityResultContracts.PickVisualMedia(),
+        ) { uri -> uri?.let { onPicked(it.toString()) } }
+        return remember(launcher) {
+            {
+                launcher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                )
+            }
+        }
+    }
 
     // Lazy, all three: the player is not the first thing the process does, and
     // none of these objects should be woken for a launch that never opens it.

@@ -423,9 +423,12 @@ internal fun LandscapeCredits(
     onOpenArtist: (browseId: String?, name: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Only the words are overridden; the share and like gates below ask the
+    // original track, because a renamed local file is still a local file.
+    val display = rememberEditedSong(song)
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
         Crossfade(
-            targetState = song.title to song.artist,
+            targetState = display.title to display.artist,
             animationSpec = tween(durationMillis = 300),
             modifier = Modifier.weight(1f),
             label = "landscapeCredits",
@@ -433,7 +436,7 @@ internal fun LandscapeCredits(
             Column {
                 var titleOverflowing by remember { mutableStateOf(false) }
                 MarqueeText(
-                    text = song.title,
+                    text = display.title,
                     style = MaterialTheme.typography.titleLarge,
                     color = Color.White,
                     onOverflowChange = { titleOverflowing = it },
@@ -446,9 +449,9 @@ internal fun LandscapeCredits(
                 )
                 Spacer(Modifier.height(2.dp))
                 ArtistCreditsMarquee(
-                    text = song.artist,
-                    credits = remember(song.artist, song.artists, song.artistId) {
-                        artistCredits(song.artist, song.artists, song.artistId)
+                    text = display.artist,
+                    credits = remember(display.artist, display.artists, display.artistId) {
+                        artistCredits(display.artist, display.artists, display.artistId)
                     },
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.W500),
                     color = LocalPlayerTint.current.copy(alpha = 0.55f),

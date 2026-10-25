@@ -93,7 +93,12 @@ internal fun rememberCanvasArtwork(song: Song): CanvasArtwork? {
  * Everything here is keyed on the cover's [url] — see [rememberPlayerArtwork].
  */
 @Stable
-internal class PlayerArtwork(val url: String?, private val context: PlatformContext) {
+internal class PlayerArtwork(
+    val url: String?,
+    private val context: PlatformContext,
+    /** The decode's longest side: the card's 800, or the banner's source size. */
+    private val artPx: Int = ART_PX,
+) {
     /**
      * Whether the cover is on screen. Keyed on the artwork rather than on the
      * track, because that is what it actually describes and because only Coil
@@ -141,12 +146,13 @@ internal class PlayerArtwork(val url: String?, private val context: PlatformCont
         val attempt = attempt
         ImageRequest.Builder(context)
             .data(url)
-            .size(ART_PX)
+            .size(artPx)
             // What makes a retry a new request as far as Coil's model comparison
             // is concerned. Only from the second go onwards, so the ordinary
-            // request stays byte-identical to the one the mesh and the palette
-            // make of the same cover and goes on sharing their memory-cache
-            // entry. The disk key is unaffected either way.
+            // request stays byte-identical across recompositions — and, in the
+            // banner, to the one the mesh and the palette make of the same
+            // cover, sharing their memory-cache entry. The disk key is
+            // unaffected either way.
             .apply { if (attempt > 0) memoryCacheKeyExtra("attempt", attempt.toString()) }
             .build()
     }
@@ -169,10 +175,10 @@ internal class PlayerArtwork(val url: String?, private val context: PlatformCont
 }
 
 @Composable
-internal fun rememberPlayerArtwork(remoteArt: String?): PlayerArtwork {
+internal fun rememberPlayerArtwork(remoteArt: String?, artPx: Int = ART_PX): PlayerArtwork {
     val context = LocalPlatformContext.current
-    val artUrl = remoteArt?.artworkAt(ART_PX)
-    val art = remember(artUrl) { PlayerArtwork(artUrl, context) }
+    val artUrl = remoteArt?.artworkAt(artPx)
+    val art = remember(artUrl, artPx) { PlayerArtwork(artUrl, context, artPx) }
     LaunchedEffect(artUrl, art.failed) {
         // A track with no artwork at all fails immediately and would fail
         // identically three more times: there is no request to make, so there is

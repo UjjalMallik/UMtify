@@ -34,6 +34,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Downloading
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
@@ -86,6 +87,7 @@ import com.music.bitchord.download.Downloads
 import com.music.bitchord.playback.SleepTimer
 import com.music.bitchord.ui.components.thumbnailBorder
 import com.music.bitchord.ui.icons.BitChordIcons
+import com.music.bitchord.ui.player.rememberEditedSong
 import com.music.bitchord.ui.theme.ArtworkPalette
 import com.music.bitchord.ui.theme.rememberArtworkPalette
 import kotlinx.coroutines.delay
@@ -181,6 +183,12 @@ fun SongActionsSheet(
     /** Opens the timing control offered only by the main player's menu. */
     onLyricsOffset: (() -> Unit)? = null,
     /**
+     * Opens the title / artist / album / cover editor. Offered only for a
+     * track with a file behind it — see [isOffline] — because a streamed
+     * catalogue row has no local identity to hang a private edit on.
+     */
+    onEditSong: (() -> Unit)? = null,
+    /**
      * True while a lookup for this track's album/artist ids is still in
      * flight, so it isn't yet known whether "Open album" and "Open artist"
      * belong on this sheet at all. Only the player ever opens a sheet before
@@ -210,7 +218,9 @@ fun SongActionsSheet(
     val palette = if (menu) {
         neutralMenuPalette()
     } else {
-        rememberArtworkPalette(song.thumbnailUrl, artPx = ROW_ART_PX)
+        // The cover the row was showing, which is the listener's own one when
+        // they have set it — the sheet has to open on the same colours.
+        rememberArtworkPalette(rememberRemoteArtworkUrl(song), artPx = ROW_ART_PX)
     }
     val liked = likeStatus == LikeStatus.LIKE
     val disliked = likeStatus == LikeStatus.DISLIKE
@@ -298,6 +308,19 @@ fun SongActionsSheet(
 
         DownloadRow(song, palette, isOffline, onDownload)
         WebDavUploadRow(song, palette, isOffline, onUploadToWebDav)
+        // Only local and downloaded tracks: a streamed catalogue row's title
+        // belongs to YouTube Music, and an override would have no file to
+        // travel with when the song is played on another device.
+        if (isOffline) {
+            onEditSong?.let {
+                ActionRow(
+                    icon = Icons.Rounded.Edit,
+                    label = stringResource(R.string.edit_song_info),
+                    accent = palette.accent,
+                    onClick = it,
+                )
+            }
+        }
         ActionRow(
             icon = Icons.Rounded.Radio,
             label = stringResource(R.string.start_radio),
@@ -376,7 +399,7 @@ fun SongActionsSheet(
         return
     }
 
-    TintedSheet(palette = palette, imageUrl = song.thumbnailUrl, modifier = modifier) {
+    TintedSheet(palette = palette, imageUrl = rememberRemoteArtworkUrl(song), modifier = modifier) {
         if (pickingSleepTimer) {
             SleepTimerPicker(palette = palette, onBack = { pickingSleepTimer = false })
             return@TintedSheet
@@ -908,6 +931,7 @@ internal fun SheetTrackHeader(
     modifier: Modifier = Modifier,
     subtitleColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
+    val display = rememberEditedSong(song)
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -915,7 +939,9 @@ internal fun SheetTrackHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AsyncImage(
-            model = song.artworkAt(ROW_ART_PX),
+            // Through the host's resolver so a custom cover shows here too;
+            // artworkAt is a no-op on a local file path.
+            model = rememberRemoteArtworkUrl(song)?.artworkAt(ROW_ART_PX),
             contentDescription = null,
             modifier = Modifier
                 .size(52.dp)
@@ -926,12 +952,12 @@ internal fun SheetTrackHeader(
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             ExplicitSongTitle(
-                song = song,
+                song = display,
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onBackground,
             )
             Text(
-                text = song.artist,
+                text = display.artist,
                 style = MaterialTheme.typography.bodyMedium,
                 color = subtitleColor,
                 maxLines = 1,

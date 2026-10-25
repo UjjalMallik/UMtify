@@ -172,6 +172,7 @@ import com.music.bitchord.ui.haptics.Haptic
 import com.music.bitchord.ui.haptics.rememberHaptics
 import com.music.bitchord.ui.icons.BitChordIcons
 import com.music.bitchord.ui.player.CanvasArtworkPlayer
+import com.music.bitchord.ui.player.rememberEditedSongs
 import com.music.bitchord.ui.theme.ArtworkPalette
 import com.music.bitchord.ui.theme.rememberArtworkPalette
 import kotlin.math.roundToInt
@@ -339,11 +340,14 @@ fun DetailScreen(
     folder: LocalFolder? = null,
 ) {
     val rawSongs = (page.songs as? UiState.Success)?.data.orEmpty()
-    // A folder keeps its own sort — the one its top bar menu sets — rather
-    // than the per-page one a release takes.
+    // A device folder keeps its own sort — the one its top bar menu sets — rather
+    // than the per-page one a release takes. The overrides are applied first so
+    // that sort, search and the folder's artist/album tabs all read the names
+    // the listener gave the tracks, not the ones the files came with.
     val folderSort = folder?.sort
-    val songs = remember(rawSongs, songSort, folderSort) {
-        if (folderSort != null) rawSongs.sortedForLibrary(folderSort) else rawSongs.sortedForDetail(songSort)
+    val editedSongs = rememberEditedSongs(rawSongs)
+    val songs = remember(editedSongs, songSort, folderSort) {
+        if (folderSort != null) editedSongs.sortedForLibrary(folderSort) else editedSongs.sortedForDetail(songSort)
     }
     // What a numbered row shows regardless of [songSort] — an album's track
     // numbers are the sleeve's own and must not relabel themselves to match
@@ -437,7 +441,7 @@ fun DetailScreen(
     // first while it is on.
     val folderState = folder?.state
     val folderGroups = if (folder != null && folderState != null) {
-        rememberLocalFolderGroups(page.browseId, folder, folderState.tab, rawSongs, query)
+        rememberLocalFolderGroups(page.browseId, folder, folderState.tab, editedSongs, query)
     } else {
         emptyList()
     }

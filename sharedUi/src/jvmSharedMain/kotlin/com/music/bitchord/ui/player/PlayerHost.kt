@@ -9,6 +9,7 @@ import com.music.bitchord.data.listentogether.PartyMember
 import com.music.bitchord.data.lyrics.LyricLine
 import com.music.bitchord.data.lyrics.LyricsSource
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.model.SongEdit
 import com.music.bitchord.data.settings.AudioQuality
 import com.music.bitchord.data.settings.LastPlayerScreen
 import com.music.bitchord.data.settings.SmartAnalysis
@@ -47,6 +48,42 @@ interface PlayerHost {
      */
     @Composable
     fun rememberRemoteArtworkUrl(song: Song?): String?
+
+    /**
+     * [rememberRemoteArtworkUrl] without the listener's own cover — the source
+     * artwork, for the editor's preview once a custom cover is reset.
+     */
+    @Composable
+    fun rememberOriginalArtworkUrl(song: Song?): String? = rememberRemoteArtworkUrl(song)
+
+    // ---- The listener's own metadata ----------------------------------------
+    /**
+     * Title, artist, album and cover overrides, keyed by [Song.videoId].
+     *
+     * A platform with no store answers with an always-empty flow, which makes
+     * the edit affordance and every override quietly absent there.
+     */
+    val songEdits: StateFlow<Map<String, SongEdit>> get() = NoSongEdits
+
+    fun setSongEdit(songId: String, edit: SongEdit) = Unit
+
+    fun clearSongEdit(songId: String) = Unit
+
+    /**
+     * Copies a picked image into this platform's storage and returns the
+     * absolute path to draw it from, or null if the image could not be read.
+     */
+    suspend fun saveSongCover(songId: String, coverUri: String): String? = null
+
+    /** Removes a cover written by [saveSongCover], when it is still there. */
+    fun deleteSongCover(path: String?) = Unit
+
+    /**
+     * A launcher for the system photo picker, which hands [onPicked] the chosen
+     * image's content URI. A no-op where the platform has no picker.
+     */
+    @Composable
+    fun rememberCoverPicker(onPicked: (String) -> Unit): () -> Unit = {}
 
     /** The system output level the player's volume bar drives, if it drives one. */
     val volume: SystemVolume
@@ -125,6 +162,9 @@ interface PlayerHost {
 private val NoCast = MutableStateFlow(CastUi())
 
 private val NoWatch = MutableStateFlow(WatchOutputUi())
+
+/** Shared by every host with no metadata store; never written, so sharing it is free. */
+private val NoSongEdits = MutableStateFlow<Map<String, SongEdit>>(emptyMap())
 
 /** What the output drawer needs to draw the watch's row. */
 data class WatchOutputUi(

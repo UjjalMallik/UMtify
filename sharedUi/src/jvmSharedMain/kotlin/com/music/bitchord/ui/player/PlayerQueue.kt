@@ -78,7 +78,9 @@ import coil3.compose.AsyncImage
 import com.music.bitchord.ui.components.thumbnailBorder
 import com.music.bitchord.ui.icons.BitChordIcons
 import com.music.bitchord.data.model.QueueTier
+import com.music.bitchord.data.model.ROW_ART_PX
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.model.artworkAt
 import com.music.bitchord.playback.autoplaySectionStart
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -763,6 +765,7 @@ private fun InlineQueueRow(
     onDrag: (Float) -> Unit = {},
     onDragEnd: () -> Unit = {},
 ) {
+    val display = rememberEditedSong(song)
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -799,7 +802,9 @@ private fun InlineQueueRow(
             Spacer(Modifier.width(4.dp))
         }
         AsyncImage(
-            model = rememberRemoteArtworkUrl(song),
+            // A 44dp row tile: ask the source for a thumbnail-sized copy rather
+            // than decoding the full artwork this list would then throw away.
+            model = rememberRemoteArtworkUrl(song)?.artworkAt(ROW_ART_PX),
             contentDescription = null,
             modifier = Modifier
                 .size(44.dp)
@@ -810,12 +815,12 @@ private fun InlineQueueRow(
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             ExplicitSongTitle(
-                song = song,
+                song = display,
                 style = MaterialTheme.typography.titleMedium,
                 color = if (isCurrent) Color.White else Color.White.copy(alpha = 0.92f),
             )
             Text(
-                text = song.artist,
+                text = display.artist,
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color.White.copy(alpha = 0.55f),
                 maxLines = 1,

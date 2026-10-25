@@ -62,6 +62,7 @@ import com.music.bitchord.download.DownloadSession
 import com.music.bitchord.download.Downloads
 import com.music.bitchord.ui.haptics.Haptic
 import com.music.bitchord.ui.haptics.rememberHaptics
+import com.music.bitchord.ui.player.rememberEditedSong
 
 /**
  * The download indicator in the top bar, beside the account photo.
@@ -290,6 +291,10 @@ private fun DownloadManagerRow(
 ) {
     val progress = item.progress
     val failed = progress as? DownloadProgress.Failed
+    // The batch list names tracks the way the rest of the app does, custom
+    // title and cover included where the listener has already set them.
+    val display = rememberEditedSong(item.song)
+    val art = rememberRemoteArtworkUrl(item.song)
 
     Row(
         modifier = Modifier
@@ -299,7 +304,7 @@ private fun DownloadManagerRow(
     ) {
         Box(Modifier.size(ART_SIZE), contentAlignment = Alignment.Center) {
             AsyncImage(
-                model = item.song.artworkAt(ROW_ART_PX),
+                model = art?.artworkAt(ROW_ART_PX),
                 contentDescription = null,
                 modifier = Modifier
                     .size(ART_SIZE)
@@ -338,7 +343,7 @@ private fun DownloadManagerRow(
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             ExplicitSongTitle(
-                song = item.song,
+                song = display,
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onBackground,
             )
@@ -347,8 +352,8 @@ private fun DownloadManagerRow(
                 // forty rows off three albums, the credit alone does not say
                 // which batch a row belongs to.
                 text = listOfNotNull(
-                    item.song.artist.takeIf { it.isNotBlank() },
-                    item.from?.takeIf { it.isNotBlank() && it != item.song.artist },
+                    display.artist.takeIf { it.isNotBlank() },
+                    item.from?.takeIf { it.isNotBlank() && it != display.artist },
                 ).joinToString(" · ").ifBlank { stringResource(R.string.unknown_artist) },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

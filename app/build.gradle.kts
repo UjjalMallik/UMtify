@@ -57,6 +57,37 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        /*
+         * Only the languages this app is actually translated into ship. AGP
+         * otherwise keeps every locale any library carries — androidx, Media3,
+         * Play Services each bring dozens — and each one is a values table that
+         * is never read and never displayed, because there is no translation to
+         * select it. This list mirrors the `values-*` folders under res/ and
+         * sharedUi's composeResources, so dropping a language here means
+         * dropping its folder first.
+         */
+        resourceConfigurations += listOf(
+            "en",
+            "b+zh+Hant",
+            "de",
+            "es",
+            "fr",
+            "he",
+            "hi",
+            "id",
+            "it",
+            "ja",
+            "pl",
+            "pt",
+            "ru",
+            "th",
+            "tr",
+            "vi",
+            "zh",
+            "zh-rHK",
+            "zh-rTW",
+        )
+
         buildConfigField(
             "String",
             "LISTEN_TOGETHER_SERVER",
@@ -152,6 +183,17 @@ android {
             excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
             // The three BouncyCastle jars (bcprov, bcutil, bcpkix) ship one licence between them.
             pickFirsts += setOf("META-INF/LICENSE.md", "META-INF/LICENSE.txt", "META-INF/NOTICE.md")
+        }
+        jniLibs {
+            /*
+             * Store the .so files compressed in the APK instead of page-aligned
+             * and uncompressed. Android extracts them at install time and loads
+             * them from the app's lib directory either way, so this costs a
+             * little install time and saves several megabytes of download —
+             * libonnxruntime, libquickjs and libffmpegJNI are together most of
+             * what is left of this APK.
+             */
+            useLegacyPackaging = true
         }
     }
     buildFeatures {

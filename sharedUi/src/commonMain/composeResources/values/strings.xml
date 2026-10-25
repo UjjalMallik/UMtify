@@ -17,6 +17,16 @@
     <string name="bit_depth">%1$d-bit</string>
     <string name="cancel">Cancel</string>
     <string name="cast">Cast</string>
+    <string name="album_label">Album</string>
+    <string name="artist_label">Artist</string>
+    <string name="change_cover">Change cover</string>
+    <string name="cover_art">Cover art</string>
+    <string name="cover_save_failed">Couldn’t save that image</string>
+    <string name="edit_song_info">Edit song info</string>
+    <string name="edit_song_info_note">Saved on this device only</string>
+    <string name="reset_cover">Reset to original</string>
+    <string name="save">Save</string>
+    <string name="title_label">Title</string>
     <string name="cast_casting">Casting</string>
     <string name="cast_connecting">Connecting…</string>
     <string name="cast_row_subtitle">Chromecast and Google Cast speakers</string>

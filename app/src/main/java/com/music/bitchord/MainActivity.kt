@@ -259,6 +259,7 @@ import com.music.bitchord.ui.components.FieldConfig
 import com.music.bitchord.ui.icons.BitChordIcons
 import androidx.media3.common.Player
 import com.music.bitchord.data.YtMusicRepository
+import com.music.bitchord.ui.player.EditSongInfoDialog
 import com.music.bitchord.ui.player.NowPlayingScreen
 import com.music.bitchord.ui.player.PlayerSheetMotion
 import androidx.compose.ui.geometry.Offset
@@ -620,6 +621,11 @@ private fun BitChordApp(
     var showSpotifyLogin by remember { mutableStateOf(false) }
     var discordDialog by remember { mutableStateOf<DiscordDialog?>(null) }
     var songActions by remember { mutableStateOf<Song?>(null) }
+    // The track whose title / artist / album / cover is being edited, or null
+    // while the editor is shut. Separate from [songActions] because the menu
+    // closes behind it — the editor is the next step, not a second sheet
+    // stacked on the first.
+    var editingSong by remember { mutableStateOf<Song?>(null) }
     var showLyricsOffset by remember { mutableStateOf(false) }
     /**
      * Whether the track menu that is up was opened from the player.
@@ -4462,6 +4468,13 @@ private fun BitChordApp(
                 // drops it for a local file via `isOffline`, this catches
                 // the rest.
                 onShare = share.takeIf { song.videoId.isNotBlank() },
+                // Offered for anything the sheet already treats as offline —
+                // a file the listener holds, not a catalogue row. Closing the
+                // menu first keeps the editor as the one thing on screen.
+                onEditSong = {
+                    songActions = null
+                    editingSong = song
+                },
                 onCopyLog = if (fromPlayer) {
                     {
                         songActions = null
@@ -4509,6 +4522,11 @@ private fun BitChordApp(
             ) {
                 songMenuBody(song, SongActionsPresentation.Sheet)
             }
+        }
+        // Over everything, including the player and mini player, and with its
+        // own scrim — the menu has already closed behind it.
+        editingSong?.let { song ->
+            EditSongInfoDialog(song = song, onDismiss = { editingSong = null })
         }
         // Drawn over everything, tab bar and mini player included, and kept
         // composed through its own exit — so it is not gated on songActions.

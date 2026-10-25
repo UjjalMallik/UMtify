@@ -393,6 +393,10 @@ private fun SongGridCard(
     onClick: () -> Unit,
     onLongPress: () -> Unit,
 ) {
+    // Through the host's resolver so a custom cover replaces the file's own
+    // picture here as it does everywhere else. Title and artist are already
+    // wearing the listener's overrides — see the page's own edited list.
+    val art = rememberRemoteArtworkUrl(song)
     Column(
         modifier = Modifier
             .clip(CARD_SHAPE)
@@ -409,9 +413,9 @@ private fun SongGridCard(
             contentAlignment = Alignment.Center,
         ) {
             CoverPlaceholder(Icons.Rounded.MusicNote, Modifier.fillMaxSize())
-            if (song.thumbnailUrl != null) {
+            if (art != null) {
                 AsyncImage(
-                    model = song.thumbnailUrl.artworkAt(CARD_ART_PX),
+                    model = art.artworkAt(CARD_ART_PX),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),

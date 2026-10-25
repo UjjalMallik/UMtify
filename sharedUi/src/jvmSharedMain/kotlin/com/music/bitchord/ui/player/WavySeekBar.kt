@@ -15,9 +15,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +40,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.unit.dp
 import kotlin.math.PI
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
@@ -52,7 +55,13 @@ import kotlin.math.sin
  */
 @Composable
 internal fun WavySeekBar(
-    value: Float,
+    /**
+     * Where the handle is. A lambda rather than a value: the playhead ticks
+     * several times a second, and reading it inside the draw keeps a tick to a
+     * redraw of this one canvas instead of recomposing the bar, its scrubber
+     * and both timestamps under it.
+     */
+    value: () -> Float,
     onValueChange: (Float) -> Unit,
     isPlaying: Boolean,
     modifier: Modifier = Modifier,
@@ -69,6 +78,23 @@ internal fun WavySeekBar(
     markerColor: Color = Color.White.copy(alpha = 0.36f),
 ) {
     var dragging by remember { mutableStateOf(false) }
+    // Semantics has to carry a number, so it cannot be deferred to the draw the
+    // way the wave is. Quantised to whole percents, so accessibility sees the
+    // bar move while this composable is rebuilt at most a hundred times per
+    // track rather than on every position tick.
+    //
+    // [rememberUpdatedState] keeps the cached derived value following the
+    // lambda this composition was given: the bar outlives a track change, and
+    // a captured first lambda would go on dividing the new playhead by the old
+    // track's duration.
+    val currentValue = rememberUpdatedState(value)
+    val progressPercent by remember {
+        derivedStateOf { (currentValue.value().coerceIn(0f, 1f) * 100f).roundToInt() }
+    }
+    // Read here, in composition, so a percent change invalidates the semantics
+    // below; a read inside the semantics lambda would only be sampled whenever
+    // the semantics tree happened to be rebuilt.
+    val semanticProgress = progressPercent / 100f
     // The wave is a property of playback, not of the handle: it flows while the
     // music does, and a finger on the bar doesn't stop it. Only pause does.
     val amplitude by animateDpAsState(
@@ -136,7 +162,7 @@ internal fun WavySeekBar(
                 }
             }
             .semantics {
-                progressBarRangeInfo = ProgressBarRangeInfo(value.coerceIn(0f, 1f), 0f..1f)
+                progressBarRangeInfo = ProgressBarRangeInfo(semanticProgress, 0f..1f)
                 setProgress { target ->
                     onValueChange(target.coerceIn(0f, 1f))
                     onValueChangeFinished?.invoke()
@@ -181,7 +207,7 @@ internal fun WavySeekBar(
                 }
             }
 
-            val base = value.coerceIn(0f, 1f)
+            val base = value().coerceIn(0f, 1f)
             // A blend claims the whole bar, as the old hairline's did, so the
             // handoff reads on the bar rather than only on a label.
             val cover = if (dragging || !mixing) 0f else mixPulse?.cover ?: 0f

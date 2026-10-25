@@ -18,7 +18,17 @@
 -keep class com.grack.nanojson.** { *; }
 -keep class org.jsoup.** { *; }
 -keep class com.metrolist.** { *; }
+
+# ---- QuickJS --------------------------------------------------------------------
+# The module runner evaluates addon JavaScript in a native VM: the Kotlin wrapper
+# crosses into libquickjs through JNI and hands native code back Java callbacks
+# and bound functions by name.
 -keep class com.dokar.quickjs.** { *; }
+-keep class com.quickjs.** { *; }
+# Bound Kotlin functions are invoked from the VM by the name the binding carries,
+# not by a direct call site.
+-keep,includedescriptorclasses class * extends com.dokar.quickjs.binding.FunctionBinding { *; }
+-keep,includedescriptorclasses class * extends com.dokar.quickjs.binding.AsyncFunctionBinding { *; }
 
 # ---- Native and crypto --------------------------------------------------------
 # ONNX Runtime and QuickJS are called from JNI, which R8 cannot see. SMBJ picks
@@ -39,10 +49,87 @@
 -keep class * extends com.google.protobuf.GeneratedMessageLite { *; }
 # Ktor resolves serializers and engine pieces by type at runtime.
 -keep class io.ktor.** { *; }
-# Our own @Serializable models, whole: kotlinx.serialization's bundled rules
-# cover the generated serializers, and keeping the classes too costs little.
+
+# ---- Kotlinx Serialization ------------------------------------------------------
+# The compiler plugin generates a `$serializer` beside every @Serializable class
+# and a `serializer()` on its companion; the runtime finds both by name, so
+# neither is visible to R8 as a reference. These are the rules kotlinx.serialization
+# publishes, plus a keep for the classes themselves: a model that only exists to
+# be deserialized has no other call site, and without the class keep R8 is free
+# to remove it and leave the serializer pointing at nothing.
+-keepattributes RuntimeVisibleAnnotations,AnnotationDefault
+-keep class kotlinx.serialization.** { *; }
+-if @kotlinx.serialization.Serializable class **
+-keepclassmembers class <1> {
+    static <1>$Companion Companion;
+}
+-if @kotlinx.serialization.Serializable class ** {
+    static **$* *;
+}
+-keepclassmembers class <2>$<3> {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+-if @kotlinx.serialization.Serializable class ** {
+    public static ** INSTANCE;
+}
+-keepclassmembers class <1> {
+    public static <1> INSTANCE;
+    kotlinx.serialization.KSerializer serializer(...);
+}
+-keep,allowoptimization @kotlinx.serialization.Serializable class ** { *; }
+-keepclassmembers class **$$serializer {
+    *** descriptor;
+    kotlinx.serialization.KSerializer serializer(...);
+}
+# The app's wire and database models are read back by field name from JSON and
+# Preferences; keep the whole model package rather than trusting a call site.
+-keep class com.music.bitchord.data.model.** { *; }
 -keep @kotlinx.serialization.Serializable class com.music.bitchord.** { *; }
 -keep @kotlinx.serialization.Serializable class com.my.kizzy.** { *; }
+
+# Enums are written to preferences and saved state as names. `-dontobfuscate`
+# keeps the names, but R8 may still strip the synthetic lookup methods.
+-keepclassmembers enum * {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}
+
+# ---- HTTP: OkHttp and Okio ------------------------------------------------------
+# OkHttp picks its TLS platform implementation and public-suffix database by
+# class name at startup. Its refs to JVM-only conscrypt/OpenJDK classes are
+# optional and absent on Android, which is a warning rather than a fault.
+-keep class okhttp3.internal.platform.** { *; }
+-keep class okhttp3.internal.publicsuffix.** { *; }
+-keep class okhttp3.internal.tls.** { *; }
+-keep class okio.** { *; }
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
+
+# ---- Media3 / ExoPlayer ---------------------------------------------------------
+# The session layer crosses process boundaries as Bundles and is rebuilt by class
+# name; the HLS/DASH sources create their extractors from manifest MIME types,
+# and the FFmpeg extension is entered from JNI. Media3's own consumer rules cover
+# the rest of the player, so this is limited to what reflection can reach.
+-keep class androidx.media3.session.** { *; }
+-keep class androidx.media3.exoplayer.hls.** { *; }
+-keep class androidx.media3.exoplayer.dash.** { *; }
+-keep class androidx.media3.exoplayer.audio.** { *; }
+-keep class androidx.media3.datasource.okhttp.** { *; }
+-keep class androidx.media3.decoder.ffmpeg.** { *; }
+-keepclassmembers class androidx.media3.** implements android.os.Parcelable {
+    public static final ** CREATOR;
+}
+# The media button receiver and playback service are named in the manifest, but
+# their subclasses still need their platform constructors.
+-keepclassmembers class * extends androidx.media3.session.MediaSessionService {
+    public <init>(...);
+}
+-keepclassmembers class * extends androidx.media3.session.MediaLibraryService {
+    public <init>(...);
+}
 
 # ---- WebView bridges ------------------------------------------------------------
 # PoToken minting and the Spotify token page call back into these from JavaScript.

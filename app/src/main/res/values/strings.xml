@@ -408,6 +408,7 @@
     <string name="connect_account_first">Connect an account first</string>
     <string name="connected_presence_off">Connected, presence off</string>
     <string name="copy_log">Copy log</string>
+    <string name="edit_song_info">Edit song info</string>
     <string name="couldnt_find">Couldn\'t find %1$s</string>
     <string name="couldnt_open_link">Couldn\'t open that link</string>
     <string name="create_playlist">Create playlist</string>

@@ -87,6 +87,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.snapshots.Snapshot
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
@@ -119,6 +120,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerInputChange
@@ -185,6 +187,14 @@ import kotlin.math.roundToInt
  * large home-screen widget asks for the same copy — see [PLAYER_ART_PX].
  */
 internal const val ART_PX = PLAYER_ART_PX
+
+/**
+ * The photocard's own rung: 800 pixels is more than a phone-width square at 3x
+ * needs, and two thirds the memory of the banner's source-size decode. Only the
+ * full-bleed presentation asks for [ART_PX], because there the same bitmap has
+ * to fill a taller frame.
+ */
+internal const val CARD_ART_PX = 800
 
 /**
  * How many further goes a cover that failed to load gets.
@@ -303,6 +313,16 @@ internal val PLAYER_GUTTER = 30.dp
  * room to spare. The panels keep [PLAYER_GUTTER] of their own.
  */
 private val CARD_ART_GUTTER = 20.dp
+/**
+ * How long the photocard's travelling border takes to go once round.
+ *
+ * Slow on purpose: this is light moving over a cover, not a progress spinner.
+ * Fast enough and the eye follows it as a spinning thing rather than reading
+ * it as the artwork breathing.
+ */
+private const val AURA_TURN_SECONDS = 9f
+/** How far the two breathing ripples travel out past the card's edge. */
+private val AURA_RIPPLE_REACH = 18.dp
 /** Clear air between the sleeve's bottom edge and the stats pill under it. */
 private val STATS_BADGE_GAP = 10.dp
 /**
@@ -825,6 +845,10 @@ fun NowPlayingScreen(
     val spotifyCanvasAutoHide by PlayerSettings.spotifyCanvasAutoHide.collectAsStateWithLifecycle()
     val mixing by PlayerSettings.smartMixInProgress.collectAsStateWithLifecycle()
     val canvas = rememberCanvasArtwork(song)
+    // What the credits say. The canvas above, the palette, the album link and
+    // everything else addressed by id keep the original track: a renamed song
+    // is the same song, only wearing a different label.
+    val displaySong = rememberEditedSong(song)
     var canvasAspect by remember(canvas) { mutableFloatStateOf(0f) }
     // Whether the clip actually has a frame on screen right now, and one of
     // them — used to blow the sleeve out to the full-bleed hero treatment and
@@ -1250,7 +1274,7 @@ fun NowPlayingScreen(
     // had and never re-emits, so the `onState` that is the sole writer here
     // never fires again. Keyed on the cover there is nothing to reset: the
     // bitmap really is still loaded, so the state stays true.
-    val art = rememberPlayerArtwork(remoteArt)
+    val art = rememberPlayerArtwork(remoteArt, if (heroMode) ART_PX else CARD_ART_PX)
     // Sticky, unlike [PlayerArtwork.loaded]: the banner is the shape of the player rather
     // than a property of the track in it. Waiting on each new cover would
     // collapse the banner into a card and blow it back out on every skip —
@@ -2839,6 +2863,34 @@ fun NowPlayingScreen(
                         fun sleeveChromeCorner(): Dp =
                             lerp(sleeveCorner(), 0.dp, bannerShare())
 
+                        // The card's aura: a band of light that travels round
+                        // its edge while the music plays, with two ripples
+                        // breathing out from behind it. The phase is advanced
+                        // by hand rather than by an infinite transition so it
+                        // stops with the music — a paused player settles on
+                        // the still rim below instead of paying for a frame
+                        // every frame.
+                        val auraIntensity by animateFloatAsState(
+                            targetValue = if (isPlaying) 1f else 0f,
+                            animationSpec = tween(500),
+                            label = "coverAuraIntensity",
+                        )
+                        val auraPhase = remember { mutableFloatStateOf(0f) }
+                        LaunchedEffect(isPlaying) {
+                            if (!isPlaying) return@LaunchedEffect
+                            var previous = 0L
+                            while (true) {
+                                withFrameNanos { now ->
+                                    if (previous != 0L) {
+                                        auraPhase.floatValue = (
+                                            auraPhase.floatValue +
+                                                (now - previous) / 1_000_000_000f / AURA_TURN_SECONDS
+                                            ) % 1f
+                                    }
+                                    previous = now
+                                }
+                            }
+                        }
                         // The ambient light the card casts: a handful of
                         // concentric rounded rects in the sleeve's own lifted
                         // colour, drawn behind it. A real blur would cost a
@@ -2879,6 +2931,56 @@ fun NowPlayingScreen(
                                             size = Size(size.width + grow * 2f, size.height + grow * 2f),
                                             cornerRadius = CornerRadius(corner + grow * 0.45f),
                                         )
+                                    }
+                                    // Only the card gets the music-reactive aura;
+                                    // full bleed has no edge of its own to run
+                                    // light around.
+                                    if (!heroMode && auraIntensity > 0.01f) {
+                                        val lit = auraIntensity
+                                        val phase = auraPhase.floatValue
+                                        // Two ripples half a cycle apart: one is
+                                        // leaving the edge as the other is born,
+                                        // so the card reads as breathing rather
+                                        // than as blinking.
+                                        val rippleReach = AURA_RIPPLE_REACH.toPx()
+                                        val rippleStroke = 1.4.dp.toPx()
+                                        for (index in 0 until 2) {
+                                            val travel = (phase * 2f + index * 0.5f) % 1f
+                                            val grow = rippleReach * (0.05f + travel * 0.95f)
+                                            val strength = (1f - travel) * lit
+                                            drawRoundRect(
+                                                color = playerTones.accent.copy(alpha = 0.22f * strength),
+                                                topLeft = Offset(-grow, -grow),
+                                                size = Size(size.width + grow * 2f, size.height + grow * 2f),
+                                                cornerRadius = CornerRadius(corner + grow * 0.65f),
+                                                style = Stroke(width = rippleStroke * (0.7f + travel * 1.2f)),
+                                            )
+                                        }
+                                        // The travelling border: a sweep of the
+                                        // sleeve's vibrant accent, its pastel
+                                        // and one white glint, rotated whole.
+                                        // Drawn entirely outside the card so the
+                                        // cover never clips half of it.
+                                        val sweep = 1.6.dp.toPx()
+                                        val center = Offset(size.width / 2f, size.height / 2f)
+                                        rotate(degrees = phase * 360f, pivot = center) {
+                                            drawRoundRect(
+                                                brush = Brush.sweepGradient(
+                                                    0f to Color.Transparent,
+                                                    0.18f to playerTones.accent.copy(alpha = 0.18f * lit),
+                                                    0.34f to Color.White.copy(alpha = 0.65f * lit),
+                                                    0.44f to playerTones.primaryContainer.copy(alpha = 0.32f * lit),
+                                                    0.62f to playerTones.accent.copy(alpha = 0.14f * lit),
+                                                    0.86f to Color.Transparent,
+                                                    1f to Color.Transparent,
+                                                    center = center,
+                                                ),
+                                                topLeft = Offset(-sweep, -sweep),
+                                                size = Size(size.width + sweep * 2f, size.height + sweep * 2f),
+                                                cornerRadius = CornerRadius(corner + sweep),
+                                                style = Stroke(width = sweep),
+                                            )
+                                        }
                                     }
                                     // The tight ring is the colour the cover
                                     // actually carries, not its diluted wash.
@@ -3132,10 +3234,12 @@ fun NowPlayingScreen(
                                 // only because the sleeve happens to be full size at
                                 // that moment.
                                 //
-                                // Asked for at the source's own size rather than the
-                                // sleeve's: the banner is taller than the card is
-                                // wide, and the one bitmap has to serve both shapes
-                                // with nothing to upscale between them.
+                                // Asked for at a fixed rung rather than the sleeve's
+                                // current layout size: the banner needs the source's
+                                // own pixels because it is taller than the card is
+                                // wide, while the photocard asks for [CARD_ART_PX] —
+                                // enough for a phone-width square, and two thirds the
+                                // memory of the banner's decode.
                                 model = art.request,
                                 contentDescription = null,
                                 // Video thumbnails are 16:9; letterboxing them inside
@@ -3378,14 +3482,14 @@ fun NowPlayingScreen(
                                 // snapping while the rest of the switch moves around
                                 // it.
                                 Crossfade(
-                                    targetState = song.title to song.artist,
+                                    targetState = displaySong.title to displaySong.artist,
                                     animationSpec = tween(durationMillis = 300),
                                     label = "playerCredits",
                                 ) {
                                     val scrolling = scrolls()
                                     Column {
                                         MarqueeText(
-                                            text = song.title,
+                                            text = displaySong.title,
                                             style = MaterialTheme.typography.titleLarge.copy(
                                                 fontSize = 21.sp,
                                                 fontWeight = FontWeight.Bold,
@@ -3403,9 +3507,13 @@ fun NowPlayingScreen(
                                             modifier = Modifier.opensPage(song.albumId, onOpenAlbum),
                                         )
                                         ArtistCreditsMarquee(
-                                            text = song.artist,
-                                            credits = remember(song.artist, song.artists, song.artistId) {
-                                                artistCredits(song.artist, song.artists, song.artistId)
+                                            text = displaySong.artist,
+                                            credits = remember(displaySong.artist, displaySong.artists, displaySong.artistId) {
+                                                artistCredits(
+                                                    displaySong.artist,
+                                                    displaySong.artists,
+                                                    displaySong.artistId,
+                                                )
                                             },
                                             style = MaterialTheme.typography.titleLarge.copy(
                                                 fontWeight = FontWeight.Medium,

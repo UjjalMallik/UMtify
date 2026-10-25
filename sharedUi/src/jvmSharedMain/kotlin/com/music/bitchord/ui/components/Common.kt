@@ -501,6 +501,9 @@ private fun SongRowContent(
         targetValue = if (isCurrent || selected) activeTint.copy(alpha = 0.14f) else Color.Transparent,
         label = "song row background",
     )
+    // The row's words, with the listener's rename applied. Everything the row
+    // *does* — its tap, its menu, its download badge — keeps the real song.
+    val display = com.music.bitchord.ui.player.rememberEditedSong(song)
     // A Spotify track still being matched to a YouTube Music song, or one that
     // has no match: shown, but not something a tap or a menu can act on.
     val matching = song.isMatchPending
@@ -563,13 +566,13 @@ private fun SongRowContent(
         Spacer(Modifier.width(if (trackNumber == null) 14.dp else PAGE_GUTTER))
         Column(Modifier.weight(1f)) {
             ExplicitSongTitle(
-                song = song,
+                song = display,
                 style = MaterialTheme.typography.titleMedium,
                 color = titleColor,
             )
             Spacer(Modifier.height(2.dp))
             val subtitle = listOfNotNull(
-                song.artist.takeIf { it.isNotBlank() },
+                display.artist.takeIf { it.isNotBlank() },
                 song.downloadFormat,
             ).joinToString(" · ")
             val quality = if (showSourceQuality) song.sourceQualityBadge() else null

@@ -7,6 +7,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.music.bitchord.data.SongEditStore
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.remote.RemoteArtworkStore
 
@@ -21,16 +23,23 @@ import com.music.bitchord.data.remote.RemoteArtworkStore
  * of flashing a stranger's cover.
  */
 @Composable
-fun rememberRemoteArtworkUrl(song: Song?): String? {
+fun rememberRemoteArtworkUrl(song: Song?, ignoreCustom: Boolean = false): String? {
     val context = LocalContext.current
     val key = song?.videoId
+    // The listener's own cover outranks anything the track came with, here
+    // rather than at each image: every row, the queue, the mini player and the
+    // shared player all resolve artwork through this function or the host
+    // wrapper around it, so one check puts a custom cover everywhere at once.
+    // [ignoreCustom] is the editor's source-art preview.
+    val edits by SongEditStore.edits.collectAsStateWithLifecycle()
+    val custom = if (ignoreCustom) null else song?.let { edits[it.videoId]?.coverPath }?.let { "file://$it" }
     var resolved by remember(key) { mutableStateOf(song?.thumbnailUrl) }
-    LaunchedEffect(key) {
-        if (song != null && song.thumbnailUrl == null &&
+    LaunchedEffect(key, custom) {
+        if (custom == null && song != null && song.thumbnailUrl == null &&
             (song.videoId.startsWith("webdav:") || song.videoId.startsWith("smb:"))
         ) {
             resolved = RemoteArtworkStore.resolveArt(context, song)
         }
     }
-    return resolved
+    return custom ?: resolved
 }

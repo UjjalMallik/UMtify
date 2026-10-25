@@ -15,6 +15,7 @@ import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import okhttp3.OkHttpClient
 import com.music.bitchord.auth.AuthStore
 import com.music.bitchord.data.DebugLog
+import com.music.bitchord.data.SongEditStore
 import com.music.bitchord.data.lyrics.LyricsTranslation
 import androidx.appcompat.app.AppCompatDelegate
 import com.music.bitchord.ui.player.AndroidPlayerHost
@@ -50,6 +51,10 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
         // The player is drawn by the shared UI module; this is what it reads
         // underneath — settings, the Canvas decoder, outputs, the party.
         AndroidStreamHooks.installEarly()
+        // Before the player, because its host reads a track's custom cover on
+        // the first composition — a reopened player must show the listener's
+        // artwork rather than the source's for a frame.
+        SongEditStore.init(this)
         PlayerPlatform.install(AndroidPlayerHost(this))
         com.music.bitchord.ui.AppUi.install(com.music.bitchord.ui.AndroidAppUiHost)
         // The shared data layer (lyrics, the YouTube Music client) logs to

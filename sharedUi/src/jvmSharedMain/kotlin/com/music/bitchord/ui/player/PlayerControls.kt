@@ -60,7 +60,6 @@ import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Speaker
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -82,8 +81,6 @@ import org.jetbrains.compose.resources.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -197,8 +194,10 @@ internal fun PlaybackOriginCaption(
 @Composable
 internal fun PlayerScrubber(
     /**
-     * Where the handle is, read in here so the playhead's tick recomposes the
-     * bar and its two times rather than the player the bar sits in.
+     * Where the handle is. Read inside the bar's draw and inside the elapsed
+     * label, never during this composable's own composition, so a position tick
+     * redraws the rail and rewrites one timestamp instead of recomposing the
+     * scrubber or the player it sits in.
      */
     shown: () -> Float,
     durationMs: Long,
@@ -213,7 +212,6 @@ internal fun PlayerScrubber(
     onScrubFinished: () -> Unit,
     centerLabel: @Composable BoxScope.() -> Unit = {},
 ) {
-    val shown = shown()
     // Held as a State and read only inside the bar's draw: the blend republishes
     // every fade tick, and collecting it by value here would recompose the
     // scrubber and its labels thirty times a second for a change only the
@@ -244,11 +242,7 @@ internal fun PlayerScrubber(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text(
-                    text = formatTime((shown * durationMs).toLong()),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = LocalPlayerTint.current.copy(alpha = 0.55f),
-                )
+                ElapsedTime(shown, durationMs)
                 Text(
                     text = formatTime(durationMs),
                     style = MaterialTheme.typography.labelMedium,
@@ -272,6 +266,29 @@ internal fun PlayerScrubber(
             }
         }
     }
+}
+
+/**
+ * The elapsed timestamp under the bar.
+ *
+ * Its own composable, and the reason is the position tick: the text changes
+ * once a second, and if the formatting happened in [PlayerScrubber] every tick
+ * would recompose the scrubber — and with it the wavy bar — several times a
+ * second for a timestamp that had not changed yet. Here only this one `Text`
+ * is rebuilt, and only when the formatted string actually differs.
+ */
+@Composable
+private fun ElapsedTime(shown: () -> Float, durationMs: Long) {
+    val elapsed by remember(shown, durationMs) {
+        derivedStateOf {
+            formatTime((shown().coerceIn(0f, 1f) * durationMs).toLong())
+        }
+    }
+    Text(
+        text = elapsed,
+        style = MaterialTheme.typography.labelMedium,
+        color = LocalPlayerTint.current.copy(alpha = 0.55f),
+    )
 }
 
 /**
@@ -455,9 +472,6 @@ internal fun NerdStatsBadge(song: Song, modifier: Modifier = Modifier) {
     }
 }
 
-/** How long the glass takes to light up under a finger. */
-private const val PRESS_FLASH_MS = 120
-
 /** How far a skip glyph slides on tap, and how long the slide takes. */
 private const val SKIP_NUDGE_DP = 4f
 private const val SKIP_NUDGE_MS = 120
@@ -468,61 +482,77 @@ private const val PLAY_STATE_FADE_MS = 220
 /** How long the liquid takes to flatten after a pause. */
 private const val WAVE_SETTLE_MS = 350
 
-/** One full sweep of the waves, and one breath of the rim glow. */
+/** One full sweep of the waves. */
 private const val WAVE_PERIOD_MS = 3200
-private const val GLOW_PERIOD_MS = 1800
 
 private const val TAU = 6.2831855f
 
 /**
- * The Mica sheen: a soft white wash along the very top edge that dissolves by
- * a third of the way down, leaving the middle of the glass clear.
+ * The frosted body: two full-size vertical gradients, white over the sleeve's
+ * accent. Both cover the entire clipped shape, so no smaller circle is ever
+ * painted inside the button.
  */
-private fun micaSheen(flash: Float): Brush =
+private fun glassBodyWhite(): Brush =
     Brush.verticalGradient(
         colorStops = arrayOf(
-            0f to Color.White.copy(alpha = 0.22f + 0.08f * flash),
-            0.35f to Color.Transparent,
-            1f to Color.Transparent,
+            0f to Color.White.copy(alpha = 0.38f),
+            0.45f to Color.White.copy(alpha = 0.18f),
+            0.85f to Color.White.copy(alpha = 0.14f),
+            1f to Color.White.copy(alpha = 0.26f),
         ),
     )
 
-/** The curved inner highlight that lifts the bottom 15% of the glass. */
-private fun micaBottomLift(flash: Float): Brush =
+private fun glassBodyAccent(accent: Color): Brush =
     Brush.verticalGradient(
         colorStops = arrayOf(
-            0f to Color.Transparent,
-            0.85f to Color.Transparent,
-            1f to Color.White.copy(alpha = 0.10f + 0.04f * flash),
+            0f to accent.copy(alpha = 0.25f),
+            0.45f to accent.copy(alpha = 0.22f),
+            0.85f to accent.copy(alpha = 0.25f),
+            1f to accent.copy(alpha = 0.30f),
         ),
+    )
+
+/** The glossy lip across the top third of the glass. */
+private fun glassTopSheen(): Brush =
+    Brush.verticalGradient(
+        colorStops = arrayOf(
+            0f to Color.White.copy(alpha = 0.32f),
+            0.35f to Color.Transparent,
+        ),
+    )
+
+/** The polished outer rim, bright at the top and still visible at the bottom. */
+private fun glassRim(): Brush =
+    Brush.verticalGradient(
+        0f to Color.White.copy(alpha = 0.85f),
+        0.5f to Color.White.copy(alpha = 0.25f),
+        1f to Color.White.copy(alpha = 0.50f),
     )
 
 /**
- * The polished outer rim: bright along the top and the left/right curves,
- * settling to a quiet line at the bottom edge. [flash] drives it white under
- * a press and [glow] breathes while the pill is playing.
+ * One pass of the button's glass, confined to its own clipped shape: a solid
+ * frosted body, the waves when the pill is playing, the top sheen and one crisp
+ * 1.5dp rim. There is no inset ring, radial gradient or nested circle.
  */
-private fun micaRim(flash: Float, glow: Float): Brush {
-    fun lit(alpha: Float) = (alpha + (1f - alpha) * flash + glow * 0.16f).coerceIn(0f, 1f)
-    return Brush.verticalGradient(
-        colorStops = arrayOf(
-            0f to Color.White.copy(alpha = lit(0.75f)),
-            0.25f to Color.White.copy(alpha = lit(0.65f)),
-            0.55f to Color.White.copy(alpha = lit(0.42f)),
-            1f to Color.White.copy(alpha = lit(0.20f)),
-        ),
-    )
-}
-
-/** The 1dp rim just inside the edge that reads as the thickness of the glass. */
-private fun micaInsetRim(flash: Float): Brush {
-    fun lit(alpha: Float) = (alpha + (1f - alpha) * flash * 0.7f).coerceIn(0f, 1f)
-    return Brush.verticalGradient(
-        colorStops = arrayOf(
-            0f to Color.White.copy(alpha = lit(0.30f)),
-            0.55f to Color.White.copy(alpha = lit(0.14f)),
-            1f to Color.White.copy(alpha = lit(0.06f)),
-        ),
+private fun DrawScope.drawTransportGlass(
+    accent: Color,
+    cornerRadius: Float,
+    borderWidth: Float,
+    waveLevel: Float = 0f,
+    wavePhase: Float = 0f,
+) {
+    val radius = CornerRadius(cornerRadius, cornerRadius)
+    drawRoundRect(brush = glassBodyWhite(), cornerRadius = radius)
+    drawRoundRect(brush = glassBodyAccent(accent), cornerRadius = radius)
+    drawLiquidWaves(accent = accent, level = waveLevel, phase = wavePhase)
+    drawRoundRect(brush = glassTopSheen(), cornerRadius = radius)
+    val inset = borderWidth / 2f
+    drawRoundRect(
+        brush = glassRim(),
+        topLeft = Offset(inset, inset),
+        size = Size(size.width - borderWidth, size.height - borderWidth),
+        cornerRadius = CornerRadius(cornerRadius - inset, cornerRadius - inset),
+        style = Stroke(width = borderWidth),
     )
 }
 
@@ -663,11 +693,11 @@ internal fun TransportRow(
 }
 
 /**
- * A disc of Mica glass for one end of the transport: a uniform tint of the
- * sleeve, a top sheen, a bottom lift and one polished rim. The interior has no
- * radial or off-centre marks, so it reads as a single piece of glass. The
- * glyph stays crisp white, and a tap slides it a few dps in the skip direction
- * before it settles back.
+ * A disc of solid, frosted glass for one end of the transport: a white and
+ * accent vertical body, one top sheen and a single crisp rim, all drawn inside
+ * the clipped circle. There are no shadows, radial gradients or inner circles,
+ * so the interior stays one even piece of glass. The glyph stays crisp white,
+ * and a tap slides it a few dps in the skip direction before it settles back.
  */
 @Composable
 private fun TransportDisc(
@@ -696,11 +726,6 @@ private fun TransportDisc(
         ),
         label = "transportDiscPressScale",
     )
-    val flash by animateFloatAsState(
-        targetValue = if (pressed) 1f else 0f,
-        animationSpec = tween(durationMillis = PRESS_FLASH_MS),
-        label = "transportDiscFlash",
-    )
     var nudging by remember { mutableStateOf(false) }
     val nudge by animateFloatAsState(
         targetValue = if (nudging) 1f else 0f,
@@ -720,39 +745,13 @@ private fun TransportDisc(
                 scaleX = pressScale
                 scaleY = pressScale
             }
-            .shadow(
-                elevation = 6.dp,
-                shape = CircleShape,
-                clip = false,
-                ambientColor = Color.Black.copy(alpha = 0.35f),
-                spotColor = Color.Black.copy(alpha = 0.35f),
-            )
             .clip(CircleShape)
-            .drawWithCache {
-                val r = this.size.minDimension / 2f
-                val stroke = 1.2.dp.toPx()
-                val sheen = micaSheen(flash)
-                val lift = micaBottomLift(flash)
-                val inset = micaInsetRim(flash)
-                val rim = micaRim(flash, glow = 0f)
-                onDrawBehind {
-                    // Two uniform fills make the Mica tint: the sleeve's accent
-                    // under a white frost, with nothing off-centre in either.
-                    drawCircle(color = tones.accent.copy(alpha = 0.14f + 0.05f * flash), radius = r)
-                    drawCircle(color = Color.White.copy(alpha = 0.10f + 0.05f * flash), radius = r)
-                    drawCircle(brush = sheen, radius = r)
-                    drawCircle(brush = lift, radius = r)
-                    drawCircle(
-                        brush = inset,
-                        radius = r - 1.7.dp.toPx(),
-                        style = Stroke(width = 1.dp.toPx()),
-                    )
-                    drawCircle(
-                        brush = rim,
-                        radius = r - stroke / 2f,
-                        style = Stroke(width = stroke),
-                    )
-                }
+            .drawBehind {
+                drawTransportGlass(
+                    accent = tones.accent,
+                    cornerRadius = this.size.height / 2f,
+                    borderWidth = 1.5.dp.toPx(),
+                )
             }
             .clickable(
                 interactionSource = interactionSource,
@@ -783,10 +782,11 @@ private fun TransportDisc(
  * its own verb so the middle of the transport never has to be inferred from a
  * triangle.
  *
- * The same Mica glass as the skip discs, stretched into a capsule. While music
- * plays, two slow waves fill its lower half, a three-bar figure dances beside
- * the label and the rim breathes; pausing settles every one of those to rest,
- * leaving clear glass around the word "Play".
+ * The same solid frosted glass as the skip discs, stretched into a capsule.
+ * While music plays, two slow waves fill its lower half and a three-bar figure
+ * dances beside the label; pausing settles both to rest, leaving the glass
+ * around the word "Play". The icon and label are always rendered at full size,
+ * including while a stream is buffering or switching.
  */
 @Composable
 private fun PlayPausePill(
@@ -811,11 +811,6 @@ private fun PlayPausePill(
         ),
         label = "playPillPressScale",
     )
-    val flash by animateFloatAsState(
-        targetValue = if (pressed) 1f else 0f,
-        animationSpec = tween(durationMillis = PRESS_FLASH_MS),
-        label = "playPillFlash",
-    )
     val waveLevel = animateFloatAsState(
         targetValue = if (isPlaying) 1f else 0f,
         animationSpec = tween(durationMillis = WAVE_SETTLE_MS),
@@ -831,15 +826,6 @@ private fun PlayPausePill(
         ),
         label = "playPillWavePhase",
     )
-    val breathe = liquid.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = GLOW_PERIOD_MS, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "playPillGlow",
-    )
     Box(
         modifier = Modifier
             .width(width)
@@ -848,44 +834,15 @@ private fun PlayPausePill(
                 scaleX = pressScale
                 scaleY = pressScale
             }
-            .shadow(
-                elevation = 6.dp,
-                shape = shape,
-                clip = false,
-                ambientColor = Color.Black.copy(alpha = 0.35f),
-                spotColor = Color.Black.copy(alpha = 0.35f),
-            )
             .clip(shape)
-            .drawWithCache {
-                val w = this.size.width
-                val h = this.size.height
-                val radius = h / 2f
-                val sheen = micaSheen(flash)
-                val lift = micaBottomLift(flash)
-                val inset = micaInsetRim(flash)
-                onDrawBehind {
-                    drawRoundRect(
-                        color = tones.accent.copy(alpha = 0.14f + 0.05f * flash),
-                        cornerRadius = CornerRadius(radius, radius),
-                    )
-                    drawRoundRect(
-                        color = Color.White.copy(alpha = 0.10f + 0.05f * flash),
-                        cornerRadius = CornerRadius(radius, radius),
-                    )
-                    drawRoundRect(brush = sheen, cornerRadius = CornerRadius(radius, radius))
-                    drawRoundRect(brush = lift, cornerRadius = CornerRadius(radius, radius))
-                    val insetPx = 1.7.dp.toPx()
-                    drawRoundRect(
-                        brush = inset,
-                        topLeft = Offset(insetPx, insetPx),
-                        size = Size(w - insetPx * 2f, h - insetPx * 2f),
-                        cornerRadius = CornerRadius(
-                            (h - insetPx * 2f) / 2f,
-                            (h - insetPx * 2f) / 2f,
-                        ),
-                        style = Stroke(width = 1.dp.toPx()),
-                    )
-                }
+            .drawBehind {
+                drawTransportGlass(
+                    accent = tones.accent,
+                    cornerRadius = this.size.height / 2f,
+                    borderWidth = 1.5.dp.toPx(),
+                    waveLevel = waveLevel.value,
+                    wavePhase = wavePhase.value,
+                )
             }
             .clickable(
                 interactionSource = interactionSource,
@@ -898,81 +855,43 @@ private fun PlayPausePill(
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
-        Spacer(
-            Modifier
-                .matchParentSize()
-                .drawBehind {
-                    drawLiquidWaves(
-                        accent = tones.accent,
-                        level = waveLevel.value,
-                        phase = wavePhase.value,
+        Crossfade(
+            targetState = isPlaying,
+            animationSpec = tween(durationMillis = PLAY_STATE_FADE_MS),
+            label = "playPauseContent",
+        ) { playing ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    painter = painterResource(
+                        if (playing) Res.drawable.ic_player_pause else Res.drawable.ic_player_play,
+                    ),
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(if (compact) 22.dp else 26.dp),
+                )
+                Spacer(Modifier.width(if (compact) 7.dp else 9.dp))
+                Text(
+                    text = stringResource(if (playing) Res.string.pause else Res.string.play),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 16.sp,
+                    ),
+                    maxLines = 1,
+                )
+                if (playing) {
+                    Spacer(Modifier.width(if (compact) 6.dp else 8.dp))
+                    Spacer(
+                        Modifier
+                            .width(13.dp)
+                            .height(15.dp)
+                            .drawBehind {
+                                drawEqualizer(
+                                    level = waveLevel.value,
+                                    phase = wavePhase.value,
+                                )
+                            },
                     )
-                },
-        )
-        Spacer(
-            Modifier
-                .matchParentSize()
-                .drawBehind {
-                    // The rim sits over the liquid and takes its breath from
-                    // it: full white while playing, a quiet line when paused.
-                    val stroke = 1.2.dp.toPx()
-                    drawRoundRect(
-                        brush = micaRim(flash, glow = breathe.value * waveLevel.value),
-                        topLeft = Offset(stroke / 2f, stroke / 2f),
-                        size = Size(size.width - stroke, size.height - stroke),
-                        cornerRadius = CornerRadius(
-                            (size.height - stroke) / 2f,
-                            (size.height - stroke) / 2f,
-                        ),
-                        style = Stroke(width = stroke),
-                    )
-                },
-        )
-        if (isLoading) {
-            CircularProgressIndicator(
-                color = Color.White,
-                strokeWidth = 2.5.dp,
-                modifier = Modifier.size(if (compact) 22.dp else 26.dp),
-            )
-        } else {
-            Crossfade(
-                targetState = isPlaying,
-                animationSpec = tween(durationMillis = PLAY_STATE_FADE_MS),
-                label = "playPauseContent",
-            ) { playing ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        painter = painterResource(
-                            if (playing) Res.drawable.ic_player_pause else Res.drawable.ic_player_play,
-                        ),
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(if (compact) 22.dp else 26.dp),
-                    )
-                    Spacer(Modifier.width(if (compact) 7.dp else 9.dp))
-                    Text(
-                        text = stringResource(if (playing) Res.string.pause else Res.string.play),
-                        color = Color.White,
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 16.sp,
-                        ),
-                        maxLines = 1,
-                    )
-                    if (playing) {
-                        Spacer(Modifier.width(if (compact) 6.dp else 8.dp))
-                        Spacer(
-                            Modifier
-                                .width(13.dp)
-                                .height(15.dp)
-                                .drawBehind {
-                                    drawEqualizer(
-                                        level = waveLevel.value,
-                                        phase = wavePhase.value,
-                                    )
-                                },
-                        )
-                    }
                 }
             }
         }
