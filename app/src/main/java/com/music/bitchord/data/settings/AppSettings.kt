@@ -530,8 +530,10 @@ object AppSettings {
     val paxSenixApiKey = MutableStateFlow("")
 
     /**
-     * Disk budget for cached audio. [AudioCache][com.music.bitchord.playback.AudioCache] evicts past it.
-     * [UNLIMITED_CACHE_LIMIT_BYTES] means no ceiling of the app's own.
+     * Disk budget for cached audio. [AudioCache][com.music.bitchord.playback.AudioCache]
+     * evicts past it, and empties the cache — keeping the track that is playing —
+     * once the directory reaches it. [UNLIMITED_CACHE_LIMIT_BYTES] means no
+     * ceiling of the app's own.
      */
     val audioCacheLimitBytes = MutableStateFlow(DEFAULT_CACHE_LIMIT_BYTES)
 
@@ -1850,7 +1852,12 @@ object AppSettings {
         KEY_LAST_VERSION_CODE,
     )
 
-    const val DEFAULT_CACHE_LIMIT_BYTES = 512L * 1024 * 1024
+    /**
+     * The cache's floor, its starting size and the smallest rung the slider
+     * offers: 200MB, small enough that a first install is not quietly claiming
+     * half a gigabyte for audio it may never play.
+     */
+    const val DEFAULT_CACHE_LIMIT_BYTES = 200L * 1024 * 1024
     const val MAX_CACHE_LIMIT_BYTES = 10L * 1024 * 1024 * 1024
 
     /** The cache limit with no ceiling: only free storage bounds it. */

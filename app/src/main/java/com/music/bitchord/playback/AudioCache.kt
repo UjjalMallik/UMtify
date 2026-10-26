@@ -42,6 +42,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.coroutineContext
 
 /**
@@ -72,10 +73,12 @@ object AudioCache {
     private const val TAG = "BitChord"
 
     /**
-     * The disk budget, straight from [AppSettings] — 512MB by default, roughly
-     * 150 tracks at the highest bitrate offered, adjustable up to 10GB — or
-     * unlimited — from Settings. Least-recently-used entries are dropped past it, so it's a
-     * ceiling rather than something the listener has to manage day to day.
+     * The disk budget, straight from [AppSettings] — 200MB by default, a
+     * couple of dozen full tracks, adjustable up to 10GB — or unlimited —
+     * from Settings. Least-recently-used entries are dropped past it and the
+     * whole cache is reset when the directory reaches it (see
+     * [resetIfOversize]), so it is a budget rather than something the listener
+     * has to manage day to day.
      */
     private val evictor = DynamicLruCacheEvictor(AppSettings.DEFAULT_CACHE_LIMIT_BYTES)
 
@@ -191,9 +194,43 @@ object AudioCache {
     /** How many upcoming tracks are worth gathering for [prefetchQueue] — the caller doesn't need to know why. */
     const val QUEUE_DEPTH = QUEUE_LOOKAHEAD + 1
 
+    /**
+     * How often the cache checks whether it has reached the listener's ceiling.
+     *
+     * The evictor keeps growth under the limit as it writes; this is the
+     * automatic reset the setting promises. It runs at startup, on a track
+     * change and on this tick, and empties the cache down to whatever is
+     * playing once the directory reaches the ceiling.
+     */
+    private const val CACHE_RESET_CHECK_MS = 60_000L
+
+    /**
+     * How close to the ceiling counts as having reached it.
+     *
+     * The evictor trims span by span, so a full cache settles a little *under*
+     * the limit rather than exactly on it; waiting for byte-for-byte equality
+     * would mean the reset never ran at all. A couple of megabytes at the
+     * default size is the last chunk's worth of headroom.
+     */
+    private const val CACHE_RESET_MARGIN_BYTES = 4L * 1024 * 1024
+
     private lateinit var cache: SimpleCache
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    /**
+     * The entry playback is currently reading, and the track it belongs to.
+     *
+     * [playingKey] names the exact rendition — a `#hifi` upgrade reads a
+     * sibling of the key the track opened with — while [playingMediaId]
+     * protects every rendition of the same track. Written from playback's
+     * thread, read from the reset's, hence the volatiles.
+     */
+    @Volatile private var playingKey: String? = null
+    @Volatile private var playingMediaId: String? = null
+
+    /** Keeps the periodic and track-change checks from resetting at once. */
+    private val resetting = AtomicBoolean(false)
 
     /**
      * Kept in the app's cache directory: this is disposable by definition, and
@@ -233,6 +270,68 @@ object AudioCache {
                 evictor.maxBytes = maxBytes
                 evictor.applyNow(cache)
             }
+        }
+        // A cache carried over from a previous session can already be at or
+        // past the limit — a lowered setting, or the old default still on
+        // disk — and the evictor only reclaims when it next writes. Check at
+        // startup, then once a minute, so a session that stops playing near
+        // the ceiling still gets cleaned up.
+        scope.launch {
+            resetIfOversize()
+            while (true) {
+                delay(CACHE_RESET_CHECK_MS)
+                resetIfOversize()
+            }
+        }
+    }
+
+    /**
+     * Empties the cache when it has reached the listener's ceiling, keeping
+     * the entry playback is reading.
+     *
+     * [DynamicLruCacheEvictor] already keeps the cache from growing past the
+     * limit; this is the reset half of the setting rather than the eviction
+     * path. It runs at startup, on every track change and once a minute. The
+     * explicit playing-track skip matters twice over: [SimpleCache.removeResource]
+     * would throw on the live entry's lock anyway, and a track whose bytes
+     * vanish mid-crossfade is worse than a cache that briefly stays full.
+     * Locked entries the reset knows nothing about — the outgoing side of a
+     * crossfade, an analysis read — are left in place by that same throw, so
+     * a reset never tears bytes out from under a reader.
+     */
+    private fun resetIfOversize() {
+        if (!::cache.isInitialized) return
+        val limit = evictor.maxBytes
+        if (limit == Long.MAX_VALUE || limit <= 0L) return
+        if (!resetting.compareAndSet(false, true)) return
+        try {
+            val space = cache.cacheSpace
+            if (space < limit && limit - space > CACHE_RESET_MARGIN_BYTES) return
+            val keepKey = playingKey
+            val keepId = playingMediaId
+            var removed = 0
+            for (key in cache.keys.toList()) {
+                val playing = key == keepKey ||
+                    (keepId != null && (key == keepId || key.startsWith("$keepId#")))
+                if (playing) continue
+                runCatching { cache.removeResource(key) }.onSuccess { removed++ }
+            }
+            if (removed == 0) return
+            // The bookkeeping describes bytes that no longer exist; see
+            // [clear], which resets the same four for the same reason.
+            analysisHeads.clear()
+            analysisHeadsInFlight.clear()
+            analysisHeadWant.clear()
+            renditionKeys.clear()
+            _contentsChanged.value++
+            TrackLog.d(
+                TAG,
+                "cache reached ${limit / (1024 * 1024)}MB; reset $removed entries" +
+                    (keepId?.let { ", kept the playing track" } ?: ""),
+                about = keepId,
+            )
+        } finally {
+            resetting.set(false)
         }
     }
 
@@ -546,24 +645,38 @@ object AudioCache {
      * never reaches [recordServed], so this is also what keeps such a replay
      * counted. If the entry doesn't exist yet, [recordServed] marks it as its
      * first bytes arrive.
+     *
+     * Also records this entry as the one [resetIfOversize] must keep, and
+     * checks the ceiling again — a track change is the natural moment the
+     * cache may have just crossed it.
      */
     fun notePlayed(song: Song, uri: Uri?) {
-        if (song.localUri != null || song.videoId.isBlank()) return
+        if (song.localUri != null || song.videoId.isBlank()) {
+            playingKey = null
+            playingMediaId = null
+            return
+        }
         if (playedIds.size > MAX_NOTED_SONGS) playedIds.clear()
         playedIds += song.videoId
         noteSongs(listOf(song))
-        if (!::cache.isInitialized || uri?.scheme != "bitchord") return
+        val key = uri?.takeIf { it.scheme == "bitchord" }
+            ?.let { keyFactory.buildCacheKey(DataSpec(it)) }
+        playingKey = key
+        playingMediaId = if (key == null) null else song.videoId
+        if (!::cache.isInitialized) return
         scope.launch {
-            val key = keyFactory.buildCacheKey(DataSpec(uri))
-            runCatching {
-                val meta = cache.getContentMetadata(key)
-                if (meta.get(META_ORIGIN, null as String?) == null) return@runCatching
-                if (meta.get(META_PLAYED, null as String?) != null) return@runCatching
-                cache.applyContentMetadataMutations(
-                    key,
-                    ContentMetadataMutations().set(META_PLAYED, "1"),
-                )
+            if (key != null) {
+                runCatching {
+                    val meta = cache.getContentMetadata(key)
+                    if (meta.get(META_ORIGIN, null as String?) == null) return@runCatching
+                    if (meta.get(META_PLAYED, null as String?) != null) return@runCatching
+                    cache.applyContentMetadataMutations(
+                        key,
+                        ContentMetadataMutations().set(META_PLAYED, "1"),
+                    )
+                }
             }
+            resetIfOversize()
         }
     }
 

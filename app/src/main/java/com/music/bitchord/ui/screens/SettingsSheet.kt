@@ -156,6 +156,7 @@ import com.music.bitchord.data.stats.Backup
 import com.music.bitchord.playback.AudioCache
 import com.music.bitchord.ui.player.fullBleedArtworkAvailable
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import java.util.Locale
 
@@ -1176,13 +1177,21 @@ fun SettingsScreen(
                         else -> stringResource(R.string.song_cache_limit_subtitle)
                     },
                     value = cacheLimitLabel,
-                    sliderValue = cacheLimitMb.toFloat(),
-                    onSliderValue = {
-                        AppSettings.setAudioCacheLimitBytes(it.roundToInt().toLong() * 1024 * 1024)
+                    sliderValue = cacheStopIndex(cacheLimitMb).toFloat(),
+                    onSliderValue = { index ->
+                        val mb = CACHE_LIMIT_STOPS_MB[
+                            index.roundToInt().coerceIn(0, CACHE_LIMIT_STOPS_MB.lastIndex)
+                        ]
+                        AppSettings.setAudioCacheLimitBytes(
+                            if (mb == CACHE_UNLIMITED_STOP_MB) {
+                                AppSettings.UNLIMITED_CACHE_LIMIT_BYTES
+                            } else {
+                                mb.toLong() * 1024 * 1024
+                            },
+                        )
                     },
-                    valueRange = (AppSettings.DEFAULT_CACHE_LIMIT_BYTES / (1024 * 1024)).toFloat()..
-                        CACHE_UNLIMITED_STOP_MB.toFloat(),
-                    steps = 19,
+                    valueRange = 0f..CACHE_LIMIT_STOPS_MB.lastIndex.toFloat(),
+                    steps = CACHE_LIMIT_STOPS_MB.size - 2,
                 )
             }
             val clearSongCacheTitle = stringResource(R.string.clear_song_cache)
@@ -1811,10 +1820,35 @@ internal fun openEqualizer(context: Context, sessionId: Int) {
 private const val CACHE_WARNING_MB = 2048
 
 /**
- * Where the cache limit slider's "Unlimited" stop sits: one 512MB step past
+ * Where the cache limit slider's "Unlimited" stop sits: one step past
  * [AppSettings.MAX_CACHE_LIMIT_BYTES], so the fixed sizes keep their positions.
  */
 private const val CACHE_UNLIMITED_STOP_MB = 10 * 1024 + 512
+
+/**
+ * The cache limit's selectable rungs, in MB. The first is both the floor and
+ * the default; [CACHE_UNLIMITED_STOP_MB] is the last stop and means
+ * "Unlimited" rather than a size.
+ */
+private val CACHE_LIMIT_STOPS_MB = intArrayOf(
+    (AppSettings.DEFAULT_CACHE_LIMIT_BYTES / (1024 * 1024)).toInt(),
+    300,
+    500,
+    750,
+    1024,
+    1536,
+    2048,
+    3072,
+    4096,
+    6144,
+    8192,
+    10 * 1024,
+    CACHE_UNLIMITED_STOP_MB,
+)
+
+/** Which rung [mb] is nearest, so a value stored off the ladder still lands on one. */
+private fun cacheStopIndex(mb: Int): Int =
+    CACHE_LIMIT_STOPS_MB.indices.minByOrNull { abs(CACHE_LIMIT_STOPS_MB[it] - mb) } ?: 0
 
 /** "512 MB", "2 GB", "2.5 GB" — whichever reads more naturally at that size. */
 private fun formatCacheSize(mb: Int): String {

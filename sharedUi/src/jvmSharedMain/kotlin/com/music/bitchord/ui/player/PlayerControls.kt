@@ -69,10 +69,12 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import androidx.compose.ui.Alignment
@@ -87,6 +89,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -120,6 +123,7 @@ import com.music.bitchord.data.settings.AudioQuality
 import com.music.bitchord.data.model.Song
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
@@ -569,10 +573,11 @@ private fun DrawScope.drawTransportGlass(
 
 /**
  * Two slow sine waves filling the lower half of the pill: clear liquid sloshing
- * inside crystal. The back wave is plain white at 12%, the front one carries
- * only a 10% hint of the sleeve — enough to tint the liquid, not enough to
- * paint the glass. [level] is the animated amplitude: at 0 the liquid is gone
- * and the glass reads clear.
+ * inside crystal. The back wave is plain white at 18%, and the front one
+ * carries the sleeve's accent at 30% with a thin white crest along its top —
+ * enough that the liquid reads as lit colour inside the glass rather than as a
+ * faint wash. [level] is the animated amplitude: at 0 the liquid is gone and
+ * the glass reads clear.
  */
 private fun DrawScope.drawLiquidWaves(accent: Color, level: Float, phase: Float) {
     if (level <= 0.01f) return
@@ -582,7 +587,13 @@ private fun DrawScope.drawLiquidWaves(accent: Color, level: Float, phase: Float)
     val frontBase = h * 0.74f
     val amplitude = h * 0.11f * level
 
-    fun wavePath(cycles: Float, offset: Float, speed: Float, baseline: Float): Path {
+    fun wavePath(
+        cycles: Float,
+        offset: Float,
+        speed: Float,
+        baseline: Float,
+        closed: Boolean,
+    ): Path {
         val path = Path()
         fun yAt(x: Float): Float =
             baseline + sin((x / w) * cycles * TAU + offset + phase * speed * TAU) * amplitude
@@ -593,29 +604,54 @@ private fun DrawScope.drawLiquidWaves(accent: Color, level: Float, phase: Float)
             path.lineTo(x, yAt(x))
             x += step
         }
-        path.lineTo(w, h)
-        path.lineTo(0f, h)
-        path.close()
+        if (closed) {
+            path.lineTo(w, h)
+            path.lineTo(0f, h)
+            path.close()
+        }
         return path
     }
 
     drawPath(
-        path = wavePath(cycles = 1.6f, offset = 0f, speed = 1f, baseline = backBase),
+        path = wavePath(
+            cycles = 1.6f,
+            offset = 0f,
+            speed = 1f,
+            baseline = backBase,
+            closed = true,
+        ),
         brush = Brush.verticalGradient(
-            0f to Color.White.copy(alpha = 0.12f * level),
+            0f to Color.White.copy(alpha = 0.18f * level),
             1f to Color.Transparent,
             startY = backBase - amplitude,
             endY = h,
         ),
     )
     drawPath(
-        path = wavePath(cycles = 1.25f, offset = 2.1f, speed = -1f, baseline = frontBase),
+        path = wavePath(
+            cycles = 1.25f,
+            offset = 2.1f,
+            speed = -1f,
+            baseline = frontBase,
+            closed = true,
+        ),
         brush = Brush.verticalGradient(
-            0f to accent.copy(alpha = 0.10f * level),
+            0f to accent.copy(alpha = 0.30f * level),
             1f to Color.Transparent,
             startY = frontBase - amplitude,
             endY = h,
         ),
+    )
+    drawPath(
+        path = wavePath(
+            cycles = 1.25f,
+            offset = 2.1f,
+            speed = -1f,
+            baseline = frontBase,
+            closed = false,
+        ),
+        color = Color.White.copy(alpha = 0.18f * level),
+        style = Stroke(width = 1.2.dp.toPx(), cap = StrokeCap.Round),
     )
 }
 
@@ -704,6 +740,147 @@ internal fun TransportRow(
             )
         }
     }
+}
+
+/** The ribbon strip's drawn height between the transport and the actions below. */
+private val TRANSPORT_WAVE_HEIGHT = 30.dp
+
+/** One full travel of the strip's curves. Slower than the pill's own slosh. */
+private const val TRANSPORT_WAVE_PERIOD_MS = 4200
+
+/**
+ * The music-reactive ribbon between the transport and the action row: three
+ * slow curves — accent, secondary, and a white crest — layered over one
+ * another and faded to nothing at both edges.
+ *
+ * The phase advances by hand rather than through an infinite transition, so it
+ * only runs while something is playing. Pausing lets [level] fall to zero over
+ * 400ms and then stops requesting frames altogether; a paused player pays
+ * nothing for a strip it cannot see.
+ */
+@Composable
+internal fun TransportWaveVisualizer(
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val tones = LocalPlayerTones.current
+    val level by animateFloatAsState(
+        targetValue = if (isPlaying) 1f else 0f,
+        animationSpec = tween(durationMillis = 400),
+        label = "transportWaveLevel",
+    )
+    val phase = remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(isPlaying) {
+        if (!isPlaying) return@LaunchedEffect
+        var previous = 0L
+        while (true) {
+            withFrameNanos { now ->
+                if (previous != 0L) {
+                    phase.floatValue = (
+                        phase.floatValue +
+                            (now - previous) / 1_000_000_000f /
+                            (TRANSPORT_WAVE_PERIOD_MS / 1000f)
+                        ) % 1f
+                }
+                previous = now
+            }
+        }
+    }
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(TRANSPORT_WAVE_HEIGHT)
+            .padding(horizontal = 24.dp)
+            .drawBehind {
+                drawTransportWaves(
+                    accent = tones.accent,
+                    secondary = tones.secondaryContainer,
+                    level = level,
+                    phase = phase.floatValue,
+                )
+            },
+    )
+}
+
+/**
+ * The three ribbons themselves. Each is a shallow sine with a second harmonic
+ * so its crests are not identical arcs, stroked twice — a wide faint pass for
+ * the glow, a narrow bright one for the line — and faded to
+ * [Color.Transparent] at the edges by its brush, so the strip merges into the
+ * backdrop rather than ending at a border.
+ */
+private fun DrawScope.drawTransportWaves(
+    accent: Color,
+    secondary: Color,
+    level: Float,
+    phase: Float,
+) {
+    if (level <= 0.01f) return
+    val w = size.width
+    val h = size.height
+    if (w <= 0f || h <= 0f) return
+
+    fun edgeFade(color: Color): Brush = Brush.horizontalGradient(
+        0f to Color.Transparent,
+        0.18f to color,
+        0.82f to color,
+        1f to Color.Transparent,
+    )
+
+    fun ribbon(
+        cycles: Float,
+        speed: Float,
+        baseline: Float,
+        amplitudeScale: Float,
+        weight: Float,
+        color: Color,
+    ) {
+        val amplitude = h * amplitudeScale * level
+        val path = Path()
+        val samples = 96
+        for (index in 0..samples) {
+            val x = w * index / samples
+            val turn = x / w * cycles * TAU + phase * speed * TAU + speed * 1.7f
+            val y = baseline + sin(turn) * amplitude +
+                cos(turn * 2f) * amplitude * 0.16f
+            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(
+            path = path,
+            brush = edgeFade(color.copy(alpha = color.alpha * 0.30f)),
+            style = Stroke(width = weight * 3.2f, cap = StrokeCap.Round),
+        )
+        drawPath(
+            path = path,
+            brush = edgeFade(color),
+            style = Stroke(width = weight, cap = StrokeCap.Round),
+        )
+    }
+
+    ribbon(
+        cycles = 1.15f,
+        speed = 1f,
+        baseline = h * 0.58f,
+        amplitudeScale = 0.28f,
+        weight = 1.8.dp.toPx(),
+        color = accent.copy(alpha = 0.65f * level),
+    )
+    ribbon(
+        cycles = 1.65f,
+        speed = -0.7f,
+        baseline = h * 0.60f,
+        amplitudeScale = 0.22f,
+        weight = 1.4.dp.toPx(),
+        color = secondary.copy(alpha = 0.45f * level),
+    )
+    ribbon(
+        cycles = 0.82f,
+        speed = 0.55f,
+        baseline = h * 0.52f,
+        amplitudeScale = 0.30f,
+        weight = 1.dp.toPx(),
+        color = Color.White.copy(alpha = 0.50f * level),
+    )
 }
 
 /**
