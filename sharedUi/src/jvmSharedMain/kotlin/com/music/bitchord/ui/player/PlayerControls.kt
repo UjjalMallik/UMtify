@@ -793,18 +793,19 @@ internal fun TransportRow(
     }
 }
 
-/** The ripple panel's height between the transport and the controls below. */
-private val TRANSPORT_WAVE_HEIGHT = 72.dp
+/** The ribbon strip's drawn height between the transport and the controls below. */
+private val TRANSPORT_WAVE_HEIGHT = 44.dp
 
 /**
- * The music-reactive liquid glass between the transport and the action row: a
- * stack of translucent water ribbons, tallest under the pause button and
- * collapsing to a line at both edges.
+ * The music-reactive ribbon between the transport and the action row: two
+ * overlapping fills and three flowing lines, all shaped by a bell envelope that
+ * pins them to a flat centre at both edges.
  *
  * Nothing here is a loop. [rememberWavePhase] hands the draw an ever-advancing
- * clock, so the counter-flowing layers never meet a seam. [level] is the
- * animated amplitude: pausing eases it to zero over 450ms, leaving one calm
- * glass line, and stops the frame clock altogether.
+ * clock, so the layers — which counter-flow at speeds that are not whole turns
+ * — never meet a seam. [level] is the animated amplitude: pausing eases it to
+ * zero over 450ms, leaving one calm glass line, and stops the frame clock
+ * altogether.
  */
 @Composable
 internal fun TransportWaveVisualizer(
@@ -822,9 +823,9 @@ internal fun TransportWaveVisualizer(
         modifier = modifier
             .fillMaxWidth()
             .height(TRANSPORT_WAVE_HEIGHT)
-            .padding(horizontal = 14.dp)
+            .padding(horizontal = 24.dp)
             .drawBehind {
-                drawLiquidGlassRipple(
+                drawLiquidRibbon(
                     accent = tones.accent,
                     secondary = tones.secondaryContainer,
                     level = level,
@@ -835,19 +836,18 @@ internal fun TransportWaveVisualizer(
 }
 
 /**
- * The ripple itself: four translucent glass ribbons layered back to front.
+ * The ribbon itself, in four layers: two translucent bodies filled between a
+ * crest and its mirrored counter-phase trough, then the accent, secondary and
+ * white lines weaving through them.
  *
- * Each layer is a closed band between a wavy crest and a slower, counter-phase
- * trough, with both edges multiplied by `sin(x/w * PI)^1.2` — the bell that
- * keeps the centre, under the pause button, the tallest and the ends flat. A
- * two-tone swell then breathes the whole stack. Every band is filled with its
- * album colour fading to nothing, lit from inside by a white
- * [BlendMode.Screen] sheen and closed with a 1.5dp specular crest.
- *
+ * Every displacement is multiplied by `sin(x/w * PI)^1.4`, a smooth bell that
+ * leaves the wave flat at both edges, and by a two-tone swell that makes the
+ * whole ribbon breathe. The wave clock shapes that breathing too, so the
+ * ribbon never looks metronomic.
  * [phaseSeconds] must come from [rememberWavePhase]: the speeds below are
  * radians per second and [WAVE_PHASE_WRAP] was chosen to fold them cleanly.
  */
-private fun DrawScope.drawLiquidGlassRipple(
+private fun DrawScope.drawLiquidRibbon(
     accent: Color,
     secondary: Color,
     level: Float,
@@ -859,175 +859,129 @@ private fun DrawScope.drawLiquidGlassRipple(
 
     fun edgeFade(color: Color): Brush = Brush.horizontalGradient(
         0f to Color.Transparent,
-        0.14f to color,
-        0.86f to color,
+        0.16f to color,
+        0.84f to color,
         1f to Color.Transparent,
     )
 
     val centre = h / 2f
-    // Paused: the layers have converged, so the panel is one calm glass line.
+    // Paused: the layers have converged, so the strip is one calm glass line.
     if (level <= 0.01f) {
         drawLine(
-            brush = edgeFade(Color.White.copy(alpha = 0.05f)),
+            brush = edgeFade(Color.White.copy(alpha = 0.10f)),
             start = Offset(0f, centre),
             end = Offset(w, centre),
-            strokeWidth = 3.dp.toPx(),
-            cap = StrokeCap.Round,
-        )
-        drawLine(
-            brush = edgeFade(Color.White.copy(alpha = 0.14f)),
-            start = Offset(0f, centre),
-            end = Offset(w, centre),
-            strokeWidth = 1.2.dp.toPx(),
+            strokeWidth = 1.dp.toPx(),
             cap = StrokeCap.Round,
         )
         return
     }
 
-    // Two-tone swell: the stack breathes rather than holding one amplitude.
-    val swell = 0.72f + 0.28f * sin(phaseSeconds * 3.1f) * cos(phaseSeconds * 1.7f)
-    val samples = 96
+    // Two-tone swell: the ribbon breathes rather than holding one amplitude.
+    val beat = 0.72f + 0.28f * sin(phaseSeconds * 3.1f) * cos(phaseSeconds * 1.7f)
+    val swing = h * 0.30f * level * beat
 
     fun envelopeAt(x: Float): Float {
         val t = (x / w).coerceIn(0f, 1f)
-        return sin(t * PI.toFloat()).coerceAtLeast(0f).pow(1.2f)
+        return sin(t * PI.toFloat()).coerceAtLeast(0f).pow(1.4f)
     }
 
-    /**
-     * One glass ribbon. The offsets are fractions of the height, negative
-     * above the centre; both edges collapse onto the centre as [envelopeAt]
-     * falls to zero, so the stack tapers into a single line at the ends.
-     */
-    fun layer(
-        topOffset: Float,
-        bottomOffset: Float,
-        topCycles: Float,
-        bottomCycles: Float,
-        topSpeed: Float,
-        bottomSpeed: Float,
-        phaseOffset: Float,
-        amplitude: Float,
-        color: Color,
-        alpha: Float,
-    ) {
-        fun crestAt(x: Float, env: Float): Float {
-            val turn = (x / w) * topCycles * TAU + phaseSeconds * topSpeed + phaseOffset
-            return centre + (topOffset + sin(turn) * amplitude * swell) * h * env
-        }
+    fun yAt(x: Float, cycles: Float, speed: Float, offset: Float, scale: Float): Float {
+        val turn = (x / w) * cycles * TAU + phaseSeconds * speed + offset
+        return centre +
+            (sin(turn) + 0.2f * cos(turn * 2f)) * swing * scale * envelopeAt(x)
+    }
 
-        fun troughAt(x: Float, env: Float): Float {
-            val turn = (x / w) * bottomCycles * TAU + phaseSeconds * bottomSpeed +
-                phaseOffset * 1.7f
-            return centre + (bottomOffset + sin(turn) * amplitude * 0.4f * swell) * h * env
-        }
-
-        val band = Path()
-        val crest = Path()
+    fun linePath(cycles: Float, speed: Float, offset: Float, scale: Float): Path {
+        val path = Path()
+        val samples = 96
         for (index in 0..samples) {
             val x = w * index / samples
-            val top = crestAt(x, envelopeAt(x))
-            if (index == 0) {
-                band.moveTo(x, top)
-                crest.moveTo(x, top)
-            } else {
-                band.lineTo(x, top)
-                crest.lineTo(x, top)
-            }
+            val y = yAt(x, cycles, speed, offset, scale)
+            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        return path
+    }
+
+    /** A crest traced left to right, then a counter-phase trough back to the left. */
+    fun ribbonPath(
+        cycles: Float,
+        speed: Float,
+        offset: Float,
+        troughScale: Float,
+        troughCycles: Float,
+    ): Path {
+        val path = Path()
+        val samples = 96
+        for (index in 0..samples) {
+            val x = w * index / samples
+            val y = yAt(x, cycles, speed, offset, 1f)
+            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
         for (index in samples downTo 0) {
             val x = w * index / samples
-            band.lineTo(x, troughAt(x, envelopeAt(x)))
+            val y = centre -
+                (yAt(x, troughCycles, -speed, offset + 1.35f, troughScale) - centre)
+            path.lineTo(x, y)
         }
-        band.close()
+        path.close()
+        return path
+    }
 
-        val body = color.copy(alpha = alpha * level)
-        val topY = centre + (topOffset - amplitude) * h
-        val bottomY = centre + bottomOffset * h
+    // Layer 1: the accent body, widest and softest.
+    drawPath(
+        path = ribbonPath(
+            cycles = 1.35f,
+            speed = 1.9f,
+            offset = 0f,
+            troughScale = 0.82f,
+            troughCycles = 1.15f,
+        ),
+        brush = edgeFade(accent.copy(alpha = 0.24f * level)),
+    )
+    // Layer 2: the secondary body, flowing the other way.
+    drawPath(
+        path = ribbonPath(
+            cycles = 2.05f,
+            speed = -1.5f,
+            offset = 2.1f,
+            troughScale = 0.72f,
+            troughCycles = 1.7f,
+        ),
+        brush = edgeFade(secondary.copy(alpha = 0.18f * level)),
+    )
+
+    /** A bright line with a wide, faint pass beneath it so it reads as lit. */
+    fun glowLine(path: Path, color: Color, width: Float) {
         drawPath(
-            path = band,
-            brush = Brush.verticalGradient(
-                0f to body,
-                0.16f to lerp(body, Color.White, 0.22f).copy(alpha = body.alpha * 0.85f),
-                0.50f to body.copy(alpha = body.alpha * 0.40f),
-                1f to Color.Transparent,
-                startY = topY,
-                endY = bottomY,
-            ),
+            path = path,
+            brush = edgeFade(color.copy(alpha = color.alpha * 0.22f)),
+            style = Stroke(width = width * 3f, cap = StrokeCap.Round),
         )
-        // Depth: a screen-blended white wash inside the same band, brightest
-        // just under the crest where the glass would catch the room.
         drawPath(
-            path = band,
-            brush = Brush.verticalGradient(
-                0f to Color.White.copy(alpha = 0.10f * level),
-                1f to Color.Transparent,
-                startY = topY,
-                endY = topY + (bottomY - topY) * 0.6f,
-            ),
-            blendMode = BlendMode.Screen,
-        )
-        // Wet glass: each crest catches the light, white near the top of the
-        // panel and tinting off as it dips towards the bottom.
-        drawPath(
-            path = crest,
-            brush = Brush.verticalGradient(
-                0f to Color.White.copy(alpha = 0.85f * level),
-                0.30f to Color.White.copy(alpha = 0.38f * level),
-                0.70f to color.copy(alpha = 0.22f * level),
-                1f to Color.Transparent,
-            ),
-            style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round),
+            path = path,
+            brush = edgeFade(color),
+            style = Stroke(width = width, cap = StrokeCap.Round),
         )
     }
 
-    // Back to front: the deepest body first, the small bright crest last.
-    layer(
-        topOffset = -0.36f,
-        bottomOffset = 0.44f,
-        topCycles = 1.05f,
-        bottomCycles = 1.35f,
-        topSpeed = 1.9f,
-        bottomSpeed = 1.6f,
-        phaseOffset = 0f,
-        amplitude = 0.12f,
-        color = accent,
-        alpha = 0.20f,
+    // Layer 3: the primary accent line, warmed a touch towards white.
+    glowLine(
+        path = linePath(cycles = 1.1f, speed = 1.5f, offset = 0.6f, scale = 1f),
+        color = lerp(accent, Color.White, 0.18f).copy(alpha = 0.85f * level),
+        width = 2.2.dp.toPx(),
     )
-    layer(
-        topOffset = -0.24f,
-        bottomOffset = 0.34f,
-        topCycles = 1.5f,
-        bottomCycles = 1.85f,
-        topSpeed = -1.5f,
-        bottomSpeed = -1.2f,
-        phaseOffset = 2.1f,
-        amplitude = 0.11f,
-        color = secondary,
-        alpha = 0.26f,
+    // Layer 4: the counter-flowing secondary line, lighter than its body.
+    glowLine(
+        path = linePath(cycles = 1.65f, speed = -1.9f, offset = 2.6f, scale = 0.78f),
+        color = lerp(secondary, Color.White, 0.35f).copy(alpha = 0.65f * level),
+        width = 1.6.dp.toPx(),
     )
-    layer(
-        topOffset = -0.12f,
-        bottomOffset = 0.24f,
-        topCycles = 2f,
-        bottomCycles = 2.35f,
-        topSpeed = 1.7f,
-        bottomSpeed = 1.4f,
-        phaseOffset = 4f,
-        amplitude = 0.10f,
-        color = lerp(accent, Color.White, 0.22f),
-        alpha = 0.20f,
-    )
-    layer(
-        topOffset = 0f,
-        bottomOffset = 0.16f,
-        topCycles = 0.9f,
-        bottomCycles = 1.15f,
-        topSpeed = 2.4f,
-        bottomSpeed = 2.1f,
-        phaseOffset = 1.2f,
-        amplitude = 0.09f,
-        color = lerp(secondary, Color.White, 0.30f),
-        alpha = 0.28f,
+    // The specular crest: one thin white highlight weaving down the middle.
+    drawPath(
+        path = linePath(cycles = 0.9f, speed = 2.4f, offset = 4.1f, scale = 0.52f),
+        brush = edgeFade(Color.White.copy(alpha = 0.80f * level)),
+        style = Stroke(width = 1.2.dp.toPx(), cap = StrokeCap.Round),
     )
 }
 
