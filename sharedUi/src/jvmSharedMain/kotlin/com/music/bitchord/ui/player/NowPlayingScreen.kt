@@ -3742,11 +3742,13 @@ fun NowPlayingScreen(
                         onNext = onNext,
                     )
 
-                    // The ribbon occupies what used to be empty air between the
-                    // transport and the volume row. Its 30dp and the two tight
-                    // gaps around it are the entire cost; the spread below still
-                    // does the breathing on a tall screen.
-                    Spacer(Modifier.height(2.dp))
+                    // The ribbon sits in its own 44dp band with the same 12dp
+                    // of air above and below, so it reads as centred in the
+                    // space the transport leaves rather than pinned to the
+                    // pill. The tall screen's share of the spread joins the
+                    // gap beneath it, where it lifts the volume row off the
+                    // ribbon instead of hollowing out one side.
+                    Spacer(Modifier.height(12.dp))
 
                     TransportWaveVisualizer(isPlaying = isPlaying)
 
@@ -3754,7 +3756,7 @@ fun NowPlayingScreen(
                     // hidden. Removing the slot itself shortened the controls by 50dp
                     // and moved every control below it. A display preference should not
                     // change the half-player's geometry.
-                    Spacer(Modifier.height(4.dp + controlSpread / 2))
+                    Spacer(Modifier.height(12.dp + controlSpread / 2))
 
                     if (!hideVolumeBar) {
                         VolumeRow(

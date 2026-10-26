@@ -67,6 +67,7 @@ import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableFloatStateOf
@@ -93,6 +94,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import org.jetbrains.compose.resources.painterResource
@@ -123,7 +125,9 @@ import com.music.bitchord.data.settings.AudioQuality
 import com.music.bitchord.data.model.Song
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
@@ -486,10 +490,54 @@ private const val PLAY_STATE_FADE_MS = 220
 /** How long the liquid takes to flatten after a pause. */
 private const val WAVE_SETTLE_MS = 350
 
-/** One full sweep of the waves. */
-private const val WAVE_PERIOD_MS = 3200
-
 private const val TAU = 6.2831855f
+
+/**
+ * How long the wave clock runs before it is folded, in seconds — twelve and a
+ * half minutes, or 120 whole turns of phase.
+ *
+ * [rememberWavePhase] advances forever rather than looping a 0..1 cycle, so
+ * layers whose speeds are not whole numbers of turns never jump at a seam. A
+ * `Float` still runs out of resolution after hours, so the clock is folded
+ * here; every angular speed used below, times 120, is a whole number, so the
+ * fold shifts each harmonic by an exact multiple of TAU and cannot be seen.
+ */
+private const val WAVE_PHASE_WRAP = 120f * TAU
+
+/**
+ * A wave clock that advances only while [isPlaying] and never snaps back to
+ * the start of a loop.
+ *
+ * This replaces the bounded `infiniteTransition` float the waves used to read:
+ * a 0..1 cycle restarting every few seconds is invisible only while every
+ * multiplier is whole, and a counter-flowing layer at 0.55 or 1.9 turns is
+ * not. Accumulating real elapsed time lets each `phaseSeconds * speed`
+ * harmonic flow straight through, with the fold at [WAVE_PHASE_WRAP] leaving
+ * no seam. The coroutine stops with playback, so a paused player requests no
+ * frames.
+ */
+@Composable
+private fun rememberWavePhase(isPlaying: Boolean): MutableFloatState {
+    val phaseSeconds = remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(isPlaying) {
+        if (!isPlaying) return@LaunchedEffect
+        var previous = 0L
+        while (true) {
+            withFrameNanos { now ->
+                if (previous != 0L) {
+                    val next = phaseSeconds.floatValue + (now - previous) / 1_000_000_000f
+                    phaseSeconds.floatValue = if (next > WAVE_PHASE_WRAP) {
+                        next % WAVE_PHASE_WRAP
+                    } else {
+                        next
+                    }
+                }
+                previous = now
+            }
+        }
+    }
+    return phaseSeconds
+}
 
 /**
  * The clear glass body: white only. The catchlight at the top edge, a quiet
@@ -555,12 +603,12 @@ private fun DrawScope.drawTransportGlass(
     cornerRadius: Float,
     borderWidth: Float,
     waveLevel: Float = 0f,
-    wavePhase: Float = 0f,
+    phaseSeconds: Float = 0f,
 ) {
     val radius = CornerRadius(cornerRadius, cornerRadius)
     drawRoundRect(brush = glassBody(), cornerRadius = radius)
     drawRoundRect(brush = glassAccentVeil(accent), cornerRadius = radius)
-    drawLiquidWaves(accent = accent, level = waveLevel, phase = wavePhase)
+    drawLiquidWaves(accent = accent, level = waveLevel, phaseSeconds = phaseSeconds)
     val inset = borderWidth / 2f
     drawRoundRect(
         brush = glassRim(),
@@ -578,8 +626,11 @@ private fun DrawScope.drawTransportGlass(
  * enough that the liquid reads as lit colour inside the glass rather than as a
  * faint wash. [level] is the animated amplitude: at 0 the liquid is gone and
  * the glass reads clear.
+ *
+ * [phaseSeconds] comes from [rememberWavePhase]; the speeds here are radians
+ * per second, so the slosh is continuous rather than timed to a loop.
  */
-private fun DrawScope.drawLiquidWaves(accent: Color, level: Float, phase: Float) {
+private fun DrawScope.drawLiquidWaves(accent: Color, level: Float, phaseSeconds: Float) {
     if (level <= 0.01f) return
     val w = size.width
     val h = size.height
@@ -596,7 +647,7 @@ private fun DrawScope.drawLiquidWaves(accent: Color, level: Float, phase: Float)
     ): Path {
         val path = Path()
         fun yAt(x: Float): Float =
-            baseline + sin((x / w) * cycles * TAU + offset + phase * speed * TAU) * amplitude
+            baseline + sin((x / w) * cycles * TAU + offset + phaseSeconds * speed) * amplitude
         path.moveTo(0f, yAt(0f))
         val step = w / 64f
         var x = step
@@ -616,7 +667,7 @@ private fun DrawScope.drawLiquidWaves(accent: Color, level: Float, phase: Float)
         path = wavePath(
             cycles = 1.6f,
             offset = 0f,
-            speed = 1f,
+            speed = 1.9f,
             baseline = backBase,
             closed = true,
         ),
@@ -631,7 +682,7 @@ private fun DrawScope.drawLiquidWaves(accent: Color, level: Float, phase: Float)
         path = wavePath(
             cycles = 1.25f,
             offset = 2.1f,
-            speed = -1f,
+            speed = -1.9f,
             baseline = frontBase,
             closed = true,
         ),
@@ -646,7 +697,7 @@ private fun DrawScope.drawLiquidWaves(accent: Color, level: Float, phase: Float)
         path = wavePath(
             cycles = 1.25f,
             offset = 2.1f,
-            speed = -1f,
+            speed = -1.9f,
             baseline = frontBase,
             closed = false,
         ),
@@ -656,12 +707,12 @@ private fun DrawScope.drawLiquidWaves(accent: Color, level: Float, phase: Float)
 }
 
 /** Three slim bars that dance with the same phase as the waves. */
-private fun DrawScope.drawEqualizer(level: Float, phase: Float) {
+private fun DrawScope.drawEqualizer(level: Float, phaseSeconds: Float) {
     if (level <= 0.01f) return
     val barWidth = size.width * 0.22f
     val gap = (size.width - barWidth * 3f) / 2f
     repeat(3) { index ->
-        val pulse = (sin(phase * 2f * TAU + index * 2.1f) + 1f) / 2f
+        val pulse = (sin(phaseSeconds * 3.9f + index * 2.1f) + 1f) / 2f
         val barHeight = size.height * (0.22f + 0.78f * pulse) * level
         drawRoundRect(
             color = Color.White.copy(alpha = 0.9f * level),
@@ -742,21 +793,19 @@ internal fun TransportRow(
     }
 }
 
-/** The ribbon strip's drawn height between the transport and the actions below. */
-private val TRANSPORT_WAVE_HEIGHT = 30.dp
-
-/** One full travel of the strip's curves. Slower than the pill's own slosh. */
-private const val TRANSPORT_WAVE_PERIOD_MS = 4200
+/** The ribbon strip's drawn height between the transport and the controls below. */
+private val TRANSPORT_WAVE_HEIGHT = 44.dp
 
 /**
- * The music-reactive ribbon between the transport and the action row: three
- * slow curves — accent, secondary, and a white crest — layered over one
- * another and faded to nothing at both edges.
+ * The music-reactive ribbon between the transport and the action row: two
+ * overlapping fills and three flowing lines, all shaped by a bell envelope that
+ * pins them to a flat centre at both edges.
  *
- * The phase advances by hand rather than through an infinite transition, so it
- * only runs while something is playing. Pausing lets [level] fall to zero over
- * 400ms and then stops requesting frames altogether; a paused player pays
- * nothing for a strip it cannot see.
+ * Nothing here is a loop. [rememberWavePhase] hands the draw an ever-advancing
+ * clock, so the layers — which counter-flow at speeds that are not whole turns
+ * — never meet a seam. [level] is the animated amplitude: pausing eases it to
+ * zero over 450ms, leaving one calm glass line, and stops the frame clock
+ * altogether.
  */
 @Composable
 internal fun TransportWaveVisualizer(
@@ -766,120 +815,173 @@ internal fun TransportWaveVisualizer(
     val tones = LocalPlayerTones.current
     val level by animateFloatAsState(
         targetValue = if (isPlaying) 1f else 0f,
-        animationSpec = tween(durationMillis = 400),
+        animationSpec = tween(durationMillis = 450),
         label = "transportWaveLevel",
     )
-    val phase = remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(isPlaying) {
-        if (!isPlaying) return@LaunchedEffect
-        var previous = 0L
-        while (true) {
-            withFrameNanos { now ->
-                if (previous != 0L) {
-                    phase.floatValue = (
-                        phase.floatValue +
-                            (now - previous) / 1_000_000_000f /
-                            (TRANSPORT_WAVE_PERIOD_MS / 1000f)
-                        ) % 1f
-                }
-                previous = now
-            }
-        }
-    }
+    val phaseSeconds = rememberWavePhase(isPlaying)
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(TRANSPORT_WAVE_HEIGHT)
             .padding(horizontal = 24.dp)
             .drawBehind {
-                drawTransportWaves(
+                drawLiquidRibbon(
                     accent = tones.accent,
                     secondary = tones.secondaryContainer,
                     level = level,
-                    phase = phase.floatValue,
+                    phaseSeconds = phaseSeconds.floatValue,
                 )
             },
     )
 }
 
 /**
- * The three ribbons themselves. Each is a shallow sine with a second harmonic
- * so its crests are not identical arcs, stroked twice — a wide faint pass for
- * the glow, a narrow bright one for the line — and faded to
- * [Color.Transparent] at the edges by its brush, so the strip merges into the
- * backdrop rather than ending at a border.
+ * The ribbon itself, in four layers: two translucent bodies filled between a
+ * crest and its mirrored counter-phase trough, then the accent, secondary and
+ * white lines weaving through them.
+ *
+ * Every displacement is multiplied by `sin(x/w * PI)^1.4`, a smooth bell that
+ * leaves the wave flat at both edges, and by a two-tone swell that makes the
+ * whole ribbon breathe. The wave clock shapes that breathing too, so the
+ * ribbon never looks metronomic.
+ * [phaseSeconds] must come from [rememberWavePhase]: the speeds below are
+ * radians per second and [WAVE_PHASE_WRAP] was chosen to fold them cleanly.
  */
-private fun DrawScope.drawTransportWaves(
+private fun DrawScope.drawLiquidRibbon(
     accent: Color,
     secondary: Color,
     level: Float,
-    phase: Float,
+    phaseSeconds: Float,
 ) {
-    if (level <= 0.01f) return
     val w = size.width
     val h = size.height
     if (w <= 0f || h <= 0f) return
 
     fun edgeFade(color: Color): Brush = Brush.horizontalGradient(
         0f to Color.Transparent,
-        0.18f to color,
-        0.82f to color,
+        0.16f to color,
+        0.84f to color,
         1f to Color.Transparent,
     )
 
-    fun ribbon(
-        cycles: Float,
-        speed: Float,
-        baseline: Float,
-        amplitudeScale: Float,
-        weight: Float,
-        color: Color,
-    ) {
-        val amplitude = h * amplitudeScale * level
+    val centre = h / 2f
+    // Paused: the layers have converged, so the strip is one calm glass line.
+    if (level <= 0.01f) {
+        drawLine(
+            brush = edgeFade(Color.White.copy(alpha = 0.10f)),
+            start = Offset(0f, centre),
+            end = Offset(w, centre),
+            strokeWidth = 1.dp.toPx(),
+            cap = StrokeCap.Round,
+        )
+        return
+    }
+
+    // Two-tone swell: the ribbon breathes rather than holding one amplitude.
+    val beat = 0.72f + 0.28f * sin(phaseSeconds * 3.1f) * cos(phaseSeconds * 1.7f)
+    val swing = h * 0.30f * level * beat
+
+    fun envelopeAt(x: Float): Float {
+        val t = (x / w).coerceIn(0f, 1f)
+        return sin(t * PI.toFloat()).coerceAtLeast(0f).pow(1.4f)
+    }
+
+    fun yAt(x: Float, cycles: Float, speed: Float, offset: Float, scale: Float): Float {
+        val turn = (x / w) * cycles * TAU + phaseSeconds * speed + offset
+        return centre +
+            (sin(turn) + 0.2f * cos(turn * 2f)) * swing * scale * envelopeAt(x)
+    }
+
+    fun linePath(cycles: Float, speed: Float, offset: Float, scale: Float): Path {
         val path = Path()
         val samples = 96
         for (index in 0..samples) {
             val x = w * index / samples
-            val turn = x / w * cycles * TAU + phase * speed * TAU + speed * 1.7f
-            val y = baseline + sin(turn) * amplitude +
-                cos(turn * 2f) * amplitude * 0.16f
+            val y = yAt(x, cycles, speed, offset, scale)
             if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
+        return path
+    }
+
+    /** A crest traced left to right, then a counter-phase trough back to the left. */
+    fun ribbonPath(
+        cycles: Float,
+        speed: Float,
+        offset: Float,
+        troughScale: Float,
+        troughCycles: Float,
+    ): Path {
+        val path = Path()
+        val samples = 96
+        for (index in 0..samples) {
+            val x = w * index / samples
+            val y = yAt(x, cycles, speed, offset, 1f)
+            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        for (index in samples downTo 0) {
+            val x = w * index / samples
+            val y = centre -
+                (yAt(x, troughCycles, -speed, offset + 1.35f, troughScale) - centre)
+            path.lineTo(x, y)
+        }
+        path.close()
+        return path
+    }
+
+    // Layer 1: the accent body, widest and softest.
+    drawPath(
+        path = ribbonPath(
+            cycles = 1.35f,
+            speed = 1.9f,
+            offset = 0f,
+            troughScale = 0.82f,
+            troughCycles = 1.15f,
+        ),
+        brush = edgeFade(accent.copy(alpha = 0.24f * level)),
+    )
+    // Layer 2: the secondary body, flowing the other way.
+    drawPath(
+        path = ribbonPath(
+            cycles = 2.05f,
+            speed = -1.5f,
+            offset = 2.1f,
+            troughScale = 0.72f,
+            troughCycles = 1.7f,
+        ),
+        brush = edgeFade(secondary.copy(alpha = 0.18f * level)),
+    )
+
+    /** A bright line with a wide, faint pass beneath it so it reads as lit. */
+    fun glowLine(path: Path, color: Color, width: Float) {
         drawPath(
             path = path,
-            brush = edgeFade(color.copy(alpha = color.alpha * 0.30f)),
-            style = Stroke(width = weight * 3.2f, cap = StrokeCap.Round),
+            brush = edgeFade(color.copy(alpha = color.alpha * 0.22f)),
+            style = Stroke(width = width * 3f, cap = StrokeCap.Round),
         )
         drawPath(
             path = path,
             brush = edgeFade(color),
-            style = Stroke(width = weight, cap = StrokeCap.Round),
+            style = Stroke(width = width, cap = StrokeCap.Round),
         )
     }
 
-    ribbon(
-        cycles = 1.15f,
-        speed = 1f,
-        baseline = h * 0.58f,
-        amplitudeScale = 0.28f,
-        weight = 1.8.dp.toPx(),
-        color = accent.copy(alpha = 0.65f * level),
+    // Layer 3: the primary accent line, warmed a touch towards white.
+    glowLine(
+        path = linePath(cycles = 1.1f, speed = 1.5f, offset = 0.6f, scale = 1f),
+        color = lerp(accent, Color.White, 0.18f).copy(alpha = 0.85f * level),
+        width = 2.2.dp.toPx(),
     )
-    ribbon(
-        cycles = 1.65f,
-        speed = -0.7f,
-        baseline = h * 0.60f,
-        amplitudeScale = 0.22f,
-        weight = 1.4.dp.toPx(),
-        color = secondary.copy(alpha = 0.45f * level),
+    // Layer 4: the counter-flowing secondary line, lighter than its body.
+    glowLine(
+        path = linePath(cycles = 1.65f, speed = -1.9f, offset = 2.6f, scale = 0.78f),
+        color = lerp(secondary, Color.White, 0.35f).copy(alpha = 0.65f * level),
+        width = 1.6.dp.toPx(),
     )
-    ribbon(
-        cycles = 0.82f,
-        speed = 0.55f,
-        baseline = h * 0.52f,
-        amplitudeScale = 0.30f,
-        weight = 1.dp.toPx(),
-        color = Color.White.copy(alpha = 0.50f * level),
+    // The specular crest: one thin white highlight weaving down the middle.
+    drawPath(
+        path = linePath(cycles = 0.9f, speed = 2.4f, offset = 4.1f, scale = 0.52f),
+        brush = edgeFade(Color.White.copy(alpha = 0.80f * level)),
+        style = Stroke(width = 1.2.dp.toPx(), cap = StrokeCap.Round),
     )
 }
 
@@ -1008,16 +1110,10 @@ private fun PlayPausePill(
         animationSpec = tween(durationMillis = WAVE_SETTLE_MS),
         label = "playPillWaveLevel",
     )
-    val liquid = rememberInfiniteTransition(label = "playPillLiquid")
-    val wavePhase = liquid.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = WAVE_PERIOD_MS, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "playPillWavePhase",
-    )
+    // A continuous clock rather than a repeating transition: the slosh is
+    // counter-flowing at speeds that are not whole turns, so a looping 0..1
+    // float would visibly snap every few seconds.
+    val wavePhase = rememberWavePhase(isPlaying)
     Box(
         modifier = Modifier
             .width(width)
@@ -1033,7 +1129,7 @@ private fun PlayPausePill(
                     cornerRadius = this.size.height / 2f,
                     borderWidth = 1.5.dp.toPx(),
                     waveLevel = waveLevel.value,
-                    wavePhase = wavePhase.value,
+                    phaseSeconds = wavePhase.floatValue,
                 )
             }
             .clickable(
@@ -1080,7 +1176,7 @@ private fun PlayPausePill(
                             .drawBehind {
                                 drawEqualizer(
                                     level = waveLevel.value,
-                                    phase = wavePhase.value,
+                                    phaseSeconds = wavePhase.floatValue,
                                 )
                             },
                     )
