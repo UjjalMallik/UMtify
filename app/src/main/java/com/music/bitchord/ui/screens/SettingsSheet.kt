@@ -37,6 +37,7 @@ import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.Animation
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.BarChart
+import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BlurOff
 import androidx.compose.material.icons.rounded.BlurOn
@@ -56,6 +57,11 @@ import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.LibraryMusic
@@ -236,6 +242,13 @@ fun SettingsScreen(
     val exportDownloads by AppSettings.exportDownloads.collectAsStateWithLifecycle()
     val stopOnTaskRemoved by AppSettings.stopOnTaskRemoved.collectAsStateWithLifecycle()
     val hideVolumeBar by AppSettings.hideVolumeBar.collectAsStateWithLifecycle()
+    val showPlayerBottomToolbar by AppSettings.showPlayerBottomToolbar.collectAsStateWithLifecycle()
+    val showQueueButton by AppSettings.showQueueButton.collectAsStateWithLifecycle()
+    val showSleepTimerButton by AppSettings.showSleepTimerButton.collectAsStateWithLifecycle()
+    val showShuffleButton by AppSettings.showShuffleButton.collectAsStateWithLifecycle()
+    val showLyricsButton by AppSettings.showLyricsButton.collectAsStateWithLifecycle()
+    val showRepeatButton by AppSettings.showRepeatButton.collectAsStateWithLifecycle()
+    val showMoreButton by AppSettings.showMoreButton.collectAsStateWithLifecycle()
     val hideStatusBarInPlayer by AppSettings.hideStatusBarInPlayer.collectAsStateWithLifecycle()
     val hideSongStatus by AppSettings.hideSongStatus.collectAsStateWithLifecycle()
     val showQueueHistory by AppSettings.showQueueHistory.collectAsStateWithLifecycle()
@@ -1032,6 +1045,147 @@ fun SettingsScreen(
                         },
                         trailing = { Chevron() },
                         onClick = onTranslationLanguage,
+                    )
+                }
+                val showToolbarTitle = stringResource(R.string.show_player_bottom_toolbar)
+                row(showToolbarTitle, "player", "toolbar", "action bar", "buttons", "bottom") {
+                    SettingsRow(
+                        icon = Icons.Rounded.Apps,
+                        title = showToolbarTitle,
+                        subtitle = stringResource(R.string.show_player_bottom_toolbar_subtitle),
+                        trailing = {
+                            Switch(
+                                checked = showPlayerBottomToolbar,
+                                onCheckedChange = AppSettings::setShowPlayerBottomToolbar,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = {
+                            AppSettings.setShowPlayerBottomToolbar(!showPlayerBottomToolbar)
+                        },
+                    )
+                }
+                val showQueueButtonTitle = stringResource(R.string.show_queue_button)
+                row(showQueueButtonTitle, "player", "toolbar", "button", "queue") {
+                    SettingsRow(
+                        icon = Icons.Rounded.QueueMusic,
+                        title = showQueueButtonTitle,
+                        enabled = showPlayerBottomToolbar,
+                        trailing = {
+                            Switch(
+                                checked = showQueueButton,
+                                onCheckedChange = AppSettings::setShowQueueButton,
+                                enabled = showPlayerBottomToolbar,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setShowQueueButton(!showQueueButton) },
+                    )
+                }
+                val showSleepTimerButtonTitle = stringResource(R.string.show_sleep_timer_button)
+                row(showSleepTimerButtonTitle, "player", "toolbar", "button", "sleep timer") {
+                    SettingsRow(
+                        icon = Icons.Rounded.Bedtime,
+                        title = showSleepTimerButtonTitle,
+                        enabled = showPlayerBottomToolbar,
+                        trailing = {
+                            Switch(
+                                checked = showSleepTimerButton,
+                                onCheckedChange = AppSettings::setShowSleepTimerButton,
+                                enabled = showPlayerBottomToolbar,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setShowSleepTimerButton(!showSleepTimerButton) },
+                    )
+                }
+                val showShuffleButtonTitle = stringResource(R.string.show_shuffle_button)
+                row(showShuffleButtonTitle, "player", "toolbar", "button", "shuffle") {
+                    SettingsRow(
+                        icon = Icons.Rounded.Shuffle,
+                        title = showShuffleButtonTitle,
+                        enabled = showPlayerBottomToolbar,
+                        trailing = {
+                            Switch(
+                                checked = showShuffleButton,
+                                onCheckedChange = AppSettings::setShowShuffleButton,
+                                enabled = showPlayerBottomToolbar,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setShowShuffleButton(!showShuffleButton) },
+                    )
+                }
+                val showLyricsButtonTitle = stringResource(R.string.show_lyrics_button)
+                row(showLyricsButtonTitle, "player", "toolbar", "button", "lyrics") {
+                    SettingsRow(
+                        icon = Icons.Rounded.Lyrics,
+                        title = showLyricsButtonTitle,
+                        enabled = showPlayerBottomToolbar,
+                        trailing = {
+                            Switch(
+                                checked = showLyricsButton,
+                                onCheckedChange = AppSettings::setShowLyricsButton,
+                                enabled = showPlayerBottomToolbar,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setShowLyricsButton(!showLyricsButton) },
+                    )
+                }
+                val showRepeatButtonTitle = stringResource(R.string.show_repeat_button)
+                row(showRepeatButtonTitle, "player", "toolbar", "button", "repeat") {
+                    SettingsRow(
+                        icon = Icons.Rounded.Repeat,
+                        title = showRepeatButtonTitle,
+                        enabled = showPlayerBottomToolbar,
+                        trailing = {
+                            Switch(
+                                checked = showRepeatButton,
+                                onCheckedChange = AppSettings::setShowRepeatButton,
+                                enabled = showPlayerBottomToolbar,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setShowRepeatButton(!showRepeatButton) },
+                    )
+                }
+                val showMoreButtonTitle = stringResource(R.string.show_more_button)
+                row(showMoreButtonTitle, "player", "toolbar", "button", "more options", "menu") {
+                    SettingsRow(
+                        icon = Icons.Rounded.MoreHoriz,
+                        title = showMoreButtonTitle,
+                        enabled = showPlayerBottomToolbar,
+                        trailing = {
+                            Switch(
+                                checked = showMoreButton,
+                                onCheckedChange = AppSettings::setShowMoreButton,
+                                enabled = showPlayerBottomToolbar,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setShowMoreButton(!showMoreButton) },
                     )
                 }
             }

@@ -208,6 +208,15 @@ interface PlayerSettingsSource {
     val hideSongStatus: StateFlow<Boolean>
     val showQueueHistory: StateFlow<Boolean>
     val hideVolumeBar: StateFlow<Boolean>
+    /** Whether the bottom action row is drawn at all. */
+    val showPlayerBottomToolbar: StateFlow<Boolean>
+    /** The six keys [showPlayerBottomToolbar] governs, one switch each. */
+    val showQueueButton: StateFlow<Boolean>
+    val showSleepTimerButton: StateFlow<Boolean>
+    val showShuffleButton: StateFlow<Boolean>
+    val showLyricsButton: StateFlow<Boolean>
+    val showRepeatButton: StateFlow<Boolean>
+    val showMoreButton: StateFlow<Boolean>
     /** Hide the device status bar while the player is up. Always false where there is none. */
     val hideStatusBar: StateFlow<Boolean>
     val lastPlayerScreen: StateFlow<LastPlayerScreen>

@@ -64,6 +64,13 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         override val hideSongStatus get() = AppSettings.hideSongStatus
         override val showQueueHistory get() = AppSettings.showQueueHistory
         override val hideVolumeBar get() = AppSettings.hideVolumeBar
+        override val showPlayerBottomToolbar get() = AppSettings.showPlayerBottomToolbar
+        override val showQueueButton get() = AppSettings.showQueueButton
+        override val showSleepTimerButton get() = AppSettings.showSleepTimerButton
+        override val showShuffleButton get() = AppSettings.showShuffleButton
+        override val showLyricsButton get() = AppSettings.showLyricsButton
+        override val showRepeatButton get() = AppSettings.showRepeatButton
+        override val showMoreButton get() = AppSettings.showMoreButton
         override val hideStatusBar get() = AppSettings.hideStatusBarInPlayer
         override val lastPlayerScreen get() = AppSettings.lastPlayerScreen
         override val legacyMeshGradient get() = AppSettings.legacyMeshGradient

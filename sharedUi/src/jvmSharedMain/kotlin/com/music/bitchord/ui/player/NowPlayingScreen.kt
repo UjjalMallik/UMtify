@@ -333,6 +333,17 @@ internal val PLAYER_MAX_WIDTH = 560.dp
 private val TABLET_PLAYER_MIN_WIDTH = 700.dp
 
 /**
+ * The height below which the portrait player tightens its vertical rhythm.
+ *
+ * Short phones and phones running a large display scale have less height than
+ * the layout was tuned for; without this the sleeve, transport and action row
+ * would squeeze the artwork and the queue. Under this the spacers shrink, the
+ * transport takes its compact discs, and the artwork keeps every dp the
+ * controls give back.
+ */
+private val DENSE_PLAYER_HEIGHT = 740.dp
+
+/**
  * The least a landscape window has to offer before the player splits into its
  * two columns: enough that each half still holds what it is given — the sleeve
  * above the lyrics / output / queue row on the left, the credits and transport
@@ -825,6 +836,24 @@ fun NowPlayingScreen(
     }
     val hideVolumeBar by PlayerSettings.hideVolumeBar.collectAsStateWithLifecycle()
     val hideSongStatus by PlayerSettings.hideSongStatus.collectAsStateWithLifecycle()
+    // The bottom action row: a master switch plus one per key. Everything
+    // hidden means the row is not composed at all, so the caption below it
+    // sits straight under the volume row.
+    val showPlayerBottomToolbar by PlayerSettings.showPlayerBottomToolbar.collectAsStateWithLifecycle()
+    val showQueueButton by PlayerSettings.showQueueButton.collectAsStateWithLifecycle()
+    val showSleepTimerButton by PlayerSettings.showSleepTimerButton.collectAsStateWithLifecycle()
+    val showShuffleButton by PlayerSettings.showShuffleButton.collectAsStateWithLifecycle()
+    val showLyricsButton by PlayerSettings.showLyricsButton.collectAsStateWithLifecycle()
+    val showRepeatButton by PlayerSettings.showRepeatButton.collectAsStateWithLifecycle()
+    val showMoreButton by PlayerSettings.showMoreButton.collectAsStateWithLifecycle()
+    val actionVisibility = PlayerActionVisibility(
+        queue = showQueueButton,
+        sleepTimer = showSleepTimerButton,
+        shuffle = showShuffleButton,
+        lyrics = showLyricsButton,
+        repeat = showRepeatButton,
+        more = showMoreButton,
+    )
 
     // Animated cover art: the looping video some labels publish alongside a
     // release, laid over the sleeve. A miss is the normal answer — see
@@ -1510,25 +1539,30 @@ fun NowPlayingScreen(
     val onVolumeChangeFinished: () -> Unit = volume::release
 
     // The row both layouts end on: playback modes, queue, sleep timer and the
-    // track menu, with the output and party line just beneath them.
+    // track menu, with the output and party line just beneath them. Hidden
+    // outright when the master switch is off or every key was switched off —
+    // an empty row would only cost the player a band of dead space.
     val playerActions: @Composable () -> Unit = {
-        PlayerActionBar(
-            lyricsOpen = lyricsOpen,
-            queueOpen = queueOpen,
-            shuffleEnabled = shuffleEnabled,
-            repeatMode = repeatMode,
-            onToggleLyrics = toggleLyrics,
-            onToggleQueue = toggleQueue,
-            onToggleShuffle = onToggleShuffle,
-            onCycleRepeat = onCycleRepeat,
-            onOpenSleepTimer = onOpenSleepTimer,
-            onOpenMenu = onOpenMenu,
-            menuIcon = if (showRevertCue) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.MoreHoriz,
-            sleepTimerActive = sleepTimerActive,
-        )
-        // Keep the current output capsule visible in every state, with the way
-        // into Listen Together beside it when there is no party to open.
-        Spacer(Modifier.height(10.dp))
+        if (showPlayerBottomToolbar && actionVisibility.showsAnything) {
+            PlayerActionBar(
+                lyricsOpen = lyricsOpen,
+                queueOpen = queueOpen,
+                shuffleEnabled = shuffleEnabled,
+                repeatMode = repeatMode,
+                onToggleLyrics = toggleLyrics,
+                onToggleQueue = toggleQueue,
+                onToggleShuffle = onToggleShuffle,
+                onCycleRepeat = onCycleRepeat,
+                onOpenSleepTimer = onOpenSleepTimer,
+                onOpenMenu = onOpenMenu,
+                menuIcon = if (showRevertCue) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.MoreHoriz,
+                sleepTimerActive = sleepTimerActive,
+                visibility = actionVisibility,
+            )
+            // Keep the current output capsule visible in every state, with the
+            // way into Listen Together beside it when there is no party to open.
+            Spacer(Modifier.height(10.dp))
+        }
         Box(
             modifier = Modifier.fillMaxWidth().height(30.dp),
             contentAlignment = Alignment.TopCenter,
@@ -1612,6 +1646,8 @@ fun NowPlayingScreen(
     // queue in turn, and in landscape none of them has anything to do — the
     // sleeve never has to get out of anything's way.
     val landscape = landscapePlayerAvailable(windowWidth, windowHeight)
+    // Short portrait windows get the tight rhythm — see [DENSE_PLAYER_HEIGHT].
+    val densePortrait = !landscape && windowHeight < DENSE_PLAYER_HEIGHT
     // Tablet-sized players use the full-cover blur in all three states. On a
     // phone only the lyrics and queue replace the main player's seam-aware,
     // reflected mesh; the main player deliberately keeps its existing look.
@@ -2557,7 +2593,10 @@ fun NowPlayingScreen(
                             .weight(1f)
                             .widthIn(max = PLAYER_MAX_WIDTH)
                             .fillMaxWidth()
-                            .padding(top = ART_BOX_TOP_PAD, bottom = 18.dp),
+                            .padding(
+                                top = if (densePortrait) 2.dp else ART_BOX_TOP_PAD,
+                                bottom = if (densePortrait) 8.dp else 18.dp,
+                            ),
                     ) {
                         if (spotifyCanvasPresentation && playerDeckSettledOpen &&
                             maxHeight != spotifyCanvasExpandedTopHeight
@@ -3729,7 +3768,7 @@ fun NowPlayingScreen(
                     // which sit close enough together to read as one. Both of its own
                     // gaps take half the spread, so on a tall screen it holds the
                     // centre rather than drifting up under the seek bar.
-                    Spacer(Modifier.height(8.dp + controlSpread / 2))
+                    Spacer(Modifier.height((if (densePortrait) 4.dp else 8.dp) + controlSpread / 2))
 
                     TransportRow(
                         isPlaying = isPlaying,
@@ -3740,6 +3779,7 @@ fun NowPlayingScreen(
                         onPrevious = onPrevious,
                         onPlayPause = onPlayPause,
                         onNext = onNext,
+                        compact = densePortrait,
                     )
 
                     // The ribbon sits in its own 44dp band with the same 12dp
@@ -3748,7 +3788,7 @@ fun NowPlayingScreen(
                     // pill. The tall screen's share of the spread joins the
                     // gap beneath it, where it lifts the volume row off the
                     // ribbon instead of hollowing out one side.
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(if (densePortrait) 8.dp else 12.dp))
 
                     TransportWaveVisualizer(isPlaying = isPlaying)
 
@@ -3756,7 +3796,11 @@ fun NowPlayingScreen(
                     // hidden. Removing the slot itself shortened the controls by 50dp
                     // and moved every control below it. A display preference should not
                     // change the half-player's geometry.
-                    Spacer(Modifier.height(12.dp + controlSpread / 2))
+                    Spacer(
+                        Modifier.height(
+                            (if (densePortrait) 8.dp else 12.dp) + controlSpread / 2,
+                        ),
+                    )
 
                     if (!hideVolumeBar) {
                         VolumeRow(
@@ -3770,10 +3814,10 @@ fun NowPlayingScreen(
 
                     // The volume slider already has 13dp below its drawn track.
                     // Balance that invisible inset with the caption gap below the icons.
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(if (densePortrait) 4.dp else 6.dp))
 
                     playerActions()
-                    Spacer(Modifier.height(18.dp))
+                    Spacer(Modifier.height(if (densePortrait) 10.dp else 18.dp))
                     }
                     }
                     }

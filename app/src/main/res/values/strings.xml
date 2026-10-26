@@ -347,6 +347,14 @@
     <string name="stop_music_on_close_subtitle">Stops playback when swiped away from recent apps</string>
     <string name="hide_volume_bar">Hide volume bar</string>
     <string name="hide_volume_bar_subtitle">Removes the volume slider from the main player</string>
+    <string name="show_player_bottom_toolbar">Show bottom action bar</string>
+    <string name="show_player_bottom_toolbar_subtitle">The queue, sleep timer, shuffle, lyrics, repeat and more buttons under the player</string>
+    <string name="show_queue_button">Queue button</string>
+    <string name="show_sleep_timer_button">Sleep timer button</string>
+    <string name="show_shuffle_button">Shuffle button</string>
+    <string name="show_lyrics_button">Lyrics button</string>
+    <string name="show_repeat_button">Repeat button</string>
+    <string name="show_more_button">More options button</string>
     <string name="hide_status_bar_in_player">Hide status bar in player</string>
     <string name="hide_status_bar_in_player_subtitle">Hides the clock, battery and notification icons while the main player is open</string>
     <string name="hide_song_status">Hide Song Status</string>

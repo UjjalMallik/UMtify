@@ -803,9 +803,9 @@ private val TRANSPORT_WAVE_HEIGHT = 44.dp
  *
  * Nothing here is a loop. [rememberWavePhase] hands the draw an ever-advancing
  * clock, so the layers — which counter-flow at speeds that are not whole turns
- * — never meet a seam. [level] is the animated amplitude: pausing eases it to
- * zero over 450ms, leaving one calm glass line, and stops the frame clock
- * altogether.
+ * — never meet a seam. [level] is the animated amplitude *and* opacity:
+ * pausing eases it to zero over 350ms, after which the strip draws nothing at
+ * all and the frame clock stops.
  */
 @Composable
 internal fun TransportWaveVisualizer(
@@ -815,7 +815,7 @@ internal fun TransportWaveVisualizer(
     val tones = LocalPlayerTones.current
     val level by animateFloatAsState(
         targetValue = if (isPlaying) 1f else 0f,
-        animationSpec = tween(durationMillis = 450),
+        animationSpec = tween(durationMillis = 350),
         label = "transportWaveLevel",
     )
     val phaseSeconds = rememberWavePhase(isPlaying)
@@ -865,17 +865,9 @@ private fun DrawScope.drawLiquidRibbon(
     )
 
     val centre = h / 2f
-    // Paused: the layers have converged, so the strip is one calm glass line.
-    if (level <= 0.01f) {
-        drawLine(
-            brush = edgeFade(Color.White.copy(alpha = 0.10f)),
-            start = Offset(0f, centre),
-            end = Offset(w, centre),
-            strokeWidth = 1.dp.toPx(),
-            cap = StrokeCap.Round,
-        )
-        return
-    }
+    // Paused or stopped: the strip is completely empty. Not even the old calm
+    // baseline is drawn — the canvas stays transparent until playback resumes.
+    if (level <= 0.01f) return
 
     // Two-tone swell: the ribbon breathes rather than holding one amplitude.
     val beat = 0.72f + 0.28f * sin(phaseSeconds * 3.1f) * cos(phaseSeconds * 1.7f)
@@ -1230,6 +1222,27 @@ internal fun VolumeRow(
 }
 
 /**
+ * Which keys the bottom action row shows. Every key is on by default; the
+ * listener can narrow the row from Settings, and the row re-centres the keys
+ * that remain rather than leaving holes where the hidden ones were.
+ */
+internal data class PlayerActionVisibility(
+    val queue: Boolean = true,
+    val sleepTimer: Boolean = true,
+    val shuffle: Boolean = true,
+    val lyrics: Boolean = true,
+    val repeat: Boolean = true,
+    val more: Boolean = true,
+) {
+    /** How many keys survive the filter. */
+    val shownCount: Int
+        get() = listOf(queue, sleepTimer, shuffle, lyrics, repeat, more).count { it }
+
+    /** Nothing left to draw means the caller hides the row entirely. */
+    val showsAnything: Boolean get() = shownCount > 0
+}
+
+/**
  * The row both layouts end on: queue, sleep timer, shuffle, lyrics, repeat, and
  * the more menu.
  *
@@ -1243,6 +1256,10 @@ internal fun VolumeRow(
  * and hiding them behind a panel made them look like queue settings.
  *
  * AutoPlay lives in the queue panel, where its tracks are.
+ *
+ * [visibility] filters the keys and the whole row is always one line: each key
+ * is measured against the width the row was actually given, so six keys, four,
+ * or one all fit without ever wrapping onto a second line.
  */
 @Composable
 internal fun PlayerActionBar(
@@ -1260,12 +1277,17 @@ internal fun PlayerActionBar(
     menuIcon: ImageVector = Icons.Rounded.MoreHoriz,
     /** A sleep timer is armed — either a countdown or "after this track". */
     sleepTimerActive: Boolean = false,
+    visibility: PlayerActionVisibility = PlayerActionVisibility(),
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val gap = 6.dp
-        val keyWidth = 48.dp
-        val keyHeight = 42.dp
+        // Measured first so every key below can size its own glyph.
+        val keyWidth = ((maxWidth - gap * (visibility.shownCount - 1)) /
+            visibility.shownCount.coerceAtLeast(1))
+            .coerceIn(36.dp, 48.dp)
+        val keyHeight = (keyWidth * 0.88f).coerceIn(34.dp, 42.dp)
+        val iconSize = (keyWidth * 0.42f).coerceIn(16.dp, 20.dp)
         val queue: @Composable (Modifier) -> Unit = { m ->
             PlayerTonalKey(
                 icon = BitChordIcons.Queue,
@@ -1273,6 +1295,7 @@ internal fun PlayerActionBar(
                 active = queueOpen,
                 onClick = onToggleQueue,
                 haptic = if (queueOpen) Haptic.Tap else Haptic.Expand,
+                iconSize = iconSize,
                 modifier = m,
             )
         }
@@ -1282,6 +1305,7 @@ internal fun PlayerActionBar(
                 contentDescription = stringResource(Res.string.sleep_timer),
                 active = sleepTimerActive,
                 onClick = onOpenSleepTimer,
+                iconSize = iconSize,
                 modifier = m,
             )
         }
@@ -1295,6 +1319,7 @@ internal fun PlayerActionBar(
                 onClick = onToggleShuffle,
                 haptic = if (shuffleEnabled) Haptic.ToggleOff else Haptic.ToggleOn,
                 tapWindowMs = SHUFFLE_TAP_WINDOW_MS,
+                iconSize = iconSize,
                 modifier = m,
             )
         }
@@ -1306,6 +1331,7 @@ internal fun PlayerActionBar(
                 ),
                 active = lyricsOpen,
                 onClick = onToggleLyrics,
+                iconSize = iconSize,
                 modifier = m,
             )
         }
@@ -1325,6 +1351,7 @@ internal fun PlayerActionBar(
                     RepeatModes.ONE -> Haptic.ToggleOff
                     else -> Haptic.Select
                 },
+                iconSize = iconSize,
                 modifier = m,
             )
         }
@@ -1334,48 +1361,25 @@ internal fun PlayerActionBar(
                 contentDescription = stringResource(Res.string.more),
                 active = false,
                 onClick = onOpenMenu,
+                iconSize = iconSize,
                 modifier = m,
             )
         }
-        val keyModifier = Modifier.size(keyWidth, keyHeight)
-        if (maxWidth < keyWidth * 6 + gap * 5) {
-            // A phone on its side leaves the landscape column narrower than one
-            // row of six keys. Two rows of three keep them full size instead of
-            // shaving the widths down below the target size.
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(gap),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
-                ) {
-                    queue(keyModifier)
-                    sleep(keyModifier)
-                    shuffle(keyModifier)
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
-                ) {
-                    lyrics(keyModifier)
-                    repeat(keyModifier)
-                    more(keyModifier)
-                }
-            }
-        } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                queue(keyModifier)
-                sleep(keyModifier)
-                shuffle(keyModifier)
-                lyrics(keyModifier)
-                repeat(keyModifier)
-                more(keyModifier)
-            }
+        val keys = listOfNotNull(
+            queue.takeIf { visibility.queue },
+            sleep.takeIf { visibility.sleepTimer },
+            shuffle.takeIf { visibility.shuffle },
+            lyrics.takeIf { visibility.lyrics },
+            repeat.takeIf { visibility.repeat },
+            more.takeIf { visibility.more },
+        )
+        if (keys.isEmpty()) return@BoxWithConstraints
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            keys.forEach { key -> key(Modifier.size(keyWidth, keyHeight)) }
         }
     }
 }
@@ -1397,6 +1401,8 @@ private fun PlayerTonalKey(
     haptic: Haptic = Haptic.Tap,
     /** The same tap window as the queue's heavy toggles. */
     tapWindowMs: Long = 0L,
+    /** Scales with the key's width so a narrow row keeps its glyphs balanced. */
+    iconSize: Dp = 20.dp,
 ) {
     val haptics = rememberHaptics()
     val lastTap = remember { mutableLongStateOf(-tapWindowMs) }
@@ -1442,7 +1448,7 @@ private fun PlayerTonalKey(
                 imageVector = icon,
                 contentDescription = null,
                 tint = content,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(iconSize),
             )
         } else if (label != null) {
             Text(

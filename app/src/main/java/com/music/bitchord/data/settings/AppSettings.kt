@@ -374,6 +374,23 @@ object AppSettings {
     /** Hides the volume slider on the main player, leaving the rest of the layout to reflow. */
     val hideVolumeBar = MutableStateFlow(false)
 
+    /**
+     * The bottom action row — queue, sleep timer, shuffle, lyrics, repeat and
+     * more — as a master switch plus one switch per key.
+     *
+     * The master is the only way to remove the row outright; the six per-key
+     * switches narrow it, and hiding every key empties it just the same. The
+     * row re-centres whatever survives rather than leaving the gaps where the
+     * hidden keys were.
+     */
+    val showPlayerBottomToolbar = MutableStateFlow(true)
+    val showQueueButton = MutableStateFlow(true)
+    val showSleepTimerButton = MutableStateFlow(true)
+    val showShuffleButton = MutableStateFlow(true)
+    val showLyricsButton = MutableStateFlow(true)
+    val showRepeatButton = MutableStateFlow(true)
+    val showMoreButton = MutableStateFlow(true)
+
     /** Hides the device status bar (clock, battery, notifications) while the main player is open. */
     val hideStatusBarInPlayer = MutableStateFlow(false)
 
@@ -836,6 +853,13 @@ object AppSettings {
         )
         stopOnTaskRemoved.value = prefs.getBoolean(KEY_STOP_ON_TASK_REMOVED, false)
         hideVolumeBar.value = prefs.getBoolean(KEY_HIDE_VOLUME_BAR, false)
+        showPlayerBottomToolbar.value = prefs.getBoolean(KEY_SHOW_PLAYER_BOTTOM_TOOLBAR, true)
+        showQueueButton.value = prefs.getBoolean(KEY_SHOW_QUEUE_BUTTON, true)
+        showSleepTimerButton.value = prefs.getBoolean(KEY_SHOW_SLEEP_TIMER_BUTTON, true)
+        showShuffleButton.value = prefs.getBoolean(KEY_SHOW_SHUFFLE_BUTTON, true)
+        showLyricsButton.value = prefs.getBoolean(KEY_SHOW_LYRICS_BUTTON, true)
+        showRepeatButton.value = prefs.getBoolean(KEY_SHOW_REPEAT_BUTTON, true)
+        showMoreButton.value = prefs.getBoolean(KEY_SHOW_MORE_BUTTON, true)
         hideStatusBarInPlayer.value = prefs.getBoolean(KEY_HIDE_STATUS_BAR_IN_PLAYER, false)
         hideSongStatus.value = prefs.getBoolean(KEY_HIDE_SONG_STATUS, false)
         showQueueHistory.value = prefs.getBoolean(KEY_SHOW_QUEUE_HISTORY, false)
@@ -1198,6 +1222,41 @@ object AppSettings {
     fun setHideVolumeBar(value: Boolean) {
         hideVolumeBar.value = value
         prefs.edit().putBoolean(KEY_HIDE_VOLUME_BAR, value).apply()
+    }
+
+    fun setShowPlayerBottomToolbar(value: Boolean) {
+        showPlayerBottomToolbar.value = value
+        prefs.edit().putBoolean(KEY_SHOW_PLAYER_BOTTOM_TOOLBAR, value).apply()
+    }
+
+    fun setShowQueueButton(value: Boolean) {
+        showQueueButton.value = value
+        prefs.edit().putBoolean(KEY_SHOW_QUEUE_BUTTON, value).apply()
+    }
+
+    fun setShowSleepTimerButton(value: Boolean) {
+        showSleepTimerButton.value = value
+        prefs.edit().putBoolean(KEY_SHOW_SLEEP_TIMER_BUTTON, value).apply()
+    }
+
+    fun setShowShuffleButton(value: Boolean) {
+        showShuffleButton.value = value
+        prefs.edit().putBoolean(KEY_SHOW_SHUFFLE_BUTTON, value).apply()
+    }
+
+    fun setShowLyricsButton(value: Boolean) {
+        showLyricsButton.value = value
+        prefs.edit().putBoolean(KEY_SHOW_LYRICS_BUTTON, value).apply()
+    }
+
+    fun setShowRepeatButton(value: Boolean) {
+        showRepeatButton.value = value
+        prefs.edit().putBoolean(KEY_SHOW_REPEAT_BUTTON, value).apply()
+    }
+
+    fun setShowMoreButton(value: Boolean) {
+        showMoreButton.value = value
+        prefs.edit().putBoolean(KEY_SHOW_MORE_BUTTON, value).apply()
     }
 
     fun setHideStatusBarInPlayer(value: Boolean) {
@@ -1916,6 +1975,13 @@ object AppSettings {
     private const val KEY_PERFORMANCE_REFRESH_RATE = "performance_refresh_rate"
     private const val KEY_STOP_ON_TASK_REMOVED = "stop_on_task_removed"
     private const val KEY_HIDE_VOLUME_BAR = "hide_volume_bar"
+    private const val KEY_SHOW_PLAYER_BOTTOM_TOOLBAR = "show_player_bottom_toolbar"
+    private const val KEY_SHOW_QUEUE_BUTTON = "show_queue_button"
+    private const val KEY_SHOW_SLEEP_TIMER_BUTTON = "show_sleep_timer_button"
+    private const val KEY_SHOW_SHUFFLE_BUTTON = "show_shuffle_button"
+    private const val KEY_SHOW_LYRICS_BUTTON = "show_lyrics_button"
+    private const val KEY_SHOW_REPEAT_BUTTON = "show_repeat_button"
+    private const val KEY_SHOW_MORE_BUTTON = "show_more_button"
     private const val KEY_HIDE_STATUS_BAR_IN_PLAYER = "hide_status_bar_in_player"
     private const val KEY_HIDE_SONG_STATUS = "hide_song_status"
     private const val KEY_SHOW_QUEUE_HISTORY = "show_queue_history"
