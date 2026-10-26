@@ -305,12 +305,19 @@ private const val MESH_REFRESH_MS = 3_000L
 /** The player's side margin. Scrollable panels reach back across it. */
 internal val PLAYER_GUTTER = 30.dp
 /**
- * The square photocard's side margin. Narrower than [PLAYER_GUTTER] so the
- * sleeve fills nearly the whole width of a phone — the card is the player's
- * shape in that mode, and a 30dp gutter around it read as a thumbnail with
- * room to spare. The panels keep [PLAYER_GUTTER] of their own.
+ * The square photocard's side margin: 16dp a side, 32dp in total.
+ *
+ * Narrower than [PLAYER_GUTTER] so the sleeve fills nearly the whole width of a
+ * phone — the card is the player's shape in that mode, and a 30dp gutter
+ * around it read as a thumbnail with room to spare. The panels keep
+ * [PLAYER_GUTTER] of their own.
+ *
+ * Kept at the figure that spends no more than 32dp of the width on both sides
+ * together rather than 32dp each: the card's whole point is to be as large as
+ * the phone allows, and every dp of gutter is taken off its side, not the
+ * backdrop. On a 360dp phone this leaves a 328dp square.
  */
-private val CARD_ART_GUTTER = 20.dp
+private val CARD_ART_GUTTER = 16.dp
 /** Clear air between the sleeve's bottom edge and the stats pill under it. */
 private val STATS_BADGE_GAP = 10.dp
 /**
@@ -390,6 +397,23 @@ private const val ARTWORK_SCALE_DURATION_MS = 500
  */
 private val CONTROL_GAP_SPREAD_MAX = 24.dp
 /**
+ * How much the portrait player may pull back out of its empty vertical gaps
+ * before the sleeve is allowed to shrink.
+ *
+ * The photocard is sized off the width first and the height only as a last
+ * resort: a full-width square is the shape the whole layout is built around,
+ * and on a short screen — a small phone, or a large display scale — the answer
+ * is to close the air around the transport, not to hand back a few dozen dp of
+ * artwork. Taken in quarters from the four gaps between the scrubber, the
+ * transport and the action row, mirroring [CONTROL_GAP_SPREAD_MAX], so the
+ * same two places that breathe on a tall screen are the ones that tighten on a
+ * short one.
+ *
+ * Only ever spent after [CONTROL_GAP_SPREAD_MAX] has nothing to grant: slack
+ * and shortage cannot both exist, so the two never pull the layout apart.
+ */
+private val CONTROL_GAP_TIGHTEN_MAX = 32.dp
+/**
  * The spread [NowPlayingScreen] settled on the last time it was laid out.
  *
  * It follows from the window, so it is very nearly the same answer on every open
@@ -399,6 +423,13 @@ private val CONTROL_GAP_SPREAD_MAX = 24.dp
  * that is all it is, a cache of a measurement, not state anything observes.
  */
 private var lastControlSpread: Dp = 0.dp
+/**
+ * The tighten [NowPlayingScreen] settled on the last time it was laid out —
+ * the same head start as [lastControlSpread], for the same reason and for the
+ * other sign: without it a short phone would open with its gaps at their
+ * untightened size and grow the sleeve into the room a frame later.
+ */
+private var lastControlTighten: Dp = 0.dp
 
 /**
  * Whether the full-bleed banner had settled the last time the player was open
@@ -2588,6 +2619,10 @@ fun NowPlayingScreen(
                     // controls at the foot of the screen. Filled in from inside the box,
                     // where the sleeve's real size is known; see [lastControlSpread].
                     var controlSpread by remember { mutableStateOf(lastControlSpread) }
+                    // The reverse of [controlSpread]: gap dp handed *back* from the
+                    // controls when the window is too short for a full-width sleeve.
+                    // Zero on every screen that has room to spare.
+                    var controlTighten by remember { mutableStateOf(lastControlTighten) }
                     BoxWithConstraints(
                         modifier = Modifier
                             .weight(1f)
@@ -2619,13 +2654,14 @@ fun NowPlayingScreen(
                         // or coming back from the lyrics panel, where the strip is
                         // rebuilt from scratch) was pocketed for good. The gaps
                         // ratcheted open a little at a time and the sleeve paid for it.
-                        val roomy = maxHeight + controlSpread
+                        val roomy = maxHeight + controlSpread - controlTighten
                         // The sleeve is square, so it is bounded by whichever of the
-                        // two axes runs out first: the player's width on a phone, or —
-                        // on a tablet, where there is width to spare — the height left
-                        // over once the credits row and the gap above it have had
-                        // theirs. Sizing it off the width alone is what pushed the
-                        // credits down across the scrubber on anything but a phone.
+                        // two axes runs out first. It is asked for the width first:
+                        // on a phone the card is meant to fill the glass, and only a
+                        // full-bleed banner or a tablet, where there is width to
+                        // spare, is ever height-bound on purpose. When the window is
+                        // a little short the gaps below give room back — see
+                        // [CONTROL_GAP_TIGHTEN_MAX] — rather than the artwork.
                         val wantArt = minOf(maxWidth, roomy - ART_TITLE_GAP - HEADER_HEIGHT - statsSlot)
                         // Held to what the box has actually got, for the single frame it
                         // takes the gaps below to catch up with a change in their own
@@ -2700,6 +2736,35 @@ fun NowPlayingScreen(
                                 SideEffect {
                                     controlSpread = granted
                                     lastControlSpread = granted
+                                }
+                            }
+                        }
+                        // The other side of the same measurement: a window too short
+                        // for a full-width square. [shortage] is what the gaps still
+                        // owe before the sleeve reaches [maxWidth], taken off the four
+                        // empty gaps around the transport and the action row rather
+                        // than off the artwork.
+                        //
+                        // Exactly one of [slack] and [shortage] can be non-zero — they
+                        // are the two signs of the same difference — so the spread and
+                        // the tighten never trade the same dp back and forth, and the
+                        // player settles on whichever side of "just fits" it is on.
+                        if (!lyricsOpen && !queueOpen && !queueDragging && collapseAtRest && controlDeckIsMeasured) {
+                            val shortage = (maxWidth -
+                                (roomy - ART_TITLE_GAP - HEADER_HEIGHT - statsSlot))
+                                .coerceIn(0.dp, CONTROL_GAP_TIGHTEN_MAX)
+                            // Stepped like the spread above, so a late cancellation
+                            // decays instead of standing at full amplitude.
+                            val pulled = with(density) {
+                                val steppedPx = (controlTighten.toPx() +
+                                    (shortage.toPx() - controlTighten.toPx()) * 0.5f)
+                                    .roundToInt()
+                                steppedPx.toDp()
+                            }
+                            if (pulled != controlTighten) {
+                                SideEffect {
+                                    controlTighten = pulled
+                                    lastControlTighten = pulled
                                 }
                             }
                         }
@@ -3202,7 +3267,12 @@ fun NowPlayingScreen(
                                 // placement pass.
                                 .offset { IntOffset(artStart().roundToPx(), artTop().roundToPx()) }
                                 // What `.size(artSize)` measured, asked at measure
-                                // time instead of composition.
+                                // time instead of composition. Both constraints are
+                                // fixed to the same [side], so the card is exactly
+                                // 1:1 at every point of its collapse — the same
+                                // guarantee `Modifier.aspectRatio(1f)` gives, stated
+                                // here because this size is animated and aspectRatio
+                                // would recompose for every frame of the collapse.
                                 .layout { measurable, constraints ->
                                     val side = artSize().roundToPx()
                                     val placeable = measurable.measure(
@@ -3767,8 +3837,17 @@ fun NowPlayingScreen(
                     // the scrubber above it, and the volume bar and toggle row below,
                     // which sit close enough together to read as one. Both of its own
                     // gaps take half the spread, so on a tall screen it holds the
-                    // centre rather than drifting up under the seek bar.
-                    Spacer(Modifier.height((if (densePortrait) 4.dp else 8.dp) + controlSpread / 2))
+                    // centre rather than drifting up under the seek bar. On a short
+                    // one the same gaps take a quarter of the tighten each — see
+                    // [CONTROL_GAP_TIGHTEN_MAX] — which is what keeps a full-width
+                    // sleeve on a phone whose controls would otherwise squeeze it.
+                    Spacer(
+                        Modifier.height(
+                            ((if (densePortrait) 4.dp else 8.dp) + controlSpread / 2 -
+                                controlTighten / 4)
+                                .coerceAtLeast(0.dp),
+                        ),
+                    )
 
                     TransportRow(
                         isPlaying = isPlaying,
@@ -3788,7 +3867,12 @@ fun NowPlayingScreen(
                     // pill. The tall screen's share of the spread joins the
                     // gap beneath it, where it lifts the volume row off the
                     // ribbon instead of hollowing out one side.
-                    Spacer(Modifier.height(if (densePortrait) 8.dp else 12.dp))
+                    Spacer(
+                        Modifier.height(
+                            ((if (densePortrait) 8.dp else 12.dp) - controlTighten / 4)
+                                .coerceAtLeast(0.dp),
+                        ),
+                    )
 
                     TransportWaveVisualizer(isPlaying = isPlaying)
 
@@ -3798,7 +3882,9 @@ fun NowPlayingScreen(
                     // change the half-player's geometry.
                     Spacer(
                         Modifier.height(
-                            (if (densePortrait) 8.dp else 12.dp) + controlSpread / 2,
+                            ((if (densePortrait) 8.dp else 12.dp) + controlSpread / 2 -
+                                controlTighten / 4)
+                                .coerceAtLeast(0.dp),
                         ),
                     )
 
@@ -3814,7 +3900,12 @@ fun NowPlayingScreen(
 
                     // The volume slider already has 13dp below its drawn track.
                     // Balance that invisible inset with the caption gap below the icons.
-                    Spacer(Modifier.height(if (densePortrait) 4.dp else 6.dp))
+                    Spacer(
+                        Modifier.height(
+                            ((if (densePortrait) 4.dp else 6.dp) - controlTighten / 4)
+                                .coerceAtLeast(0.dp),
+                        ),
+                    )
 
                     playerActions()
                     Spacer(Modifier.height(if (densePortrait) 10.dp else 18.dp))
