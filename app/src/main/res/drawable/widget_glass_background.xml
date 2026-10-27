@@ -1,36 +1,67 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The empty-state stand-in for a widget face: the same frosted slate the
-  compositor bakes, plus the top wet-glass sheen. Only ever seen before the
-  first bitmap arrives (or in the picker, where no track exists), because
-  MediaWidgetArt draws the real thing at every update.
+  The empty-state stand-in for a widget face: clear crystal glass, the same
+  recipe MediaWidgetArt bakes — white 12% haze over a 10% scrim, the wet sheen
+  across the top 35%, the bounce along the foot and a crystal rim. Only seen
+  before the first bitmap arrives (or where no track exists), because the
+  compositor draws the real thing at every update.
+
+  The one thing a drawable cannot do is carry an accent tint or a diagonal rim
+  gradient; those live in the baked bitmap, and this approximates them.
 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Clear body: white 12%. -->
     <item>
         <shape android:shape="rectangle">
             <corners android:radius="@dimen/widget_corner_radius" />
-            <gradient
-                android:angle="270"
-                android:centerColor="#FF1B2130"
-                android:centerY="0.45"
-                android:endColor="#FF07090E"
-                android:startColor="#FF2E3446"
-                android:type="linear" />
+            <solid android:color="#1FFFFFFF" />
         </shape>
     </item>
 
-    <!-- White 22%, fading out by 40% of the way down. -->
+    <!-- Legibility scrim: black 10%. -->
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/widget_corner_radius" />
+            <solid android:color="#1A000000" />
+        </shape>
+    </item>
+
+    <!-- Wet sheen: white 28%, gone by 35% of the way down. -->
     <item>
         <shape android:shape="rectangle">
             <corners android:radius="@dimen/widget_corner_radius" />
             <gradient
                 android:angle="270"
                 android:centerColor="#00FFFFFF"
-                android:centerY="0.4"
+                android:centerY="0.35"
                 android:endColor="#00FFFFFF"
-                android:startColor="#38FFFFFF"
+                android:startColor="#47FFFFFF"
                 android:type="linear" />
+        </shape>
+    </item>
+
+    <!-- Bounce: white 14% along the last 15%. -->
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/widget_corner_radius" />
+            <gradient
+                android:angle="270"
+                android:centerColor="#00FFFFFF"
+                android:centerY="0.85"
+                android:endColor="#24FFFFFF"
+                android:startColor="#00FFFFFF"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <!-- The crystal rim. -->
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/widget_corner_radius" />
+            <stroke
+                android:width="@dimen/widget_glass_rim"
+                android:color="#8CFFFFFF" />
         </shape>
     </item>
 </layer-list>

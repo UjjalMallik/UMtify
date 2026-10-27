@@ -4,9 +4,8 @@
   inflated live rather than an image being drawn.
 
   A copy of widget_media_wide with stand-in text, a stand-in artwork tile and a
-  part-filled progress bar. The real layout leaves the tile transparent because
-  the provider bakes the artwork into the glass; here there is no bitmap, so the
-  tile carries the placeholder gradient instead.
+  part-filled progress bar — and, unlike the real layout, the tile participates
+  in the row so the deck starts exactly where it ends without a runtime padding.
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -15,28 +14,34 @@
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center_vertical"
+        android:layout_height="match_parent"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingLeft="@dimen/widget_wide_padding"
-        android:paddingRight="@dimen/widget_wide_padding">
+        android:paddingStart="@dimen/widget_wide_padding"
+        android:paddingEnd="@dimen/widget_wide_padding">
 
-        <FrameLayout
-            android:layout_width="@dimen/widget_wide_art"
-            android:layout_height="@dimen/widget_wide_art"
-            android:background="@drawable/widget_art_placeholder_wide" />
+        <!-- match_parent tall and square via adjustViewBounds, as in the real
+             layout, so the tile shrinks with a short preview instead of
+             crowding the deck. -->
+        <ImageView
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_marginEnd="@dimen/widget_wide_gap"
+            android:adjustViewBounds="true"
+            android:importantForAccessibility="no"
+            android:scaleType="fitXY"
+            android:src="@drawable/widget_art_placeholder_wide" />
 
         <LinearLayout
             android:layout_width="0dp"
-            android:layout_height="@dimen/widget_wide_art"
-            android:layout_marginLeft="@dimen/widget_wide_gap"
+            android:layout_height="match_parent"
             android:layout_weight="1"
+            android:gravity="center_vertical"
             android:orientation="vertical">
 
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="@dimen/widget_wide_title_row"
+                android:layout_height="wrap_content"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
@@ -45,7 +50,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:orientation="vertical"
-                    android:paddingRight="6dp">
+                    android:paddingEnd="6dp">
 
                     <TextView
                         android:layout_width="match_parent"
@@ -54,9 +59,12 @@
                         android:fontFamily="@font/sf_pro_display_semibold"
                         android:includeFontPadding="false"
                         android:maxLines="1"
+                        android:shadowColor="#99000000"
+                        android:shadowDy="1"
+                        android:shadowRadius="4"
                         android:text="@string/widget_preview_title"
                         android:textColor="#FFFFFFFF"
-                        android:textSize="16sp" />
+                        android:textSize="15sp" />
 
                     <TextView
                         android:layout_width="match_parent"
@@ -66,9 +74,12 @@
                         android:fontFamily="@font/sf_pro_display_regular"
                         android:includeFontPadding="false"
                         android:maxLines="1"
+                        android:shadowColor="#99000000"
+                        android:shadowDy="1"
+                        android:shadowRadius="4"
                         android:text="@string/widget_preview_artist"
-                        android:textColor="#B8FFFFFF"
-                        android:textSize="13sp" />
+                        android:textColor="#CCFFFFFF"
+                        android:textSize="12.5sp" />
                 </LinearLayout>
 
                 <ImageView
@@ -83,14 +94,17 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="@dimen/widget_wide_transport"
+                android:layout_marginTop="@dimen/widget_wide_transport_gap"
+                android:layout_marginBottom="@dimen/widget_wide_transport_gap"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
                 <ImageView
                     android:layout_width="@dimen/widget_wide_transport"
                     android:layout_height="@dimen/widget_wide_transport"
+                    android:background="@drawable/widget_glass_icon"
                     android:contentDescription="@string/widget_previous"
-                    android:padding="4dp"
+                    android:padding="9dp"
                     android:src="@drawable/ic_widget_previous" />
 
                 <FrameLayout
@@ -99,11 +113,11 @@
                     android:layout_weight="1" />
 
                 <ImageView
-                    android:layout_width="@dimen/widget_play_pill_width"
-                    android:layout_height="@dimen/widget_play_pill_height"
+                    android:layout_width="@dimen/widget_wide_play_width"
+                    android:layout_height="@dimen/widget_wide_play_height"
                     android:background="@drawable/widget_glass_play"
                     android:contentDescription="@string/widget_play"
-                    android:padding="6dp"
+                    android:padding="8dp"
                     android:src="@drawable/ic_widget_play" />
 
                 <FrameLayout
@@ -114,8 +128,9 @@
                 <ImageView
                     android:layout_width="@dimen/widget_wide_transport"
                     android:layout_height="@dimen/widget_wide_transport"
+                    android:background="@drawable/widget_glass_icon"
                     android:contentDescription="@string/widget_next"
-                    android:padding="4dp"
+                    android:padding="9dp"
                     android:src="@drawable/ic_widget_next" />
             </LinearLayout>
 
@@ -130,6 +145,9 @@
                     android:layout_height="wrap_content"
                     android:fontFamily="@font/sf_pro_display_regular"
                     android:includeFontPadding="false"
+                    android:shadowColor="#99000000"
+                    android:shadowDy="1"
+                    android:shadowRadius="4"
                     android:text="1:35"
                     android:textColor="#99FFFFFF"
                     android:textSize="11sp" />
@@ -137,9 +155,9 @@
                 <ProgressBar
                     style="@android:style/Widget.ProgressBar.Horizontal"
                     android:layout_width="0dp"
-                    android:layout_height="5dp"
-                    android:layout_marginLeft="6dp"
-                    android:layout_marginRight="6dp"
+                    android:layout_height="4dp"
+                    android:layout_marginStart="8dp"
+                    android:layout_marginEnd="8dp"
                     android:layout_weight="1"
                     android:max="1000"
                     android:progress="430"
@@ -150,6 +168,9 @@
                     android:layout_height="wrap_content"
                     android:fontFamily="@font/sf_pro_display_regular"
                     android:includeFontPadding="false"
+                    android:shadowColor="#99000000"
+                    android:shadowDy="1"
+                    android:shadowRadius="4"
                     android:text="3:40"
                     android:textColor="#99FFFFFF"
                     android:textSize="11sp" />

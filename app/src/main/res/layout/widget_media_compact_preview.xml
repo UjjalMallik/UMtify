@@ -9,14 +9,22 @@
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@drawable/widget_glass_background">
+    android:layout_height="match_parent">
 
-    <FrameLayout
+    <ImageView
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_margin="@dimen/widget_art_inset"
-        android:background="@drawable/widget_art_placeholder_compact" />
+        android:importantForAccessibility="no"
+        android:scaleType="fitXY"
+        android:src="@drawable/widget_art_placeholder_compact" />
+
+    <!-- The clear pane over the art: the same fallback the real layout carries
+         underneath its bitmap, so the wall showing through reads the same. -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/widget_glass_background"
+        android:importantForAccessibility="no" />
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -26,22 +34,26 @@
         android:background="@drawable/widget_dock_background"
         android:gravity="center_horizontal"
         android:orientation="vertical"
-        android:paddingLeft="4dp"
-        android:paddingRight="4dp"
+        android:paddingStart="4dp"
         android:paddingTop="4dp"
+        android:paddingEnd="4dp"
         android:paddingBottom="4dp">
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginBottom="2dp"
             android:ellipsize="end"
             android:fontFamily="@font/sf_pro_display_semibold"
             android:gravity="center_horizontal"
             android:includeFontPadding="false"
             android:maxLines="1"
+            android:shadowColor="#99000000"
+            android:shadowDy="1"
+            android:shadowRadius="4"
             android:text="@string/widget_preview_title"
             android:textColor="#FFFFFFFF"
-            android:textSize="13sp" />
+            android:textSize="12.5sp" />
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -59,10 +71,10 @@
 
             <ImageView
                 android:layout_width="@dimen/widget_compact_play_width"
-                android:layout_height="@dimen/widget_compact_button"
+                android:layout_height="@dimen/widget_compact_play_height"
                 android:background="@drawable/widget_glass_play"
                 android:contentDescription="@string/widget_play"
-                android:padding="5dp"
+                android:padding="4dp"
                 android:src="@drawable/ic_widget_play" />
 
             <ImageView

@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  A tactile glass icon button: a barely-there white disc with a 1dp glass edge,
-  under the same oval ripple the old transport buttons used. The edge is what
-  makes a row of them read as physical keys rather than floating glyphs.
+  The 4×2's circular crystal previous/next keys: a faint white disc with a 1dp
+  glass edge, under a round ripple. 38dp, so the 9dp padding around each glyph
+  keeps the touch target comfortable without a visible ring competing with the
+  play pill.
 -->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
     android:color="#40FFFFFF">

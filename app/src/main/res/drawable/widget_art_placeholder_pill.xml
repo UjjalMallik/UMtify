@@ -1,13 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Stand-in for the 4×1 inset artwork before the composite arrives, and in the picker. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="rectangle">
-    <corners android:radius="@dimen/widget_pill_art_corner" />
-    <gradient
-        android:angle="270"
-        android:centerColor="#FF1B2130"
-        android:centerY="0.45"
-        android:endColor="#FF07090E"
-        android:startColor="#FF2E3446"
-        android:type="linear" />
-</shape>
+<!--
+  Stand-in for the 4×1 inset artwork before the composite arrives, and in the
+  picker. Square 50dp so the adjustViewBounds ImageView keeps the tile 1:1.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="50dp"
+    android:height="50dp"
+    android:viewportWidth="50"
+    android:viewportHeight="50">
+
+    <path android:pathData="M14,0 L36,0 A14,14 0 0 1 50,14 L50,36 A14,14 0 0 1 36,50 L14,50 A14,14 0 0 1 0,36 L0,14 A14,14 0 0 1 14,0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endX="0"
+                android:endY="50"
+                android:startX="0"
+                android:startY="0"
+                android:type="linear">
+                <item android:color="#FF39405A" android:offset="0" />
+                <item android:color="#FF222A3C" android:offset="0.5" />
+                <item android:color="#FF0C1018" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <path
+        android:fillColor="#00FFFFFF"
+        android:pathData="M14,0 L36,0 A14,14 0 0 1 50,14 L50,36 A14,14 0 0 1 36,50 L14,50 A14,14 0 0 1 0,36 L0,14 A14,14 0 0 1 14,0 Z"
+        android:strokeColor="#4DFFFFFF"
+        android:strokeWidth="1" />
+</vector>

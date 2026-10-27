@@ -1,15 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The 2×2 widget's floating dock before its bitmap arrives: frosted dark glass
-  with a wet highlight across the top. The real dock frosts whatever artwork is
-  beneath it — see MediaWidgetArt — which a drawable cannot do.
+  The 2×2 widget's floating dock before its bitmap arrives: translucent crystal,
+  not a dark box — white 12% with the 18% sheen across its top half and a 1dp
+  white rim. The real dock also frosts the artwork beneath it, which a drawable
+  cannot do; see MediaWidgetArt.
 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
 
     <item>
         <shape android:shape="rectangle">
             <corners android:radius="@dimen/widget_dock_radius" />
-            <solid android:color="#4D14181F" />
+            <solid android:color="#1FFFFFFF" />
         </shape>
     </item>
 
@@ -21,8 +22,17 @@
                 android:centerColor="#00FFFFFF"
                 android:centerY="0.5"
                 android:endColor="#00FFFFFF"
-                android:startColor="#26FFFFFF"
+                android:startColor="#2EFFFFFF"
                 android:type="linear" />
+        </shape>
+    </item>
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/widget_dock_radius" />
+            <stroke
+                android:width="@dimen/widget_dock_rim"
+                android:color="#99FFFFFF" />
         </shape>
     </item>
 </layer-list>

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The 4×2 widget's Like button: a 34dp frosted glass disc — white 18% fill with
-  a brighter 1dp rim — as in the reference card.
+  The 4×2 widget's Like button: a 34dp crystal disc — white 18% fill with a
+  brighter 1dp rim — as in the reference card.
 -->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
     android:color="#40FFFFFF">

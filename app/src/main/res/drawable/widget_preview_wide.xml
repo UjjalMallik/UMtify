@@ -1,53 +1,72 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Picker artwork for the 4×2 widget, on hosts older than API 31. The split card
-  in miniature: frosted body, inset artwork tile on the left, the deck on the
-  right with its frosted Like disc, the glass play pill and the progress bar.
+  Picker artwork for the 4×2 widget on hosts older than API 31. The reference
+  card in miniature at its ideal 112dp tile: clear crystal body, inset artwork
+  tile on the left, the deck on the right with its crystal Like disc, the
+  transport row and the progress bar.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
-    android:width="250dp"
-    android:height="110dp"
-    android:viewportWidth="250"
-    android:viewportHeight="110">
+    android:width="324dp"
+    android:height="140dp"
+    android:viewportWidth="324"
+    android:viewportHeight="140">
 
-    <!-- Frosted body. -->
-    <path android:pathData="M26,0 L224,0 A26,26 0 0 1 250,26 L250,84 A26,26 0 0 1 224,110 L26,110 A26,26 0 0 1 0,84 L0,26 A26,26 0 0 1 26,0 Z">
+    <!-- Clear body: white 12%. -->
+    <path android:pathData="M28,0 L296,0 A28,28 0 0 1 324,28 L324,112 A28,28 0 0 1 296,140 L28,140 A28,28 0 0 1 0,112 L0,28 A28,28 0 0 1 28,0 Z">
         <aapt:attr name="android:fillColor">
             <gradient
                 android:endX="0"
-                android:endY="110"
+                android:endY="140"
                 android:startX="0"
                 android:startY="0"
                 android:type="linear">
-                <item android:color="#FF2E3446" android:offset="0" />
-                <item android:color="#FF1B2130" android:offset="0.45" />
-                <item android:color="#FF07090E" android:offset="1" />
+                <item android:color="#2BFFFFFF" android:offset="0" />
+                <item android:color="#1FFFFFFF" android:offset="0.45" />
+                <item android:color="#14FFFFFF" android:offset="1" />
             </gradient>
         </aapt:attr>
     </path>
 
-    <!-- Wet-glass sheen over the top 40%. -->
-    <path android:pathData="M26,0 L224,0 A26,26 0 0 1 250,26 L250,84 A26,26 0 0 1 224,110 L26,110 A26,26 0 0 1 0,84 L0,26 A26,26 0 0 1 26,0 Z">
+    <!-- Legibility scrim: black 10%. -->
+    <path android:fillColor="#1A000000" android:pathData="M28,0 L296,0 A28,28 0 0 1 324,28 L324,112 A28,28 0 0 1 296,140 L28,140 A28,28 0 0 1 0,112 L0,28 A28,28 0 0 1 28,0 Z" />
+
+    <!-- Wet sheen over the top 35%. -->
+    <path android:pathData="M28,0 L296,0 A28,28 0 0 1 324,28 L324,112 A28,28 0 0 1 296,140 L28,140 A28,28 0 0 1 0,112 L0,28 A28,28 0 0 1 28,0 Z">
         <aapt:attr name="android:fillColor">
             <gradient
                 android:endX="0"
-                android:endY="44"
+                android:endY="49"
                 android:startX="0"
                 android:startY="0"
                 android:type="linear">
-                <item android:color="#38FFFFFF" android:offset="0" />
+                <item android:color="#47FFFFFF" android:offset="0" />
                 <item android:color="#00FFFFFF" android:offset="1" />
             </gradient>
         </aapt:attr>
     </path>
 
-    <!-- Inset artwork tile, with its 1dp glass edge. -->
-    <path android:pathData="M32,14 L78,14 A18,18 0 0 1 96,32 L96,78 A18,18 0 0 1 78,96 L32,96 A18,18 0 0 1 14,78 L14,32 A18,18 0 0 1 32,14 Z">
+    <!-- Bounce along the last 15%. -->
+    <path android:pathData="M28,0 L296,0 A28,28 0 0 1 324,28 L324,112 A28,28 0 0 1 296,140 L28,140 A28,28 0 0 1 0,112 L0,28 A28,28 0 0 1 28,0 Z">
         <aapt:attr name="android:fillColor">
             <gradient
                 android:endX="0"
-                android:endY="96"
+                android:endY="140"
+                android:startX="0"
+                android:startY="119"
+                android:type="linear">
+                <item android:color="#00FFFFFF" android:offset="0" />
+                <item android:color="#24FFFFFF" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Inset artwork tile. -->
+    <path android:pathData="M32,14 L108,14 A18,18 0 0 1 126,32 L126,108 A18,18 0 0 1 108,126 L32,126 A18,18 0 0 1 14,108 L14,32 A18,18 0 0 1 32,14 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endX="0"
+                android:endY="126"
                 android:startX="0"
                 android:startY="14"
                 android:type="linear">
@@ -57,48 +76,54 @@
             </gradient>
         </aapt:attr>
     </path>
-    <path android:fillColor="#00FFFFFF" android:pathData="M32,14 L78,14 A18,18 0 0 1 96,32 L96,78 A18,18 0 0 1 78,96 L32,96 A18,18 0 0 1 14,78 L14,32 A18,18 0 0 1 32,14 Z" android:strokeColor="#4DFFFFFF" android:strokeWidth="1" />
+    <path android:fillColor="#00FFFFFF" android:pathData="M32,14 L108,14 A18,18 0 0 1 126,32 L126,108 A18,18 0 0 1 108,126 L32,126 A18,18 0 0 1 14,108 L14,32 A18,18 0 0 1 32,14 Z" android:strokeColor="#8CFFFFFF" android:strokeWidth="1" />
 
     <!-- Title and artist. -->
-    <path android:pathData="M110,26 L196,26" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeWidth="7" />
-    <path android:pathData="M110,41 L172,41" android:strokeColor="#B8FFFFFF" android:strokeLineCap="round" android:strokeWidth="5" />
+    <path android:pathData="M140,32 L246,32" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeWidth="8" />
+    <path android:pathData="M140,50 L212,50" android:strokeColor="#CCFFFFFF" android:strokeLineCap="round" android:strokeWidth="5" />
 
-    <!-- Frosted Like disc, top right. -->
-    <path android:fillColor="#2EFFFFFF" android:pathData="M226,10 A17,17 0 1 0 226,44 A17,17 0 1 0 226,10 Z" android:strokeColor="#59FFFFFF" android:strokeWidth="1" />
-    <group android:translateX="218" android:translateY="19" android:scaleX="0.67" android:scaleY="0.67">
+    <!-- Crystal Like disc, top right. -->
+    <path android:fillColor="#2EFFFFFF" android:pathData="M275,36 A17,17 0 1 0 309,36 A17,17 0 1 0 275,36 Z" android:strokeColor="#59FFFFFF" android:strokeWidth="1" />
+    <group android:scaleX="0.67" android:scaleY="0.67" android:translateX="284" android:translateY="28">
         <path android:pathData="M12,20C12,20 3.2,14.6 3.2,8.9A4.5,4.5 0 0 1,12 7.4A4.5,4.5 0 0 1,20.8 8.9C20.8,14.6 12,20 12,20Z" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeWidth="2.4" />
     </group>
 
-    <!-- The glowing glass play pill, with previous and next either side. -->
-    <path android:fillColor="#33FFFFFF" android:pathData="M174,48 L190,48 A14,14 0 0 1 204,62 A14,14 0 0 1 190,76 L174,76 A14,14 0 0 1 160,62 A14,14 0 0 1 174,48 Z" android:strokeColor="#66FFFFFF" android:strokeWidth="1" />
-    <group android:translateX="172" android:translateY="55" android:scaleX="0.6" android:scaleY="0.6">
-        <path android:fillColor="#FFFFFFFF" android:pathData="M8.4,6.4L8.4,17.6L17.6,12Z" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeWidth="2.6" />
-    </group>
-    <group android:translateX="124" android:translateY="55" android:scaleX="0.7" android:scaleY="0.7">
+    <!-- Previous, the crystal play pill, next — evenly spread. -->
+    <path android:fillColor="#14FFFFFF" android:pathData="M159,68 A19,19 0 1 0 159,106 A19,19 0 1 0 159,68 Z" android:strokeColor="#3DFFFFFF" android:strokeWidth="1" />
+    <group android:scaleX="0.7" android:scaleY="0.7" android:translateX="151" android:translateY="79">
         <path android:pathData="M7,7.4L7,16.6" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeWidth="2.4" />
         <path android:fillColor="#FFFFFFFF" android:pathData="M16.6,7.7L16.6,16.3L10.7,12Z" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeWidth="2.4" />
     </group>
-    <group android:translateX="214" android:translateY="55" android:scaleX="0.7" android:scaleY="0.7">
+
+    <path android:fillColor="#2EFFFFFF" android:pathData="M217,68 L233,68 A19,19 0 0 1 252,87 A19,19 0 0 1 233,106 L217,106 A19,19 0 0 1 198,87 A19,19 0 0 1 217,68 Z" android:strokeColor="#99FFFFFF" android:strokeWidth="1" />
+    <group android:scaleX="0.75" android:scaleY="0.75" android:translateX="216" android:translateY="78">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M8.4,6.4L8.4,17.6L17.6,12Z" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeWidth="2.6" />
+    </group>
+
+    <path android:fillColor="#14FFFFFF" android:pathData="M291,68 A19,19 0 1 0 291,106 A19,19 0 1 0 291,68 Z" android:strokeColor="#3DFFFFFF" android:strokeWidth="1" />
+    <group android:scaleX="0.7" android:scaleY="0.7" android:translateX="283" android:translateY="79">
         <path android:fillColor="#FFFFFFFF" android:pathData="M7.4,7.7L7.4,16.3L13.3,12Z" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeWidth="2.4" />
         <path android:pathData="M17,7.4L17,16.6" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeWidth="2.4" />
     </group>
 
-    <!-- Progress: track, then the part played. -->
-    <path android:pathData="M112,91 L234,91" android:strokeColor="#38FFFFFF" android:strokeLineCap="round" android:strokeWidth="4" />
-    <path android:pathData="M112,91 L170,91" android:strokeColor="#E6FFFFFF" android:strokeLineCap="round" android:strokeWidth="4" />
+    <!-- Elapsed, track, played part, total. -->
+    <path android:pathData="M140,120 L153,120" android:strokeColor="#99FFFFFF" android:strokeLineCap="round" android:strokeWidth="5" />
+    <path android:pathData="M161,120 L289,120" android:strokeColor="#38FFFFFF" android:strokeLineCap="round" android:strokeWidth="4" />
+    <path android:pathData="M161,120 L239,120" android:strokeColor="#E6FFFFFF" android:strokeLineCap="round" android:strokeWidth="4" />
+    <path android:pathData="M297,120 L310,120" android:strokeColor="#99FFFFFF" android:strokeLineCap="round" android:strokeWidth="5" />
 
     <!-- Signature diagonal specular rim. -->
-    <path android:fillColor="#00FFFFFF" android:pathData="M26,0 L224,0 A26,26 0 0 1 250,26 L250,84 A26,26 0 0 1 224,110 L26,110 A26,26 0 0 1 0,84 L0,26 A26,26 0 0 1 26,0 Z" android:strokeWidth="1.5">
+    <path android:fillColor="#00FFFFFF" android:pathData="M28,0 L296,0 A28,28 0 0 1 324,28 L324,112 A28,28 0 0 1 296,140 L28,140 A28,28 0 0 1 0,112 L0,28 A28,28 0 0 1 28,0 Z" android:strokeWidth="1.5">
         <aapt:attr name="android:strokeColor">
             <gradient
-                android:endX="250"
-                android:endY="110"
+                android:endX="324"
+                android:endY="140"
                 android:startX="0"
                 android:startY="0"
                 android:type="linear">
-                <item android:color="#CCFFFFFF" android:offset="0" />
-                <item android:color="#26FFFFFF" android:offset="0.5" />
-                <item android:color="#A6FFFFFF" android:offset="1" />
+                <item android:color="#D9FFFFFF" android:offset="0" />
+                <item android:color="#40FFFFFF" android:offset="0.5" />
+                <item android:color="#B3FFFFFF" android:offset="1" />
             </gradient>
         </aapt:attr>
     </path>

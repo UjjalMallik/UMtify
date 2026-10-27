@@ -1,13 +1,34 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Stand-in for the 2×2 artwork before the composite arrives, and in the picker. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="rectangle">
-    <corners android:radius="@dimen/widget_compact_art_corner" />
-    <gradient
-        android:angle="270"
-        android:centerColor="#FF1B2130"
-        android:centerY="0.45"
-        android:endColor="#FF07090E"
-        android:startColor="#FF2E3446"
-        android:type="linear" />
-</shape>
+<!--
+  Stand-in for the 2×2 artwork before the composite arrives, and in the picker.
+  Full-bleed square at the card's own corner radius, so the tile underneath the
+  glass reads as the same card before any art is loaded.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="110dp"
+    android:height="110dp"
+    android:viewportWidth="110"
+    android:viewportHeight="110">
+
+    <path android:pathData="M28,0 L82,0 A28,28 0 0 1 110,28 L110,82 A28,28 0 0 1 82,110 L28,110 A28,28 0 0 1 0,82 L0,28 A28,28 0 0 1 28,0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endX="0"
+                android:endY="110"
+                android:startX="0"
+                android:startY="0"
+                android:type="linear">
+                <item android:color="#FF39405A" android:offset="0" />
+                <item android:color="#FF222A3C" android:offset="0.5" />
+                <item android:color="#FF0C1018" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <path
+        android:fillColor="#00FFFFFF"
+        android:pathData="M28,0 L82,0 A28,28 0 0 1 110,28 L110,82 A28,28 0 0 1 82,110 L28,110 A28,28 0 0 1 0,82 L0,28 A28,28 0 0 1 28,0 Z"
+        android:strokeColor="#4DFFFFFF"
+        android:strokeWidth="1" />
+</vector>

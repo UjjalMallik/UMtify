@@ -25,131 +25,173 @@ import com.music.bitchord.data.model.ROW_ART_PX
 import com.music.bitchord.data.model.artworkAt
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
 
 /**
- * Everything a widget's baked bitmap is made of, in pixels.
+ * The album tile of a widget, in pixels: a rounded square, its crystal rim, and
+ * nothing else.
  *
- * The whole card is one bitmap rather than a stack of images because
- * [android.widget.RemoteViews] cannot blur, gradient, clip or tint anything at
- * runtime — there is no RenderEffect, no shader and no way to reach a view's
- * render node. So the frosted body, the specular rim, the inset artwork and (on
- * the square widget) the floating dock are all composed here on the CPU, once
- * per track and size, and pushed as a single ImageView.
- *
- * [art] and [dock] are in the bitmap's own coordinates, supplied by the provider
- * from the same dp values its layout uses, so the artwork always lands exactly
- * under the empty cell the RemoteViews leaves for it.
+ * The tile is its own bitmap, drawn into its own `ImageView`, because it is the
+ * one part of a widget that must not be stretched. A `RemoteViews` image is
+ * scaled to whatever the host decides the view is, and the host decides from
+ * the widget's cell span — which is a range, not a size. Baking the artwork into
+ * the card meant the tile slid inward and grew into the title whenever that
+ * guess was a little off. Positioned by the layout instead, it is square at any
+ * size and the text can never run into it.
  */
-internal class GlassSpec(
+internal class ArtSpec(
+    val widthPx: Int,
+    val heightPx: Int,
+    val cornerPx: Float,
+    val rimPx: Float,
+) {
+    /** Identifies the finished bitmap: every value that changes a pixel is in here. */
+    fun cacheKey(key: String): String =
+        "art|$key|${widthPx}x$heightPx|${cornerPx.roundToInt()}/${rimPx.roundToInt()}"
+}
+
+/**
+ * The glass of a widget, in pixels: the clear body, its wet sheen, the specular
+ * rim and — on the square widget — the floating dock.
+ *
+ * No artwork is composed into this any more. The body is a nearly transparent
+ * pane, so whatever the launcher has on the home screen shows through it; the
+ * artwork is a layer of its own, above this one. The dock is the exception: it
+ * frosts what is *under* it, which is only possible by sampling the artwork
+ * bitmap, passed to [MediaWidgetArt.renderFace].
+ */
+internal class FaceSpec(
     val widthPx: Int,
     val heightPx: Int,
     val radiusPx: Float,
     val rimPx: Float,
-    val art: Rect,
-    val artCornerPx: Float,
-    val artRimPx: Float,
-    val artShadowPx: Float = 0f,
     val dock: Rect? = null,
     val dockCornerPx: Float = 0f,
     val dockRimPx: Float = 0f,
-    val bodyAlpha: Int = 255,
 ) {
-    /** Identifies the finished bitmap: every value that changes a pixel is in here. */
     fun cacheKey(key: String): String = buildString {
-        append("glass|").append(key)
+        append("face|").append(key)
         append('|').append(widthPx).append('x').append(heightPx)
         append('|').append(radiusPx.roundToInt()).append('/').append(rimPx.roundToInt())
-        append('|').append(art.left).append(',').append(art.top)
-            .append(',').append(art.width()).append(',').append(art.height())
-        append('|').append(artCornerPx.roundToInt()).append('/').append(artRimPx.roundToInt())
-            .append('/').append(artShadowPx.roundToInt())
         dock?.let {
             append("|d").append(it.left).append(',').append(it.top)
                 .append(',').append(it.width()).append(',').append(it.height())
                 .append('/').append(dockCornerPx.roundToInt()).append('/').append(dockRimPx.roundToInt())
         }
-        append('|').append(bodyAlpha)
     }
 }
 
 /**
- * Draws the optical liquid-glass face of all three home-screen widgets.
+ * Draws the crystal glass of all three home-screen widgets.
  *
  * The recipe, in the order it is painted:
  *
- *  - **Frosted mica base** — the cover reduced to a [AMBIENT_WORKING_WIDTH_PX]-wide
- *    working image and blurred until only its colours remain, sampled back up to
- *    fill the card, so the album's tones (and, through [GlassSpec.bodyAlpha], a
- *    little of the wallpaper) diffuse behind everything.
- *  - **Frosted tint** — `#8814181F` nudged a quarter of the way towards the
- *    cover's dominant accent, which is what keeps the glass reading as glass on a
- *    white sleeve and as the album on a saturated one.
- *  - **Wet-glass sheen** — a white-to-transparent vertical gradient across the
- *    top 40%, the highlight a curved pane catches.
- *  - **Specular rim** — a 1.5dp stroke whose gradient runs bright at the
- *    top-left, faint across the middle and back up at the bottom-right, plus a
- *    1dp inset glow: the signature edge of the reference glass card.
+ *  - **Clear body** — white at 12% over a 10% dark scrim, with up to 8% of the
+ *    cover's dominant colour: enough to keep white type legible on a bright
+ *    wallpaper, far too little to hide the wallpaper itself.
+ *  - **Wet-glass sheen** — white 28% fading out across the top 35%, the
+ *    highlight a curved pane catches, and a 14% bounce along the bottom 15%
+ *    where the pane curves away.
+ *  - **Specular rim** — a 1.5dp stroke running white 85% at the top-left, 25%
+ *    across the middle and 70% at the bottom-right.
  *
- * Everything downstream of that ([GlassSpec.art], [GlassSpec.dock]) is optional
- * so the same renderer serves the 2×2 photocard, the 4×2 split card and the 4×1
- * capsule.
+ * Nothing here is blurred or tinted at runtime — [android.widget.RemoteViews]
+ * cannot do any of that — so all of it is composed on the CPU, once per track
+ * and size, and cached under [ArtSpec.cacheKey] / [FaceSpec.cacheKey].
  */
 internal object MediaWidgetArt {
 
     /**
-     * Draws the widget face described by [spec].
+     * Draws the artwork tile described by [spec].
      *
      * [key] identifies the track; it is what the finished bitmap is remembered
-     * under. Pass null only when there is nothing worth remembering (no track),
-     * so the placeholder is not cached under a shared name.
+     * under. Pass null only when there is nothing worth remembering (no track).
      */
-    suspend fun render(
+    suspend fun renderArt(
         context: Context,
         artworkUrl: String?,
-        spec: GlassSpec,
+        spec: ArtSpec,
         key: String?,
     ): Bitmap {
-        peek(spec, key)?.let { return it }
+        peekArt(spec, key)?.let { return it }
         val cacheKey = key?.let { spec.cacheKey(it) }
 
-        val cover = if (isCoolingOff(key)) null else loadArtwork(context, artworkUrl, maxOf(spec.widthPx, spec.heightPx))
+        val cover = if (isCoolingOff(key)) {
+            null
+        } else {
+            loadArtwork(context, artworkUrl, maxOf(spec.widthPx, spec.heightPx))
+        }
         // A cover that was asked for and didn't arrive is a failure, not an
-        // answer. The face is drawn either way — the caller has a widget to fill
-        // — but it must not be remembered, or one dropped connection would pin
-        // the placeholder to this track for as long as the process lives. See
-        // the `put` at the end.
+        // answer: the tile is drawn either way, but it must not be remembered,
+        // or one dropped connection would pin the placeholder to this track for
+        // as long as the process lives.
         val failed = cover == null && !artworkUrl.isNullOrBlank()
         if (failed && key != null) failures[key] = SystemClock.elapsedRealtime()
 
-        val composed = Bitmap.createBitmap(spec.widthPx, spec.heightPx, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(composed)
-        val accent = canvas.drawAmbient(cover)
-        if (spec.art.width() > 0 && spec.art.height() > 0) canvas.drawArtwork(cover, spec, accent)
-        spec.dock?.let { canvas.drawDock(composed, it, spec, accent) }
-        canvas.drawEdge(spec)
+        val accent = cover?.let { accentOfBitmap(it) } ?: DEFAULT_ACCENT
+        val base = Bitmap.createBitmap(spec.widthPx, spec.heightPx, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(base)
+        if (cover != null) canvas.fillCentreCropped(cover) else canvas.fillPlaceholder(accent)
 
-        val rounded = composed.withRoundedCorners(spec.radiusPx, spec.bodyAlpha)
-        composed.recycle()
-        if (!failed) cacheKey?.let { composites.put(it, rounded) }
+        val rounded = if (spec.cornerPx > 0f) base.withRoundedCorners(spec.cornerPx) else base
+        if (rounded !== base) base.recycle()
+        Canvas(rounded).strokeGlass(
+            RectF(0f, 0f, spec.widthPx.toFloat(), spec.heightPx.toFloat()),
+            spec.cornerPx,
+            spec.rimPx,
+            ART_RIM_COLORS,
+            inset = true,
+        )
+        if (!failed) cacheKey?.let { arts.put(it, rounded) }
         return rounded
     }
 
     /**
-     * The face for these arguments if it has already been drawn, without drawing
-     * it if it hasn't.
+     * Draws the glass face described by [spec].
      *
-     * Lets a provider find out, on the thread it was called on, whether it can
-     * push a finished widget in one go. Without it every update would push the
-     * controls first and the artwork second, and the gap between the two shows:
-     * a play/pause tap — one glyph — would blink the whole card away and back.
+     * [tintSource] is the artwork the face is going over: the dock on the square
+     * widget frosts it, and its dominant colour is what the 8% accent wash is
+     * made of. Null means there is no cover — the face is still glass, just
+     * untinted, and it is not cached so a cover that arrives later can tint it.
      */
-    fun peek(spec: GlassSpec, key: String?): Bitmap? =
-        key?.let { composites[spec.cacheKey(it)] }?.takeIf { !it.isRecycled }
+    suspend fun renderFace(
+        context: Context,
+        artworkUrl: String?,
+        spec: FaceSpec,
+        tintSource: Bitmap?,
+        key: String?,
+    ): Bitmap {
+        peekFace(spec, key)?.let { return it }
+        val cacheKey = key?.let { spec.cacheKey(it) }
+
+        val accent = tintSource?.let { accentOfBitmap(it) } ?: DEFAULT_ACCENT
+        val composed = Bitmap.createBitmap(spec.widthPx, spec.heightPx, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(composed)
+        canvas.drawClearGlass(accent)
+        spec.dock?.let { canvas.drawDock(tintSource, it, spec) }
+        canvas.drawEdge(spec)
+
+        val rounded = composed.withRoundedCorners(spec.radiusPx)
+        composed.recycle()
+        // A face tinted from nothing would keep the default accent for the life
+        // of the process; let the next update have another go instead.
+        if (tintSource != null || artworkUrl.isNullOrBlank()) {
+            cacheKey?.let { faces.put(it, rounded) }
+        }
+        return rounded
+    }
+
+    /** The artwork tile for these arguments if it has already been drawn. */
+    fun peekArt(spec: ArtSpec, key: String?): Bitmap? =
+        key?.let { arts[spec.cacheKey(it)] }?.takeIf { !it.isRecycled }
+
+    /** The glass face for these arguments if it has already been drawn. */
+    fun peekFace(spec: FaceSpec, key: String?): Bitmap? =
+        key?.let { faces[spec.cacheKey(it)] }?.takeIf { !it.isRecycled }
 
     /** Drops every remembered face — the last widget has just been removed. */
     fun clear() {
-        composites.evictAll()
+        arts.evictAll()
+        faces.evictAll()
         failures.clear()
     }
 
@@ -160,10 +202,10 @@ internal object MediaWidgetArt {
      * The counterweight to not caching failures. A widget redraws on every play
      * and every pause as well as on every track change, so a cover that is not
      * merely slow but genuinely gone — a dead URL, a source that has moved its
-     * images — would otherwise be re-fetched, twice over with the fallback, on
-     * every tap of the play button. Long enough that a jammed play/pause finger
-     * costs one attempt; short enough that walking back into Wi-Fi fixes the
-     * widget on the next thing that happens rather than on the next restart.
+     * images — would otherwise be re-fetched on every tap of the play button.
+     * Long enough that a jammed play/pause finger costs one attempt; short
+     * enough that walking back into Wi-Fi fixes the widget on the next thing
+     * that happens rather than on the next restart.
      */
     private fun isCoolingOff(key: String?): Boolean {
         val failedAt = key?.let { failures[it] } ?: return false
@@ -179,25 +221,21 @@ internal object MediaWidgetArt {
     // ---- glass ----
 
     /**
-     * Paints the frosted backdrop and returns the accent the rest of the face
-     * tints against.
+     * The clear pane: a white haze, a whisper of the album's colour, a dark
+     * scrim just heavy enough to hold white type over a bright wallpaper, the
+     * top sheen and the bounce along the foot.
      */
-    private fun Canvas.drawAmbient(cover: Bitmap?): Int {
-        val accent = if (cover == null) DEFAULT_ACCENT else drawBlurredCover(cover)
-        if (cover == null) fillPlaceholder(accent)
+    private fun Canvas.drawClearGlass(accent: Int) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+
+        drawRect(0f, 0f, w, h, Paint().apply { color = GLASS_WHITE })
+        drawRect(0f, 0f, w, h, Paint().apply { color = withAlpha(accent, GLASS_ACCENT_ALPHA) })
+        drawRect(0f, 0f, w, h, Paint().apply { color = GLASS_BLACK })
+
+        val sheenBottom = h * SHEEN_SCALE
         drawRect(
-            0f,
-            0f,
-            width.toFloat(),
-            height.toFloat(),
-            Paint().apply { color = glassTint(accent) },
-        )
-        val sheenBottom = height * SHEEN_SCALE
-        drawRect(
-            0f,
-            0f,
-            width.toFloat(),
-            sheenBottom,
+            0f, 0f, w, sheenBottom,
             Paint().apply {
                 shader = LinearGradient(
                     0f, 0f, 0f, sheenBottom,
@@ -205,124 +243,71 @@ internal object MediaWidgetArt {
                 )
             },
         )
-        return accent
+
+        val bounceTop = h * REFLECTION_START
+        drawRect(
+            0f, bounceTop, w, h,
+            Paint().apply {
+                shader = LinearGradient(
+                    0f, bounceTop, 0f, h,
+                    Color.TRANSPARENT, REFLECTION_ALPHA, Shader.TileMode.CLAMP,
+                )
+            },
+        )
     }
 
     /**
-     * The cover as colour: centre-cropped, reduced to [AMBIENT_WORKING_WIDTH_PX]
-     * and blurred far past a Gaussian, then sampled back up to the full canvas.
-     *
-     * Cropped at twice the working size and halved, so the reduction averages
-     * each 2×2 block instead of sampling a sparse grid of it — aliasing that the
-     * blur would turn into visible blocks on a moving queue of covers.
-     */
-    private fun Canvas.drawBlurredCover(cover: Bitmap): Int {
-        val workW = AMBIENT_WORKING_WIDTH_PX
-        val workH = (workW * height / width.coerceAtLeast(1)).coerceAtLeast(4)
-        val crop = Bitmap.createBitmap(workW * 2, workH * 2, Bitmap.Config.ARGB_8888)
-        Canvas(crop).fillCentreCropped(cover)
-        val work = Bitmap.createScaledBitmap(crop, workW, workH, true)
-        if (work !== crop) crop.recycle()
-
-        val pixels = IntArray(workW * workH)
-        work.getPixels(pixels, 0, workW, 0, 0, workW, workH)
-        val accent = accentOf(pixels)
-        blurInPlace(
-            pixels,
-            IntArray(pixels.size),
-            workW,
-            workH,
-            (workW * AMBIENT_BLUR_FRACTION).roundToInt().coerceAtLeast(1),
-        )
-        work.setPixels(pixels, 0, workW, 0, 0, workW, workH)
-        drawBitmap(
-            work,
-            Rect(0, 0, workW, workH),
-            Rect(0, 0, width, height),
-            Paint().apply { isFilterBitmap = true },
-        )
-        work.recycle()
-        return accent
-    }
-
-    /** The inset album art card: rounded square, its own glass rim, optional shadow. */
-    private fun Canvas.drawArtwork(cover: Bitmap?, spec: GlassSpec, accent: Int) {
-        val rect = spec.art
-        val artW = rect.width()
-        val artH = rect.height()
-        if (artW <= 0 || artH <= 0) return
-
-        if (spec.artShadowPx > 0f) {
-            // The fill under the art is almost transparent; only its shadow shows.
-            drawRoundRect(
-                RectF(rect),
-                spec.artCornerPx,
-                spec.artCornerPx,
-                Paint().apply {
-                    isAntiAlias = true
-                    color = SHADOW_FILL
-                    setShadowLayer(spec.artShadowPx, 0f, spec.artShadowPx * 0.45f, SHADOW_COLOR)
-                },
-            )
-        }
-
-        val art = Bitmap.createBitmap(artW, artH, Bitmap.Config.ARGB_8888)
-        val artCanvas = Canvas(art)
-        if (cover != null) artCanvas.fillCentreCropped(cover) else artCanvas.fillPlaceholder(accent)
-        val rounded = art.withRoundedCorners(spec.artCornerPx)
-        if (rounded !== art) art.recycle()
-        drawBitmap(
-            rounded,
-            rect.left.toFloat(),
-            rect.top.toFloat(),
-            Paint().apply { isAntiAlias = true; isFilterBitmap = true },
-        )
-        rounded.recycle()
-
-        strokeGlass(RectF(rect), spec.artCornerPx, spec.artRimPx, RIM_COLORS)
-    }
-
-    /**
-     * The 2×2 widget's floating dock: a frost panel that samples what is beneath
+     * The square widget's floating dock: a pane that frosts whatever is under
      * it, so the artwork visibly blurs behind the glass rather than being
      * covered by a flat scrim.
      */
-    private fun Canvas.drawDock(source: Bitmap, dock: Rect, spec: GlassSpec, accent: Int) {
+    private fun Canvas.drawDock(source: Bitmap?, dock: Rect, spec: FaceSpec) {
         val dockW = dock.width()
         val dockH = dock.height()
         if (dockW <= 0 || dockH <= 0) return
 
-        val region = runCatching { Bitmap.createBitmap(source, dock.left, dock.top, dockW, dockH) }.getOrNull()
         val layer = Bitmap.createBitmap(dockW, dockH, Bitmap.Config.ARGB_8888)
         val layerCanvas = Canvas(layer)
-        if (region != null) {
-            val workW = DOCK_WORKING_WIDTH_PX
-            val workH = (workW * dockH / dockW).coerceAtLeast(4)
-            val work = Bitmap.createScaledBitmap(region, workW, workH, true)
-            region.recycle()
-            val pixels = IntArray(workW * workH)
-            work.getPixels(pixels, 0, workW, 0, 0, workW, workH)
-            blurInPlace(
-                pixels,
-                IntArray(pixels.size),
-                workW,
-                workH,
-                (workW * DOCK_BLUR_FRACTION).roundToInt().coerceAtLeast(1),
-            )
-            work.setPixels(pixels, 0, workW, 0, 0, workW, workH)
-            layerCanvas.drawBitmap(
-                work,
-                Rect(0, 0, workW, workH),
-                Rect(0, 0, dockW, dockH),
-                Paint().apply { isFilterBitmap = true },
-            )
-            work.recycle()
-        } else {
-            layerCanvas.fillPlaceholder(accent)
+        if (source != null && !source.isRecycled) {
+            // The artwork is the card's own size, bar a rounding either way, so
+            // the dock's place in it is proportional rather than exact.
+            val sx = source.width.toFloat() / spec.widthPx.coerceAtLeast(1)
+            val sy = source.height.toFloat() / spec.heightPx.coerceAtLeast(1)
+            val left = (dock.left * sx).roundToInt().coerceIn(0, source.width - 1)
+            val top = (dock.top * sy).roundToInt().coerceIn(0, source.height - 1)
+            val right = (dock.right * sx).roundToInt().coerceIn(left + 1, source.width)
+            val bottom = (dock.bottom * sy).roundToInt().coerceIn(top + 1, source.height)
+            val region = runCatching {
+                Bitmap.createBitmap(source, left, top, right - left, bottom - top)
+            }.getOrNull()
+            if (region != null) {
+                val workW = DOCK_WORKING_WIDTH_PX
+                val workH = (workW * dockH / dockW).coerceAtLeast(4)
+                val work = Bitmap.createScaledBitmap(region, workW, workH, true)
+                if (work !== region) region.recycle()
+                val pixels = IntArray(workW * workH)
+                work.getPixels(pixels, 0, workW, 0, 0, workW, workH)
+                blurInPlace(
+                    pixels,
+                    IntArray(pixels.size),
+                    workW,
+                    workH,
+                    (workW * DOCK_BLUR_FRACTION).roundToInt().coerceAtLeast(1),
+                )
+                work.setPixels(pixels, 0, workW, 0, 0, workW, workH)
+                layerCanvas.drawBitmap(
+                    work,
+                    Rect(0, 0, workW, workH),
+                    Rect(0, 0, dockW, dockH),
+                    Paint().apply { isFilterBitmap = true },
+                )
+                work.recycle()
+            }
         }
+
         layerCanvas.drawRect(
             0f, 0f, dockW.toFloat(), dockH.toFloat(),
-            Paint().apply { color = DOCK_TINT },
+            Paint().apply { color = DOCK_WHITE },
         )
         val sheenBottom = dockH * DOCK_SHEEN_SCALE
         layerCanvas.drawRect(
@@ -345,20 +330,23 @@ internal object MediaWidgetArt {
         )
         rounded.recycle()
 
-        strokeGlass(RectF(dock), spec.dockCornerPx, spec.dockRimPx, RIM_COLORS)
+        strokeGlass(
+            RectF(dock),
+            spec.dockCornerPx,
+            spec.dockRimPx,
+            DOCK_RIM_COLORS,
+            inset = true,
+        )
     }
 
-    /** The outer specular rim and the faint inner glow just inside it. */
-    private fun Canvas.drawEdge(spec: GlassSpec) {
-        val rect = RectF(0f, 0f, spec.widthPx.toFloat(), spec.heightPx.toFloat())
-        strokeGlass(rect, spec.radiusPx, spec.rimPx, RIM_COLORS)
-        val inset = spec.rimPx * GLOW_INSET_SCALE
-        val glow = RectF(rect).apply { inset(inset, inset) }
+    /** The outer specular rim — the lit edge that makes the pane read as glass. */
+    private fun Canvas.drawEdge(spec: FaceSpec) {
         strokeGlass(
-            glow,
-            (spec.radiusPx - inset).coerceAtLeast(0f),
-            spec.rimPx * GLOW_WIDTH_SCALE,
-            GLOW_COLORS,
+            RectF(0f, 0f, spec.widthPx.toFloat(), spec.heightPx.toFloat()),
+            spec.radiusPx,
+            spec.rimPx,
+            RIM_COLORS,
+            inset = true,
         )
     }
 
@@ -366,13 +354,28 @@ internal object MediaWidgetArt {
      * Strokes [rect] with a diagonal glass gradient: bright at the top-left,
      * nearly gone across the middle, back up at the bottom-right — the highlight
      * a real pane of glass throws along its edge.
+     *
+     * [inset] pulls the stroke half its width inside the rect, so a rim drawn on
+     * a bitmap's own edge is not half clipped away.
      */
-    private fun Canvas.strokeGlass(rect: RectF, cornerPx: Float, widthPx: Float, colors: IntArray) {
+    private fun Canvas.strokeGlass(
+        rect: RectF,
+        cornerPx: Float,
+        widthPx: Float,
+        colors: IntArray,
+        inset: Boolean,
+    ) {
         if (widthPx <= 0f || rect.width() <= 0f || rect.height() <= 0f) return
+        val bounds = RectF(rect)
+        if (inset) {
+            val half = widthPx / 2f
+            bounds.inset(half, half)
+        }
+        val radius = (cornerPx - if (inset) widthPx / 2f else 0f).coerceAtLeast(0f)
         drawRoundRect(
-            rect,
-            cornerPx,
-            cornerPx,
+            bounds,
+            radius,
+            radius,
             Paint().apply {
                 isAntiAlias = true
                 style = Paint.Style.STROKE
@@ -429,12 +432,6 @@ internal object MediaWidgetArt {
      * track, [NOTIFICATION_ART_PX] is the size the media session itself
      * requested, so it is certainly there. A 720px cover in an 860px-wide widget
      * is a 1.2× upscale that no one can see.
-     *
-     * [PLAYER_ART_PX] is on the ladder for exactly the same reason as the rest of
-     * it, and it matters most at the top: a tablet-sized instance is wider than
-     * every other rung, so without it the largest widgets were the ones certain
-     * to fetch a size of their own. It is what the full player asks for, so a
-     * widget that big now shares the player's copy instead.
      */
     private fun artPxFor(longestSidePx: Int): Int = when {
         longestSidePx <= ROW_ART_PX -> ROW_ART_PX
@@ -493,12 +490,21 @@ internal object MediaWidgetArt {
     }
 
     /**
-     * The cover's dominant colour, averaged over pixels with enough saturation
-     * and light to be a colour rather than a grey.
+     * The dominant colour of [source], sampled from a 32px reduction.
      *
-     * Sampled on a stride so a phone-sized cover costs a few thousand reads at
-     * most; falls back to [DEFAULT_ACCENT] for monochrome sleeves.
+     * Averaged over pixels with enough saturation and light to be a colour
+     * rather than a grey; falls back to [DEFAULT_ACCENT] for monochrome sleeves.
      */
+    private fun accentOfBitmap(source: Bitmap): Int {
+        if (source.isRecycled) return DEFAULT_ACCENT
+        val size = ACCENT_WORKING_PX
+        val small = Bitmap.createScaledBitmap(source, size, size, true)
+        val pixels = IntArray(size * size)
+        small.getPixels(pixels, 0, size, 0, 0, size, size)
+        if (small !== source) small.recycle()
+        return accentOf(pixels)
+    }
+
     private fun accentOf(pixels: IntArray): Int {
         val hsv = FloatArray(3)
         var r = 0L
@@ -599,8 +605,8 @@ internal object MediaWidgetArt {
      * arc. Drawn through a shader instead, the round rect's own antialiasing
      * does the work.
      */
-    private fun Bitmap.withRoundedCorners(radiusPx: Float, alpha: Int = 255): Bitmap {
-        if (radiusPx <= 0f && alpha == 255) return this
+    private fun Bitmap.withRoundedCorners(radiusPx: Float): Bitmap {
+        if (radiusPx <= 0f) return this
         val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         Canvas(out).drawRoundRect(
             RectF(0f, 0f, width.toFloat(), height.toFloat()),
@@ -608,7 +614,6 @@ internal object MediaWidgetArt {
             radiusPx,
             Paint().apply {
                 isAntiAlias = true
-                this.alpha = alpha
                 shader = BitmapShader(this@withRoundedCorners, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
             },
         )
@@ -625,58 +630,43 @@ internal object MediaWidgetArt {
         return (0xFF shl 24) or (channel(16) shl 16) or (channel(8) shl 8) or channel(0)
     }
 
-    /** The dark frosted layer, pulled a quarter of the way to the album's accent. */
-    private fun glassTint(accent: Int): Int =
-        (GLASS_TINT_ALPHA shl 24) or (mix(GLASS_TINT_RGB, accent, GLASS_ACCENT_MIX) and 0x00FFFFFF)
+    /** [color]'s three channels at [alpha], as a premultiplied-free ARGB int. */
+    private fun withAlpha(color: Int, alpha: Int): Int =
+        (alpha shl 24) or (color and 0x00FFFFFF)
 
     // ---- tuning ----
 
-    /** Width of the working image the mica backdrop is blurred on. */
-    private const val AMBIENT_WORKING_WIDTH_PX = 64
+    /** White at 12%: the body's haze. */
+    private const val GLASS_WHITE = 0x1FFFFFFF
 
-    /**
-     * The mica blur's box radius as a fraction of the working width. Three
-     * passes at a fifth spread each colour across most of the card — the sleeve
-     * reads as its tones, not as a picture.
-     */
-    private const val AMBIENT_BLUR_FRACTION = 0.2f
+    /** Black at 10%, and only so white type holds on a bright wallpaper. */
+    private const val GLASS_BLACK = 0x1A000000
 
-    /** How much of the card the wet-glass sheen covers, from the top. */
-    private const val SHEEN_SCALE = 0.4f
+    /** The album's colour, at 8%. */
+    private const val GLASS_ACCENT_ALPHA = 0x14
 
-    /** White at 22%. */
-    private const val SHEEN_ALPHA = 0x38FFFFFF.toInt()
+    /** The wet sheen: white 28% across the top 35%. */
+    private const val SHEEN_ALPHA = 0x47FFFFFF
+    private const val SHEEN_SCALE = 0.35f
 
-    /** `#14181F` at 53% — the frosted layer the artwork diffuses through. */
-    private const val GLASS_TINT_RGB = 0xFF14181F.toInt()
-    private const val GLASS_TINT_ALPHA = 0x88
+    /** The foot of the pane bouncing white 14% back up over its last 15%. */
+    private const val REFLECTION_ALPHA = 0x24FFFFFF
+    private const val REFLECTION_START = 0.85f
 
-    /** How far the frosted layer leans towards the album's own colour. */
-    private const val GLASS_ACCENT_MIX = 0.25f
+    /** Specular rim: white 85% → 25% → 70% down the diagonal. */
+    private val RIM_COLORS = intArrayOf(0xD9FFFFFF.toInt(), 0x40FFFFFF, 0xB3FFFFFF.toInt())
 
-    /** Specular rim: white 80% → 15% → 65% down the diagonal. */
-    private val RIM_COLORS = intArrayOf(0xCCFFFFFF.toInt(), 0x26FFFFFF, 0xA6FFFFFF.toInt())
+    /** The artwork tile's own rim: the same gradient, softer. */
+    private val ART_RIM_COLORS = intArrayOf(0xB3FFFFFF.toInt(), 0x33FFFFFF, 0x8CFFFFFF.toInt())
 
-    /** White 12%, three stops because a shader needs at least two. */
-    private val GLOW_COLORS = intArrayOf(0x1FFFFFFF, 0x1FFFFFFF, 0x1FFFFFFF)
+    /** The floating dock's rim: white 60% → 20% → 50%. */
+    private val DOCK_RIM_COLORS = intArrayOf(0x99FFFFFF.toInt(), 0x33FFFFFF, 0x80FFFFFF.toInt())
 
     private val RIM_STOPS = floatArrayOf(0f, 0.5f, 1f)
 
-    /** The inner glow sits this many rim widths in… */
-    private const val GLOW_INSET_SCALE = 1.5f
-
-    /** …and is this much thinner than the rim. */
-    private const val GLOW_WIDTH_SCALE = 0.66f
-
-    /** Shadow under the 4×2 artwork card: nearly invisible fill, real shadow. */
-    private const val SHADOW_FILL = 0x0A000000
-    private const val SHADOW_COLOR = 0x55000000
-
-    /** The 2×2 dock's frosted layer: `#14181F` at 30%. */
-    private const val DOCK_TINT = 0x4D14181F
-
-    /** White at 15%, over the top half of the dock. */
-    private const val DOCK_SHEEN = 0x26FFFFFF
+    /** The dock's frosted pane: white 12%, plus 18% across its top half. */
+    private const val DOCK_WHITE = 0x1FFFFFFF
+    private const val DOCK_SHEEN = 0x2EFFFFFF
     private const val DOCK_SHEEN_SCALE = 0.5f
 
     /** Width of the working image the dock's frost is blurred on. */
@@ -692,6 +682,7 @@ internal object MediaWidgetArt {
     /** What a monochrome sleeve falls back to. */
     private const val DEFAULT_ACCENT = 0xFF5B6BD6.toInt()
 
+    private const val ACCENT_WORKING_PX = 32
     private const val ACCENT_MIN_SATURATION = 0.45f
     private val ACCENT_VALUE_RANGE = 0.55f..0.92f
     private const val ACCENT_SAMPLES = 4096
@@ -708,15 +699,18 @@ internal object MediaWidgetArt {
     private const val OPAQUE = 0xFF shl 24
 
     /**
-     * Finished faces, by track and size.
+     * Finished tiles and faces, by track and size.
      *
      * Worth keeping because most widget updates do not change the picture at
      * all: a play/pause tap swaps one glyph, and re-deriving the face for it
      * would mean a cover decode and a stack of scaling passes to draw the
-     * identical bitmap again. Sized for a handful of widgets' worth at phone
-     * resolutions.
+     * identical bitmap again.
      */
-    private val composites = object : LruCache<String, Bitmap>(8 * 1024 * 1024) {
+    private val arts = object : LruCache<String, Bitmap>(5 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: Bitmap) = value.allocationByteCount
+    }
+
+    private val faces = object : LruCache<String, Bitmap>(5 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.allocationByteCount
     }
 

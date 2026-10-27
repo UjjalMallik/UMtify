@@ -1,20 +1,34 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The 4×1 capsule before its bitmap arrives: the same frosted slate and top
-  highlight as the other widgets, cut to the capsule's 32dp corner. The real
-  body is baked by MediaWidgetArt, frosted from the album's own colours.
+  The 4×1 capsule before its bitmap arrives: the same clear crystal recipe as
+  the square widgets, cut to the capsule's 32dp corner. The real body is baked
+  by MediaWidgetArt.
 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
 
     <item>
         <shape android:shape="rectangle">
             <corners android:radius="@dimen/widget_pill_radius" />
+            <solid android:color="#1FFFFFFF" />
+        </shape>
+    </item>
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/widget_pill_radius" />
+            <solid android:color="#1A000000" />
+        </shape>
+    </item>
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/widget_pill_radius" />
             <gradient
                 android:angle="270"
-                android:centerColor="#FF1B2130"
-                android:centerY="0.45"
-                android:endColor="#FF07090E"
-                android:startColor="#FF2E3446"
+                android:centerColor="#00FFFFFF"
+                android:centerY="0.35"
+                android:endColor="#00FFFFFF"
+                android:startColor="#47FFFFFF"
                 android:type="linear" />
         </shape>
     </item>
@@ -25,10 +39,19 @@
             <gradient
                 android:angle="270"
                 android:centerColor="#00FFFFFF"
-                android:centerY="0.4"
-                android:endColor="#00FFFFFF"
-                android:startColor="#38FFFFFF"
+                android:centerY="0.85"
+                android:endColor="#24FFFFFF"
+                android:startColor="#00FFFFFF"
                 android:type="linear" />
+        </shape>
+    </item>
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/widget_pill_radius" />
+            <stroke
+                android:width="@dimen/widget_glass_rim"
+                android:color="#8CFFFFFF" />
         </shape>
     </item>
 </layer-list>

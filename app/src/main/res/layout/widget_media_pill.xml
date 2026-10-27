@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The 4×1 widget: a glass capsule with the artwork inset at its left, the track
-  above Like / previous / play / next / Shuffle beside it.
+  The 4×1 widget: a clear crystal capsule with the artwork tile inset at its
+  left, the track above Like / previous / play / next / Shuffle beside it.
 
-  The capsule's body, its specular rim and the artwork tile are one bitmap from
-  MediaWidgetArt, drawn at the capsule's exact size so its round ends stay round
-  rather than being stretched. The 52dp frame left empty here is where that tile
-  lands; the provider hands the compositor the same dp values.
+  The tile has a layout cell of its own and the track has a matching end margin,
+  so the title can never run over the cover. Like, previous, next and Shuffle
+  are borderless white glyphs — an oval behind each of them read as five
+  squashed pills once the capsule stretched — and only the play/pause sits in a
+  crystal pill.
 
   The capsule is wrap_content tall and centred rather than filling the cell. A
   one-row cell is anywhere from ~60dp to over 100dp tall depending on the
@@ -38,37 +39,46 @@
             android:layout_height="match_parent"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingLeft="8dp"
-            android:paddingRight="12dp">
+            android:paddingStart="@dimen/widget_pill_padding_h"
+            android:paddingTop="@dimen/widget_pill_padding_v"
+            android:paddingEnd="@dimen/widget_pill_padding_h"
+            android:paddingBottom="@dimen/widget_pill_padding_v">
 
-            <!-- Where the baked artwork tile lands. Transparent: the bitmap
-                 shows through it. -->
-            <FrameLayout
-                android:layout_width="@dimen/widget_pill_art"
-                android:layout_height="@dimen/widget_pill_art" />
+            <ImageView
+                android:id="@+id/widget_art"
+                android:layout_width="wrap_content"
+                android:layout_height="@dimen/widget_pill_art"
+                android:layout_marginEnd="@dimen/widget_pill_gap"
+                android:adjustViewBounds="true"
+                android:importantForAccessibility="no"
+                android:scaleType="fitXY"
+                android:src="@drawable/widget_art_placeholder_pill" />
 
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginLeft="8dp"
                 android:layout_weight="1"
+                android:gravity="center_vertical"
                 android:orientation="vertical">
 
                 <TextView
                     android:id="@+id/widget_title"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:layout_marginBottom="4dp"
                     android:ellipsize="end"
                     android:fontFamily="@font/sf_pro_display_semibold"
                     android:includeFontPadding="false"
                     android:maxLines="1"
+                    android:shadowColor="#99000000"
+                    android:shadowDy="1"
+                    android:shadowRadius="4"
                     android:textColor="#FFFFFFFF"
-                    android:textSize="16sp" />
+                    android:textSize="13sp" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="@dimen/widget_pill_button"
-                    android:layout_marginTop="2dp"
                     android:gravity="center_vertical"
                     android:orientation="horizontal">
 
@@ -77,9 +87,8 @@
                         android:layout_width="0dp"
                         android:layout_height="@dimen/widget_pill_button"
                         android:layout_weight="1"
-                        android:background="@drawable/widget_glass_icon"
                         android:contentDescription="@string/like"
-                        android:padding="8dp"
+                        android:padding="7dp"
                         android:src="@drawable/ic_widget_heart" />
 
                     <ImageView
@@ -87,7 +96,6 @@
                         android:layout_width="0dp"
                         android:layout_height="@dimen/widget_pill_button"
                         android:layout_weight="1"
-                        android:background="@drawable/widget_glass_icon"
                         android:contentDescription="@string/widget_previous"
                         android:padding="7dp"
                         android:src="@drawable/ic_widget_previous" />
@@ -95,10 +103,10 @@
                     <ImageView
                         android:id="@+id/widget_toggle"
                         android:layout_width="@dimen/widget_pill_play_width"
-                        android:layout_height="@dimen/widget_pill_button"
+                        android:layout_height="@dimen/widget_pill_play_height"
                         android:background="@drawable/widget_glass_play"
                         android:contentDescription="@string/widget_play"
-                        android:padding="7dp"
+                        android:padding="4dp"
                         android:src="@drawable/ic_widget_play" />
 
                     <ImageView
@@ -106,7 +114,6 @@
                         android:layout_width="0dp"
                         android:layout_height="@dimen/widget_pill_button"
                         android:layout_weight="1"
-                        android:background="@drawable/widget_glass_icon"
                         android:contentDescription="@string/widget_next"
                         android:padding="7dp"
                         android:src="@drawable/ic_widget_next" />
@@ -116,9 +123,8 @@
                         android:layout_width="0dp"
                         android:layout_height="@dimen/widget_pill_button"
                         android:layout_weight="1"
-                        android:background="@drawable/widget_glass_icon"
                         android:contentDescription="@string/shuffle_off"
-                        android:padding="8dp"
+                        android:padding="7dp"
                         android:src="@drawable/ic_widget_shuffle" />
                 </LinearLayout>
             </LinearLayout>
