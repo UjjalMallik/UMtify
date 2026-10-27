@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.Bundle
+import android.view.Gravity
 import android.view.View
 import android.widget.RemoteViews
 import com.music.bitchord.MainActivity
@@ -24,7 +25,12 @@ import kotlin.math.roundToInt
 
 /**
  * The 4×1 widget: a clear crystal capsule with the artwork tile inset at its
- * left, the track above Like / previous / play / next / Shuffle beside it.
+ * left, the track and its spectrum above the transport beside it.
+ *
+ * At [COMPACT_WIDTH_DP] and below the capsule cannot hold the tile and five
+ * keys at once, so the layout drops the tile, Like and Shuffle and centres the
+ * title over previous / play / next — the same widget, sized to what the host
+ * gives it, rather than five cramped keys and a cover that overlaps them.
  *
  * Its own provider rather than a third size of [MediaWidget]: a different shape
  * with a different picture. It reads the same [MediaWidgetSnapshot], shares the
@@ -49,7 +55,14 @@ class MediaWidgetPill : AppWidgetProvider() {
     }
 
     override fun onDeleted(context: Context, ids: IntArray) {
-        for (id in ids) lastFace.remove(id)
+        for (id in ids) {
+            lastFace.remove(id)
+            WidgetWave.stop(id)
+        }
+    }
+
+    override fun onDisabled(context: Context) {
+        lastFace.clear()
     }
 
     private fun renderAsync(context: Context, ids: IntArray) {
@@ -95,7 +108,10 @@ class MediaWidgetPill : AppWidgetProvider() {
                 if (art == null || face == null) {
                     // With what this widget last drew, not with nothing: a
                     // RemoteViews replaces the whole tree. See MediaWidget.render.
-                    manager.push(id, views(context, snapshot, art, face ?: lastFace[id]))
+                    manager.push(
+                        id,
+                        views(context, snapshot, id, specs, art, face ?: lastFace[id]),
+                    )
                 }
                 if (art == null) {
                     art = withTimeoutOrNull(RENDER_TIMEOUT_MS) {
@@ -112,22 +128,53 @@ class MediaWidgetPill : AppWidgetProvider() {
                     )
                 }
                 lastFace[id] = face
-                manager.push(id, views(context, snapshot, art, face))
+                manager.push(id, views(context, snapshot, id, specs, art, face))
+
+                if (specs.waveWidthPx > 0 && snapshot.isPlaying && snapshot.hasTrack) {
+                    WidgetWave.play(
+                        context = context,
+                        id = id,
+                        layout = R.layout.widget_media_pill,
+                        viewId = R.id.widget_wave,
+                        widthPx = specs.waveWidthPx,
+                        heightPx = specs.waveHeightPx,
+                    )
+                } else {
+                    WidgetWave.stop(id)
+                }
             }
         }
 
-        private class Specs(val face: FaceSpec, val art: ArtSpec)
+        private class Specs(
+            val face: FaceSpec,
+            val art: ArtSpec,
+            /** Too narrow for the tile and five keys: the tile goes, so do Like and Shuffle. */
+            val compact: Boolean,
+            /** The spectrum's width in px, matching the track column. */
+            val waveWidthPx: Int,
+            val waveHeightPx: Int,
+        )
 
         /**
          * The capsule's two bitmaps: its glass, the widget's width for the
          * orientation in force, and a fixed-height capsule; and the artwork tile
          * at the size its layout cell gives it.
+         *
+         * The width also decides the layout: a capsule too narrow for the tile
+         * and five keys drops the tile (see [views]), and the spectrum then
+         * spans the full inner width rather than starting past a tile.
          */
         private fun specs(context: Context, manager: AppWidgetManager, id: Int): Specs {
             val resources = context.resources
-            val widthPx = widthPx(context, manager, id)
+            val density = resources.displayMetrics.density
+            val widthDp = widthDp(context, manager, id)
+            val widthPx = (widthDp * density).roundToInt().coerceIn(1, MAX_WIDTH_PX)
+            val compact = widthDp < COMPACT_WIDTH_DP
             val heightPx = resources.getDimensionPixelSize(R.dimen.widget_pill_height)
             val artSize = resources.getDimensionPixelSize(R.dimen.widget_pill_art)
+            val padding = resources.getDimensionPixelSize(R.dimen.widget_pill_padding_h)
+            val trackInset =
+                if (compact) 0 else artSize + resources.getDimensionPixelSize(R.dimen.widget_pill_gap)
             return Specs(
                 face = FaceSpec(
                     widthPx = widthPx,
@@ -144,25 +191,37 @@ class MediaWidgetPill : AppWidgetProvider() {
                     cornerPx = resources.getDimension(R.dimen.widget_pill_art_corner),
                     rimPx = resources.getDimension(R.dimen.widget_pill_art_rim),
                 ),
+                compact = compact,
+                waveWidthPx = (widthPx - 2 * padding - trackInset).coerceAtLeast(0),
+                waveHeightPx = resources.getDimensionPixelSize(R.dimen.widget_wave_pill_height),
             )
         }
 
-        private fun widthPx(context: Context, manager: AppWidgetManager, id: Int): Int {
+        /**
+         * The width the host reports for the orientation in force, in dp.
+         *
+         * The options bundle reports a range, not a size: portrait wants the
+         * minimum width and landscape the maximum, which is the same reading
+         * [MediaWidget] uses.
+         */
+        private fun widthDp(context: Context, manager: AppWidgetManager, id: Int): Int {
             val options = runCatching { manager.getAppWidgetOptions(id) }.getOrNull()
             val landscape =
                 context.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-            val widthDp = options?.getInt(
+            return options?.getInt(
                 if (landscape) AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH else AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,
             )?.takeIf { it > 0 } ?: FALLBACK_WIDTH_DP
-            return (widthDp * context.resources.displayMetrics.density).roundToInt().coerceIn(1, MAX_WIDTH_PX)
         }
 
         private fun views(
             context: Context,
             snapshot: MediaWidgetSnapshot,
+            id: Int,
+            specs: Specs,
             art: Bitmap?,
             face: Bitmap?,
         ): RemoteViews {
+            val compact = specs.compact
             val views = RemoteViews(context.packageName, R.layout.widget_media_pill)
             art?.let { views.setImageViewBitmap(R.id.widget_art, it) }
             face?.let {
@@ -181,6 +240,28 @@ class MediaWidgetPill : AppWidgetProvider() {
                 },
             )
 
+            // Narrow capsules keep only what fits three keys wide: the tile,
+            // Like and Shuffle are given up so previous / play / next have room
+            // to spread, and the title moves to the middle of the freed width.
+            views.setViewVisibility(R.id.widget_art, if (compact) View.GONE else View.VISIBLE)
+            views.setInt(
+                R.id.widget_title,
+                "setGravity",
+                if (compact) Gravity.CENTER_HORIZONTAL else Gravity.START,
+            )
+            // Fully hidden, not merely unpainted: pausing must leave no frame
+            // of the spectrum behind. While playing, the ticker's current frame
+            // rides along so a full update never blanks it.
+            val playing = snapshot.isPlaying && snapshot.hasTrack
+            if (playing) {
+                WidgetWave.frameFor(id, specs.waveWidthPx, specs.waveHeightPx)
+                    ?.let { views.setImageViewBitmap(R.id.widget_wave, it) }
+            }
+            views.setImageAlpha(
+                R.id.widget_wave,
+                if (playing) ALPHA_ENABLED else ALPHA_HIDDEN,
+            )
+
             views.setImageViewResource(
                 R.id.widget_toggle,
                 if (snapshot.isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play,
@@ -191,7 +272,14 @@ class MediaWidgetPill : AppWidgetProvider() {
             )
             // Hidden rather than greyed, like the player's: the buttons either
             // side share the room out evenly without it.
-            views.setViewVisibility(R.id.widget_like, if (snapshot.canLike) View.VISIBLE else View.GONE)
+            views.setViewVisibility(
+                R.id.widget_like,
+                if (!compact && snapshot.canLike) View.VISIBLE else View.GONE,
+            )
+            views.setViewVisibility(
+                R.id.widget_shuffle,
+                if (compact) View.GONE else View.VISIBLE,
+            )
             views.setImageViewResource(
                 R.id.widget_like,
                 if (snapshot.isLiked) R.drawable.ic_widget_heart_filled else R.drawable.ic_widget_heart,
@@ -274,6 +362,14 @@ class MediaWidgetPill : AppWidgetProvider() {
         /** Four cells by the launcher's 70n − 30 arithmetic, for a host that hasn't said. */
         private const val FALLBACK_WIDTH_DP = 250
 
+        /**
+         * Below this the capsule can't hold the tile and all five keys: the deck
+         * would be under ~150dp, which is the five keys' own width with no gaps
+         * left between them. Narrower than this the tile, Like and Shuffle go
+         * and the remaining three spread across the whole capsule.
+         */
+        private const val COMPACT_WIDTH_DP = 232
+
         /** Bounds the bitmap parcelled to the host on a tablet-wide instance. */
         private const val MAX_WIDTH_PX = 1_600
 
@@ -281,6 +377,9 @@ class MediaWidgetPill : AppWidgetProvider() {
 
         private const val ALPHA_ENABLED = 255
         private const val ALPHA_DISABLED = 90
+
+        /** The spectrum's alpha while nothing is playing — fully gone. */
+        private const val ALPHA_HIDDEN = 0
 
         private const val KEY_NO_ARTWORK = "no-artwork"
 

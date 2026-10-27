@@ -7,8 +7,13 @@
   The tile is an ImageView of the card's own size, inset at runtime to where the
   square belongs — see MediaWidget.views. It uses `scaleType="matrix"`, so its
   bitmap is drawn 1:1 at the size it was composited, never stretched to the
-  host's idea of the card, and the deck is padded past it. Both insets are
-  absolute px, so they move together and can never overlap.
+  host's idea of the card.
+
+  The deck is held off the tile twice over: it carries a 16dp start margin of its
+  own, and the runtime padding that already clears the tile is added on top of
+  it. That margin is the guarantee — the text column is `0dp`/weight-1 inside it,
+  so neither the title nor the artist can ever reach the artwork, whatever their
+  length or the user's font size.
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
@@ -44,11 +49,12 @@
         android:paddingStart="@dimen/widget_wide_padding"
         android:paddingEnd="@dimen/widget_wide_padding">
 
-        <!-- Starts where the tile ends; the left padding is set at runtime. -->
+        <!-- Starts where the tile ends, plus the 16dp hard gap. -->
         <LinearLayout
             android:id="@+id/widget_deck"
             android:layout_width="0dp"
             android:layout_height="match_parent"
+            android:layout_marginStart="@dimen/widget_wide_gap"
             android:layout_weight="1"
             android:gravity="center_vertical"
             android:orientation="vertical">
@@ -101,7 +107,7 @@
                     android:id="@+id/widget_like"
                     android:layout_width="@dimen/widget_like_size"
                     android:layout_height="@dimen/widget_like_size"
-                    android:background="@drawable/widget_glass_like"
+                    android:background="@drawable/widget_crystal_disc"
                     android:contentDescription="@string/like"
                     android:padding="8dp"
                     android:src="@drawable/ic_widget_heart" />
@@ -120,7 +126,7 @@
                     android:id="@+id/widget_previous"
                     android:layout_width="@dimen/widget_wide_transport"
                     android:layout_height="@dimen/widget_wide_transport"
-                    android:background="@drawable/widget_glass_icon"
+                    android:background="@drawable/widget_crystal_ring"
                     android:contentDescription="@string/widget_previous"
                     android:padding="9dp"
                     android:src="@drawable/ic_widget_previous" />
@@ -134,7 +140,7 @@
                     android:id="@+id/widget_toggle"
                     android:layout_width="@dimen/widget_wide_play_width"
                     android:layout_height="@dimen/widget_wide_play_height"
-                    android:background="@drawable/widget_glass_play"
+                    android:background="@drawable/widget_crystal_pill_wide"
                     android:contentDescription="@string/widget_play"
                     android:padding="8dp"
                     android:src="@drawable/ic_widget_play" />
@@ -148,54 +154,72 @@
                     android:id="@+id/widget_next"
                     android:layout_width="@dimen/widget_wide_transport"
                     android:layout_height="@dimen/widget_wide_transport"
-                    android:background="@drawable/widget_glass_icon"
+                    android:background="@drawable/widget_crystal_ring"
                     android:contentDescription="@string/widget_next"
                     android:padding="9dp"
                     android:src="@drawable/ic_widget_next" />
             </LinearLayout>
 
-            <!-- Elapsed, the crystal progress bar, and the track's length. -->
+            <!-- Elapsed, the crystal progress bar, the track's length, and under
+                 them the spectrum. The wave is pushed frame by frame while
+                 playing and held at alpha 0 otherwise — a widget can't animate,
+                 so WidgetWave re-inflates just this view on a timer. -->
             <LinearLayout
-                android:id="@+id/widget_progress_row"
+                android:id="@+id/widget_progress_block"
                 android:layout_width="match_parent"
-                android:layout_height="@dimen/widget_wide_progress_row"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
 
-                <Chronometer
-                    android:id="@+id/widget_elapsed"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:fontFamily="@font/sf_pro_display_regular"
-                    android:includeFontPadding="false"
-                    android:shadowColor="#99000000"
-                    android:shadowDy="1"
-                    android:shadowRadius="4"
-                    android:textColor="#99FFFFFF"
-                    android:textSize="11sp" />
+                <LinearLayout
+                    android:id="@+id/widget_progress_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/widget_wide_progress_row"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
 
-                <ProgressBar
-                    android:id="@+id/widget_progress"
-                    style="@android:style/Widget.ProgressBar.Horizontal"
-                    android:layout_width="0dp"
-                    android:layout_height="4dp"
-                    android:layout_marginStart="8dp"
-                    android:layout_marginEnd="8dp"
-                    android:layout_weight="1"
-                    android:max="1000"
-                    android:progressDrawable="@drawable/widget_progress" />
+                    <Chronometer
+                        android:id="@+id/widget_elapsed"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="@font/sf_pro_display_regular"
+                        android:includeFontPadding="false"
+                        android:shadowColor="#99000000"
+                        android:shadowDy="1"
+                        android:shadowRadius="4"
+                        android:textColor="#99FFFFFF"
+                        android:textSize="11sp" />
 
-                <TextView
-                    android:id="@+id/widget_total"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:fontFamily="@font/sf_pro_display_regular"
-                    android:includeFontPadding="false"
-                    android:shadowColor="#99000000"
-                    android:shadowDy="1"
-                    android:shadowRadius="4"
-                    android:textColor="#99FFFFFF"
-                    android:textSize="11sp" />
+                    <ProgressBar
+                        android:id="@+id/widget_progress"
+                        style="@android:style/Widget.ProgressBar.Horizontal"
+                        android:layout_width="0dp"
+                        android:layout_height="4dp"
+                        android:layout_marginStart="8dp"
+                        android:layout_marginEnd="8dp"
+                        android:layout_weight="1"
+                        android:max="1000"
+                        android:progressDrawable="@drawable/widget_progress" />
+
+                    <TextView
+                        android:id="@+id/widget_total"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="@font/sf_pro_display_regular"
+                        android:includeFontPadding="false"
+                        android:shadowColor="#99000000"
+                        android:shadowDy="1"
+                        android:shadowRadius="4"
+                        android:textColor="#99FFFFFF"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <ImageView
+                    android:id="@+id/widget_wave"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/widget_wave_height"
+                    android:layout_marginTop="2dp"
+                    android:importantForAccessibility="no"
+                    android:scaleType="fitXY" />
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>

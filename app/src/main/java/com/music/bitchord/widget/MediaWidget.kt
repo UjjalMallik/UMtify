@@ -73,7 +73,10 @@ abstract class MediaWidget : AppWidgetProvider() {
 
     /** A widget that has been dragged off the home screen has no last face. */
     override fun onDeleted(context: Context, ids: IntArray) {
-        for (id in ids) lastFace.remove(id)
+        for (id in ids) {
+            lastFace.remove(id)
+            WidgetWave.stop(id)
+        }
     }
 
     override fun onDisabled(context: Context) {
@@ -110,7 +113,7 @@ abstract class MediaWidget : AppWidgetProvider() {
          * artwork rather than floated over it.
          *
          * The split layout spends 14dp on leading padding, at least 64dp on the
-         * artwork tile, 14dp of gap, and 130dp of deck — 38dp previous, the
+         * artwork tile, 16dp of hard gap, and 130dp of deck — 38dp previous, the
          * 54dp play pill and 38dp next with no room left for the spacers — so
          * below roughly 236dp the transport would not fit.
          *
@@ -203,7 +206,7 @@ abstract class MediaWidget : AppWidgetProvider() {
                 // widget last drew, not from nothing: a RemoteViews replaces the
                 // whole tree, so leaving widget_glass unset clears it and the
                 // fallback gradient shows through until the render finishes.
-                manager.push(id, views(context, snapshot, size, art, face ?: lastFace[id]))
+                manager.push(id, views(context, id, snapshot, size, art, face ?: lastFace[id]))
             }
             if (art == null) {
                 art = withTimeoutOrNull(RENDER_TIMEOUT_MS) {
@@ -222,13 +225,30 @@ abstract class MediaWidget : AppWidgetProvider() {
                 )
             }
             lastFace[id] = face
-            manager.push(id, views(context, snapshot, size, art, face))
+            manager.push(id, views(context, id, snapshot, size, art, face))
+
+            // The spectrum only exists on the split layout, and only while
+            // something is actually playing: WidgetWave holds a ticker, so
+            // every path that isn't "playing, wide" has to stop it.
+            if (size.waveWidthPx > 0 && snapshot.isPlaying && snapshot.hasTrack) {
+                WidgetWave.play(
+                    context = context,
+                    id = id,
+                    layout = R.layout.widget_media_wide,
+                    viewId = R.id.widget_wave,
+                    widthPx = size.waveWidthPx,
+                    heightPx = size.waveHeightPx,
+                )
+            } else {
+                WidgetWave.stop(id)
+            }
         }
 
         // ---- views ----
 
         private fun views(
             context: Context,
+            id: Int,
             snapshot: MediaWidgetSnapshot,
             size: WidgetSize,
             art: Bitmap?,
@@ -277,6 +297,20 @@ abstract class MediaWidget : AppWidgetProvider() {
                 )
                 bindLike(views, context, snapshot)
                 bindProgress(views, snapshot, size.tall)
+                // Zero, not just "never drawn": a paused widget must not leave
+                // the last frame of the spectrum behind. While playing, the
+                // frame the ticker is on rides along — a full update drops the
+                // bitmap a partial one pushed, and the progress republish must
+                // not blank the spectrum for a tick.
+                val playing = snapshot.isPlaying && snapshot.hasTrack
+                if (playing) {
+                    WidgetWave.frameFor(id, size.waveWidthPx, size.waveHeightPx)
+                        ?.let { views.setImageViewBitmap(R.id.widget_wave, it) }
+                }
+                views.setImageAlpha(
+                    R.id.widget_wave,
+                    if (playing) ALPHA_ENABLED else ALPHA_HIDDEN,
+                )
             }
 
             views.setImageViewResource(
@@ -371,7 +405,7 @@ abstract class MediaWidget : AppWidgetProvider() {
          */
         private fun bindProgress(views: RemoteViews, snapshot: MediaWidgetSnapshot, tall: Boolean) {
             views.setViewVisibility(
-                R.id.widget_progress_row,
+                R.id.widget_progress_block,
                 if (tall) View.VISIBLE else View.GONE,
             )
             if (!tall) return
@@ -470,8 +504,12 @@ abstract class MediaWidget : AppWidgetProvider() {
             val artPad: Rect,
             /** Enough height for the title and its artist line. */
             val roomy: Boolean,
-            /** Enough height for the progress row as well. */
+            /** Enough height for the progress row and the spectrum as well. */
             val tall: Boolean,
+            /** The spectrum view's width in px; 0 where the layout has none. */
+            val waveWidthPx: Int,
+            /** The spectrum view's height in px; 0 where the layout has none. */
+            val waveHeightPx: Int,
         )
 
         /**
@@ -551,6 +589,7 @@ abstract class MediaWidget : AppWidgetProvider() {
                 // must not shrink the inset with it.
                 val padPx = (paddingDp * density).roundToInt()
                 val artPadPx = (artDp * density).roundToInt()
+                val gapPx = (gapDp * density).roundToInt()
                 val artPad = Rect(
                     padPx,
                     ((heightDp * density - artPadPx) / 2f).roundToInt().coerceAtLeast(0),
@@ -572,10 +611,20 @@ abstract class MediaWidget : AppWidgetProvider() {
                         cornerPx = unscaled(R.dimen.widget_wide_art_corner),
                         rimPx = unscaled(R.dimen.widget_wide_art_rim),
                     ),
-                    deckPaddingDp = artDp + gapDp,
+                    // Only the tile's own width: the 16dp gap is a layout margin
+                    // on the deck now, so it is already outside this padding.
+                    deckPaddingDp = artDp,
                     artPad = artPad,
                     roomy = availableDp >= ROOMY_DECK_DP * textScale,
                     tall = availableDp >= TALL_DECK_DP * textScale,
+                    // The deck spans the card's inner width less the tile and
+                    // the gap; the spectrum fills it edge to edge.
+                    waveWidthPx = (widthDp * density).roundToInt()
+                        .minus(2 * padPx)
+                        .minus(artPadPx)
+                        .minus(gapPx)
+                        .coerceAtLeast(0),
+                    waveHeightPx = resources.getDimensionPixelSize(R.dimen.widget_wave_height),
                 )
             }
 
@@ -610,6 +659,8 @@ abstract class MediaWidget : AppWidgetProvider() {
                 artPad = Rect(),
                 roomy = true,
                 tall = true,
+                waveWidthPx = 0,
+                waveHeightPx = 0,
             )
         }
 
@@ -632,8 +683,8 @@ abstract class MediaWidget : AppWidgetProvider() {
         /** Below this the artist line is dropped rather than clipped. */
         private const val ROOMY_DECK_DP = 90f
 
-        /** Below this the progress row is dropped rather than clipped. */
-        private const val TALL_DECK_DP = 104f
+        /** Below this the progress row and the spectrum are dropped rather than clipped. */
+        private const val TALL_DECK_DP = 118f
 
         /**
          * Renders run on a process-wide scope rather than one tied to a receiver:
@@ -668,6 +719,9 @@ abstract class MediaWidget : AppWidgetProvider() {
 
         private const val ALPHA_ENABLED = 255
         private const val ALPHA_DISABLED = 90
+
+        /** The spectrum's alpha while nothing is playing — fully gone. */
+        private const val ALPHA_HIDDEN = 0
 
         /** What the placeholder face is remembered under. */
         private const val KEY_NO_ARTWORK = "no-artwork"

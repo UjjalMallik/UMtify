@@ -10,14 +10,26 @@
   the bounds Material's own play_arrow occupies. Hand-authored arcs would give
   the same picture with three more chances to get a control point wrong.
 
-  White, not tinted: this only ever draws over darkened album art, so there is
-  no theme for it to follow.
+  The first, offset copy is the drop shadow. A widget ImageView can't take a
+  shadow layer, so the shadow is baked into the vector: the same glyph in 35%
+  black, 0.7 down and right, laid under the white one.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
+    <group
+        android:translateX="0.7"
+        android:translateY="1">
+        <path
+            android:fillColor="#59000000"
+            android:pathData="M8.4,6.4L8.4,17.6L17.6,12Z"
+            android:strokeColor="#59000000"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:strokeWidth="2.6" />
+    </group>
     <path
         android:fillColor="#FFFFFFFF"
         android:pathData="M8.4,6.4L8.4,17.6L17.6,12Z"

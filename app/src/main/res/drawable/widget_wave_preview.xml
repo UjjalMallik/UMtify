@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A still frame of the crystal spectrum, for the picker's preview layouts. The
+  live widget pushes real frames into the same slot; see WidgetWave.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="160dp"
+    android:height="10dp"
+    android:viewportWidth="160"
+    android:viewportHeight="10"
+    android:alpha="0.85">
+    <path
+        android:pathData="M0,6h5v4h-5zM12,3h5v7h-5zM24,7h5v3h-5zM36,1h5v9h-5zM48,4h5v6h-5zM60,0h5v10h-5zM72,5h5v5h-5zM84,2h5v8h-5zM96,8h5v2h-5zM108,4h5v6h-5zM120,7h5v3h-5zM132,3h5v7h-5zM144,6h5v4h-5z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endColor="#73FFFFFF"
+                android:endY="10"
+                android:startColor="#E6FFFFFF"
+                android:startY="0"
+                android:type="linear" />
+        </aapt:attr>
+    </path>
+</vector>

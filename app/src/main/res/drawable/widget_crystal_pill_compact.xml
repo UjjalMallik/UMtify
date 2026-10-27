@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The 34×24 crystal pill the 2×2 dock's play/pause sits in. Sized so the two
+  24dp discs beside it still fit the dock at the widget's 110dp minimum.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="34dp"
+    android:height="24dp"
+    android:viewportWidth="34"
+    android:viewportHeight="24">
+
+    <path
+        android:fillColor="#2EFFFFFF"
+        android:pathData="M11,1.5L23,1.5A10.5,10.5 0 0 1 33.5,12A10.5,10.5 0 0 1 23,22.5L11,22.5A10.5,10.5 0 0 1 0.5,12A10.5,10.5 0 0 1 11,1.5Z" />
+
+    <path
+        android:fillType="evenOdd"
+        android:pathData="M12,0L22,0A12,12 0 0 1 34,12A12,12 0 0 1 22,24L12,24A12,12 0 0 1 0,12A12,12 0 0 1 12,0ZM11,1.5L23,1.5A10.5,10.5 0 0 1 33.5,12A10.5,10.5 0 0 1 23,22.5L11,22.5A10.5,10.5 0 0 1 0.5,12A10.5,10.5 0 0 1 11,1.5Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endColor="#4DFFFFFF"
+                android:endX="34"
+                android:endY="24"
+                android:startColor="#D9FFFFFF"
+                android:startX="0"
+                android:startY="0"
+                android:type="linear" />
+        </aapt:attr>
+    </path>
+</vector>

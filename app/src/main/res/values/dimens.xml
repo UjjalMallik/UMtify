@@ -21,7 +21,12 @@
       preview draws.
     -->
     <dimen name="widget_wide_padding">14dp</dimen>
-    <dimen name="widget_wide_gap">14dp</dimen>
+    <!--
+      The hard boundary between the tile and the deck. The deck carries this as a
+      real start margin, so no amount of title, artist or font scaling can pull
+      the text back over the artwork.
+    -->
+    <dimen name="widget_wide_gap">16dp</dimen>
     <dimen name="widget_wide_art">112dp</dimen>
     <dimen name="widget_wide_art_corner">18dp</dimen>
     <dimen name="widget_wide_art_rim">1dp</dimen>
@@ -45,10 +50,20 @@
     <dimen name="widget_dock_radius">20dp</dimen>
     <dimen name="widget_dock_rim">1dp</dimen>
 
-    <!-- The dock's control row, and the pill the play/pause sits in. -->
+    <!--
+      The dock's control row, and the pill the play/pause sits in. The discs are
+      fixed rather than weighted: a circle behind a weight-1 slot is drawn as an
+      oval, and the dock is narrow enough that two 24dp discs and a 34dp pill
+      only just fit the smallest card it can be.
+    -->
     <dimen name="widget_compact_button">30dp</dimen>
-    <dimen name="widget_compact_play_width">38dp</dimen>
-    <dimen name="widget_compact_play_height">26dp</dimen>
+    <dimen name="widget_compact_disc">24dp</dimen>
+    <dimen name="widget_compact_play_width">34dp</dimen>
+    <dimen name="widget_compact_play_height">24dp</dimen>
+
+    <!-- The crystal spectrum under the 4×2 progress bar, and in the 4×1 track. -->
+    <dimen name="widget_wave_height">10dp</dimen>
+    <dimen name="widget_wave_pill_height">5dp</dimen>
 
     <!--
       The 4×1 capsule: 80dp tall, a 50dp artwork tile inset 8dp above and below,
@@ -59,7 +74,7 @@
     <dimen name="widget_pill_art_corner">14dp</dimen>
     <dimen name="widget_pill_art_rim">1dp</dimen>
     <dimen name="widget_pill_radius">32dp</dimen>
-    <dimen name="widget_pill_button">34dp</dimen>
+    <dimen name="widget_pill_button">26dp</dimen>
     <dimen name="widget_pill_play_width">42dp</dimen>
     <dimen name="widget_pill_play_height">28dp</dimen>
 

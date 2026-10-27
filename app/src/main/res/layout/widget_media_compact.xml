@@ -10,6 +10,10 @@
 
   The dock is not clickable itself, so its empty space falls through to the root
   and opens the app, like any other pixel of the artwork.
+
+  The keys are fixed 24dp discs with weight-1 spacers between them rather than
+  weight-1 keys: a circle given a weighted width is drawn as an oval, and two
+  discs plus the 34dp play pill are the most that fit the dock's smallest card.
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
@@ -69,29 +73,39 @@
 
             <ImageView
                 android:id="@+id/widget_previous"
-                android:layout_width="0dp"
-                android:layout_height="@dimen/widget_compact_button"
-                android:layout_weight="1"
+                android:layout_width="@dimen/widget_compact_disc"
+                android:layout_height="@dimen/widget_compact_disc"
+                android:background="@drawable/widget_crystal_ring_small"
                 android:contentDescription="@string/widget_previous"
-                android:padding="5dp"
+                android:padding="4dp"
                 android:src="@drawable/ic_widget_previous" />
+
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
 
             <ImageView
                 android:id="@+id/widget_toggle"
                 android:layout_width="@dimen/widget_compact_play_width"
                 android:layout_height="@dimen/widget_compact_play_height"
-                android:background="@drawable/widget_glass_play"
+                android:background="@drawable/widget_crystal_pill_compact"
                 android:contentDescription="@string/widget_play"
-                android:padding="4dp"
+                android:padding="3dp"
                 android:src="@drawable/ic_widget_play" />
+
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
 
             <ImageView
                 android:id="@+id/widget_next"
-                android:layout_width="0dp"
-                android:layout_height="@dimen/widget_compact_button"
-                android:layout_weight="1"
+                android:layout_width="@dimen/widget_compact_disc"
+                android:layout_height="@dimen/widget_compact_disc"
+                android:background="@drawable/widget_crystal_ring_small"
                 android:contentDescription="@string/widget_next"
-                android:padding="5dp"
+                android:padding="4dp"
                 android:src="@drawable/ic_widget_next" />
         </LinearLayout>
     </LinearLayout>
