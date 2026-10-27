@@ -626,6 +626,16 @@ class PlaybackService : MediaLibraryService() {
     /** Last sampled position of the playing track, in seconds. */
     private var lastPositionSeconds = 0L
 
+    /**
+     * When the widget snapshot was last republished from the progress sampler.
+     *
+     * The 4×2 progress bar is only as fresh as the last publish, and the
+     * sampler below is the one loop that ticks while audio is coming out — so
+     * it is where the bar's drift is trimmed. The elapsed label does not need
+     * this: it is a Chronometer the host runs itself between pushes.
+     */
+    private var lastWidgetProgressAt = 0L
+
     /** When the current track was chosen, for the time-to-first-audio log. */
     private var trackSelectedAt: Long? = null
 
@@ -5852,6 +5862,12 @@ class PlaybackService : MediaLibraryService() {
             isLiked = liked,
             canLike = canLike(exoPlayer.currentMediaItem),
             shuffleEnabled = QueueShuffle.enabled.value,
+            // The clock on the widget's progress bar. Position is read through
+            // the session player like everything else here, so a Cast or watch
+            // speaker reports where it actually is rather than where this
+            // process last left off. Unknown position reads as zero.
+            positionMs = reported.currentPosition.coerceAtLeast(0L),
+            durationMs = reported.duration.coerceAtLeast(0L),
         )
         MediaWidgetSnapshot.save(this, snapshot)
         MediaWidget.refresh(this)
@@ -5990,6 +6006,17 @@ class PlaybackService : MediaLibraryService() {
                     // Only two primitive preference values. Queue JSON is
                     // written from onTimelineChanged, never from this loop.
                     savePlaybackState(player)
+                    // The 4×2 bar's fill, at a coarser beat than the sampler:
+                    // a widget push re-renders and ships a bitmap, and doing
+                    // that every five seconds to move a bar a few pixels is
+                    // more work than the accuracy is worth. The glass itself
+                    // is cached against the track, so this costs a RemoteViews
+                    // rebuild rather than a redraw.
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - lastWidgetProgressAt >= WIDGET_PROGRESS_MS) {
+                        lastWidgetProgressAt = now
+                        publishWidgetState()
+                    }
                     // The renderer can settle on its format a moment after the
                     // track change, which no callback of ours follows up on.
                     publishNerdStats()
@@ -8613,6 +8640,13 @@ class PlaybackService : MediaLibraryService() {
 
         /** How often played-seconds are sampled off the player. */
         const val PROGRESS_SAMPLE_MS = 5_000L
+
+        /**
+         * How often the progress sampler republishes the widget, which is what
+         * moves the 4×2 progress bar. Slower than the sample itself: see the
+         * comment at the call site.
+         */
+        const val WIDGET_PROGRESS_MS = 15_000L
 
         /** Bounds on a track's normalization gain, in millibels: the range the platform LoudnessEnhancer this replaced accepted. */
         const val MIN_LOUDNESS_GAIN_MB = -1500

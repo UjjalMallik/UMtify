@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The empty-state stand-in for a widget face: the same frosted slate the
+  compositor bakes, plus the top wet-glass sheen. Only ever seen before the
+  first bitmap arrives (or in the picker, where no track exists), because
+  MediaWidgetArt draws the real thing at every update.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/widget_corner_radius" />
+            <gradient
+                android:angle="270"
+                android:centerColor="#FF1B2130"
+                android:centerY="0.45"
+                android:endColor="#FF07090E"
+                android:startColor="#FF2E3446"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <!-- White 22%, fading out by 40% of the way down. -->
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/widget_corner_radius" />
+            <gradient
+                android:angle="270"
+                android:centerColor="#00FFFFFF"
+                android:centerY="0.4"
+                android:endColor="#00FFFFFF"
+                android:startColor="#38FFFFFF"
+                android:type="linear" />
+        </shape>
+    </item>
+</layer-list>

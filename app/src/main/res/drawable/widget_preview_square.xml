@@ -3,10 +3,10 @@
   Picker artwork for the 2×2 widget, on hosts older than API 31 — from 31 the
   picker inflates previewLayout instead and this is never seen.
 
-  The band's darkening is folded into the background's own gradient rather than
-  drawn as a second rect over it, so there is nothing to clip against the rounded
-  corners: a dark rect pinned to the bottom would square off the two corners the
-  path underneath had rounded.
+  The liquid-glass card in miniature: frosted body, wet top sheen, an inset
+  rounded artwork pane, the floating dock across the foot, and the diagonal
+  specular rim that ties them together. Everything is folded into the shapes
+  rather than layered as separate rects, so nothing squares off the corners.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
@@ -15,7 +15,8 @@
     android:viewportWidth="110"
     android:viewportHeight="110">
 
-    <path android:pathData="M12,0 L98,0 A12,12 0 0 1 110,12 L110,98 A12,12 0 0 1 98,110 L12,110 A12,12 0 0 1 0,98 L0,12 A12,12 0 0 1 12,0 Z">
+    <!-- Frosted body. -->
+    <path android:pathData="M26,0 L84,0 A26,26 0 0 1 110,26 L110,84 A26,26 0 0 1 84,110 L26,110 A26,26 0 0 1 0,84 L0,26 A26,26 0 0 1 26,0 Z">
         <aapt:attr name="android:fillColor">
             <gradient
                 android:endX="0"
@@ -30,22 +31,70 @@
         </aapt:attr>
     </path>
 
-    <!--
-      Transport, on the row the real layout puts it: the band is 66dp of a 110dp
-      widget, 4dp of that is padding below the buttons, and the buttons are 40dp
-      with a 9dp inset — so the glyphs run from y=75 to y=97. Spread across the
-      band's content width the way the weighted row spreads them, rather than
-      bunched in the middle.
-    -->
-    <group android:translateX="12.7" android:translateY="75" android:scaleX="0.917" android:scaleY="0.917">
+    <!-- Wet-glass sheen over the top 40%. -->
+    <path android:pathData="M26,0 L84,0 A26,26 0 0 1 110,26 L110,84 A26,26 0 0 1 84,110 L26,110 A26,26 0 0 1 0,84 L0,26 A26,26 0 0 1 26,0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endX="0"
+                android:endY="44"
+                android:startX="0"
+                android:startY="0"
+                android:type="linear">
+                <item android:color="#38FFFFFF" android:offset="0" />
+                <item android:color="#00FFFFFF" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Inset artwork pane. -->
+    <path android:pathData="M26,3 L84,3 A23,23 0 0 1 107,26 L107,84 A23,23 0 0 1 84,107 L26,107 A23,23 0 0 1 3,84 L3,26 A23,23 0 0 1 26,3 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endX="0"
+                android:endY="107"
+                android:startX="0"
+                android:startY="3"
+                android:type="linear">
+                <item android:color="#FF39405A" android:offset="0" />
+                <item android:color="#FF222A3C" android:offset="0.5" />
+                <item android:color="#FF0C1018" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Floating dock, with its own glass rim. -->
+    <path android:fillColor="#4D14181F" android:pathData="M30,44 L80,44 A20,20 0 0 1 100,64 L100,80 A20,20 0 0 1 80,100 L30,100 A20,20 0 0 1 10,80 L10,64 A20,20 0 0 1 30,44 Z" />
+    <path android:fillColor="#00FFFFFF" android:pathData="M30,44 L80,44 A20,20 0 0 1 100,64 L100,80 A20,20 0 0 1 80,100 L30,100 A20,20 0 0 1 10,80 L10,64 A20,20 0 0 1 30,44 Z" android:strokeColor="#59FFFFFF" android:strokeWidth="1" />
+
+    <!-- Title. -->
+    <path android:pathData="M24,58 L86,58" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeWidth="7" />
+
+    <!-- Previous, play and next, centred in the dock. -->
+    <group android:translateX="23" android:translateY="70" android:scaleX="0.75" android:scaleY="0.75">
         <path android:pathData="M7,7.4L7,16.6" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeWidth="2.4" />
         <path android:fillColor="#FFFFFFFF" android:pathData="M16.6,7.7L16.6,16.3L10.7,12Z" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeWidth="2.4" />
     </group>
-    <group android:translateX="44" android:translateY="75" android:scaleX="0.917" android:scaleY="0.917">
+    <group android:translateX="46" android:translateY="70" android:scaleX="0.75" android:scaleY="0.75">
         <path android:fillColor="#FFFFFFFF" android:pathData="M8.4,6.4L8.4,17.6L17.6,12Z" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeWidth="2.6" />
     </group>
-    <group android:translateX="75.3" android:translateY="75" android:scaleX="0.917" android:scaleY="0.917">
+    <group android:translateX="69" android:translateY="70" android:scaleX="0.75" android:scaleY="0.75">
         <path android:fillColor="#FFFFFFFF" android:pathData="M7.4,7.7L7.4,16.3L13.3,12Z" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeWidth="2.4" />
         <path android:pathData="M17,7.4L17,16.6" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeWidth="2.4" />
     </group>
+
+    <!-- Signature diagonal specular rim. -->
+    <path android:fillColor="#00FFFFFF" android:pathData="M26,0 L84,0 A26,26 0 0 1 110,26 L110,84 A26,26 0 0 1 84,110 L26,110 A26,26 0 0 1 0,84 L0,26 A26,26 0 0 1 26,0 Z" android:strokeWidth="1.5">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:endX="110"
+                android:endY="110"
+                android:startX="0"
+                android:startY="0"
+                android:type="linear">
+                <item android:color="#CCFFFFFF" android:offset="0" />
+                <item android:color="#26FFFFFF" android:offset="0.5" />
+                <item android:color="#A6FFFFFF" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
 </vector>

@@ -44,6 +44,15 @@ internal data class MediaWidgetSnapshot(
     val canLike: Boolean = false,
     /** Whether shuffle is on. Drawn by the 4×1 widget's Shuffle. */
     val shuffleEnabled: Boolean = false,
+    /**
+     * Where the playhead was when this was published, and how long the track is.
+     *
+     * Both are needed by the 4×2 widget's progress row. Zero duration means the
+     * player did not know one yet — a live stream, or a track still resolving —
+     * and the row hides rather than drawing a bar against nothing.
+     */
+    val positionMs: Long = 0L,
+    val durationMs: Long = 0L,
 ) {
     /** Whether there is a track to draw at all. */
     val hasTrack: Boolean get() = mediaId != null
@@ -72,6 +81,8 @@ internal data class MediaWidgetSnapshot(
                 .putBoolean(KEY_LIKED, snapshot.isLiked)
                 .putBoolean(KEY_CAN_LIKE, snapshot.canLike)
                 .putBoolean(KEY_SHUFFLE, snapshot.shuffleEnabled)
+                .putLong(KEY_POSITION, snapshot.positionMs)
+                .putLong(KEY_DURATION, snapshot.durationMs)
                 .apply()
         }
 
@@ -91,6 +102,8 @@ internal data class MediaWidgetSnapshot(
                     isLiked = prefs.getBoolean(KEY_LIKED, false),
                     canLike = prefs.getBoolean(KEY_CAN_LIKE, false),
                     shuffleEnabled = prefs.getBoolean(KEY_SHUFFLE, false),
+                    positionMs = prefs.getLong(KEY_POSITION, 0L),
+                    durationMs = prefs.getLong(KEY_DURATION, 0L),
                 )
             }
             return EMPTY
@@ -109,5 +122,7 @@ internal data class MediaWidgetSnapshot(
         private const val KEY_LIKED = "liked"
         private const val KEY_CAN_LIKE = "can_like"
         private const val KEY_SHUFFLE = "shuffle"
+        private const val KEY_POSITION = "position_ms"
+        private const val KEY_DURATION = "duration_ms"
     }
 }

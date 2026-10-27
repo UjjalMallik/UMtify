@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.View
@@ -20,32 +21,33 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 
 /**
- * The home-screen widget: the cover of what's playing, with a transport across
- * the foot of it.
+ * The home-screen widget: the album's own colour frosted into a liquid-glass
+ * card, with the transport laid over it.
  *
  * Two providers, [MediaWidgetSquare] and [MediaWidgetWide], so the picker offers
  * a square one and a full-width one — but they are the same widget, and both can
  * be resized across the whole range. What they differ in is the size they arrive
  * at. Which of the two layouts a given instance draws is decided from its
  * *measured* width ([WIDE_LAYOUT_MIN_DP]), not from which provider it came from,
- * so a square dragged out to four cells sets its title beside the buttons and
- * picks up the artist, and a wide one squeezed back to two stacks the title over
- * them instead — rather than either being stuck with a layout its size doesn't
- * suit.
+ * so a square dragged out to four cells sets its title beside the artwork and
+ * picks up the artist, like and progress, and a wide one squeezed back to two
+ * floats its dock over the cover instead — rather than either being stuck with a
+ * layout its size doesn't suit.
  *
- * Everything visual except the transport itself is one bitmap, drawn by
- * [MediaWidgetArt] — see there for why the blur has to work that way.
+ * The whole face — frosted body, specular rim, artwork tile, dock — is one
+ * bitmap drawn by [MediaWidgetArt]; see there for why it has to work that way.
  */
 abstract class MediaWidget : AppWidgetProvider() {
 
     /**
      * The width to assume when the host hasn't said. Launchers are supposed to
      * put a size in the options bundle before the first update and most do, but
-     * not all, and a widget that guessed wrong renders its artwork at the wrong
+     * not all, and a widget that guessed wrong renders its face at the wrong
      * aspect ratio until something moves it. This provider's own target size is
      * the best available guess.
      */
@@ -65,7 +67,7 @@ abstract class MediaWidget : AppWidgetProvider() {
         renderAsync(context, intArrayOf(id))
     }
 
-    /** A widget that has been dragged off the home screen has no last cover. */
+    /** A widget that has been dragged off the home screen has no last face. */
     override fun onDeleted(context: Context, ids: IntArray) {
         for (id in ids) lastArt.remove(id)
     }
@@ -101,13 +103,11 @@ abstract class MediaWidget : AppWidgetProvider() {
 
         /**
          * The measured width at which the track is worth setting beside the
-         * transport rather than above it.
+         * artwork rather than floated over it.
          *
-         * The wide layout spends 158dp on chrome — 14dp of leading padding, three
-         * 44dp buttons, 4dp trailing, 8dp between text and buttons — so below
-         * roughly 230dp the title is a stub, and the compact layout, which gives
-         * that width back to the title by putting it on its own line, reads
-         * better.
+         * The split layout spends 14dp on leading padding, an 82dp artwork tile,
+         * 12dp of gap and 14dp of trailing padding — 122dp of chrome, so below
+         * roughly 230dp the deck is a stub and the compact layout reads better.
          *
          * Set at the midpoint between a three-cell span (180dp) and a four-cell
          * one (250dp) rather than at either end. Cells are not really 70dp on
@@ -188,35 +188,32 @@ abstract class MediaWidget : AppWidgetProvider() {
             fallbackWidthDp: Int,
         ) {
             val size = measure(context, manager, id, fallbackWidthDp)
-            val cached = MediaWidgetArt.peek(key, size.widthPx, size.heightPx, size.bandPx)
+            val cached = MediaWidgetArt.peek(size.spec, key)
             if (cached == null) {
-                // The picture still has to be drawn, and that can mean a network
-                // fetch. Push the transport now so a tap is answered in a frame;
-                // the artwork catches up below.
+                // The face still has to be drawn, and that can mean a network
+                // fetch. Push the controls now so a tap is answered in a frame;
+                // the face catches up below.
                 //
-                // With the cover this widget last drew, not with nothing. A
-                // RemoteViews replaces the whole tree, so leaving widget_art
+                // With the one this widget last drew, not with nothing. A
+                // RemoteViews replaces the whole tree, so leaving widget_glass
                 // unset does not leave it alone — it clears it, and the layout's
                 // placeholder background shows through. That is only correct if
                 // the render below then succeeds; when it fails, or times out, or
                 // never gets a turn, the wipe is all that happens and the widget
-                // sits on a gradient until something else refreshes it. Holding
-                // the old cover for the fraction of a second the new one takes is
-                // the smaller wrong: it is briefly the wrong picture rather than
-                // durably no picture.
+                // sits on the fallback gradient until something else refreshes it.
+                // Holding the old face for the fraction of a second the new one
+                // takes is the smaller wrong: it is briefly the wrong picture
+                // rather than durably no picture.
                 manager.push(id, views(context, snapshot, size, lastArt[id]))
             }
-            val art = cached ?: MediaWidgetArt.render(
+            val face = cached ?: MediaWidgetArt.render(
                 context = context,
                 artworkUrl = snapshot.artworkUrl,
-                widthPx = size.widthPx,
-                heightPx = size.heightPx,
-                bandPx = size.bandPx,
+                spec = size.spec,
                 key = key,
-                cornerRadiusPx = size.cornerRadiusPx,
             )
-            lastArt[id] = art
-            manager.push(id, views(context, snapshot, size, art))
+            lastArt[id] = face
+            manager.push(id, views(context, snapshot, size, face))
         }
 
         // ---- views ----
@@ -225,15 +222,13 @@ abstract class MediaWidget : AppWidgetProvider() {
             context: Context,
             snapshot: MediaWidgetSnapshot,
             size: WidgetSize,
-            art: Bitmap?,
+            face: Bitmap?,
         ): RemoteViews {
             val layout =
                 if (size.wide) R.layout.widget_media_wide else R.layout.widget_media_compact
             val views = RemoteViews(context.packageName, layout)
-            art?.let { views.setImageViewBitmap(R.id.widget_art, it) }
+            face?.let { views.setImageViewBitmap(R.id.widget_glass, it) }
 
-            // Both layouts carry the title; only the wide one has room for the
-            // artist beneath it.
             views.setTextViewText(
                 R.id.widget_title,
                 if (snapshot.hasTrack) {
@@ -242,12 +237,17 @@ abstract class MediaWidget : AppWidgetProvider() {
                     context.getString(R.string.widget_nothing_played)
                 },
             )
+
+            // Both layouts carry the title; only the wide one has the room for
+            // the artist, Like and the progress row.
             if (size.wide) {
                 views.setTextViewText(R.id.widget_artist, snapshot.artist)
                 views.setViewVisibility(
                     R.id.widget_artist,
                     if (snapshot.artist.isBlank()) View.GONE else View.VISIBLE,
                 )
+                bindLike(views, context, snapshot)
+                bindProgress(views, snapshot)
             }
 
             views.setImageViewResource(
@@ -261,10 +261,10 @@ abstract class MediaWidget : AppWidgetProvider() {
                 ),
             )
 
-            // On the root, not on widget_art: the root is the last view offered a
-            // touch, so this catches every pixel that isn't a button — including
-            // the empty space either side of them in the band, which is over the
-            // artwork and should behave like it.
+            // On the root, not on widget_glass: the root is the last view offered
+            // a touch, so this catches every pixel that isn't a button — including
+            // the empty artwork frame and the deck's dead space, which are over
+            // the baked face and should behave like it.
             val open = openPlayer(context)
             views.setOnClickPendingIntent(R.id.widget_root, open)
 
@@ -300,8 +300,81 @@ abstract class MediaWidget : AppWidgetProvider() {
                     views.setImageAlpha(button, ALPHA_DISABLED)
                     views.setOnClickPendingIntent(button, open)
                 }
+                if (size.wide) views.setOnClickPendingIntent(R.id.widget_like, open)
             }
             return views
+        }
+
+        /** The Like disc: hidden where liking isn't offered, and a toggle otherwise. */
+        private fun bindLike(
+            views: RemoteViews,
+            context: Context,
+            snapshot: MediaWidgetSnapshot,
+        ) {
+            views.setViewVisibility(
+                R.id.widget_like,
+                if (snapshot.canLike) View.VISIBLE else View.INVISIBLE,
+            )
+            views.setImageViewResource(
+                R.id.widget_like,
+                if (snapshot.isLiked) R.drawable.ic_widget_heart_filled else R.drawable.ic_widget_heart,
+            )
+            views.setContentDescription(
+                R.id.widget_like,
+                context.getString(
+                    if (snapshot.isLiked) R.string.remove_from_liked else R.string.like,
+                ),
+            )
+        }
+
+        /**
+         * The progress row: a live elapsed clock, a static length, and the bar.
+         *
+         * The clock is a [android.widget.Chronometer] rather than text so it
+         * ticks between widget pushes — RemoteViews cannot animate anything, but
+         * the host runs a Chronometer itself. The bar is only as fresh as the
+         * last push; the service republishes every so often while playing (see
+         * `PlaybackService.reportProgress`) and the clock covers the rest.
+         */
+        private fun bindProgress(views: RemoteViews, snapshot: MediaWidgetSnapshot) {
+            val duration = snapshot.durationMs
+            val position = snapshot.positionMs.coerceIn(0L, duration.coerceAtLeast(0L))
+            val hasDuration = duration > 0L
+
+            views.setTextViewText(
+                R.id.widget_total,
+                if (hasDuration) formatTime(duration) else null,
+            )
+            if (hasDuration) {
+                val fraction = (position * PROGRESS_MAX / duration).toInt().coerceIn(0, PROGRESS_MAX)
+                views.setProgressBar(R.id.widget_progress, PROGRESS_MAX, fraction, false)
+                views.setViewVisibility(R.id.widget_progress, View.VISIBLE)
+            } else {
+                views.setViewVisibility(R.id.widget_progress, View.INVISIBLE)
+            }
+
+            if (snapshot.hasTrack) {
+                views.setChronometer(
+                    R.id.widget_elapsed,
+                    SystemClock.elapsedRealtime() - position,
+                    null,
+                    snapshot.isPlaying && hasDuration,
+                )
+                views.setViewVisibility(R.id.widget_elapsed, View.VISIBLE)
+            } else {
+                views.setViewVisibility(R.id.widget_elapsed, View.GONE)
+            }
+        }
+
+        private fun formatTime(ms: Long): String {
+            val totalSeconds = (ms / 1000).coerceAtLeast(0L)
+            val minutes = totalSeconds / 60
+            val seconds = totalSeconds % 60
+            return if (minutes >= 60) {
+                String.format(Locale.US, "%d:%02d:%02d", minutes / 60, minutes % 60, seconds)
+            } else {
+                String.format(Locale.US, "%d:%02d", minutes, seconds)
+            }
         }
 
         /**
@@ -344,24 +417,24 @@ abstract class MediaWidget : AppWidgetProvider() {
 
         // ---- measuring ----
 
-        private class WidgetSize(
-            val wide: Boolean,
-            val widthPx: Int,
-            val heightPx: Int,
-            val bandPx: Int,
-            val cornerRadiusPx: Float,
-        )
+        private class WidgetSize(val wide: Boolean, val spec: GlassSpec)
 
         /**
-         * The size to draw this instance at, in bitmap pixels.
+         * The size to draw this instance at, in bitmap pixels, and the glass
+         * spec that places everything in it.
          *
          * The options bundle reports a range, not a size: the smallest the host
          * will make the widget in one orientation and the largest in the other.
          * Portrait wants min-width and max-height, landscape the reverse. Read
          * for the orientation in force now, so what is drawn matches what is on
          * screen — a widget rendered for the wrong orientation is stretched by
-         * `fitXY`, and a vertical stretch is the one that shows, because it slides
-         * the baked blur out of line with the band drawn over it.
+         * `fitXY`, and a vertical stretch is the one that shows, because it
+         * slides the baked rim off the host's own.
+         *
+         * Every dp the layout uses is read through [px] and multiplied by the
+         * same [scale] as the bitmap, so the artwork tile the compositor paints
+         * lands exactly under the frame the RemoteViews leaves empty — even on
+         * a tablet-sized instance whose bitmap is capped by [MAX_BITMAP_PX].
          */
         private fun measure(
             context: Context,
@@ -398,18 +471,64 @@ abstract class MediaWidget : AppWidgetProvider() {
             // binds.
             val longest = maxOf(rawWidth, rawHeight)
             val scale = if (longest > MAX_BITMAP_PX) MAX_BITMAP_PX / longest else 1f
-            val band = resources.getDimensionPixelSize(
-                if (wide) R.dimen.widget_band_wide else R.dimen.widget_band_compact,
-            )
-            return WidgetSize(
-                wide = wide,
-                widthPx = (rawWidth * scale).roundToInt().coerceAtLeast(1),
-                heightPx = (rawHeight * scale).roundToInt().coerceAtLeast(1),
-                // Scaled by the same factor as the bitmap, or the blurred region
-                // would stop lining up with the band laid over it.
-                bandPx = (band * scale).roundToInt().coerceAtLeast(1),
-                cornerRadiusPx = resources.getDimension(R.dimen.widget_corner_radius) * scale,
-            )
+            val widthPx = (rawWidth * scale).roundToInt().coerceAtLeast(1)
+            val heightPx = (rawHeight * scale).roundToInt().coerceAtLeast(1)
+
+            fun px(id: Int): Float = resources.getDimension(id) * scale
+            val radius = px(R.dimen.widget_corner_radius)
+            val rim = px(R.dimen.widget_glass_rim)
+
+            val spec = if (wide) {
+                val artSize = px(R.dimen.widget_wide_art)
+                val left = px(R.dimen.widget_wide_padding).coerceAtMost((widthPx - artSize).coerceAtLeast(0f))
+                val top = ((heightPx - artSize) / 2f).coerceAtLeast(0f)
+                GlassSpec(
+                    widthPx = widthPx,
+                    heightPx = heightPx,
+                    radiusPx = radius,
+                    rimPx = rim,
+                    art = Rect(
+                        left.roundToInt(),
+                        top.roundToInt(),
+                        (left + artSize).roundToInt(),
+                        (top + artSize).roundToInt(),
+                    ),
+                    artCornerPx = px(R.dimen.widget_wide_art_corner),
+                    artRimPx = px(R.dimen.widget_wide_art_rim),
+                    artShadowPx = px(R.dimen.widget_wide_art_shadow),
+                    bodyAlpha = CARD_ALPHA,
+                )
+            } else {
+                val inset = px(R.dimen.widget_art_inset)
+                val margin = px(R.dimen.widget_dock_margin)
+                val dockHeight = px(R.dimen.widget_dock_height)
+                val dockBottom = (heightPx - margin).coerceAtLeast(0f)
+                GlassSpec(
+                    widthPx = widthPx,
+                    heightPx = heightPx,
+                    radiusPx = radius,
+                    rimPx = rim,
+                    art = Rect(
+                        inset.roundToInt(),
+                        inset.roundToInt(),
+                        (widthPx - inset).roundToInt(),
+                        (heightPx - inset).roundToInt(),
+                    ),
+                    artCornerPx = px(R.dimen.widget_compact_art_corner),
+                    artRimPx = rim,
+                    artShadowPx = 0f,
+                    dock = Rect(
+                        margin.roundToInt(),
+                        (dockBottom - dockHeight).coerceAtLeast(0f).roundToInt(),
+                        (widthPx - margin).roundToInt(),
+                        dockBottom.roundToInt(),
+                    ),
+                    dockCornerPx = px(R.dimen.widget_dock_radius),
+                    dockRimPx = rim,
+                    bodyAlpha = CARD_ALPHA,
+                )
+            }
+            return WidgetSize(wide, spec)
         }
 
         // ---- constants ----
@@ -429,7 +548,7 @@ abstract class MediaWidget : AppWidgetProvider() {
          */
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-        /** How long any one widget's artwork may take before it is given up on. */
+        /** How long any one widget's face may take before it is given up on. */
         private const val RENDER_TIMEOUT_MS = 8_000L
 
         /**
@@ -441,7 +560,7 @@ abstract class MediaWidget : AppWidgetProvider() {
         private const val BROADCAST_BUDGET_MS = 8_000L
 
         /**
-         * The cover each widget is currently showing.
+         * The face each widget is currently showing.
          *
          * Kept so a render that fails has something truthful to fall back on —
          * see the push in [render]. Held strongly, which is the same thing the
@@ -452,10 +571,16 @@ abstract class MediaWidget : AppWidgetProvider() {
 
         private const val MAX_BITMAP_PX = 1_200f
 
+        /** The card's opacity: frosted through, with a little wallpaper behind it. */
+        private const val CARD_ALPHA = 246
+
+        /** Total the progress bar is scaled to, so a fraction fits in an Int. */
+        private const val PROGRESS_MAX = 1_000
+
         private const val ALPHA_ENABLED = 255
         private const val ALPHA_DISABLED = 90
 
-        /** What the placeholder composite is remembered under. */
+        /** What the placeholder face is remembered under. */
         private const val KEY_NO_ARTWORK = "no-artwork"
 
         private const val REQUEST_OPEN_PLAYER = 0

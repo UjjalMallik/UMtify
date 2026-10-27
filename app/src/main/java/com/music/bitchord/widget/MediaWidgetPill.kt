@@ -7,8 +7,9 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
-import android.os.Bundle
 import android.graphics.Bitmap
+import android.graphics.Rect
+import android.os.Bundle
 import android.view.View
 import android.widget.RemoteViews
 import com.music.bitchord.MainActivity
@@ -23,14 +24,14 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 
 /**
- * The 4×1 widget: a capsule with the cover in a circle, the track, and Like /
- * previous / play / next / Shuffle.
+ * The 4×1 widget: a liquid-glass capsule with the artwork inset at its left, the
+ * track above Like / previous / play / next / Shuffle beside it.
  *
- * Its own provider rather than a third size of [MediaWidget]: a different
- * shape with a different picture. It reads the same [MediaWidgetSnapshot],
- * shares the same [MediaWidgetActions], and draws two bitmaps through
- * [MediaWidgetArt] — the round cover, and the capsule's body, which is the cover
- * blurred to colour at the capsule's exact size.
+ * Its own provider rather than a third size of [MediaWidget]: a different shape
+ * with a different picture. It reads the same [MediaWidgetSnapshot], shares the
+ * same [MediaWidgetActions], and draws one face through [MediaWidgetArt] — the
+ * frosted capsule, its specular rim and the rounded artwork tile, all baked at
+ * the capsule's exact size.
  */
 class MediaWidgetPill : AppWidgetProvider() {
 
@@ -38,7 +39,7 @@ class MediaWidgetPill : AppWidgetProvider() {
         renderAsync(context, ids)
     }
 
-    /** A resize changes the capsule's width, and its body is drawn to size. */
+    /** A resize changes the capsule's width, and its face is drawn to size. */
     override fun onAppWidgetOptionsChanged(
         context: Context,
         manager: AppWidgetManager,
@@ -49,7 +50,7 @@ class MediaWidgetPill : AppWidgetProvider() {
     }
 
     override fun onDeleted(context: Context, ids: IntArray) {
-        for (id in ids) lastBody.remove(id)
+        for (id in ids) lastFace.remove(id)
     }
 
     private fun renderAsync(context: Context, ids: IntArray) {
@@ -80,48 +81,67 @@ class MediaWidgetPill : AppWidgetProvider() {
         }
 
         /**
-         * Pushes the controls at once when either picture still has to be drawn,
-         * for the same reason [MediaWidget] does: a tap should be answered in a
-         * frame, not after a cover fetch. The disc is one size and shared; the
-         * body is per instance, because each can be a different width.
+         * Pushes the controls at once when the face still has to be drawn, for
+         * the same reason [MediaWidget] does: a tap should be answered in a
+         * frame, not after a cover fetch.
          */
         private suspend fun render(context: Context, ids: IntArray) {
             val manager = runCatching { AppWidgetManager.getInstance(context) }.getOrNull() ?: return
             val snapshot = MediaWidgetSnapshot.load(context)
-            val key = snapshot.artworkUrl
-            val resources = context.resources
-            val discPx = resources.getDimensionPixelSize(R.dimen.widget_pill_art)
-            val heightPx = resources.getDimensionPixelSize(R.dimen.widget_pill_height)
+            val key = snapshot.artworkUrl ?: KEY_NO_ARTWORK
             for (id in ids) {
-                val widthPx = widthPx(context, manager, id)
-                val cachedDisc = key?.let { MediaWidgetArt.peekCircle(it, discPx) }
-                val cachedBody = key?.let { MediaWidgetArt.peekPill(it, widthPx, heightPx) }
-                if (cachedDisc == null || cachedBody == null) {
+                val spec = spec(context, manager, id)
+                val cached = MediaWidgetArt.peek(spec, key)
+                if (cached == null) {
                     // With what this widget last drew, not with nothing: a
                     // RemoteViews replaces the whole tree. See MediaWidget.render.
-                    manager.push(id, views(context, snapshot, cachedDisc ?: lastDisc, cachedBody ?: lastBody[id]))
+                    manager.push(id, views(context, snapshot, lastFace[id]))
                 }
-                val drawn = withTimeoutOrNull(RENDER_TIMEOUT_MS) {
-                    val disc = cachedDisc ?: key?.let {
-                        MediaWidgetArt.circle(context, snapshot.artworkUrl, discPx, it)
-                    }
-                    disc to (cachedBody ?: MediaWidgetArt.pill(context, snapshot.artworkUrl, widthPx, heightPx, key))
+                val face = cached ?: withTimeoutOrNull(RENDER_TIMEOUT_MS) {
+                    MediaWidgetArt.render(context, snapshot.artworkUrl, spec, key)
                 } ?: continue
-                val (disc, body) = drawn
-                // A track with no cover, or one that failed, shows the
-                // placeholder disc rather than the previous track's picture.
-                lastDisc = disc
-                lastBody[id] = body
-                manager.push(id, views(context, snapshot, disc, body))
+                lastFace[id] = face
+                manager.push(id, views(context, snapshot, face))
             }
         }
 
         /**
-         * The capsule's width in pixels: the widget's width for the orientation
-         * in force, as [MediaWidget.measure] reads it. The capsule is
-         * match_parent, so it is exactly this wide and the body bitmap lands
-         * 1:1 — its round ends stay round rather than being stretched.
+         * The capsule's glass spec: the widget's width for the orientation in
+         * force, as [MediaWidget] reads it, and the fixed height its layout
+         * gives the capsule.
+         *
+         * The artwork tile's left edge and size come from the same dimens the
+         * layout pads by, so it lands exactly in the frame the RemoteViews
+         * leaves empty. The capsule is match_parent across, so the bitmap is a
+         * 1:1 blit and its round ends stay round rather than being stretched.
          */
+        private fun spec(context: Context, manager: AppWidgetManager, id: Int): GlassSpec {
+            val resources = context.resources
+            val widthPx = widthPx(context, manager, id)
+            val heightPx = resources.getDimensionPixelSize(R.dimen.widget_pill_height)
+            val artSize = resources.getDimensionPixelSize(R.dimen.widget_pill_art)
+            val left = resources.getDimensionPixelSize(R.dimen.widget_pill_padding_left)
+            val top = ((heightPx - artSize) / 2f).coerceAtLeast(0f)
+            return GlassSpec(
+                widthPx = widthPx,
+                heightPx = heightPx,
+                radiusPx = minOf(
+                    resources.getDimension(R.dimen.widget_pill_radius),
+                    heightPx / 2f,
+                ),
+                rimPx = resources.getDimension(R.dimen.widget_glass_rim),
+                art = Rect(
+                    left,
+                    top.roundToInt(),
+                    left + artSize,
+                    (top + artSize).roundToInt(),
+                ),
+                artCornerPx = resources.getDimension(R.dimen.widget_pill_art_corner),
+                artRimPx = resources.getDimension(R.dimen.widget_glass_rim),
+                bodyAlpha = PILL_ALPHA,
+            )
+        }
+
         private fun widthPx(context: Context, manager: AppWidgetManager, id: Int): Int {
             val options = runCatching { manager.getAppWidgetOptions(id) }.getOrNull()
             val landscape =
@@ -135,16 +155,14 @@ class MediaWidgetPill : AppWidgetProvider() {
         private fun views(
             context: Context,
             snapshot: MediaWidgetSnapshot,
-            disc: Bitmap?,
-            body: Bitmap?,
+            face: Bitmap?,
         ): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.widget_media_pill)
-            disc?.let { views.setImageViewBitmap(R.id.widget_art, it) }
-            body?.let {
-                views.setImageViewBitmap(R.id.widget_pill_bg, it)
-                // The translucent stand-in capsule would show through the
-                // body's own transparency and darken it unevenly.
-                views.setInt(R.id.widget_pill_bg, "setBackgroundResource", 0)
+            face?.let {
+                views.setImageViewBitmap(R.id.widget_glass, it)
+                // The fallback capsule would show through the body's own
+                // transparency and darken it unevenly.
+                views.setInt(R.id.widget_pill, "setBackgroundResource", 0)
             }
 
             views.setTextViewText(
@@ -152,7 +170,7 @@ class MediaWidgetPill : AppWidgetProvider() {
                 when {
                     !snapshot.hasTrack -> context.getString(R.string.widget_nothing_played)
                     snapshot.artist.isBlank() -> snapshot.title
-                    else -> "${snapshot.title} - ${snapshot.artist}"
+                    else -> "${snapshot.title} · ${snapshot.artist}"
                 },
             )
 
@@ -164,8 +182,8 @@ class MediaWidgetPill : AppWidgetProvider() {
                 R.id.widget_toggle,
                 context.getString(if (snapshot.isPlaying) R.string.widget_pause else R.string.widget_play),
             )
-            // Hidden rather than greyed, like the player's: the spacers either
-            // side of the transport share the room out evenly without it.
+            // Hidden rather than greyed, like the player's: the buttons either
+            // side share the room out evenly without it.
             views.setViewVisibility(R.id.widget_like, if (snapshot.canLike) View.VISIBLE else View.GONE)
             views.setImageViewResource(
                 R.id.widget_like,
@@ -178,7 +196,7 @@ class MediaWidgetPill : AppWidgetProvider() {
             views.setInt(
                 R.id.widget_shuffle,
                 "setBackgroundResource",
-                if (snapshot.shuffleEnabled) R.drawable.widget_toggle_on else R.drawable.widget_transport_button,
+                if (snapshot.shuffleEnabled) R.drawable.widget_toggle_on else R.drawable.widget_glass_icon,
             )
             views.setContentDescription(
                 R.id.widget_shuffle,
@@ -244,12 +262,8 @@ class MediaWidgetPill : AppWidgetProvider() {
 
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-        /** The disc all instances currently show. @see render */
-        @Volatile
-        private var lastDisc: Bitmap? = null
-
-        /** The body each instance currently shows. @see render */
-        private val lastBody = ConcurrentHashMap<Int, Bitmap>()
+        /** The face each instance currently shows. @see render */
+        private val lastFace = ConcurrentHashMap<Int, Bitmap>()
 
         /** Four cells by the launcher's 70n − 30 arithmetic, for a host that hasn't said. */
         private const val FALLBACK_WIDTH_DP = 250
@@ -259,8 +273,13 @@ class MediaWidgetPill : AppWidgetProvider() {
 
         private const val RENDER_TIMEOUT_MS = 8_000L
 
+        /** Mostly the frosted body, with a little wallpaper through the glass. */
+        private const val PILL_ALPHA = 236
+
         private const val ALPHA_ENABLED = 255
         private const val ALPHA_DISABLED = 90
+
+        private const val KEY_NO_ARTWORK = "no-artwork"
 
         private const val REQUEST_OPEN_PLAYER = 0
     }

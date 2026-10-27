@@ -1,13 +1,34 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The 4×1 widget's body: a dark translucent capsule over the wallpaper. A
-  RemoteViews can't blur what is behind it, so it is tinted instead — dark
-  enough that white text holds on a light wallpaper, light enough that the
-  wallpaper still shows through. The radius is simply larger than the pill is
-  ever tall, which clamps to a full capsule at any height.
+  The 4×1 capsule before its bitmap arrives: the same frosted slate and top
+  highlight as the other widgets, cut to the capsule's 32dp corner. The real
+  body is baked by MediaWidgetArt, frosted from the album's own colours.
 -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="rectangle">
-    <corners android:radius="200dp" />
-    <solid android:color="#A6141619" />
-</shape>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/widget_pill_radius" />
+            <gradient
+                android:angle="270"
+                android:centerColor="#FF1B2130"
+                android:centerY="0.45"
+                android:endColor="#FF07090E"
+                android:startColor="#FF2E3446"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/widget_pill_radius" />
+            <gradient
+                android:angle="270"
+                android:centerColor="#00FFFFFF"
+                android:centerY="0.4"
+                android:endColor="#00FFFFFF"
+                android:startColor="#38FFFFFF"
+                android:type="linear" />
+        </shape>
+    </item>
+</layer-list>

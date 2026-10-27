@@ -1,93 +1,185 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The 4×2 widget, and the shape either widget takes at
-  MediaWidget.WIDE_LAYOUT_MIN_DP or wider. Same full-bleed cover and same baked
-  blur as widget_media_compact; the extra width goes to the track, because three
-  glyphs spread across four cells reads as an empty bar.
+  The 4×2 widget: a 1:1 artwork tile on the left, the control deck beside it —
+  the layout of the reference liquid-glass card, and of either widget when it is
+  at MediaWidget.WIDE_LAYOUT_MIN_DP or wider.
 
-  See widget_media_compact for why the band's height has to match the blurred
-  region, and why nothing in it is clickable except the buttons themselves.
+  Everything except the controls themselves is one bitmap drawn by
+  MediaWidgetArt: the frosted body, the specular rim, and the artwork in its
+  rounded tile. The 82dp frame left empty here is where that tile lands, and its
+  measurements come from the same dimens the provider passes the compositor, so
+  the two cannot drift apart. Artwork is 110dp of card height less 14dp padding
+  twice; the deck's 38 + 28 + 16 rows add up to the same 82dp.
+
+  The root is what opens the app, so a tap on any non-button pixel — including
+  the empty tile frame over the baked artwork — behaves like the artwork.
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@drawable/widget_preview_art">
+    android:background="@drawable/widget_glass_background">
 
+    <!-- fitXY, not centerCrop: the bitmap is composited at the widget's exact
+         pixel size, so this is a 1:1 blit. -->
     <ImageView
-        android:id="@+id/widget_art"
+        android:id="@+id/widget_glass"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:contentDescription="@string/widget_artwork"
+        android:importantForAccessibility="no"
         android:scaleType="fitXY" />
 
     <LinearLayout
-        android:id="@+id/widget_band"
         android:layout_width="match_parent"
-        android:layout_height="@dimen/widget_band_wide"
-        android:layout_gravity="bottom"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingLeft="14dp"
-        android:paddingRight="4dp">
+        android:paddingLeft="@dimen/widget_wide_padding"
+        android:paddingRight="@dimen/widget_wide_padding">
+
+        <!-- Where the baked artwork tile lands. Transparent: the bitmap shows
+             through it, and the preview copy of this layout puts the stand-in
+             gradient here instead. A plain View cannot be inflated by a
+             RemoteViews, so this is a bare FrameLayout. -->
+        <FrameLayout
+            android:layout_width="@dimen/widget_wide_art"
+            android:layout_height="@dimen/widget_wide_art" />
 
         <LinearLayout
-            android:id="@+id/widget_text"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="@dimen/widget_wide_art"
+            android:layout_marginLeft="@dimen/widget_wide_gap"
             android:layout_weight="1"
-            android:orientation="vertical"
-            android:paddingRight="8dp">
+            android:orientation="vertical">
 
-            <TextView
-                android:id="@+id/widget_title"
+            <!-- Title and artist, with the frosted Like disc on the right. -->
+            <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:fontFamily="@font/sf_pro_display_semibold"
-                android:includeFontPadding="false"
-                android:maxLines="1"
-                android:textColor="#FFFFFFFF"
-                android:textSize="14sp" />
+                android:layout_height="@dimen/widget_wide_title_row"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
 
-            <TextView
-                android:id="@+id/widget_artist"
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:paddingRight="6dp">
+
+                    <TextView
+                        android:id="@+id/widget_title"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:fontFamily="@font/sf_pro_display_semibold"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:textColor="#FFFFFFFF"
+                        android:textSize="16sp" />
+
+                    <TextView
+                        android:id="@+id/widget_artist"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:ellipsize="end"
+                        android:fontFamily="@font/sf_pro_display_regular"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:textColor="#B8FFFFFF"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <ImageView
+                    android:id="@+id/widget_like"
+                    android:layout_width="@dimen/widget_like_size"
+                    android:layout_height="@dimen/widget_like_size"
+                    android:background="@drawable/widget_glass_like"
+                    android:contentDescription="@string/like"
+                    android:padding="8dp"
+                    android:src="@drawable/ic_widget_heart" />
+            </LinearLayout>
+
+            <!-- Previous, play in its own glass pill, next — evenly spread. -->
+            <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
-                android:ellipsize="end"
-                android:fontFamily="@font/sf_pro_display_regular"
-                android:includeFontPadding="false"
-                android:maxLines="1"
-                android:textColor="#B3FFFFFF"
-                android:textSize="12sp" />
+                android:layout_height="@dimen/widget_wide_transport"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:id="@+id/widget_previous"
+                    android:layout_width="@dimen/widget_wide_transport"
+                    android:layout_height="@dimen/widget_wide_transport"
+                    android:contentDescription="@string/widget_previous"
+                    android:padding="4dp"
+                    android:src="@drawable/ic_widget_previous" />
+
+                <FrameLayout
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <ImageView
+                    android:id="@+id/widget_toggle"
+                    android:layout_width="@dimen/widget_play_pill_width"
+                    android:layout_height="@dimen/widget_play_pill_height"
+                    android:background="@drawable/widget_glass_play"
+                    android:contentDescription="@string/widget_play"
+                    android:padding="6dp"
+                    android:src="@drawable/ic_widget_play" />
+
+                <FrameLayout
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <ImageView
+                    android:id="@+id/widget_next"
+                    android:layout_width="@dimen/widget_wide_transport"
+                    android:layout_height="@dimen/widget_wide_transport"
+                    android:contentDescription="@string/widget_next"
+                    android:padding="4dp"
+                    android:src="@drawable/ic_widget_next" />
+            </LinearLayout>
+
+            <!-- Elapsed, the glass progress bar, and the track's length. -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/widget_wide_progress_row"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <Chronometer
+                    android:id="@+id/widget_elapsed"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/sf_pro_display_regular"
+                    android:includeFontPadding="false"
+                    android:textColor="#99FFFFFF"
+                    android:textSize="11sp" />
+
+                <ProgressBar
+                    android:id="@+id/widget_progress"
+                    style="@android:style/Widget.ProgressBar.Horizontal"
+                    android:layout_width="0dp"
+                    android:layout_height="5dp"
+                    android:layout_marginLeft="6dp"
+                    android:layout_marginRight="6dp"
+                    android:layout_weight="1"
+                    android:max="1000"
+                    android:progressDrawable="@drawable/widget_progress" />
+
+                <TextView
+                    android:id="@+id/widget_total"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/sf_pro_display_regular"
+                    android:includeFontPadding="false"
+                    android:textColor="#99FFFFFF"
+                    android:textSize="11sp" />
+            </LinearLayout>
         </LinearLayout>
-
-        <ImageView
-            android:id="@+id/widget_previous"
-            android:layout_width="@dimen/widget_button_wide"
-            android:layout_height="@dimen/widget_button_wide"
-            android:background="@drawable/widget_transport_button"
-            android:contentDescription="@string/widget_previous"
-            android:padding="10dp"
-            android:src="@drawable/ic_widget_previous" />
-
-        <ImageView
-            android:id="@+id/widget_toggle"
-            android:layout_width="@dimen/widget_button_wide"
-            android:layout_height="@dimen/widget_button_wide"
-            android:background="@drawable/widget_transport_button"
-            android:contentDescription="@string/widget_play"
-            android:padding="10dp"
-            android:src="@drawable/ic_widget_play" />
-
-        <ImageView
-            android:id="@+id/widget_next"
-            android:layout_width="@dimen/widget_button_wide"
-            android:layout_height="@dimen/widget_button_wide"
-            android:background="@drawable/widget_transport_button"
-            android:contentDescription="@string/widget_next"
-            android:padding="10dp"
-            android:src="@drawable/ic_widget_next" />
     </LinearLayout>
 </FrameLayout>

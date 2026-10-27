@@ -3,38 +3,65 @@
     <!--
       The radius the launcher itself rounds a widget to. Overridden on API 31+
       with the platform's own value (values-v31), so the corners baked into the
-      artwork bitmap land exactly where the host's clip does instead of leaving
-      a sliver of square image outside a rounder mask. 16dp is the pre-31
-      stand-in, where hosts don't clip at all and the baked corners are the only
-      ones there are.
+      glass bitmap land exactly where the host's clip does instead of leaving a
+      sliver of square image outside a rounder mask. 26dp is the pre-31 stand-in,
+      where hosts don't clip at all and the baked corners are the only ones there
+      are.
     -->
-    <dimen name="widget_corner_radius">16dp</dimen>
+    <dimen name="widget_corner_radius">26dp</dimen>
+
+    <!-- The 1.5dp specular rim stroked round every face, and the dock's own. -->
+    <dimen name="widget_glass_rim">1.5dp</dimen>
 
     <!--
-      The strip at the foot of the widget the track and transport sit in, and so
-      exactly how much of the artwork the blur has to cover. Read by both the
-      layout and the compositor — see MediaWidgetArt — because the two have to
-      agree: a band taller than the blur puts buttons on sharp artwork, and a
-      blur taller than the band puts a smudge above them with nothing on it.
-
-      The compact one is the taller of the two despite being the smaller widget:
-      it stacks the title over the buttons, where the wide one has the room to
-      set them side by side.
+      The 4×2 split card: a 1:1 artwork tile on the left, the deck beside it.
+      110dp of card height less 14dp above and below is the 82dp the art is
+      drawn at, and the deck's three rows add up to the same so their tops and
+      bottoms line up.
     -->
-    <dimen name="widget_band_compact">66dp</dimen>
-    <dimen name="widget_band_wide">60dp</dimen>
+    <dimen name="widget_wide_padding">14dp</dimen>
+    <dimen name="widget_wide_art">82dp</dimen>
+    <dimen name="widget_wide_art_corner">18dp</dimen>
+    <dimen name="widget_wide_art_rim">1dp</dimen>
+    <dimen name="widget_wide_art_shadow">3dp</dimen>
+    <dimen name="widget_wide_gap">12dp</dimen>
+    <dimen name="widget_wide_title_row">38dp</dimen>
+    <dimen name="widget_wide_transport">28dp</dimen>
+    <dimen name="widget_wide_progress_row">16dp</dimen>
 
-    <!-- Inset of the transport from the widget's edges. -->
-    <dimen name="widget_band_padding">8dp</dimen>
+    <!-- The circular frosted Like button in the title row. -->
+    <dimen name="widget_like_size">34dp</dimen>
 
-    <!-- Touch target and glyph size for one transport button. -->
-    <dimen name="widget_button_compact">40dp</dimen>
-    <dimen name="widget_button_wide">44dp</dimen>
-    <dimen name="widget_glyph_compact">22dp</dimen>
-    <dimen name="widget_glyph_wide">24dp</dimen>
+    <!-- The glowing glass pill the 4×2 play/pause sits in. -->
+    <dimen name="widget_play_pill_width">44dp</dimen>
+    <dimen name="widget_play_pill_height">28dp</dimen>
 
-    <!-- The 4×1 capsule: its height, round cover, and its row of five buttons. -->
-    <dimen name="widget_pill_height">78dp</dimen>
-    <dimen name="widget_pill_art">64dp</dimen>
-    <dimen name="widget_button_pill">38dp</dimen>
+    <!--
+      The 2×2 photocard's floating dock: inset from the card, and tall enough for
+      a title line over a 30dp control row.
+    -->
+    <dimen name="widget_dock_margin">10dp</dimen>
+    <dimen name="widget_dock_height">56dp</dimen>
+    <dimen name="widget_dock_radius">20dp</dimen>
+
+    <!-- How far the 2×2 artwork is inset inside its glass frame. -->
+    <dimen name="widget_art_inset">3dp</dimen>
+    <dimen name="widget_compact_art_corner">23dp</dimen>
+    <dimen name="widget_compact_button">30dp</dimen>
+    <dimen name="widget_compact_play_width">38dp</dimen>
+
+    <!--
+      The 4×1 capsule: 80dp tall, 52dp of artwork inset 14dp top and bottom, and
+      a 32dp corner that reads as a full pill at that height.
+    -->
+    <dimen name="widget_pill_height">80dp</dimen>
+    <dimen name="widget_pill_art">52dp</dimen>
+    <dimen name="widget_pill_art_corner">14dp</dimen>
+    <dimen name="widget_pill_radius">32dp</dimen>
+    <dimen name="widget_pill_button">34dp</dimen>
+    <dimen name="widget_pill_play_width">38dp</dimen>
+
+    <!-- The capsule's own inset, read by the layout and the compositor alike so
+         the artwork tile lands in the frame the layout leaves empty. -->
+    <dimen name="widget_pill_padding_left">8dp</dimen>
 </resources>
