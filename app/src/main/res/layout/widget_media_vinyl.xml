@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The 3×3 (and 2×3) vinyl card: the reference's tall centred card.
+
+  The disc takes every pixel of vertical space the fixed rows below it leave,
+  drawn by MediaWidgetArt as a circular cover inside two glowing crystal rings
+  on a transparent square — `fitCenter` keeps it round and centred at whatever
+  width the host allows. Under it: centred title and artist, the wave, the seek
+  bar and the five bubble keys, tightly grouped in the middle.
+
+  The card is its own provider and layout: it shares the snapshot, the actions
+  and the glass renderer with the other three widgets, but nothing about its
+  composition is a resize of theirs.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_glass_background">
+
+    <ImageView
+        android:id="@+id/widget_glass"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:importantForAccessibility="no"
+        android:scaleType="fitXY" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:padding="@dimen/widget_vinyl_padding">
+
+        <ImageView
+            android:id="@+id/widget_art"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:contentDescription="@string/widget_artwork"
+            android:scaleType="fitCenter" />
+
+        <TextView
+            android:id="@+id/widget_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:ellipsize="end"
+            android:fontFamily="@font/sf_pro_display_semibold"
+            android:gravity="center_horizontal"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:shadowColor="#99000000"
+            android:shadowDy="1"
+            android:shadowRadius="4"
+            android:textColor="#FFFFFFFF"
+            android:textSize="16sp" android:text="@string/widget_preview_title" />
+
+        <TextView
+            android:id="@+id/widget_artist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:ellipsize="end"
+            android:fontFamily="@font/sf_pro_display_regular"
+            android:gravity="center_horizontal"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:shadowColor="#99000000"
+            android:shadowDy="1"
+            android:shadowRadius="4"
+            android:textColor="#BFFFFFFF"
+            android:textSize="12sp" android:text="@string/widget_preview_artist" />
+
+        <ImageView
+            android:id="@+id/widget_wave"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/widget_vinyl_wave_height"
+            android:layout_marginTop="6dp"
+            android:importantForAccessibility="no"
+            android:scaleType="fitXY" />
+
+        <ImageView
+            android:id="@+id/widget_seek"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/widget_vinyl_seek_height"
+            android:layout_marginTop="2dp"
+            android:importantForAccessibility="no"
+            android:scaleType="fitXY" />
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/widget_vinyl_transport"
+            android:layout_marginTop="6dp">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:layout_gravity="center"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:id="@+id/widget_shuffle"
+                    android:layout_width="@dimen/widget_vinyl_key"
+                    android:layout_height="@dimen/widget_vinyl_key"
+                    android:background="@drawable/widget_bubble_20"
+                    android:contentDescription="@string/shuffle_off"
+                    android:padding="5dp"
+                    android:src="@drawable/ic_widget_shuffle" />
+
+                <FrameLayout
+                    android:layout_width="@dimen/widget_vinyl_button_gap"
+                    android:layout_height="1dp" />
+
+                <ImageView
+                    android:id="@+id/widget_previous"
+                    android:layout_width="@dimen/widget_vinyl_prev"
+                    android:layout_height="@dimen/widget_vinyl_prev"
+                    android:background="@drawable/widget_bubble_28"
+                    android:contentDescription="@string/widget_previous"
+                    android:padding="7.5dp"
+                    android:src="@drawable/ic_widget_previous" />
+
+                <FrameLayout
+                    android:layout_width="@dimen/widget_vinyl_button_gap"
+                    android:layout_height="1dp" />
+
+                <ImageView
+                    android:id="@+id/widget_toggle"
+                    android:layout_width="@dimen/widget_vinyl_play"
+                    android:layout_height="@dimen/widget_vinyl_play"
+                    android:background="@drawable/widget_bubble_36"
+                    android:contentDescription="@string/widget_play"
+                    android:padding="9.5dp"
+                    android:src="@drawable/ic_widget_play" />
+
+                <FrameLayout
+                    android:layout_width="@dimen/widget_vinyl_button_gap"
+                    android:layout_height="1dp" />
+
+                <ImageView
+                    android:id="@+id/widget_next"
+                    android:layout_width="@dimen/widget_vinyl_prev"
+                    android:layout_height="@dimen/widget_vinyl_prev"
+                    android:background="@drawable/widget_bubble_28"
+                    android:contentDescription="@string/widget_next"
+                    android:padding="7.5dp"
+                    android:src="@drawable/ic_widget_next" />
+
+                <FrameLayout
+                    android:layout_width="@dimen/widget_vinyl_button_gap"
+                    android:layout_height="1dp" />
+
+                <ImageView
+                    android:id="@+id/widget_repeat"
+                    android:layout_width="@dimen/widget_vinyl_key"
+                    android:layout_height="@dimen/widget_vinyl_key"
+                    android:background="@drawable/widget_bubble_20"
+                    android:contentDescription="@string/widget_repeat_all"
+                    android:padding="5dp"
+                    android:src="@drawable/ic_widget_repeat" />
+            </LinearLayout>
+        </FrameLayout>
+    </LinearLayout>
+</FrameLayout>

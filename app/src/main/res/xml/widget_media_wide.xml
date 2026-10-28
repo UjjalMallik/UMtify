@@ -1,23 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The 4×2 entry in the widget picker: same widget, placed four cells wide by
-  default and so laid out with the track alongside the transport. See
-  widget_media_square for the grid arithmetic, why resizing is horizontal only,
-  and why maxResizeWidth is 288dp rather than four cells' nominal 250dp.
+  The 4×2 entry in the widget picker: the same provider as the 2×2, placed four
+  cells wide by default. See widget_media_square for the grid arithmetic and
+  why resizing is horizontal only.
 
   minResizeWidth lets this one be dragged back down to two cells, where it takes
   the compact layout — the two providers differ in the size they arrive at, not
-  in what they can become.
+  in what they can become. maxResizeWidth is wider than the 2×2's because the
+  deck's five-key row (Shuffle, previous, play/pause, next, Like) only fits once
+  the card is well past four cells; until then the provider shows the three-key
+  transport rather than letting the keys spill into each other.
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_wide_description"
     android:initialLayout="@layout/widget_media_wide"
-    android:maxResizeWidth="288dp"
+    android:maxResizeWidth="360dp"
     android:minHeight="110dp"
     android:minResizeWidth="110dp"
     android:minWidth="250dp"
     android:previewImage="@drawable/widget_preview_wide"
-    android:previewLayout="@layout/widget_media_wide_preview"
+    android:previewLayout="@layout/widget_media_wide"
     android:resizeMode="horizontal"
     android:targetCellHeight="2"
     android:targetCellWidth="4"

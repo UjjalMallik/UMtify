@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Shader
 import android.widget.RemoteViews
@@ -22,7 +23,9 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
- * The crystal spectrum in the 4×2 and 4×1 widgets.
+ * The crystal spectrum in all four widgets — the 2×2's equalizer row, the 4×1's
+ * compact twelve bars, the 4×2's full-width bottom ribbon and the vinyl card's
+ * wave.
  *
  * A widget cannot animate: a `RemoteViews` is a snapshot, and the host never
  * runs one. What it can do is take a fresh one. So the frames are drawn here,
@@ -36,6 +39,10 @@ import kotlin.math.sin
  * is set to 0 and no frame is ever pushed again, which leaves no track, no
  * baseline and no last frame showing. Only instances the provider has told to
  * play animate; the ticker exits when none are left.
+ *
+ * Frames are drawn at a bounded working width and stretched by the host, since
+ * each one is parcelled to the launcher ten times a second and a soft bar has
+ * nothing to gain from full resolution.
  */
 internal object WidgetWave {
 
@@ -52,6 +59,10 @@ internal object WidgetWave {
         val viewId: Int,
         val widthPx: Int,
         val heightPx: Int,
+        val bars: Int,
+        val accent: Int,
+        val ribbon: Boolean,
+        val bottomCornerPx: Float,
         val frames: List<Bitmap>,
     ) {
         var index = 0
@@ -67,7 +78,10 @@ internal object WidgetWave {
      *
      * [layout] and [viewId] are the wave's own layout and view — re-applying the
      * whole widget layout in a partial update would reset the views the ticker
-     * isn't touching.
+     * isn't touching. [bars] is the bar count the design calls for, or 0 to
+     * derive one from the width. [accent] tints the foot of every bar with the
+     * album's colour; 0 leaves the spectrum white. [ribbon] adds the flowing
+     * crest that the 4×2's full-width stage carries.
      */
     fun play(
         context: Context,
@@ -76,6 +90,10 @@ internal object WidgetWave {
         viewId: Int,
         widthPx: Int,
         heightPx: Int,
+        bars: Int = 0,
+        accent: Int = 0,
+        ribbon: Boolean = false,
+        bottomCornerPx: Float = 0f,
     ) {
         if (widthPx <= 0 || heightPx <= 0) {
             stop(id)
@@ -87,7 +105,11 @@ internal object WidgetWave {
             existing.layout == layout &&
             existing.viewId == viewId &&
             existing.widthPx == widthPx &&
-            existing.heightPx == heightPx
+            existing.heightPx == heightPx &&
+            existing.bars == bars &&
+            existing.accent == accent &&
+            existing.ribbon == ribbon &&
+            existing.bottomCornerPx == bottomCornerPx
         ) {
             ensureTicker()
             return
@@ -99,7 +121,11 @@ internal object WidgetWave {
             viewId = viewId,
             widthPx = widthPx,
             heightPx = heightPx,
-            frames = frames(app, widthPx, heightPx),
+            bars = bars,
+            accent = accent,
+            ribbon = ribbon,
+            bottomCornerPx = bottomCornerPx,
+            frames = frames(app, widthPx, heightPx, bars, accent, ribbon, bottomCornerPx),
         )
         ensureTicker()
     }
@@ -168,15 +194,24 @@ internal object WidgetWave {
      * pattern, and neighbouring frames differ by a twelfth of a turn — small
      * enough that the one-second loop has no visible seams.
      */
-    private fun frames(context: Context, widthPx: Int, heightPx: Int): List<Bitmap> {
+    private fun frames(
+        context: Context,
+        widthPx: Int,
+        heightPx: Int,
+        bars: Int,
+        accent: Int,
+        ribbon: Boolean,
+        bottomCornerPx: Float,
+    ): List<Bitmap> {
         val width = widthPx.coerceIn(MIN_WIDTH_PX, MAX_WIDTH_PX)
         val height = heightPx.coerceIn(MIN_HEIGHT_PX, MAX_HEIGHT_PX)
         val density = context.resources.displayMetrics.density
-        val count = (width / (8f * density)).roundToInt().coerceIn(MIN_BARS, MAX_BARS)
+        val count = (if (bars > 0) bars else (width / (8f * density)).roundToInt())
+            .coerceIn(MIN_BARS, MAX_BARS)
         val slot = width.toFloat() / count
-        val bar = (slot * 0.58f)
-            .coerceAtLeast(1.5f * density)
-            .coerceAtMost(slot - 1f)
+        val bar = (slot * 0.56f)
+            .coerceAtLeast(1.2f * density)
+            .coerceAtMost((slot - 0.8f).coerceAtLeast(1f))
         val radius = bar / 2f
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             shader = LinearGradient(
@@ -184,30 +219,95 @@ internal object WidgetWave {
                 0f,
                 0f,
                 height.toFloat(),
-                intArrayOf(0xF5FFFFFF.toInt(), 0xCFFFFFFF.toInt(), 0x66FFFFFF),
-                floatArrayOf(0f, 0.5f, 1f),
+                intArrayOf(0xA6FFFFFF.toInt(), 0x73FFFFFF, 0x40FFFFFF),
+                floatArrayOf(0f, 0.55f, 1f),
                 Shader.TileMode.CLAMP,
             )
         }
+        val tint = if (accent != 0) {
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = LinearGradient(
+                    0f,
+                    0f,
+                    0f,
+                    height.toFloat(),
+                    intArrayOf(
+                        accent and 0x00FFFFFF,
+                        (0x59 shl 24) or (accent and 0x00FFFFFF),
+                    ),
+                    floatArrayOf(0.2f, 1f),
+                    Shader.TileMode.CLAMP,
+                )
+            }
+        } else {
+            null
+        }
+        val crest = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 2.4f * density
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+            color = 0x4DFFFFFF
+        }
+        val crestCore = Paint(crest).apply {
+            strokeWidth = 0.9f * density
+            color = 0xB3FFFFFF.toInt()
+        }
         val rect = RectF()
+        val path = Path()
+        // The card's bottom radius can be as tall as this strip; the round rect
+        // is extended above the bitmap by the radius so its bottom arcs keep
+        // their full radius instead of being clamped to half the height.
+        val corner = bottomCornerPx.coerceIn(0f, height.toFloat())
         return List(FRAME_COUNT) { frame ->
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
+            if (corner > 0f) {
+                canvas.clipPath(
+                    Path().apply {
+                        addRoundRect(
+                            RectF(0f, height.toFloat() - 2f * corner, width.toFloat(), height.toFloat()),
+                            corner,
+                            corner,
+                            Path.Direction.CW,
+                        )
+                    },
+                )
+            }
             val phase = 2.0 * PI * frame / FRAME_COUNT
             for (i in 0 until count) {
                 val unit = i.toFloat()
                 val across = if (count == 1) 0.5f else unit / (count - 1f)
-                val taper = 0.62f + 0.38f * sin(PI * across).toFloat()
-                val slow = sin(phase + unit * 0.62 + 0.9 * sin(unit * 0.35)).toFloat()
-                val fast = sin(phase * 1.7 + unit * 0.27 + 1.7).toFloat()
-                val level = 0.5f + 0.5f * (0.65f * slow + 0.35f * fast)
-                val fraction = (0.14f + 0.86f * taper * level).coerceIn(0.10f, 1f)
+                val fraction = fraction(unit, across, phase)
                 val left = unit * slot + (slot - bar) / 2f
                 rect.set(left, height - height * fraction, left + bar, height.toFloat())
                 canvas.drawRoundRect(rect, radius, radius, paint)
+                tint?.let { canvas.drawRoundRect(rect, radius, radius, it) }
+            }
+            if (ribbon) {
+                path.reset()
+                path.moveTo(0f, height - height * fraction(0f, 0f, phase))
+                var x = 0f
+                val step = width / CREST_SAMPLES.toFloat()
+                while (x < width) {
+                    x += step
+                    val across = (x / width).coerceIn(0f, 1f)
+                    path.lineTo(x, height - height * fraction(across * (count - 1), across, phase))
+                }
+                canvas.drawPath(path, crest)
+                canvas.drawPath(path, crestCore)
             }
             bitmap
         }
+    }
+
+    /** How tall the bar at [unit] stands, as a fraction of the wave view. */
+    private fun fraction(unit: Float, across: Float, phase: Double): Float {
+        val taper = 0.62f + 0.38f * sin(PI * across).toFloat()
+        val slow = sin(phase + unit * 0.62 + 0.9 * sin(unit * 0.35)).toFloat()
+        val fast = sin(phase * 1.7 + unit * 0.27 + 1.7).toFloat()
+        val level = 0.5f + 0.5f * (0.65f * slow + 0.35f * fast)
+        return (0.14f + 0.86f * taper * level).coerceIn(0.10f, 1f)
     }
 
     /** Twelve frames make a one-second loop at this cadence. */
@@ -216,13 +316,16 @@ internal object WidgetWave {
     private const val FRAME_INTERVAL_MS = 90L
 
     private const val MIN_BARS = 6
-    private const val MAX_BARS = 40
+    private const val MAX_BARS = 48
 
     private const val MIN_WIDTH_PX = 16
-    private const val MAX_WIDTH_PX = 1_024
+    private const val MAX_WIDTH_PX = 640
 
     private const val MIN_HEIGHT_PX = 3
     private const val MAX_HEIGHT_PX = 96
+
+    /** Points along the ribbon's crest, enough to read as a curve at any width. */
+    private const val CREST_SAMPLES = 160
 
     private const val ALPHA_SHOWN = 255
     private const val ALPHA_HIDDEN = 0

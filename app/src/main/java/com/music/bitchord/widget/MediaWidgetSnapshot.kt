@@ -53,6 +53,13 @@ internal data class MediaWidgetSnapshot(
      */
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
+    /**
+     * The player's repeat mode, drawn by every widget's Repeat key.
+     *
+     * `Player.REPEAT_MODE_OFF`, `ALL` or `ONE`; the default is off, which is
+     * also what a snapshot written before the field existed reads back as.
+     */
+    val repeatMode: Int = 0,
 ) {
     /** Whether there is a track to draw at all. */
     val hasTrack: Boolean get() = mediaId != null
@@ -83,6 +90,7 @@ internal data class MediaWidgetSnapshot(
                 .putBoolean(KEY_SHUFFLE, snapshot.shuffleEnabled)
                 .putLong(KEY_POSITION, snapshot.positionMs)
                 .putLong(KEY_DURATION, snapshot.durationMs)
+                .putInt(KEY_REPEAT, snapshot.repeatMode)
                 .apply()
         }
 
@@ -104,6 +112,7 @@ internal data class MediaWidgetSnapshot(
                     shuffleEnabled = prefs.getBoolean(KEY_SHUFFLE, false),
                     positionMs = prefs.getLong(KEY_POSITION, 0L),
                     durationMs = prefs.getLong(KEY_DURATION, 0L),
+                    repeatMode = prefs.getInt(KEY_REPEAT, 0),
                 )
             }
             return EMPTY
@@ -124,5 +133,6 @@ internal data class MediaWidgetSnapshot(
         private const val KEY_SHUFFLE = "shuffle"
         private const val KEY_POSITION = "position_ms"
         private const val KEY_DURATION = "duration_ms"
+        private const val KEY_REPEAT = "repeat_mode"
     }
 }

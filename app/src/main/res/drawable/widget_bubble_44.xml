@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A 44dp 3D crystal bubble: the 1.2dp specular rim (white 85% down to 20%
+  across the middle and back up to 65% at the foot), the convex dome inside it,
+  the wet-gloss crescent across the top and the bounce light along the bottom.
+  Sized to the view that uses it so the rim never scales below 1.2dp.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="44dp"
+    android:height="44dp"
+    android:viewportWidth="44"
+    android:viewportHeight="44">
+
+    <group>
+        <clip-path android:pathData="M0,22a22,22 0 1,0 44,0a22,22 0 1,0 -44,0z" />
+
+        <path android:pathData="M0,22a22,22 0 1,0 44,0a22,22 0 1,0 -44,0z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="radial"
+                    android:centerX="22"
+                    android:centerY="12.32"
+                    android:gradientRadius="34.32"
+                    android:startColor="#38FFFFFF"
+                    android:endColor="#0DFFFFFF" />
+            </aapt:attr>
+        </path>
+
+        <path android:pathData="M6.16,15.62a15.84,9.02 0 1,0 31.68,0a15.84,9.02 0 1,0 -31.68,0z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="0"
+                    android:startY="6.6"
+                    android:endX="0"
+                    android:endY="24.64"
+                    android:startColor="#66FFFFFF"
+                    android:endColor="#14FFFFFF" />
+            </aapt:attr>
+        </path>
+
+        <path android:pathData="M3.52,42.24a18.48,7.48 0 1,0 36.96,0a18.48,7.48 0 1,0 -36.96,0z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="0"
+                    android:startY="31.68"
+                    android:endX="0"
+                    android:endY="44"
+                    android:startColor="#00FFFFFF"
+                    android:endColor="#40FFFFFF" />
+            </aapt:attr>
+        </path>
+    </group>
+
+    <path
+        android:fillType="evenOdd"
+        android:pathData="M0,22a22,22 0 1,0 44,0a22,22 0 1,0 -44,0zM1.2,22a20.8,20.8 0 1,0 41.6,0a20.8,20.8 0 1,0 -41.6,0z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="0"
+                android:startY="0"
+                android:endX="0"
+                android:endY="44"
+                android:startColor="#D9FFFFFF"
+                android:centerColor="#33FFFFFF"
+                android:endColor="#A6FFFFFF" />
+        </aapt:attr>
+    </path>
+</vector>

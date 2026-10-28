@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.RadialGradient
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
@@ -43,10 +44,16 @@ internal class ArtSpec(
     val heightPx: Int,
     val cornerPx: Float,
     val rimPx: Float,
+    /**
+     * A circular disc rather than a tile: the artwork is cut to a circle with
+     * concentric crystal rings around it, on a transparent square. Used by the
+     * vinyl card, whose disc is the whole point of it.
+     */
+    val disc: Boolean = false,
 ) {
     /** Identifies the finished bitmap: every value that changes a pixel is in here. */
     fun cacheKey(key: String): String =
-        "art|$key|${widthPx}x$heightPx|${cornerPx.roundToInt()}/${rimPx.roundToInt()}"
+        "art|$key|${widthPx}x$heightPx|${cornerPx.roundToInt()}/${rimPx.roundToInt()}|${if (disc) "disc" else "tile"}"
 }
 
 /**
@@ -64,35 +71,29 @@ internal class FaceSpec(
     val heightPx: Int,
     val radiusPx: Float,
     val rimPx: Float,
-    val dock: Rect? = null,
-    val dockCornerPx: Float = 0f,
-    val dockRimPx: Float = 0f,
 ) {
-    fun cacheKey(key: String): String = buildString {
-        append("face|").append(key)
-        append('|').append(widthPx).append('x').append(heightPx)
-        append('|').append(radiusPx.roundToInt()).append('/').append(rimPx.roundToInt())
-        dock?.let {
-            append("|d").append(it.left).append(',').append(it.top)
-                .append(',').append(it.width()).append(',').append(it.height())
-                .append('/').append(dockCornerPx.roundToInt()).append('/').append(dockRimPx.roundToInt())
-        }
-    }
+    fun cacheKey(key: String): String =
+        "face|$key|${widthPx}x$heightPx|${radiusPx.roundToInt()}/${rimPx.roundToInt()}"
 }
 
 /**
- * Draws the crystal glass of all three home-screen widgets.
+ * Draws the crystal glass of all four home-screen widgets.
  *
  * The recipe, in the order it is painted:
  *
- *  - **Clear body** — white at 12% over a 10% dark scrim, with up to 8% of the
+ *  - **Clear body** — white at 10% over an 8% dark scrim, with up to 6% of the
  *    cover's dominant colour: enough to keep white type legible on a bright
  *    wallpaper, far too little to hide the wallpaper itself.
- *  - **Wet-glass sheen** — white 28% fading out across the top 35%, the
- *    highlight a curved pane catches, and a 14% bounce along the bottom 15%
+ *  - **Wet-glass sheen** — white 35% fading out across the top 32%, the
+ *    highlight a curved pane catches, and a 15% bounce along the bottom 14%
  *    where the pane curves away.
  *  - **Specular rim** — a 1.5dp stroke running white 85% at the top-left, 25%
  *    across the middle and 70% at the bottom-right.
+ *
+ * Artwork is either a rounded tile or, for the vinyl card, a disc with
+ * concentric glowing rings. The buttons' 3D bubbles are vector drawables in
+ * `res/drawable/widget_bubble_*.xml`: they are state-free, and a vector keeps
+ * them crisp without parcelling a bitmap for every key on every update.
  *
  * Nothing here is blurred or tinted at runtime — [android.widget.RemoteViews]
  * cannot do any of that — so all of it is composed on the CPU, once per track
@@ -128,30 +129,125 @@ internal object MediaWidgetArt {
         if (failed && key != null) failures[key] = SystemClock.elapsedRealtime()
 
         val accent = cover?.let { accentOfBitmap(it) } ?: DEFAULT_ACCENT
-        val base = Bitmap.createBitmap(spec.widthPx, spec.heightPx, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(base)
-        if (cover != null) canvas.fillCentreCropped(cover) else canvas.fillPlaceholder(accent)
+        val rounded = if (spec.disc) {
+            drawDiscArt(spec, cover, accent)
+        } else {
+            val base = Bitmap.createBitmap(spec.widthPx, spec.heightPx, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(base)
+            if (cover != null) canvas.fillCentreCropped(cover) else canvas.fillPlaceholder(accent)
 
-        val rounded = if (spec.cornerPx > 0f) base.withRoundedCorners(spec.cornerPx) else base
-        if (rounded !== base) base.recycle()
-        Canvas(rounded).strokeGlass(
-            RectF(0f, 0f, spec.widthPx.toFloat(), spec.heightPx.toFloat()),
-            spec.cornerPx,
-            spec.rimPx,
-            ART_RIM_COLORS,
-            inset = true,
-        )
+            val tile = if (spec.cornerPx > 0f) base.withRoundedCorners(spec.cornerPx) else base
+            if (tile !== base) base.recycle()
+            Canvas(tile).strokeGlass(
+                RectF(0f, 0f, spec.widthPx.toFloat(), spec.heightPx.toFloat()),
+                spec.cornerPx,
+                spec.rimPx,
+                ART_RIM_COLORS,
+                inset = true,
+            )
+            tile
+        }
         if (!failed) cacheKey?.let { arts.put(it, rounded) }
         return rounded
     }
 
     /**
+     * The vinyl card's disc: the cover cut to a circle, a 1.2dp crystal rim
+     * round it, and two concentric glowing rings on a transparent square.
+     *
+     * The rings live in the artwork bitmap rather than in the card's glass so
+     * they follow the disc exactly at any size the host gives the view: both
+     * are drawn from the same square, and `fitCenter` scales them together.
+     */
+    private fun drawDiscArt(spec: ArtSpec, cover: Bitmap?, accent: Int): Bitmap {
+        val out = Bitmap.createBitmap(spec.widthPx, spec.heightPx, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val side = minOf(spec.widthPx, spec.heightPx).toFloat()
+        val cx = spec.widthPx / 2f
+        val cy = spec.heightPx / 2f
+        val discRadius = side * DISC_RADIUS_SCALE
+
+        val glowRadius = side / 2f
+        canvas.drawCircle(
+            cx,
+            cy,
+            glowRadius,
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = RadialGradient(
+                    cx,
+                    cy,
+                    glowRadius,
+                    intArrayOf(
+                        withAlpha(accent, 0x4D),
+                        withAlpha(accent, 0x1A),
+                        Color.TRANSPARENT,
+                    ),
+                    floatArrayOf((discRadius / glowRadius).coerceIn(0f, 0.9f), 0.93f, 1f),
+                    Shader.TileMode.CLAMP,
+                )
+            },
+        )
+
+        canvas.drawCircle(
+            cx,
+            cy,
+            discRadius + side * DISC_RING_INNER_GAP,
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = (side * DISC_RING_WIDTH).coerceAtLeast(1f)
+                color = 0x66FFFFFF
+            },
+        )
+        canvas.drawCircle(
+            cx,
+            cy,
+            discRadius + side * DISC_RING_OUTER_GAP,
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = (side * DISC_RING_WIDTH * 0.75f).coerceAtLeast(1f)
+                color = 0x2EFFFFFF
+            },
+        )
+
+        val discSide = (discRadius * 2f).roundToInt().coerceAtLeast(1)
+        val disc = Bitmap.createBitmap(discSide, discSide, Bitmap.Config.ARGB_8888)
+        val discCanvas = Canvas(disc)
+        if (cover != null) discCanvas.fillCentreCropped(cover) else discCanvas.fillPlaceholder(accent)
+        val circular = disc.withRoundedCorners(discSide / 2f)
+        if (circular !== disc) disc.recycle()
+        canvas.drawBitmap(
+            circular,
+            cx - discSide / 2f,
+            cy - discSide / 2f,
+            Paint().apply { isFilterBitmap = true; isAntiAlias = true },
+        )
+        circular.recycle()
+
+        canvas.drawCircle(
+            cx,
+            cy,
+            (discRadius - spec.rimPx / 2f).coerceAtLeast(0f),
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = spec.rimPx.coerceAtLeast(1f)
+                color = 0xB3FFFFFF.toInt()
+            },
+        )
+        return out
+    }
+
+    /** [source]'s dominant colour, or the default for no artwork at all. */
+    fun accentOf(source: Bitmap?): Int =
+        source?.takeIf { !it.isRecycled }?.let { accentOfBitmap(it) } ?: DEFAULT_ACCENT
+
+
+    /**
      * Draws the glass face described by [spec].
      *
-     * [tintSource] is the artwork the face is going over: the dock on the square
-     * widget frosts it, and its dominant colour is what the 8% accent wash is
-     * made of. Null means there is no cover — the face is still glass, just
-     * untinted, and it is not cached so a cover that arrives later can tint it.
+     * [tintSource] is the artwork the face is going over: its dominant colour is
+     * what the 8% accent wash is made of. Null means there is no cover — the
+     * face is still glass, just untinted, and it is not cached so a cover that
+     * arrives later can tint it.
      */
     suspend fun renderFace(
         context: Context,
@@ -167,7 +263,6 @@ internal object MediaWidgetArt {
         val composed = Bitmap.createBitmap(spec.widthPx, spec.heightPx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(composed)
         canvas.drawClearGlass(accent)
-        spec.dock?.let { canvas.drawDock(tintSource, it, spec) }
         canvas.drawEdge(spec)
 
         val rounded = composed.withRoundedCorners(spec.radiusPx)
@@ -253,89 +348,6 @@ internal object MediaWidgetArt {
                     Color.TRANSPARENT, REFLECTION_ALPHA, Shader.TileMode.CLAMP,
                 )
             },
-        )
-    }
-
-    /**
-     * The square widget's floating dock: a pane that frosts whatever is under
-     * it, so the artwork visibly blurs behind the glass rather than being
-     * covered by a flat scrim.
-     */
-    private fun Canvas.drawDock(source: Bitmap?, dock: Rect, spec: FaceSpec) {
-        val dockW = dock.width()
-        val dockH = dock.height()
-        if (dockW <= 0 || dockH <= 0) return
-
-        val layer = Bitmap.createBitmap(dockW, dockH, Bitmap.Config.ARGB_8888)
-        val layerCanvas = Canvas(layer)
-        if (source != null && !source.isRecycled) {
-            // The artwork is the card's own size, bar a rounding either way, so
-            // the dock's place in it is proportional rather than exact.
-            val sx = source.width.toFloat() / spec.widthPx.coerceAtLeast(1)
-            val sy = source.height.toFloat() / spec.heightPx.coerceAtLeast(1)
-            val left = (dock.left * sx).roundToInt().coerceIn(0, source.width - 1)
-            val top = (dock.top * sy).roundToInt().coerceIn(0, source.height - 1)
-            val right = (dock.right * sx).roundToInt().coerceIn(left + 1, source.width)
-            val bottom = (dock.bottom * sy).roundToInt().coerceIn(top + 1, source.height)
-            val region = runCatching {
-                Bitmap.createBitmap(source, left, top, right - left, bottom - top)
-            }.getOrNull()
-            if (region != null) {
-                val workW = DOCK_WORKING_WIDTH_PX
-                val workH = (workW * dockH / dockW).coerceAtLeast(4)
-                val work = Bitmap.createScaledBitmap(region, workW, workH, true)
-                if (work !== region) region.recycle()
-                val pixels = IntArray(workW * workH)
-                work.getPixels(pixels, 0, workW, 0, 0, workW, workH)
-                blurInPlace(
-                    pixels,
-                    IntArray(pixels.size),
-                    workW,
-                    workH,
-                    (workW * DOCK_BLUR_FRACTION).roundToInt().coerceAtLeast(1),
-                )
-                work.setPixels(pixels, 0, workW, 0, 0, workW, workH)
-                layerCanvas.drawBitmap(
-                    work,
-                    Rect(0, 0, workW, workH),
-                    Rect(0, 0, dockW, dockH),
-                    Paint().apply { isFilterBitmap = true },
-                )
-                work.recycle()
-            }
-        }
-
-        layerCanvas.drawRect(
-            0f, 0f, dockW.toFloat(), dockH.toFloat(),
-            Paint().apply { color = DOCK_WHITE },
-        )
-        val sheenBottom = dockH * DOCK_SHEEN_SCALE
-        layerCanvas.drawRect(
-            0f, 0f, dockW.toFloat(), sheenBottom,
-            Paint().apply {
-                shader = LinearGradient(
-                    0f, 0f, 0f, sheenBottom,
-                    DOCK_SHEEN, Color.TRANSPARENT, Shader.TileMode.CLAMP,
-                )
-            },
-        )
-
-        val rounded = layer.withRoundedCorners(spec.dockCornerPx)
-        if (rounded !== layer) layer.recycle()
-        drawBitmap(
-            rounded,
-            dock.left.toFloat(),
-            dock.top.toFloat(),
-            Paint().apply { isAntiAlias = true; isFilterBitmap = true },
-        )
-        rounded.recycle()
-
-        strokeGlass(
-            RectF(dock),
-            spec.dockCornerPx,
-            spec.dockRimPx,
-            DOCK_RIM_COLORS,
-            inset = true,
         )
     }
 
@@ -531,69 +543,6 @@ internal object MediaWidgetArt {
             (b / n).toInt()
     }
 
-    // ---- the blur ----
-
-    /**
-     * Blurs [pixels] in place, using [scratch] as the intermediate.
-     *
-     * A separable box filter run [BLUR_PASSES] times, which is the standard
-     * cheap stand-in for a Gaussian — three passes are within a percent of one,
-     * and this costs a handful of integer adds per pixel with no kernel to walk,
-     * because each output reuses the previous window's sum.
-     *
-     * The source is opaque (it was cut out of the fully painted cover), so only
-     * the three colour channels are carried through and alpha is written back
-     * solid.
-     */
-    private fun blurInPlace(pixels: IntArray, scratch: IntArray, w: Int, h: Int, radius: Int) {
-        val r = radius.coerceAtMost(maxOf(1, minOf(w, h) - 1))
-        repeat(BLUR_PASSES) {
-            boxPass(pixels, scratch, lines = h, lineStride = w, span = w, step = 1, radius = r)
-            boxPass(scratch, pixels, lines = w, lineStride = 1, span = h, step = w, radius = r)
-        }
-    }
-
-    /**
-     * One box-filter pass from [src] to [dst], along whichever axis the strides
-     * describe: rows are `lineStride = w, step = 1`, columns the reverse.
-     */
-    private fun boxPass(
-        src: IntArray,
-        dst: IntArray,
-        lines: Int,
-        lineStride: Int,
-        span: Int,
-        step: Int,
-        radius: Int,
-    ) {
-        val window = radius * 2 + 1
-        for (line in 0 until lines) {
-            val base = line * lineStride
-            var r = 0
-            var g = 0
-            var b = 0
-            for (i in -radius..radius) {
-                val c = src[base + i.coerceIn(0, span - 1) * step]
-                r += (c shr 16) and 0xFF
-                g += (c shr 8) and 0xFF
-                b += c and 0xFF
-            }
-            for (i in 0 until span) {
-                dst[base + i * step] =
-                    OPAQUE or ((r / window) shl 16) or ((g / window) shl 8) or (b / window)
-                // Slide the window on by one: drop what leaves the near end,
-                // take what enters the far one. Both ends clamp, so the edges
-                // hold their own colour instead of averaging in nothing and
-                // darkening.
-                val gone = src[base + (i - radius).coerceIn(0, span - 1) * step]
-                val come = src[base + (i + radius + 1).coerceIn(0, span - 1) * step]
-                r += ((come shr 16) and 0xFF) - ((gone shr 16) and 0xFF)
-                g += ((come shr 8) and 0xFF) - ((gone shr 8) and 0xFF)
-                b += (come and 0xFF) - (gone and 0xFF)
-            }
-        }
-    }
-
     // ---- corners and colour ----
 
     /**
@@ -636,22 +585,22 @@ internal object MediaWidgetArt {
 
     // ---- tuning ----
 
-    /** White at 12%: the body's haze. */
-    private const val GLASS_WHITE = 0x1FFFFFFF
+    /** White at 10%: the body's haze, kept low so the wallpaper reads through. */
+    private const val GLASS_WHITE = 0x1AFFFFFF
 
-    /** Black at 10%, and only so white type holds on a bright wallpaper. */
-    private const val GLASS_BLACK = 0x1A000000
+    /** Black at 8%, and only so white type holds on a bright wallpaper. */
+    private const val GLASS_BLACK = 0x14000000
 
-    /** The album's colour, at 8%. */
-    private const val GLASS_ACCENT_ALPHA = 0x14
+    /** The album's colour, at 6%. */
+    private const val GLASS_ACCENT_ALPHA = 0x0F
 
-    /** The wet sheen: white 28% across the top 35%. */
-    private const val SHEEN_ALPHA = 0x47FFFFFF
-    private const val SHEEN_SCALE = 0.35f
+    /** The wet sheen: white 35% across the top 32%. */
+    private const val SHEEN_ALPHA = 0x59FFFFFF
+    private const val SHEEN_SCALE = 0.32f
 
-    /** The foot of the pane bouncing white 14% back up over its last 15%. */
-    private const val REFLECTION_ALPHA = 0x24FFFFFF
-    private const val REFLECTION_START = 0.85f
+    /** The foot of the pane bouncing white 15% back up over its last 14%. */
+    private const val REFLECTION_ALPHA = 0x26FFFFFF
+    private const val REFLECTION_START = 0.86f
 
     /** Specular rim: white 85% → 25% → 70% down the diagonal. */
     private val RIM_COLORS = intArrayOf(0xD9FFFFFF.toInt(), 0x40FFFFFF, 0xB3FFFFFF.toInt())
@@ -659,19 +608,15 @@ internal object MediaWidgetArt {
     /** The artwork tile's own rim: the same gradient, softer. */
     private val ART_RIM_COLORS = intArrayOf(0xB3FFFFFF.toInt(), 0x33FFFFFF, 0x8CFFFFFF.toInt())
 
-    /** The floating dock's rim: white 60% → 20% → 50%. */
-    private val DOCK_RIM_COLORS = intArrayOf(0x99FFFFFF.toInt(), 0x33FFFFFF, 0x80FFFFFF.toInt())
-
     private val RIM_STOPS = floatArrayOf(0f, 0.5f, 1f)
 
-    /** The dock's frosted pane: white 12%, plus 18% across its top half. */
-    private const val DOCK_WHITE = 0x1FFFFFFF
-    private const val DOCK_SHEEN = 0x2EFFFFFF
-    private const val DOCK_SHEEN_SCALE = 0.5f
+    /** The vinyl disc sits inside its square at this fraction of the shorter side. */
+    private const val DISC_RADIUS_SCALE = 0.40f
 
-    /** Width of the working image the dock's frost is blurred on. */
-    private const val DOCK_WORKING_WIDTH_PX = 48
-    private const val DOCK_BLUR_FRACTION = 0.12f
+    /** The two glowing rings, as gaps outside the disc's edge. */
+    private const val DISC_RING_INNER_GAP = 0.045f
+    private const val DISC_RING_OUTER_GAP = 0.085f
+    private const val DISC_RING_WIDTH = 0.006f
 
     /** Placeholder gradient, tinted a little towards the accent. */
     private const val PLACEHOLDER_TOP = 0xFF2E3446.toInt()
@@ -686,17 +631,6 @@ internal object MediaWidgetArt {
     private const val ACCENT_MIN_SATURATION = 0.45f
     private val ACCENT_VALUE_RANGE = 0.55f..0.92f
     private const val ACCENT_SAMPLES = 4096
-
-    /**
-     * Box-filter passes per blur. Three is where a box stops being
-     * distinguishable from a Gaussian; two leaves faint straight-edged
-     * shoulders around anything bright, which on album art means around every
-     * highlight.
-     */
-    private const val BLUR_PASSES = 3
-
-    /** Alpha channel for the opaque pixels [boxPass] writes. */
-    private const val OPAQUE = 0xFF shl 24
 
     /**
      * Finished tiles and faces, by track and size.

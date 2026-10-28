@@ -198,6 +198,9 @@ const val ACTION_TOGGLE_FAVORITE = "com.music.bitchord.action.TOGGLE_FAVORITE"
 /** Session command used by the media notification's and the 4×1 widget's Shuffle button. */
 const val ACTION_TOGGLE_SHUFFLE = "com.music.bitchord.action.TOGGLE_SHUFFLE"
 
+/** Session command behind every widget's Repeat key: off → all → one → off. */
+const val ACTION_TOGGLE_REPEAT = "com.music.bitchord.action.TOGGLE_REPEAT"
+
 /** Session actions exposed to Android Auto for the track that is playing. */
 const val ACTION_START_STATION = "com.music.bitchord.action.START_STATION"
 const val ACTION_REVERT_TO_ORIGINAL = "com.music.bitchord.action.REVERT_TO_ORIGINAL"
@@ -1108,6 +1111,9 @@ class PlaybackService : MediaLibraryService() {
             // Turning repeat-all back off can leave the current item at the end
             // of the queue, which is the same trigger as a normal transition.
             loadAutoplayForCurrentTrack()
+            // The widgets draw the mode on their Repeat key, so a change made
+            // from the player, the notification or a widget reaches all of them.
+            publishWidgetState()
         }
 
         /**
@@ -2479,6 +2485,24 @@ class PlaybackService : MediaLibraryService() {
         if (ListenTogether.state.value.inParty) QueueShuffle.clearCanonicalContext()
         player?.let(QueueShuffle::toggle)
         refreshCustomLayouts()
+    }
+
+    /**
+     * The widget's Repeat key: off → all → one → off, the same cycle the player
+     * screen runs. Persisted and applied through the session player, which
+     * forwards to whichever player is actually the speaker, so a Cast or watch
+     * session cycles on the device that is playing. [onRepeatModeChanged]
+     * republishes the widgets with the new mode.
+     */
+    private fun toggleRepeatFromSession() {
+        val current = mediaSession?.player?.repeatMode ?: player?.repeatMode ?: return
+        val next = when (current) {
+            Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+            Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+            else -> Player.REPEAT_MODE_OFF
+        }
+        AppSettings.setRepeatMode(next)
+        (mediaSession?.player ?: player)?.repeatMode = next
     }
 
     /**
@@ -5868,6 +5892,7 @@ class PlaybackService : MediaLibraryService() {
             // process last left off. Unknown position reads as zero.
             positionMs = reported.currentPosition.coerceAtLeast(0L),
             durationMs = reported.duration.coerceAtLeast(0L),
+            repeatMode = reported.repeatMode,
         )
         MediaWidgetSnapshot.save(this, snapshot)
         MediaWidget.refresh(this)
@@ -7802,6 +7827,7 @@ class PlaybackService : MediaLibraryService() {
                 ACTION_CLEAR_BOUNDED_CONTEXT -> clearBoundedContext()
                 ACTION_TOGGLE_AUTOPLAY -> toggleAutoplayFromNotification()
                 ACTION_TOGGLE_SHUFFLE -> toggleShuffleFromSession()
+                ACTION_TOGGLE_REPEAT -> toggleRepeatFromSession()
                 ACTION_START_STATION -> startStationFromSession()
                 ACTION_REVERT_TO_ORIGINAL -> revertCurrentToOriginal()
                 ACTION_SWAP_TO_VERSION -> swapCurrentToVersion(args)

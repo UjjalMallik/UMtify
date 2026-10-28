@@ -1,18 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The 4×1 widget: a clear crystal capsule with the artwork tile inset at its
-  left, the track and its spectrum above the transport beside it.
+  The 4×1 widget: the reference's horizontal glass capsule.
 
-  The controls are fixed-size crystal keys with weight-1 spacers between them,
-  not weight-1 keys: an oval stretched to share the row evenly was exactly what
-  made the old row read as five squashed pills. At fewer than
-  MediaWidgetPill.COMPACT_WIDTH_DP the provider hides the tile, Like and Shuffle
-  outright, leaving previous / play / next spread across the capsule's full
-  width with the title centred over them.
+  The 58dp tile sits at the left, inset by 12dp; the track column beside it is
+  three tight rows — title and artist with the compact twelve-bar equalizer on
+  the right, the seek bar between its two timestamps, and Shuffle and Repeat on
+  the left of the grouped previous / play / next bubbles.
 
-  The capsule is wrap_content tall and centred rather than filling the cell. A
-  one-row cell is anywhere from ~60dp to over 100dp tall depending on the
-  launcher, and a capsule stretched to the taller end stops reading as one.
+  The capsule is wrap_content tall and centred rather than filling the cell: a
+  one-row cell is anywhere from ~60dp to over 100dp depending on the launcher,
+  and a capsule stretched to the taller end stops reading as one.
 
   The root is transparent and not clickable, so a tap beside the capsule falls
   through to the home screen; widget_pill is what opens the app.
@@ -47,11 +44,10 @@
 
             <ImageView
                 android:id="@+id/widget_art"
-                android:layout_width="wrap_content"
+                android:layout_width="@dimen/widget_pill_art"
                 android:layout_height="@dimen/widget_pill_art"
                 android:layout_marginEnd="@dimen/widget_pill_gap"
-                android:adjustViewBounds="true"
-                android:importantForAccessibility="no"
+                android:contentDescription="@string/widget_artwork"
                 android:scaleType="fitXY"
                 android:src="@drawable/widget_art_placeholder_pill" />
 
@@ -59,47 +55,129 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:gravity="center_vertical"
                 android:orientation="vertical">
-
-                <TextView
-                    android:id="@+id/widget_title"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:ellipsize="end"
-                    android:fontFamily="@font/sf_pro_display_semibold"
-                    android:includeFontPadding="false"
-                    android:maxLines="1"
-                    android:shadowColor="#99000000"
-                    android:shadowDy="1"
-                    android:shadowRadius="4"
-                    android:textColor="#FFFFFFFF"
-                    android:textSize="13sp" />
-
-                <!-- The spectrum under the title; see widget_media_wide. -->
-                <ImageView
-                    android:id="@+id/widget_wave"
-                    android:layout_width="match_parent"
-                    android:layout_height="@dimen/widget_wave_pill_height"
-                    android:layout_marginTop="1dp"
-                    android:layout_marginBottom="1dp"
-                    android:importantForAccessibility="no"
-                    android:scaleType="fitXY" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="@dimen/widget_pill_play_height"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/widget_title"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:ellipsize="end"
+                            android:fontFamily="@font/sf_pro_display_semibold"
+                            android:includeFontPadding="false"
+                            android:maxLines="1"
+                            android:shadowColor="#99000000"
+                            android:shadowDy="1"
+                            android:shadowRadius="4"
+                            android:textColor="#FFFFFFFF"
+                            android:textSize="14sp" android:text="@string/widget_preview_title" />
+
+                        <TextView
+                            android:id="@+id/widget_artist"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="1dp"
+                            android:ellipsize="end"
+                            android:fontFamily="@font/sf_pro_display_regular"
+                            android:includeFontPadding="false"
+                            android:maxLines="1"
+                            android:shadowColor="#99000000"
+                            android:shadowDy="1"
+                            android:shadowRadius="4"
+                            android:textColor="#BFFFFFFF"
+                            android:textSize="11sp" android:text="@string/widget_preview_artist" />
+                    </LinearLayout>
+
+                    <ImageView
+                        android:id="@+id/widget_wave"
+                        android:layout_width="@dimen/widget_pill_wave_width"
+                        android:layout_height="@dimen/widget_pill_wave_height"
+                        android:layout_marginStart="8dp"
+                        android:importantForAccessibility="no"
+                        android:scaleType="fitXY" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <Chronometer
+                        android:id="@+id/widget_elapsed"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="@font/sf_pro_display_regular"
+                        android:includeFontPadding="false"
+                        android:shadowColor="#99000000"
+                        android:shadowDy="1"
+                        android:shadowRadius="4"
+                        android:textColor="#99FFFFFF"
+                        android:textSize="10.5sp" />
+
+                    <ImageView
+                        android:id="@+id/widget_seek"
+                        android:layout_width="0dp"
+                        android:layout_height="@dimen/widget_pill_seek_height"
+                        android:layout_marginStart="6dp"
+                        android:layout_marginEnd="6dp"
+                        android:layout_weight="1"
+                        android:importantForAccessibility="no"
+                        android:scaleType="fitXY" />
+
+                    <TextView
+                        android:id="@+id/widget_total"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="@font/sf_pro_display_regular"
+                        android:includeFontPadding="false"
+                        android:shadowColor="#99000000"
+                        android:shadowDy="1"
+                        android:shadowRadius="4"
+                        android:textColor="#99FFFFFF"
+                        android:textSize="10.5sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/widget_pill_transport"
+                    android:layout_marginTop="4dp"
                     android:gravity="center_vertical"
                     android:orientation="horizontal">
 
                     <ImageView
-                        android:id="@+id/widget_like"
-                        android:layout_width="@dimen/widget_pill_button"
-                        android:layout_height="@dimen/widget_pill_button"
-                        android:background="@drawable/widget_crystal_disc_small"
-                        android:contentDescription="@string/like"
+                        android:id="@+id/widget_shuffle"
+                        android:layout_width="@dimen/widget_pill_key"
+                        android:layout_height="@dimen/widget_pill_key"
+                        android:background="@drawable/widget_bubble_20"
+                        android:contentDescription="@string/shuffle_off"
                         android:padding="5dp"
-                        android:src="@drawable/ic_widget_heart" />
+                        android:src="@drawable/ic_widget_shuffle" />
+
+                    <FrameLayout
+                        android:layout_width="@dimen/widget_pill_button_gap"
+                        android:layout_height="1dp" />
+
+                    <ImageView
+                        android:id="@+id/widget_repeat"
+                        android:layout_width="@dimen/widget_pill_key"
+                        android:layout_height="@dimen/widget_pill_key"
+                        android:background="@drawable/widget_bubble_20"
+                        android:contentDescription="@string/widget_repeat_all"
+                        android:padding="5dp"
+                        android:src="@drawable/ic_widget_repeat" />
 
                     <FrameLayout
                         android:layout_width="0dp"
@@ -108,54 +186,38 @@
 
                     <ImageView
                         android:id="@+id/widget_previous"
-                        android:layout_width="@dimen/widget_pill_button"
-                        android:layout_height="@dimen/widget_pill_button"
-                        android:background="@drawable/widget_crystal_disc_small"
+                        android:layout_width="@dimen/widget_pill_prev"
+                        android:layout_height="@dimen/widget_pill_prev"
+                        android:background="@drawable/widget_bubble_26"
                         android:contentDescription="@string/widget_previous"
-                        android:padding="5dp"
+                        android:padding="7dp"
                         android:src="@drawable/ic_widget_previous" />
 
                     <FrameLayout
-                        android:layout_width="0dp"
-                        android:layout_height="1dp"
-                        android:layout_weight="1" />
+                        android:layout_width="@dimen/widget_pill_button_gap"
+                        android:layout_height="1dp" />
 
                     <ImageView
                         android:id="@+id/widget_toggle"
-                        android:layout_width="@dimen/widget_pill_play_width"
-                        android:layout_height="@dimen/widget_pill_play_height"
-                        android:background="@drawable/widget_crystal_pill_pill"
+                        android:layout_width="@dimen/widget_pill_play"
+                        android:layout_height="@dimen/widget_pill_play"
+                        android:background="@drawable/widget_bubble_34"
                         android:contentDescription="@string/widget_play"
-                        android:padding="4dp"
+                        android:padding="9dp"
                         android:src="@drawable/ic_widget_play" />
 
                     <FrameLayout
-                        android:layout_width="0dp"
-                        android:layout_height="1dp"
-                        android:layout_weight="1" />
+                        android:layout_width="@dimen/widget_pill_button_gap"
+                        android:layout_height="1dp" />
 
                     <ImageView
                         android:id="@+id/widget_next"
-                        android:layout_width="@dimen/widget_pill_button"
-                        android:layout_height="@dimen/widget_pill_button"
-                        android:background="@drawable/widget_crystal_disc_small"
+                        android:layout_width="@dimen/widget_pill_prev"
+                        android:layout_height="@dimen/widget_pill_prev"
+                        android:background="@drawable/widget_bubble_26"
                         android:contentDescription="@string/widget_next"
-                        android:padding="5dp"
+                        android:padding="7dp"
                         android:src="@drawable/ic_widget_next" />
-
-                    <FrameLayout
-                        android:layout_width="0dp"
-                        android:layout_height="1dp"
-                        android:layout_weight="1" />
-
-                    <ImageView
-                        android:id="@+id/widget_shuffle"
-                        android:layout_width="@dimen/widget_pill_button"
-                        android:layout_height="@dimen/widget_pill_button"
-                        android:background="@drawable/widget_crystal_disc_small"
-                        android:contentDescription="@string/shuffle_off"
-                        android:padding="5dp"
-                        android:src="@drawable/ic_widget_shuffle" />
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>

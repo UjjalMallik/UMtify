@@ -8,7 +8,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Bitmap
-import android.graphics.Rect
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.View
@@ -26,25 +25,29 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 
 /**
- * The home-screen widget: clear crystal glass with the artwork tile beside it.
+ * The 2×2 and 4×2 widgets: the square frosted card and its wide two-tier
+ * sibling, with the artwork as a tile inset beside the track.
  *
  * Two providers, [MediaWidgetSquare] and [MediaWidgetWide], so the picker offers
  * a square one and a full-width one — but they are the same widget, and both can
- * be resized across the whole range. What they differ in is the size they arrive
- * at. Which of the two layouts a given instance draws is decided from its
- * *measured* width ([WIDE_LAYOUT_MIN_DP]), not from which provider it came from,
- * so a square dragged out to four cells sets its title beside the artwork and
- * picks up the artist, like and progress, and a wide one squeezed back to two
- * floats its dock over the cover instead — rather than either being stuck with a
- * layout its size doesn't suit.
+ * be resized. Which layout a given instance draws is decided from its *measured*
+ * size, not from which provider it came from: the square one dragged out to four
+ * cells picks up the wide layout, and a wide one squeezed into a narrow column
+ * falls back to the square card rather than clipping its deck.
  *
  * Three layers, bottom to top: the artwork tile (`widget_art`), the glass face
  * (`widget_glass`, drawn by [MediaWidgetArt]) and the controls, which the layout
  * positions. The split matters — a `RemoteViews` image is stretched to whatever
  * size the host gives the view, and the host's idea of that size is a range, so
  * anything positioned *inside* a bitmap drifts into whatever is beside it. The
- * artwork is a view of its own, sized by the layout, and the text column is
- * padded clear of it at exactly its width.
+ * artwork is a view of its own, at the size the design gives it, the text column
+ * is weighted beside it, and the spectrum is either the square card's equalizer
+ * row or the wide card's full-width ribbon along the foot.
+ *
+ * Every transport key is a 3D crystal bubble (`widget_bubble_*`) with the glyph
+ * on top, so the shape is a vector rather than a bitmap and stays crisp at any
+ * host density. The seek bar and the spectrum are baked bitmaps because
+ * `RemoteViews` can give neither a thumb nor an animation.
  */
 abstract class MediaWidget : AppWidgetProvider() {
 
@@ -61,7 +64,7 @@ abstract class MediaWidget : AppWidgetProvider() {
         renderAsync(context, ids)
     }
 
-    /** Fires on every resize, which is a re-render: both bitmaps are size-specific. */
+    /** Fires on every resize, which is a re-render: every bitmap is size-specific. */
     override fun onAppWidgetOptionsChanged(
         context: Context,
         manager: AppWidgetManager,
@@ -90,8 +93,8 @@ abstract class MediaWidget : AppWidgetProvider() {
      * [goAsync] is what makes that legal — artwork may have to come off disk or
      * out of the network, and returning from `onUpdate` first would let the
      * process be killed mid-render. The deadline is well inside the window a
-     * broadcast gets; past it the widget keeps whatever it last drew, which is
-     * a better outcome than an ANR.
+     * broadcast gets; past it the widget keeps what it last drew, which is a
+     * better outcome than an ANR.
      */
     private fun renderAsync(context: Context, ids: IntArray) {
         val pending = goAsync()
@@ -109,24 +112,23 @@ abstract class MediaWidget : AppWidgetProvider() {
     companion object {
 
         /**
-         * The measured width at which the track is worth setting beside the
-         * artwork rather than floated over it.
+         * The measured width at which the wide layout is used.
          *
-         * The split layout spends 14dp on leading padding, at least 64dp on the
-         * artwork tile, 16dp of hard gap, and 130dp of deck — 38dp previous, the
-         * 54dp play pill and 38dp next with no room left for the spacers — so
-         * below roughly 236dp the transport would not fit.
-         *
-         * Set just above a four-cell span (250dp nominal) rather than at the
-         * midpoint between three cells and four: cells are not really 70dp on
-         * every launcher, and this is the smallest width at which every button
-         * keeps the size the design gives it. Below it the compact layout reads
-         * better than a split with a shrunken deck.
+         * The wide card spends 14dp of padding a side, the 104dp tile, the 14dp
+         * gap, and needs 136dp of deck for previous / play / next at their
+         * designed sizes (36 + 10 + 44 + 10 + 36). Anything narrower would clip
+         * the last key, and the host's idea of a four-cell span is not reliably
+         * 250dp — four cells is 282dp here so the widest instances the layout
+         * supports always have room, and narrower ones take the square card,
+         * which has its own, far smaller, transport.
          */
-        const val WIDE_LAYOUT_MIN_DP = 236
+        const val WIDE_LAYOUT_MIN_DP = 282
+
+        /** Below this the wide card's tile alone (104dp) would not fit vertically. */
+        private const val WIDE_LAYOUT_MIN_HEIGHT_DP = 130
 
         /**
-         * Redraws every placed widget of any kind, the 4×1 included.
+         * Redraws every placed widget of any kind, the 4×1 and vinyl included.
          *
          * Called by
          * [PlaybackService][com.music.bitchord.playback.PlaybackService] whenever
@@ -138,6 +140,7 @@ abstract class MediaWidget : AppWidgetProvider() {
         fun refresh(context: Context) {
             val app = context.applicationContext
             MediaWidgetPill.refresh(app)
+            CrystalVinylWidgetProvider.refresh(app)
             scope.launch {
                 val manager = runCatching { AppWidgetManager.getInstance(app) }.getOrNull() ?: return@launch
                 for ((provider, fallbackWidthDp) in PROVIDERS) {
@@ -213,8 +216,8 @@ abstract class MediaWidget : AppWidgetProvider() {
                     MediaWidgetArt.renderArt(context, snapshot.artworkUrl, size.art, key)
                 }
             }
-            // The face never touches the network — it needs the tile only for
-            // its colour and, on the square widget, for the dock's frost.
+            // The face never touches the network — it only needs the tile for
+            // the accent it washes the glass with.
             if (face == null) {
                 face = MediaWidgetArt.renderFace(
                     context = context,
@@ -227,17 +230,20 @@ abstract class MediaWidget : AppWidgetProvider() {
             lastFace[id] = face
             manager.push(id, views(context, id, snapshot, size, art, face))
 
-            // The spectrum only exists on the split layout, and only while
-            // something is actually playing: WidgetWave holds a ticker, so
-            // every path that isn't "playing, wide" has to stop it.
-            if (size.waveWidthPx > 0 && snapshot.isPlaying && snapshot.hasTrack) {
+            // The spectrum holds a ticker, so every path that isn't "playing,
+            // with room for it" has to stop it.
+            if (size.showWave && snapshot.isPlaying && snapshot.hasTrack) {
                 WidgetWave.play(
                     context = context,
                     id = id,
-                    layout = R.layout.widget_media_wide,
+                    layout = size.layout,
                     viewId = R.id.widget_wave,
                     widthPx = size.waveWidthPx,
                     heightPx = size.waveHeightPx,
+                    bars = size.waveBars,
+                    accent = MediaWidgetArt.accentOf(art),
+                    ribbon = size.waveRibbon,
+                    bottomCornerPx = size.waveCornerPx,
                 )
             } else {
                 WidgetWave.stop(id)
@@ -254,64 +260,57 @@ abstract class MediaWidget : AppWidgetProvider() {
             art: Bitmap?,
             face: Bitmap?,
         ): RemoteViews {
-            val layout =
-                if (size.wide) R.layout.widget_media_wide else R.layout.widget_media_compact
-            val views = RemoteViews(context.packageName, layout)
+            val views = RemoteViews(context.packageName, size.layout)
             art?.let { views.setImageViewBitmap(R.id.widget_art, it) }
             face?.let { views.setImageViewBitmap(R.id.widget_glass, it) }
 
+            val hasTrack = snapshot.hasTrack
             views.setTextViewText(
                 R.id.widget_title,
-                if (snapshot.hasTrack) {
-                    snapshot.title
+                if (hasTrack) snapshot.title else context.getString(R.string.widget_nothing_played),
+            )
+            views.setTextViewText(R.id.widget_artist, snapshot.artist)
+            views.setViewVisibility(
+                R.id.widget_artist,
+                if (hasTrack && size.showArtist && snapshot.artist.isNotBlank()) {
+                    View.VISIBLE
                 } else {
-                    context.getString(R.string.widget_nothing_played)
+                    View.GONE
                 },
             )
 
-            // Both layouts carry the title; only the wide one has the room for
-            // the artist, Like and the progress row.
+            bindWave(views, id, snapshot, size)
+            bindSeek(views, context, snapshot, size, art)
+            if (size.wide) bindProgress(views, snapshot, size)
+
+            // Shuffle, Repeat, and — on the wide card — Like. Each is given up
+            // rather than squeezed when the card is too narrow for it.
+            val keys = hasTrack && size.showKeys
+            views.setViewVisibility(R.id.widget_shuffle, if (keys) View.VISIBLE else View.GONE)
+            views.setImageViewResource(
+                R.id.widget_shuffle,
+                if (snapshot.shuffleEnabled) R.drawable.ic_widget_shuffle_on else R.drawable.ic_widget_shuffle,
+            )
+            views.setContentDescription(
+                R.id.widget_shuffle,
+                context.getString(if (snapshot.shuffleEnabled) R.string.shuffle_on else R.string.shuffle_off),
+            )
+            views.setViewVisibility(R.id.widget_repeat, if (keys) View.VISIBLE else View.GONE)
             if (size.wide) {
-                // The tile is a view of its own, not part of the face: it is
-                // drawn at the size the bitmap was composited and only its
-                // origin is set here, while the deck is padded past it. Both are
-                // px insets from the same card edge, so they move together.
-                views.setViewPadding(
-                    R.id.widget_art,
-                    size.artPad.left,
-                    size.artPad.top,
-                    size.artPad.right,
-                    size.artPad.bottom,
-                )
-                views.setViewPadding(
-                    R.id.widget_deck,
-                    (size.deckPaddingDp * context.resources.displayMetrics.density).roundToInt(),
-                    0,
-                    0,
-                    0,
-                )
-                views.setTextViewText(R.id.widget_artist, snapshot.artist)
                 views.setViewVisibility(
-                    R.id.widget_artist,
-                    if (snapshot.artist.isBlank() || !size.roomy) View.GONE else View.VISIBLE,
+                    R.id.widget_like,
+                    if (keys && snapshot.canLike) View.VISIBLE else View.GONE,
                 )
-                bindLike(views, context, snapshot)
-                bindProgress(views, snapshot, size.tall)
-                // Zero, not just "never drawn": a paused widget must not leave
-                // the last frame of the spectrum behind. While playing, the
-                // frame the ticker is on rides along — a full update drops the
-                // bitmap a partial one pushed, and the progress republish must
-                // not blank the spectrum for a tick.
-                val playing = snapshot.isPlaying && snapshot.hasTrack
-                if (playing) {
-                    WidgetWave.frameFor(id, size.waveWidthPx, size.waveHeightPx)
-                        ?.let { views.setImageViewBitmap(R.id.widget_wave, it) }
-                }
-                views.setImageAlpha(
-                    R.id.widget_wave,
-                    if (playing) ALPHA_ENABLED else ALPHA_HIDDEN,
+                views.setImageViewResource(
+                    R.id.widget_like,
+                    if (snapshot.isLiked) R.drawable.ic_widget_heart_filled else R.drawable.ic_widget_heart,
+                )
+                views.setContentDescription(
+                    R.id.widget_like,
+                    context.getString(if (snapshot.isLiked) R.string.remove_from_liked else R.string.like),
                 )
             }
+            WidgetRepeat.bind(views, context, snapshot.repeatMode)
 
             views.setImageViewResource(
                 R.id.widget_toggle,
@@ -319,9 +318,7 @@ abstract class MediaWidget : AppWidgetProvider() {
             )
             views.setContentDescription(
                 R.id.widget_toggle,
-                context.getString(
-                    if (snapshot.isPlaying) R.string.widget_pause else R.string.widget_play,
-                ),
+                context.getString(if (snapshot.isPlaying) R.string.widget_pause else R.string.widget_play),
             )
 
             // On the root, not on widget_glass: the root is the last view offered
@@ -331,7 +328,7 @@ abstract class MediaWidget : AppWidgetProvider() {
             val open = openPlayer(context)
             views.setOnClickPendingIntent(R.id.widget_root, open)
 
-            if (snapshot.hasTrack) {
+            if (hasTrack) {
                 views.setImageAlpha(R.id.widget_toggle, ALPHA_ENABLED)
                 // Dimmed at the ends of the queue, matching what the media
                 // notification does with the same commands unavailable.
@@ -343,100 +340,102 @@ abstract class MediaWidget : AppWidgetProvider() {
                     R.id.widget_next,
                     if (snapshot.hasNext) ALPHA_ENABLED else ALPHA_DISABLED,
                 )
-                views.setOnClickPendingIntent(
-                    R.id.widget_toggle,
-                    MediaWidgetActions.pendingIntent(context, MediaWidgetActions.ACTION_TOGGLE),
-                )
-                views.setOnClickPendingIntent(
-                    R.id.widget_previous,
-                    MediaWidgetActions.pendingIntent(context, MediaWidgetActions.ACTION_PREVIOUS),
-                )
-                views.setOnClickPendingIntent(
-                    R.id.widget_next,
-                    MediaWidgetActions.pendingIntent(context, MediaWidgetActions.ACTION_NEXT),
-                )
+                for ((button, action) in size.actions) {
+                    views.setOnClickPendingIntent(button, MediaWidgetActions.pendingIntent(context, action))
+                }
             } else {
                 // Nothing has ever played, so there is nothing to control. Dim the
                 // transport and send every button to the app: a control that opens
                 // the library is more use than one that does nothing at all.
-                for (button in TRANSPORT) {
+                for ((button, _) in size.actions) {
                     views.setImageAlpha(button, ALPHA_DISABLED)
                     views.setOnClickPendingIntent(button, open)
                 }
-                if (size.wide) views.setOnClickPendingIntent(R.id.widget_like, open)
             }
             return views
         }
 
-        /** The Like disc: hidden where liking isn't offered, and a toggle otherwise. */
-        private fun bindLike(
+        /**
+         * The spectrum. Zero alpha when paused, not just "never drawn": a paused
+         * widget must not leave the last frame behind. While playing, the frame
+         * the ticker is on rides along — a full update drops the bitmap a
+         * partial one pushed, and the progress republish must not blank the
+         * spectrum for a tick.
+         */
+        private fun bindWave(
+            views: RemoteViews,
+            id: Int,
+            snapshot: MediaWidgetSnapshot,
+            size: WidgetSize,
+        ) {
+            views.setViewVisibility(R.id.widget_wave, if (size.showWave) View.VISIBLE else View.GONE)
+            val playing = size.showWave && snapshot.isPlaying && snapshot.hasTrack
+            if (playing) {
+                WidgetWave.frameFor(id, size.waveWidthPx, size.waveHeightPx)
+                    ?.let { views.setImageViewBitmap(R.id.widget_wave, it) }
+            }
+            views.setImageAlpha(R.id.widget_wave, if (playing) ALPHA_ENABLED else ALPHA_HIDDEN)
+        }
+
+        /** The crystal seek bar, drawn as a bitmap because it carries a thumb. */
+        private fun bindSeek(
             views: RemoteViews,
             context: Context,
             snapshot: MediaWidgetSnapshot,
+            size: WidgetSize,
+            art: Bitmap?,
         ) {
-            views.setViewVisibility(
-                R.id.widget_like,
-                if (snapshot.canLike) View.VISIBLE else View.INVISIBLE,
-            )
-            views.setImageViewResource(
-                R.id.widget_like,
-                if (snapshot.isLiked) R.drawable.ic_widget_heart_filled else R.drawable.ic_widget_heart,
-            )
-            views.setContentDescription(
-                R.id.widget_like,
-                context.getString(
-                    if (snapshot.isLiked) R.string.remove_from_liked else R.string.like,
-                ),
-            )
+            val show = size.showSeek && snapshot.hasTrack
+            views.setViewVisibility(R.id.widget_seek, if (show) View.VISIBLE else View.GONE)
+            if (!show) return
+            val duration = snapshot.durationMs
+            val fraction = if (duration > 0L) {
+                (snapshot.positionMs.coerceIn(0L, duration).toFloat() / duration)
+            } else {
+                null
+            }
+            WidgetSeek.render(
+                context = context,
+                widthPx = size.seekWidthPx,
+                heightPx = size.seekHeightPx,
+                fraction = fraction,
+                accent = MediaWidgetArt.accentOf(art),
+            )?.let { views.setImageViewBitmap(R.id.widget_seek, it) }
         }
 
         /**
-         * The progress row: a live elapsed clock, a static length, and the bar.
+         * The wide card's timestamps: a live elapsed clock and the track's length.
          *
          * The clock is a [android.widget.Chronometer] rather than text so it
          * ticks between widget pushes — RemoteViews cannot animate anything, but
-         * the host runs a Chronometer itself. The bar is only as fresh as the
-         * last push; the service republishes every so often while playing (see
-         * `PlaybackService.reportProgress`) and the clock covers the rest.
-         *
-         * [tall] is false on a card too short to hold all three rows. The deck
-         * cannot shrink its type, so the row goes rather than the transport
-         * being clipped.
+         * the host runs a Chronometer itself. The seek bar is only as fresh as
+         * the last push; the service republishes every so often while playing
+         * (see `PlaybackService.reportProgress`) and the clock covers the rest.
          */
-        private fun bindProgress(views: RemoteViews, snapshot: MediaWidgetSnapshot, tall: Boolean) {
+        private fun bindProgress(
+            views: RemoteViews,
+            snapshot: MediaWidgetSnapshot,
+            size: WidgetSize,
+        ) {
+            val visible = size.showSeek && snapshot.hasTrack
             views.setViewVisibility(
-                R.id.widget_progress_block,
-                if (tall) View.VISIBLE else View.GONE,
+                R.id.widget_progress_row,
+                if (visible) View.VISIBLE else View.GONE,
             )
-            if (!tall) return
-
+            if (!visible) return
             val duration = snapshot.durationMs
-            val position = snapshot.positionMs.coerceIn(0L, duration.coerceAtLeast(0L))
             val hasDuration = duration > 0L
-
+            val position = snapshot.positionMs.coerceIn(0L, duration.coerceAtLeast(0L))
             views.setTextViewText(
                 R.id.widget_total,
-                if (hasDuration) formatTime(duration) else null,
+                if (hasDuration) formatTime(duration) else "",
             )
-            if (hasDuration) {
-                val fraction = (position * PROGRESS_MAX / duration).toInt().coerceIn(0, PROGRESS_MAX)
-                views.setProgressBar(R.id.widget_progress, PROGRESS_MAX, fraction, false)
-                views.setViewVisibility(R.id.widget_progress, View.VISIBLE)
-            } else {
-                views.setViewVisibility(R.id.widget_progress, View.INVISIBLE)
-            }
-
-            if (snapshot.hasTrack) {
-                views.setChronometer(
-                    R.id.widget_elapsed,
-                    SystemClock.elapsedRealtime() - position,
-                    null,
-                    snapshot.isPlaying && hasDuration,
-                )
-                views.setViewVisibility(R.id.widget_elapsed, View.VISIBLE)
-            } else {
-                views.setViewVisibility(R.id.widget_elapsed, View.GONE)
-            }
+            views.setChronometer(
+                R.id.widget_elapsed,
+                SystemClock.elapsedRealtime() - position,
+                null,
+                snapshot.isPlaying && hasDuration,
+            )
         }
 
         private fun formatTime(ms: Long): String {
@@ -492,24 +491,31 @@ abstract class MediaWidget : AppWidgetProvider() {
 
         private class WidgetSize(
             val wide: Boolean,
+            val layout: Int,
             val face: FaceSpec,
             val art: ArtSpec,
-            /** Where the deck starts, in dp from the row's own start. */
-            val deckPaddingDp: Float,
-            /**
-             * Where the artwork tile is drawn from, in px: the insets that put
-             * the full-card ImageView's 1:1 bitmap in the right place. Empty on
-             * the compact layout, whose artwork is the card.
-             */
-            val artPad: Rect,
-            /** Enough height for the title and its artist line. */
-            val roomy: Boolean,
-            /** Enough height for the progress row and the spectrum as well. */
-            val tall: Boolean,
-            /** The spectrum view's width in px; 0 where the layout has none. */
+            /** Enough width in the deck for the artist line. */
+            val showArtist: Boolean,
+            /** Enough height for the seek bar. */
+            val showSeek: Boolean,
+            /** Enough height for the spectrum. */
+            val showWave: Boolean,
+            /** Enough width for Shuffle, Repeat and Like without crowding transport. */
+            val showKeys: Boolean,
+            /** The spectrum view's width in px. */
             val waveWidthPx: Int,
-            /** The spectrum view's height in px; 0 where the layout has none. */
             val waveHeightPx: Int,
+            /** The design's bar count: the square card's 24, the wide ribbon's 40. */
+            val waveBars: Int,
+            /** Whether the wide card's flowing crest is drawn over the bars. */
+            val waveRibbon: Boolean,
+            /** The card's bottom radius, so the ribbon's corners follow it. */
+            val waveCornerPx: Float,
+            /** The seek view's width in px. */
+            val seekWidthPx: Int,
+            val seekHeightPx: Int,
+            /** Which control ids this layout carries, and what each one sends. */
+            val actions: List<Pair<Int, String>>,
         )
 
         /**
@@ -521,11 +527,6 @@ abstract class MediaWidget : AppWidgetProvider() {
          * Portrait wants min-width and max-height, landscape the reverse. Read
          * for the orientation in force now, so what is drawn matches what is on
          * screen.
-         *
-         * The artwork tile's edge is the card's inner height — the artwork fills
-         * the card vertically, a square, which is what the layout asks for with
-         * `adjustViewBounds`. It is capped by the width the deck needs, so on a
-         * narrow instance the tile gives way rather than the transport.
          */
         private fun measure(
             context: Context,
@@ -551,7 +552,7 @@ abstract class MediaWidget : AppWidgetProvider() {
                 },
             )?.takeIf { it > 0 } ?: FALLBACK_HEIGHT_DP
 
-            val wide = widthDp >= WIDE_LAYOUT_MIN_DP
+            val wide = widthDp >= WIDE_LAYOUT_MIN_DP && heightDp >= WIDE_LAYOUT_MIN_HEIGHT_DP
             val resources = context.resources
             val density = resources.displayMetrics.density
             val rawWidth = widthDp * density
@@ -565,102 +566,94 @@ abstract class MediaWidget : AppWidgetProvider() {
             val widthPx = (rawWidth * scale).roundToInt().coerceAtLeast(1)
             val heightPx = (rawHeight * scale).roundToInt().coerceAtLeast(1)
 
-            fun scaled(id: Int): Float = resources.getDimension(id) * scale
-            fun unscaled(id: Int): Float = resources.getDimension(id)
-
-            val radius = scaled(R.dimen.widget_corner_radius)
-            val rim = scaled(R.dimen.widget_glass_rim)
+            val textScale = resources.configuration.fontScale.coerceAtLeast(1f)
 
             if (wide) {
-                val paddingDp = unscaled(R.dimen.widget_wide_padding) / density
-                val gapDp = unscaled(R.dimen.widget_wide_gap) / density
-                val availableDp = (heightDp - 2f * paddingDp).coerceAtLeast(MIN_ART_DP)
-                val widthCapDp = widthDp - 2f * paddingDp - gapDp - MIN_DECK_DP
-                val artDp = minOf(availableDp, widthCapDp).coerceAtLeast(MIN_ART_DP)
-                val artPx = (artDp * density).roundToInt().coerceAtLeast(1)
-                // The rows are hidden rather than clipped, so the height the
-                // deck needs grows with the user's font size, not just with dp.
-                val textScale = resources.configuration.fontScale.coerceAtLeast(1f)
-
-                // The tile is drawn at its own size, so only its origin matters;
-                // centring it vertically in a card taller than the tile is what
-                // the top inset is for. In real px, not bitmap px: this places a
-                // view in the host, so a scaled-down bitmap on a very large card
-                // must not shrink the inset with it.
-                val padPx = (paddingDp * density).roundToInt()
-                val artPadPx = (artDp * density).roundToInt()
-                val gapPx = (gapDp * density).roundToInt()
-                val artPad = Rect(
-                    padPx,
-                    ((heightDp * density - artPadPx) / 2f).roundToInt().coerceAtLeast(0),
-                    0,
-                    0,
-                )
-
+                val padPx = resources.getDimensionPixelSize(R.dimen.widget_wide_padding)
+                val gapPx = resources.getDimensionPixelSize(R.dimen.widget_wide_gap)
+                val artPx = resources.getDimensionPixelSize(R.dimen.widget_wide_art)
+                val deckPx = (rawWidth - 2 * padPx - artPx - gapPx).roundToInt().coerceAtLeast(0)
+                val timePx = (TIME_SLOT_DP * density).roundToInt()
+                val radiusPx = resources.getDimensionPixelSize(R.dimen.widget_wide_radius)
+                val keyRowPx = listOf(
+                    R.dimen.widget_wide_key to 2,
+                    R.dimen.widget_wide_prev to 2,
+                    R.dimen.widget_wide_play to 1,
+                ).sumOf { (dimen, count) -> resources.getDimensionPixelSize(dimen) * count } +
+                    resources.getDimensionPixelSize(R.dimen.widget_wide_button_gap) * 4
                 return WidgetSize(
                     wide = true,
+                    layout = R.layout.widget_media_wide,
                     face = FaceSpec(
                         widthPx = widthPx,
                         heightPx = heightPx,
-                        radiusPx = radius,
-                        rimPx = rim,
+                        radiusPx = minOf(radiusPx * scale, minOf(widthPx, heightPx) / 2f),
+                        rimPx = resources.getDimension(R.dimen.widget_glass_rim) * scale,
                     ),
                     art = ArtSpec(
                         widthPx = artPx,
                         heightPx = artPx,
-                        cornerPx = unscaled(R.dimen.widget_wide_art_corner),
-                        rimPx = unscaled(R.dimen.widget_wide_art_rim),
+                        cornerPx = resources.getDimension(R.dimen.widget_wide_art_corner),
+                        rimPx = resources.getDimension(R.dimen.widget_wide_art_rim),
                     ),
-                    // Only the tile's own width: the 16dp gap is a layout margin
-                    // on the deck now, so it is already outside this padding.
-                    deckPaddingDp = artDp,
-                    artPad = artPad,
-                    roomy = availableDp >= ROOMY_DECK_DP * textScale,
-                    tall = availableDp >= TALL_DECK_DP * textScale,
-                    // The deck spans the card's inner width less the tile and
-                    // the gap; the spectrum fills it edge to edge.
-                    waveWidthPx = (widthDp * density).roundToInt()
-                        .minus(2 * padPx)
-                        .minus(artPadPx)
-                        .minus(gapPx)
-                        .coerceAtLeast(0),
-                    waveHeightPx = resources.getDimensionPixelSize(R.dimen.widget_wave_height),
+                    showArtist = deckPx >= (ARTIST_DECK_DP * density).roundToInt(),
+                    showSeek = heightDp >= WIDE_PLAIN_MIN_HEIGHT_DP,
+                    showWave = heightDp >= WIDE_RIBBON_MIN_HEIGHT_DP,
+                    showKeys = deckPx >= keyRowPx,
+                    // The ribbon spans the card edge to edge, under the tile as
+                    // well as the deck.
+                    waveWidthPx = rawWidth.toInt().coerceAtLeast(1),
+                    waveHeightPx = resources.getDimensionPixelSize(R.dimen.widget_wide_wave_height),
+                    waveBars = WIDE_WAVE_BARS,
+                    waveRibbon = true,
+                    waveCornerPx = radiusPx.toFloat(),
+                    seekWidthPx = (deckPx - 2 * timePx).coerceAtLeast(1),
+                    seekHeightPx = resources.getDimensionPixelSize(R.dimen.widget_wide_seek_height),
+                    actions = WIDE_ACTIONS,
                 )
             }
 
-            val margin = scaled(R.dimen.widget_dock_margin)
-            val dockHeight = scaled(R.dimen.widget_dock_height)
-            val dockBottom = (heightPx - margin).coerceAtLeast(0f)
+            val padPx = resources.getDimensionPixelSize(R.dimen.widget_card_padding)
+            val artPx = resources.getDimensionPixelSize(R.dimen.widget_card_art)
+            val innerPx = (rawWidth - 2 * padPx).roundToInt().coerceAtLeast(1)
+            // The top row is the tile or the two text lines, whichever is taller;
+            // at a large font scale the text outgrows the fixed tile.
+            val artRowDp = maxOf(
+                resources.getDimension(R.dimen.widget_card_art) / density,
+                TEXT_BLOCK_DP * textScale,
+            )
+            val transportInsetDp =
+                resources.getDimension(R.dimen.widget_card_transport_inset) / density
             return WidgetSize(
                 wide = false,
+                layout = R.layout.widget_media_compact,
                 face = FaceSpec(
                     widthPx = widthPx,
                     heightPx = heightPx,
-                    radiusPx = radius,
-                    rimPx = rim,
-                    dock = Rect(
-                        margin.roundToInt(),
-                        (dockBottom - dockHeight).coerceAtLeast(0f).roundToInt(),
-                        (widthPx - margin).roundToInt(),
-                        dockBottom.roundToInt(),
+                    radiusPx = minOf(
+                        resources.getDimension(R.dimen.widget_card_radius) * scale,
+                        minOf(widthPx, heightPx) / 2f,
                     ),
-                    dockCornerPx = scaled(R.dimen.widget_dock_radius),
-                    dockRimPx = scaled(R.dimen.widget_dock_rim),
+                    rimPx = resources.getDimension(R.dimen.widget_glass_rim) * scale,
                 ),
-                // Full bleed: the tile is the card, rounded to the card's own
-                // radius so its edge sits under the rim rather than inside it.
                 art = ArtSpec(
-                    widthPx = widthPx,
-                    heightPx = heightPx,
-                    cornerPx = unscaled(R.dimen.widget_corner_radius),
-                    rimPx = 0f,
+                    widthPx = artPx,
+                    heightPx = artPx,
+                    cornerPx = resources.getDimension(R.dimen.widget_card_art_corner),
+                    rimPx = resources.getDimension(R.dimen.widget_card_art_rim),
                 ),
-                deckPaddingDp = 0f,
-                artPad = Rect(),
-                roomy = true,
-                tall = true,
-                waveWidthPx = 0,
-                waveHeightPx = 0,
+                showArtist = widthDp >= KEYS_MIN_WIDTH_DP,
+                showSeek = heightDp.toFloat() >= artRowDp + transportInsetDp + SEEK_BLOCK_DP,
+                showWave = heightDp.toFloat() >= artRowDp + transportInsetDp + WAVE_BLOCK_DP,
+                showKeys = widthDp >= KEYS_MIN_WIDTH_DP,
+                waveWidthPx = innerPx,
+                waveHeightPx = resources.getDimensionPixelSize(R.dimen.widget_card_wave_height),
+                waveBars = CARD_WAVE_BARS,
+                waveRibbon = false,
+                waveCornerPx = 0f,
+                seekWidthPx = innerPx,
+                seekHeightPx = resources.getDimensionPixelSize(R.dimen.widget_card_seek_height),
+                actions = CARD_ACTIONS,
             )
         }
 
@@ -671,20 +664,22 @@ abstract class MediaWidget : AppWidgetProvider() {
             MediaWidgetWide::class.java to WIDE_WIDTH_DP,
         )
 
-        private val TRANSPORT =
-            intArrayOf(R.id.widget_previous, R.id.widget_toggle, R.id.widget_next)
+        private val CARD_ACTIONS = listOf(
+            R.id.widget_previous to MediaWidgetActions.ACTION_PREVIOUS,
+            R.id.widget_toggle to MediaWidgetActions.ACTION_TOGGLE,
+            R.id.widget_next to MediaWidgetActions.ACTION_NEXT,
+            R.id.widget_shuffle to MediaWidgetActions.ACTION_SHUFFLE,
+            R.id.widget_repeat to MediaWidgetActions.ACTION_REPEAT,
+        )
 
-        /** The smallest the artwork tile is allowed to get before the deck gives way. */
-        private const val MIN_ART_DP = 64f
-
-        /** Below this the deck's three transport buttons stop fitting. */
-        private const val MIN_DECK_DP = 132f
-
-        /** Below this the artist line is dropped rather than clipped. */
-        private const val ROOMY_DECK_DP = 90f
-
-        /** Below this the progress row and the spectrum are dropped rather than clipped. */
-        private const val TALL_DECK_DP = 118f
+        private val WIDE_ACTIONS = listOf(
+            R.id.widget_previous to MediaWidgetActions.ACTION_PREVIOUS,
+            R.id.widget_toggle to MediaWidgetActions.ACTION_TOGGLE,
+            R.id.widget_next to MediaWidgetActions.ACTION_NEXT,
+            R.id.widget_shuffle to MediaWidgetActions.ACTION_SHUFFLE,
+            R.id.widget_repeat to MediaWidgetActions.ACTION_REPEAT,
+            R.id.widget_like to MediaWidgetActions.ACTION_LIKE,
+        )
 
         /**
          * Renders run on a process-wide scope rather than one tied to a receiver:
@@ -714,8 +709,34 @@ abstract class MediaWidget : AppWidgetProvider() {
 
         private const val MAX_BITMAP_PX = 1_200f
 
-        /** Total the progress bar is scaled to, so a fraction fits in an Int. */
-        private const val PROGRESS_MAX = 1_000
+        // ---- the square card's height budget, in dp ----
+
+        /** Title plus artist at 1× font scale, the taller half of the 12dp inset row. */
+        private const val TEXT_BLOCK_DP = 46f
+
+        /** The equalizer row plus its margin, above the seek bar. */
+        private const val WAVE_BLOCK_DP = 24f
+
+        /** Just the seek bar and its margin, below the equalizer. */
+        private const val SEEK_BLOCK_DP = 8f
+
+        /** Width at which the text column is worth more than 64dp: artist and keys live. */
+        private const val KEYS_MIN_WIDTH_DP = 150
+
+        /** Enough deck for a single artist line on the wide card. */
+        private const val ARTIST_DECK_DP = 90f
+
+        /** The wide card's height with the progress row but no ribbon yet. */
+        private const val WIDE_PLAIN_MIN_HEIGHT_DP = 132
+
+        /** The wide card's height with the full-width ribbon along the foot. */
+        private const val WIDE_RIBBON_MIN_HEIGHT_DP = 150
+
+        /** The width the wide card's two timestamps take together. */
+        private const val TIME_SLOT_DP = 34f
+
+        private const val CARD_WAVE_BARS = 24
+        private const val WIDE_WAVE_BARS = 40
 
         private const val ALPHA_ENABLED = 255
         private const val ALPHA_DISABLED = 90
@@ -733,7 +754,8 @@ abstract class MediaWidget : AppWidgetProvider() {
 /** Grid spans, by the launcher's own arithmetic: a span of n cells is 70n − 30 dp. */
 private const val SQUARE_WIDTH_DP = 110
 
-private const val WIDE_WIDTH_DP = 250
+/** Four cells at the same arithmetic; also the width the wide layout is designed for. */
+private const val WIDE_WIDTH_DP = 320
 
 private const val FALLBACK_HEIGHT_DP = 110
 

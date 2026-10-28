@@ -14,6 +14,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionToken
 import com.music.bitchord.playback.ACTION_TOGGLE_FAVORITE
+import com.music.bitchord.playback.ACTION_TOGGLE_REPEAT
 import com.music.bitchord.playback.ACTION_TOGGLE_SHUFFLE
 import com.music.bitchord.playback.PlaybackService
 import java.util.concurrent.atomic.AtomicBoolean
@@ -109,6 +110,12 @@ class MediaWidgetActions : BroadcastReceiver() {
                 SessionCommand(ACTION_TOGGLE_SHUFFLE, Bundle.EMPTY),
                 Bundle.EMPTY,
             )
+            // The cycle itself lives in the service, which is the only place
+            // that persists it and sees the mode it is leaving.
+            ACTION_REPEAT -> sendCustomCommand(
+                SessionCommand(ACTION_TOGGLE_REPEAT, Bundle.EMPTY),
+                Bundle.EMPTY,
+            )
         }
     }
 
@@ -124,6 +131,7 @@ class MediaWidgetActions : BroadcastReceiver() {
         const val ACTION_PREVIOUS = "com.music.bitchord.widget.PREVIOUS"
         const val ACTION_LIKE = "com.music.bitchord.widget.LIKE"
         const val ACTION_SHUFFLE = "com.music.bitchord.widget.SHUFFLE"
+        const val ACTION_REPEAT = "com.music.bitchord.widget.REPEAT"
 
         fun pendingIntent(context: Context, action: String): PendingIntent =
             PendingIntent.getBroadcast(
@@ -137,7 +145,14 @@ class MediaWidgetActions : BroadcastReceiver() {
             )
 
         private val ACTIONS =
-            listOf(ACTION_TOGGLE, ACTION_NEXT, ACTION_PREVIOUS, ACTION_LIKE, ACTION_SHUFFLE)
+            listOf(
+                ACTION_TOGGLE,
+                ACTION_NEXT,
+                ACTION_PREVIOUS,
+                ACTION_LIKE,
+                ACTION_SHUFFLE,
+                ACTION_REPEAT,
+            )
 
         private const val REQUEST_BASE = 100
 

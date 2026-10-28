@@ -1,33 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The 2×2 widget: the album art full-bleed inside the crystal frame, with a
-  floating dock across the foot of it.
+  The 2×2 widget: the reference's square frosted glass card.
 
-  Three layers: the artwork (`widget_art`), the glass (`widget_glass` — the
-  clear pane, its wet sheen, the rim and the dock's frost, all drawn by
-  MediaWidgetArt) and the dock's contents, which the layout places. The dock has
-  no background of its own: the glass underneath it *is* the dock.
+  Three bands inside a 12dp inset: the 52dp artwork tile with the title and
+  artist beside it, the 24-bar crystal equalizer over the seek bar, and the
+  transport pinned to the foot — a small Shuffle and Repeat in the two bottom
+  corners with previous / play / next tightly centred between them.
 
-  The dock is not clickable itself, so its empty space falls through to the root
-  and opens the app, like any other pixel of the artwork.
+  The transport is a sibling anchored to the bottom rather than the last row of
+  the column: a short card then loses the equalizer first, via
+  MediaWidget's height rule, instead of clipping the buttons. The column's
+  bottom padding keeps the art and wave clear of it.
 
-  The keys are fixed 24dp discs with weight-1 spacers between them rather than
-  weight-1 keys: a circle given a weighted width is drawn as an oval, and two
-  discs plus the 34dp play pill are the most that fit the dock's smallest card.
+  Everything except the artwork is glass the provider bakes or vectors it
+  points at; the only bitmap set at runtime is the tile, the face and the
+  equalizer frame.
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/widget_glass_background">
-
-    <ImageView
-        android:id="@+id/widget_art"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:importantForAccessibility="no"
-        android:scaleType="fitXY"
-        android:src="@drawable/widget_art_placeholder_compact" />
 
     <ImageView
         android:id="@+id/widget_glass"
@@ -37,76 +30,155 @@
         android:scaleType="fitXY" />
 
     <LinearLayout
-        android:id="@+id/widget_dock"
         android:layout_width="match_parent"
-        android:layout_height="@dimen/widget_dock_height"
-        android:layout_gravity="bottom"
-        android:layout_margin="@dimen/widget_dock_margin"
-        android:gravity="center_horizontal"
+        android:layout_height="match_parent"
         android:orientation="vertical"
-        android:paddingStart="4dp"
-        android:paddingTop="4dp"
-        android:paddingEnd="4dp"
-        android:paddingBottom="4dp">
+        android:paddingStart="@dimen/widget_card_padding"
+        android:paddingTop="@dimen/widget_card_padding"
+        android:paddingEnd="@dimen/widget_card_padding"
+        android:paddingBottom="@dimen/widget_card_transport_inset">
 
-        <TextView
-            android:id="@+id/widget_title"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="2dp"
-            android:ellipsize="end"
-            android:fontFamily="@font/sf_pro_display_semibold"
-            android:gravity="center_horizontal"
-            android:includeFontPadding="false"
-            android:maxLines="1"
-            android:shadowColor="#99000000"
-            android:shadowDy="1"
-            android:shadowRadius="4"
-            android:textColor="#FFFFFFFF"
-            android:textSize="12.5sp" />
-
+        <!-- Tile, then the track. -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="@dimen/widget_compact_button"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:id="@+id/widget_art"
+                android:layout_width="@dimen/widget_card_art"
+                android:layout_height="@dimen/widget_card_art"
+                android:contentDescription="@string/widget_artwork"
+                android:scaleType="fitXY"
+                android:src="@drawable/widget_art_placeholder_compact" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/widget_card_gap"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/widget_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="@font/sf_pro_display_semibold"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:shadowColor="#99000000"
+                    android:shadowDy="1"
+                    android:shadowRadius="4"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="14sp" android:text="@string/widget_preview_title" />
+
+                <TextView
+                    android:id="@+id/widget_artist"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:ellipsize="end"
+                    android:fontFamily="@font/sf_pro_display_regular"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:shadowColor="#99000000"
+                    android:shadowDy="1"
+                    android:shadowRadius="4"
+                    android:textColor="#BFFFFFFF"
+                    android:textSize="11.5sp" android:text="@string/widget_preview_artist" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- The equalizer across the full inner width, then the seek bar. -->
+        <ImageView
+            android:id="@+id/widget_wave"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/widget_card_wave_height"
+            android:layout_marginTop="6dp"
+            android:importantForAccessibility="no"
+            android:scaleType="fitXY" />
+
+        <ImageView
+            android:id="@+id/widget_seek"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/widget_card_seek_height"
+            android:layout_marginTop="2dp"
+            android:importantForAccessibility="no"
+            android:scaleType="fitXY" />
+    </LinearLayout>
+
+    <!-- The transport, pinned to the foot so it can never be clipped. -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/widget_card_transport"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="@dimen/widget_card_padding"
+        android:layout_marginEnd="@dimen/widget_card_padding"
+        android:layout_marginBottom="@dimen/widget_card_padding">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_gravity="center"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
             <ImageView
                 android:id="@+id/widget_previous"
-                android:layout_width="@dimen/widget_compact_disc"
-                android:layout_height="@dimen/widget_compact_disc"
-                android:background="@drawable/widget_crystal_ring_small"
+                android:layout_width="@dimen/widget_card_prev"
+                android:layout_height="@dimen/widget_card_prev"
+                android:background="@drawable/widget_bubble_24"
                 android:contentDescription="@string/widget_previous"
-                android:padding="4dp"
+                android:padding="6.5dp"
                 android:src="@drawable/ic_widget_previous" />
 
             <FrameLayout
-                android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1" />
+                android:layout_width="@dimen/widget_card_transport_gap"
+                android:layout_height="1dp" />
 
             <ImageView
                 android:id="@+id/widget_toggle"
-                android:layout_width="@dimen/widget_compact_play_width"
-                android:layout_height="@dimen/widget_compact_play_height"
-                android:background="@drawable/widget_crystal_pill_compact"
+                android:layout_width="@dimen/widget_card_play"
+                android:layout_height="@dimen/widget_card_play"
+                android:background="@drawable/widget_bubble_30"
                 android:contentDescription="@string/widget_play"
-                android:padding="3dp"
+                android:padding="8dp"
                 android:src="@drawable/ic_widget_play" />
 
             <FrameLayout
-                android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1" />
+                android:layout_width="@dimen/widget_card_transport_gap"
+                android:layout_height="1dp" />
 
             <ImageView
                 android:id="@+id/widget_next"
-                android:layout_width="@dimen/widget_compact_disc"
-                android:layout_height="@dimen/widget_compact_disc"
-                android:background="@drawable/widget_crystal_ring_small"
+                android:layout_width="@dimen/widget_card_prev"
+                android:layout_height="@dimen/widget_card_prev"
+                android:background="@drawable/widget_bubble_24"
                 android:contentDescription="@string/widget_next"
-                android:padding="4dp"
+                android:padding="6.5dp"
                 android:src="@drawable/ic_widget_next" />
         </LinearLayout>
-    </LinearLayout>
+
+        <ImageView
+            android:id="@+id/widget_shuffle"
+            android:layout_width="@dimen/widget_card_key"
+            android:layout_height="@dimen/widget_card_key"
+            android:layout_gravity="start|center_vertical"
+            android:background="@drawable/widget_bubble_20"
+            android:contentDescription="@string/shuffle_off"
+            android:padding="5dp"
+            android:src="@drawable/ic_widget_shuffle" />
+
+        <ImageView
+            android:id="@+id/widget_repeat"
+            android:layout_width="@dimen/widget_card_key"
+            android:layout_height="@dimen/widget_card_key"
+            android:layout_gravity="end|center_vertical"
+            android:background="@drawable/widget_bubble_20"
+            android:contentDescription="@string/widget_repeat_all"
+            android:padding="5dp"
+            android:src="@drawable/ic_widget_repeat" />
+    </FrameLayout>
 </FrameLayout>
