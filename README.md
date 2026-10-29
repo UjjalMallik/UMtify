@@ -110,19 +110,20 @@ Audio details are shown in a compact glassmorphic pill directly below the cover 
 
 ## 🚀 Download & Releases
 
-**Every push to `main`** builds an optimized **arm64-v8a** APK in **GitHub Actions** and keeps it as a downloadable artifact on the run page — a push never publishes a release.
+**Every push to `main`** builds an optimized **arm64-v8a** APK in **GitHub Actions** and keeps it as the **`UMtify-arm64-v8a`** artifact on the run page. Those snapshot builds report their version as `dev` and never publish a release.
 
-**Official versioned releases** are published to **[Releases](https://github.com/UjjalMallik/UMtify/releases)** on demand:
+**Official releases** are published to **[Releases](https://github.com/UjjalMallik/UMtify/releases)** on demand:
 
 1. Open the **Android Production APK** workflow on the [Actions](https://github.com/UjjalMallik/UMtify/actions) tab.
 2. Click **Run workflow** and set:
-   - `create_release` — ✅ publish to GitHub Releases
-   - `version_name` — e.g. `1.0.7`
-   - `version_code` — e.g. `7`
+   - `version_name` — the visible release version, e.g. `1.0` or `1.1`
    - `release_notes` — optional changelog (auto-generated if left blank)
-3. Run it — or simply push a **`v*`** tag, which publishes a release from the tag name.
+   - `keep_old_releases` — leave off to keep only the newest previous release
+3. Run it — or simply push a **`v*`** tag, which publishes a release named after the tag.
 
-Download the newest `UMtify-v<versionName>.apk` and sideload it; because every build carries the same signing key and a higher version code, it installs directly over the previous one.
+The internal `versionCode` is always `100 + <workflow run number>`, so every build sorts above the last and installs straight over whatever is already on the phone. The visible version can restart at `1.0` without ever being treated as a downgrade.
+
+Download `UMtify-v<versionName>-arm64-v8a.apk` and sideload it; every build carries the same signing key, so it installs directly over the previous one.
 
 [![Latest Release](https://img.shields.io/github/v/release/UjjalMallik/UMtify?style=for-the-badge&color=0284c7)](https://github.com/UjjalMallik/UMtify/releases)
 
@@ -143,7 +144,7 @@ app/build/outputs/apk/prod/release/app-prod-arm64-v8a-release.apk
 ```
 
 > [!NOTE]
-> Version can be overridden for local builds too: append `-PversionName=1.0.7 -PversionCode=7`, or export `VERSION_NAME` / `VERSION_CODE`.
+> The visible name can be overridden locally with `-PversionName=1.1` (or `VERSION_NAME`). The internal `versionCode` stays `100 + <run number>` on CI and `100` for local builds — that is what guarantees every update installs upward.
 
 ---
 

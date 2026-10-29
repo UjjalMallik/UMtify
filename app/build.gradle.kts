@@ -40,16 +40,18 @@ val listenTogetherServer: String = (
 val runNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0
 
 /*
- * A release started by hand names its own version instead of inheriting the
- * run number: the workflow's workflow_dispatch inputs arrive as
- * `-PversionName` / `-PversionCode`, and a pushed `v*` tag arrives as
- * `-PversionName` alone. Environment variables are read as well, so the same
- * two values can be set from any other CI. Either may be missing or
- * unparseable, and then the run-numbered default below is used — which is what
- * a plain push to main gets.
+ * versionName is a display string, so a release started by hand names its own
+ * instead of inheriting the run number: the workflow's workflow_dispatch input
+ * arrives as `-PversionName`, and a pushed `v*` tag arrives as `-PversionName`
+ * too. VERSION_NAME is read as well, so any other CI can set it. Missing or
+ * blank falls back to the run-numbered default below.
+ *
+ * versionCode is deliberately not overridable. Android only compares that
+ * integer, and a value typed by hand is the one way a build can sort below the
+ * APK already installed, which the phone then refuses to update over. Letting
+ * the run number own it keeps every build an upgrade, whatever the visible
+ * name says — a "1.0" release built after "1.0.35" still installs cleanly.
  */
-val customVersionCode = (project.findProperty("versionCode") as? String)?.toIntOrNull()
-    ?: System.getenv("VERSION_CODE")?.toIntOrNull()
 val customVersionName = (project.findProperty("versionName") as? String)?.takeIf { it.isNotBlank() }
     ?: System.getenv("VERSION_NAME")?.takeIf { it.isNotBlank() }
 
@@ -70,9 +72,8 @@ android {
         // BuildConfig.VERSION_CODE and VERSION_NAME are generated from these
         // two, and every version label the app shows reads one of them (the
         // cache reset in BitChordApplication, the Settings sheet's
-        // PackageManager query, the backup header) — so an override reaches all
-        // of them without another field to keep in step.
-        versionCode = customVersionCode ?: (100 + runNumber)
+        // PackageManager query, the backup header).
+        versionCode = 100 + runNumber
         versionName = customVersionName ?: "1.0.$runNumber"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

@@ -1,40 +1,48 @@
 name: Android Production APK
 
 # A push to main proves the release build still compiles and leaves the APK as
-# a downloadable artifact on the run page. It never publishes: a GitHub Release
-# is a decision, so it happens only on a manual run with that box ticked, or on
-# a version tag someone pushed on purpose.
+# a downloadable artifact on the run page. It never publishes. A GitHub Release
+# is a decision: it happens on a manual run, or on a version tag pushed on
+# purpose.
+#
+# Docs and images do not change the APK, so a push touching only those skips
+# the build entirely.
 on:
   push:
     branches:
       - main
     tags:
       - 'v*'
+    paths-ignore:
+      - '**.md'
+      - 'Banner.png'
+      - '**.jpg'
+      - '**.png'
+      - 'LICENSE'
   workflow_dispatch:
     inputs:
-      create_release:
-        description: 'Publish to GitHub Releases?'
-        required: true
-        type: boolean
-        default: true
       version_name:
-        description: 'App Version Name (e.g. 1.0.6, 2.0.0)'
+        description: 'Release Version (e.g. 1.0, 1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9, 2.0,2.2....)'
         required: true
         type: string
-        default: '1.0.6'
-      version_code:
-        description: 'App Version Code (integer, e.g. 6, 7, 10)'
-        required: true
-        type: string
-        default: '6'
+        default: '1.0'
       release_notes:
         description: 'Optional Release Notes / Changelog'
         required: false
         type: string
         default: ''
+      keep_old_releases:
+        description: 'Keep all older releases? (false keeps only the newest previous one)'
+        required: false
+        type: boolean
+        default: false
 
-# Only the release step writes anything, and it needs to create the tag and the
-# release itself.
+# Node 24 for every JavaScript action. Without it a runner that still defaults
+# to Node 20 prints a deprecation warning on each action it starts.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# The release steps create the tag and the release, and prune old ones.
 permissions:
   contents: write
 
@@ -63,87 +71,85 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # One place decides what this run is: the version it builds, and whether
-      # it publishes. Everything after this reads its outputs.
+      # One place decides what this run is: the version name it builds, the
+      # internal version code, and whether it publishes. Everything after this
+      # reads its outputs.
       #
-      # A manual run uses exactly what was typed. A tag push takes its version
-      # from the tag and publishes. A push to main takes the defaults from
-      # app/build.gradle.kts (versionName "1.0.<run>", versionCode 100 + <run>)
-      # and does not publish.
+      # versionCode is always 100 + the run number, which only ever climbs, so
+      # an APK built today installs over anything published before it no matter
+      # what the visible name says. versionName is free to be anything.
+      #
+      # A manual run uses the name that was typed and publishes. A tag push
+      # takes its name from the tag and publishes. A push to main builds a
+      # snapshot named "dev" and does not publish.
       - name: Resolve version
         id: version
         env:
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
           INPUT_VERSION_NAME: ${{ inputs.version_name }}
-          INPUT_VERSION_CODE: ${{ inputs.version_code }}
-          INPUT_CREATE_RELEASE: ${{ inputs.create_release }}
         run: |
+          code="$((100 + ${GITHUB_RUN_NUMBER}))"
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             name="$INPUT_VERSION_NAME"
-            code="$INPUT_VERSION_CODE"
-            release="$INPUT_CREATE_RELEASE"
+            publish="true"
+            artifact="UMtify-v${name}-arm64-v8a"
+            apk="UMtify-v${name}-arm64-v8a.apk"
           elif [ "$REF_TYPE" = "tag" ]; then
             name="${GITHUB_REF_NAME#v}"
-            code="$((100 + ${GITHUB_RUN_NUMBER}))"
-            release="true"
+            publish="true"
+            artifact="UMtify-v${name}-arm64-v8a"
+            apk="UMtify-v${name}-arm64-v8a.apk"
           else
-            name="1.0.${GITHUB_RUN_NUMBER}"
-            code="$((100 + ${GITHUB_RUN_NUMBER}))"
-            release="false"
+            name="dev"
+            publish="false"
+            artifact="UMtify-arm64-v8a"
+            apk="UMtify-dev-arm64-v8a.apk"
           fi
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
-          echo "create_release=$release" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
+          echo "apk=$apk" >> "$GITHUB_OUTPUT"
 
-      # A manual run or a tag compiles the APK with the version it is published
-      # under, so the installed app reports the version on the release page. A
-      # plain push builds the defaults.
+      # The same task on every event, signed by the same committed keystore, so
+      # an artifact and a release are builds of the same code with the same
+      # signature. Only the visible version name differs.
       - name: Build production release APK
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          REF_TYPE: ${{ github.ref_type }}
-          INPUT_VERSION_NAME: ${{ inputs.version_name }}
-          INPUT_VERSION_CODE: ${{ inputs.version_code }}
-        run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            ./gradlew assembleProdRelease \
-              -PversionName="$INPUT_VERSION_NAME" \
-              -PversionCode="$INPUT_VERSION_CODE"
-          elif [ "$REF_TYPE" = "tag" ]; then
-            ./gradlew assembleProdRelease \
-              -PversionName="${GITHUB_REF_NAME#v}"
-          else
-            ./gradlew assembleProdRelease
-          fi
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: ./gradlew assembleProdRelease -PversionName="$VERSION_NAME"
 
       - name: Name the release APK
+        env:
+          APK_NAME: ${{ steps.version.outputs.apk }}
         run: |
           mkdir -p release
           cp app/build/outputs/apk/prod/release/app-prod-arm64-v8a-release.apk \
-            "release/UMtify-v${{ steps.version.outputs.name }}.apk"
+            "release/$APK_NAME"
 
       # Every run leaves its APK here, so a commit can be installed and tested
-      # without a release existing for it.
+      # without a release existing for it. A snapshot carries no version in its
+      # name, because it has none.
       - name: Upload APK artifact
         uses: actions/upload-artifact@v5
         with:
-          name: UMtify-v${{ steps.version.outputs.name }}
-          path: release/UMtify-v${{ steps.version.outputs.name }}.apk
+          name: ${{ steps.version.outputs.artifact }}
+          path: release/${{ steps.version.outputs.apk }}
           if-no-files-found: error
           retention-days: 14
 
-      # Manual run with "Publish" ticked, or a v* tag push — nothing else. The
-      # runner's pre-installed gh CLI does the publishing, so no third-party
-      # action runs in this step. Empty release notes fall back to the notes
-      # GitHub generates from the commits.
+      # Manual run, or a v* tag push — nothing else. The runner's pre-installed
+      # gh CLI does the publishing, so no third-party action runs in this step.
+      # Empty release notes fall back to the notes GitHub generates from the
+      # commits.
       - name: Publish GitHub Release
-        if: steps.version.outputs.create_release == 'true'
+        if: steps.version.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: v${{ steps.version.outputs.name }}
           TITLE: UMtify v${{ steps.version.outputs.name }} (Build ${{ steps.version.outputs.code }})
-          APK: release/UMtify-v${{ steps.version.outputs.name }}.apk
+          APK: release/${{ steps.version.outputs.apk }}
           NOTES: ${{ inputs.release_notes }}
         run: |
           # A re-run of a version that is already published replaces its APK
@@ -163,3 +169,18 @@ jobs:
               --title "$TITLE" \
               --generate-notes
           fi
+
+      # The Releases page is the download surface, so it keeps the newest two:
+      # the release just published and the one before it. --cleanup-tag removes
+      # the matching git tag too, so nothing stale lingers there. A manual run
+      # that ticks keep_old_releases skips this.
+      - name: Prune older releases
+        if: steps.version.outputs.publish == 'true' && inputs.keep_old_releases != true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release list --limit 100 --json tagName,publishedAt \
+            --jq 'sort_by(.publishedAt) | reverse | .[2:] | .[].tagName' |
+            while read -r tag; do
+              [ -n "$tag" ] && gh release delete "$tag" --yes --cleanup-tag
+            done
