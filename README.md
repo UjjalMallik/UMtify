@@ -14,7 +14,7 @@ A lightweight, Android-only music streaming & local audio player — a personal 
 [![UI](https://img.shields.io/badge/UI-Material%203%20%2B%20Liquid%20Glass-8b5cf6?style=for-the-badge)](https://github.com/UjjalMallik/UMtify)
 [![Refresh Rate](https://img.shields.io/badge/Refresh%20Rate-120Hz%20Smooth-0ea5e9?style=for-the-badge)](https://github.com/UjjalMallik/UMtify)
 [![Build](https://img.shields.io/github/actions/workflow/status/UjjalMallik/UMtify/android-build.yml?branch=main&style=for-the-badge&label=Build)](https://github.com/UjjalMallik/UMtify/actions)
-[![Latest Release](https://img.shields.io/github/v/release/UjjalMallik/UMtify?style=for-the-badge&color=0284c7)](https://github.com/UjjalMallik/UMtify/releases)
+[![Latest Release](https://img.shields.io/github/v/release/UjjalMallik/UMtify?display_name=tag&style=for-the-badge&label=RELEASE&color=0284c7)](https://github.com/UjjalMallik/UMtify/releases/latest)
 [![License](https://img.shields.io/badge/License-GPLv3-blue?style=for-the-badge)](https://github.com/UjjalMallik/UMtify/blob/main/LICENSE)
 
 </div>
@@ -110,7 +110,7 @@ Audio details are shown in a compact glassmorphic pill directly below the cover 
 
 ## 🚀 Download & Releases
 
-**Every push to `main`** builds an optimized **arm64-v8a** APK in **GitHub Actions** and keeps it as the **`UMtify-arm64-v8a`** artifact on the run page. Those snapshot builds report their version as `dev` and never publish a release.
+**Every push to `main`** builds an optimized **arm64-v8a** APK in **GitHub Actions** and keeps it as the **`UMtify-arm64-v8a`** artifact on the run page. Those builds report the release-facing version `1.0` and never publish a release.
 
 **Official releases** are published to **[Releases](https://github.com/UjjalMallik/UMtify/releases)** on demand:
 
@@ -125,7 +125,7 @@ The internal `versionCode` is always `100 + <workflow run number>`, so every bui
 
 Download `UMtify-v<versionName>-arm64-v8a.apk` and sideload it; every build carries the same signing key, so it installs directly over the previous one.
 
-[![Latest Release](https://img.shields.io/github/v/release/UjjalMallik/UMtify?style=for-the-badge&color=0284c7)](https://github.com/UjjalMallik/UMtify/releases)
+[![Latest Release](https://img.shields.io/github/v/release/UjjalMallik/UMtify?display_name=tag&style=for-the-badge&label=RELEASE&color=0284c7)](https://github.com/UjjalMallik/UMtify/releases/latest)
 
 ---
 

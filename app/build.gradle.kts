@@ -44,7 +44,7 @@ val runNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0
  * instead of inheriting the run number: the workflow's workflow_dispatch input
  * arrives as `-PversionName`, and a pushed `v*` tag arrives as `-PversionName`
  * too. VERSION_NAME is read as well, so any other CI can set it. Missing or
- * blank falls back to the run-numbered default below.
+ * blank falls back to "1.0" below, which is also what a local build reports.
  *
  * versionCode is deliberately not overridable. Android only compares that
  * integer, and a value typed by hand is the one way a build can sort below the
@@ -74,7 +74,7 @@ android {
         // cache reset in BitChordApplication, the Settings sheet's
         // PackageManager query, the backup header).
         versionCode = 100 + runNumber
-        versionName = customVersionName ?: "1.0.$runNumber"
+        versionName = customVersionName ?: "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

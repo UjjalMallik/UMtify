@@ -80,8 +80,9 @@ jobs:
       # what the visible name says. versionName is free to be anything.
       #
       # A manual run uses the name that was typed and publishes. A tag push
-      # takes its name from the tag and publishes. A push to main builds a
-      # snapshot named "dev" and does not publish.
+      # takes its name from the tag and publishes. A push to main builds the
+      # same APK but reports the release-facing default, "1.0", and does not
+      # publish.
       - name: Resolve version
         id: version
         env:
@@ -101,10 +102,10 @@ jobs:
             artifact="UMtify-v${name}-arm64-v8a"
             apk="UMtify-v${name}-arm64-v8a.apk"
           else
-            name="dev"
+            name="1.0"
             publish="false"
             artifact="UMtify-arm64-v8a"
-            apk="UMtify-dev-arm64-v8a.apk"
+            apk="UMtify-arm64-v8a.apk"
           fi
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
@@ -162,18 +163,24 @@ jobs:
             gh release create "$TAG" "$APK" \
               --target "$GITHUB_SHA" \
               --title "$TITLE" \
-              --notes "$NOTES"
+              --notes "$NOTES" \
+              --latest
           else
             gh release create "$TAG" "$APK" \
               --target "$GITHUB_SHA" \
               --title "$TITLE" \
-              --generate-notes
+              --generate-notes \
+              --latest
           fi
 
       # The Releases page is the download surface, so it keeps the newest two:
       # the release just published and the one before it. --cleanup-tag removes
       # the matching git tag too, so nothing stale lingers there. A manual run
       # that ticks keep_old_releases skips this.
+      #
+      # The second pass sweeps the old run-numbered names (v1.0.20 … v1.0.29)
+      # from before the 1.0/1.1 scheme: left behind, any version comparison
+      # would rank v1.0.26 above a plain v1.0.
       - name: Prune older releases
         if: steps.version.outputs.publish == 'true' && inputs.keep_old_releases != true
         env:
@@ -183,4 +190,10 @@ jobs:
             --jq 'sort_by(.publishedAt) | reverse | .[2:] | .[].tagName' |
             while read -r tag; do
               [ -n "$tag" ] && gh release delete "$tag" --yes --cleanup-tag
+            done
+          gh release list --limit 100 --json tagName \
+            --jq '.[].tagName' |
+            awk '/^v1\.0\.2[0-9]$/' |
+            while read -r tag; do
+              gh release delete "$tag" --yes --cleanup-tag
             done

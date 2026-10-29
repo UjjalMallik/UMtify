@@ -3,13 +3,15 @@
   The 2×2 entry in the widget picker: one square card, two cells by two.
 
   Sizes follow the launcher grid's own arithmetic — a span of n cells is
-  70n − 30 dp — so two cells is 110dp.
+  70n − 30 dp — so two cells is 110dp, and that is both the size it asks for
+  and the smallest it can be dragged to. It can grow to 520dp in either
+  direction, which covers a four-by-four block on a phone.
 
-  resizeMode is none on purpose. The card is a square by design: its 64dp tile,
-  its wave row and its transport are laid out for a square, and a cell that is
-  taller than it is wide (two cells on a dense grid, or one stretched instance)
-  used to leave a dead band between the seek bar and the buttons. The provider
-  cannot resize its views at runtime, so the shape is fixed here instead.
+  Every bitmap the provider draws — the glass face, the artwork tile, the wave
+  and the seek bar — is generated for the width and height in the options
+  bundle, and [MediaWidgetSquare] re-renders on every resize (see
+  MediaWidget.onAppWidgetOptionsChanged), so a dragged card is redrawn at its
+  new size rather than stretched from the old one.
 
   previewLayout is the real layout: its title and artist carry stand-in strings
   that a render overwrites, so the picker sees the full crystal card even
@@ -19,11 +21,15 @@
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_square_description"
     android:initialLayout="@layout/widget_media_compact"
+    android:maxResizeHeight="520dp"
+    android:maxResizeWidth="520dp"
     android:minHeight="110dp"
+    android:minResizeHeight="110dp"
+    android:minResizeWidth="110dp"
     android:minWidth="110dp"
     android:previewImage="@drawable/widget_preview_square"
     android:previewLayout="@layout/widget_media_compact"
-    android:resizeMode="none"
+    android:resizeMode="horizontal|vertical"
     android:targetCellHeight="2"
     android:targetCellWidth="2"
     android:updatePeriodMillis="0"
