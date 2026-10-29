@@ -115,9 +115,7 @@
     <string name="checking">Wird geprüft…</string>
     <string name="failed">Fehlgeschlagen</string>
     <string name="widget_square_label">Wird wiedergegeben 2×2</string>
-    <string name="widget_wide_label">Wird wiedergegeben 4×2</string>
     <string name="widget_square_description">Albumcover mit Wiedergabesteuerung, quadratisch.</string>
-    <string name="widget_wide_description">Albumcover mit Titel und Wiedergabesteuerung in voller Breite.</string>
     <string name="widget_play">Wiedergabe</string>
     <string name="widget_pause">Pause</string>
     <string name="widget_next">Weiter</string>

@@ -39,6 +39,20 @@ val listenTogetherServer: String = (
  */
 val runNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0
 
+/*
+ * A release started by hand names its own version instead of inheriting the
+ * run number: the workflow's workflow_dispatch inputs arrive as
+ * `-PversionName` / `-PversionCode`, and a pushed `v*` tag arrives as
+ * `-PversionName` alone. Environment variables are read as well, so the same
+ * two values can be set from any other CI. Either may be missing or
+ * unparseable, and then the run-numbered default below is used — which is what
+ * a plain push to main gets.
+ */
+val customVersionCode = (project.findProperty("versionCode") as? String)?.toIntOrNull()
+    ?: System.getenv("VERSION_CODE")?.toIntOrNull()
+val customVersionName = (project.findProperty("versionName") as? String)?.takeIf { it.isNotBlank() }
+    ?: System.getenv("VERSION_NAME")?.takeIf { it.isNotBlank() }
+
 android {
     namespace = "com.music.bitchord"
     // InnerTubeX's AAR requires compiling against 37; targetSdk (runtime behaviour) stays 36.
@@ -52,8 +66,14 @@ android {
         targetSdk = 36
         // 100 leaves headroom below the first published build for a hotfix
         // that has to sort before CI's run numbering.
-        versionCode = 100 + runNumber
-        versionName = "1.0.$runNumber"
+        //
+        // BuildConfig.VERSION_CODE and VERSION_NAME are generated from these
+        // two, and every version label the app shows reads one of them (the
+        // cache reset in BitChordApplication, the Settings sheet's
+        // PackageManager query, the backup header) — so an override reaches all
+        // of them without another field to keep in step.
+        versionCode = customVersionCode ?: (100 + runNumber)
+        versionName = customVersionName ?: "1.0.$runNumber"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

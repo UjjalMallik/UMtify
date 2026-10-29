@@ -632,9 +632,9 @@ class PlaybackService : MediaLibraryService() {
     /**
      * When the widget snapshot was last republished from the progress sampler.
      *
-     * The 4×2 progress bar is only as fresh as the last publish, and the
+     * The widgets' seek bars are only as fresh as the last publish, and the
      * sampler below is the one loop that ticks while audio is coming out — so
-     * it is where the bar's drift is trimmed. The elapsed label does not need
+     * it is where their drift is trimmed. The elapsed label does not need
      * this: it is a Chronometer the host runs itself between pushes.
      */
     private var lastWidgetProgressAt = 0L
@@ -5892,7 +5892,6 @@ class PlaybackService : MediaLibraryService() {
             // process last left off. Unknown position reads as zero.
             positionMs = reported.currentPosition.coerceAtLeast(0L),
             durationMs = reported.duration.coerceAtLeast(0L),
-            repeatMode = reported.repeatMode,
         )
         MediaWidgetSnapshot.save(this, snapshot)
         MediaWidget.refresh(this)
@@ -6031,9 +6030,9 @@ class PlaybackService : MediaLibraryService() {
                     // Only two primitive preference values. Queue JSON is
                     // written from onTimelineChanged, never from this loop.
                     savePlaybackState(player)
-                    // The 4×2 bar's fill, at a coarser beat than the sampler:
-                    // a widget push re-renders and ships a bitmap, and doing
-                    // that every five seconds to move a bar a few pixels is
+                    // The widgets' seek bars, at a coarser beat than the
+                    // sampler: a widget push re-renders and ships a bitmap, and
+                    // doing that every five seconds to move a bar a few pixels is
                     // more work than the accuracy is worth. The glass itself
                     // is cached against the track, so this costs a RemoteViews
                     // rebuild rather than a redraw.
@@ -8669,7 +8668,7 @@ class PlaybackService : MediaLibraryService() {
 
         /**
          * How often the progress sampler republishes the widget, which is what
-         * moves the 4×2 progress bar. Slower than the sample itself: see the
+         * moves the widgets' seek bars. Slower than the sample itself: see the
          * comment at the call site.
          */
         const val WIDGET_PROGRESS_MS = 15_000L

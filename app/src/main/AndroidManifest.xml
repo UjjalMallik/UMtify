@@ -464,9 +464,9 @@
             android:foregroundServiceType="dataSync" />
 
         <!--
-          Home-screen widgets. Four providers: the 2×2 and 4×2 are the same
-          widget resized (see MediaWidget), the 4×1 capsule is MediaWidgetPill,
-          and the circular one is CrystalVinylWidgetProvider.
+          Home-screen widgets. Three providers: the 2×2 square card (see
+          MediaWidget), the 4×1 capsule (MediaWidgetPill), and the circular
+          Crystal Vinyl card (CrystalVinylWidgetProvider).
 
           Not exported, which is correct for a widget provider despite the
           launcher being the one that talks to it: the system delivers
@@ -484,18 +484,6 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_media_square" />
-        </receiver>
-
-        <receiver
-            android:name=".widget.MediaWidgetWide"
-            android:exported="false"
-            android:label="@string/widget_wide_label">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/widget_media_wide" />
         </receiver>
 
         <!-- The 4×1 capsule. Its own provider and layout; see MediaWidgetPill. -->

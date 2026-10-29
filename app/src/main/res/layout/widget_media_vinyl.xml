@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The 3×3 (and 2×3) vinyl card: the reference's tall centred card.
+  The 3×3 (and shorter 3×2) vinyl card: the reference's tall centred card.
 
   The disc takes every pixel of vertical space the fixed rows below it leave,
   drawn by MediaWidgetArt as a circular cover inside two glowing crystal rings
   on a transparent square — `fitCenter` keeps it round and centred at whatever
   width the host allows. Under it: centred title and artist, the wave, the seek
-  bar and the five bubble keys, tightly grouped in the middle.
+  bar and the three transport keys, large and tightly grouped in the middle.
 
   The card is its own provider and layout: it shares the snapshot, the actions
   and the glass renderer with the other three widgets, but nothing about its
@@ -101,25 +101,12 @@
                 android:orientation="horizontal">
 
                 <ImageView
-                    android:id="@+id/widget_shuffle"
-                    android:layout_width="@dimen/widget_vinyl_key"
-                    android:layout_height="@dimen/widget_vinyl_key"
-                    android:background="@drawable/widget_bubble_20"
-                    android:contentDescription="@string/shuffle_off"
-                    android:padding="5dp"
-                    android:src="@drawable/ic_widget_shuffle" />
-
-                <FrameLayout
-                    android:layout_width="@dimen/widget_vinyl_button_gap"
-                    android:layout_height="1dp" />
-
-                <ImageView
                     android:id="@+id/widget_previous"
                     android:layout_width="@dimen/widget_vinyl_prev"
                     android:layout_height="@dimen/widget_vinyl_prev"
-                    android:background="@drawable/widget_bubble_28"
+                    android:background="@drawable/widget_bubble_44"
                     android:contentDescription="@string/widget_previous"
-                    android:padding="7.5dp"
+                    android:padding="12dp"
                     android:src="@drawable/ic_widget_previous" />
 
                 <FrameLayout
@@ -130,9 +117,9 @@
                     android:id="@+id/widget_toggle"
                     android:layout_width="@dimen/widget_vinyl_play"
                     android:layout_height="@dimen/widget_vinyl_play"
-                    android:background="@drawable/widget_bubble_36"
+                    android:background="@drawable/widget_bubble_54"
                     android:contentDescription="@string/widget_play"
-                    android:padding="9.5dp"
+                    android:padding="14.5dp"
                     android:src="@drawable/ic_widget_play" />
 
                 <FrameLayout
@@ -143,23 +130,10 @@
                     android:id="@+id/widget_next"
                     android:layout_width="@dimen/widget_vinyl_prev"
                     android:layout_height="@dimen/widget_vinyl_prev"
-                    android:background="@drawable/widget_bubble_28"
+                    android:background="@drawable/widget_bubble_44"
                     android:contentDescription="@string/widget_next"
-                    android:padding="7.5dp"
+                    android:padding="12dp"
                     android:src="@drawable/ic_widget_next" />
-
-                <FrameLayout
-                    android:layout_width="@dimen/widget_vinyl_button_gap"
-                    android:layout_height="1dp" />
-
-                <ImageView
-                    android:id="@+id/widget_repeat"
-                    android:layout_width="@dimen/widget_vinyl_key"
-                    android:layout_height="@dimen/widget_vinyl_key"
-                    android:background="@drawable/widget_bubble_20"
-                    android:contentDescription="@string/widget_repeat_all"
-                    android:padding="5dp"
-                    android:src="@drawable/ic_widget_repeat" />
             </LinearLayout>
         </FrameLayout>
     </LinearLayout>

@@ -116,9 +116,7 @@
     <string name="checking">Comprobando…</string>
     <string name="failed">Error</string>
     <string name="widget_square_label">Reproduciendo 2×2</string>
-    <string name="widget_wide_label">Reproduciendo 4×2</string>
     <string name="widget_square_description">Portada del álbum con controles de reproducción en formato cuadrado.</string>
-    <string name="widget_wide_description">Portada, pista y controles de reproducción a lo ancho.</string>
     <string name="widget_play">Reproducir</string>
     <string name="widget_pause">Pausar</string>
     <string name="widget_next">Siguiente</string>

@@ -42,24 +42,17 @@ internal data class MediaWidgetSnapshot(
      * disabled, when it is false, as it is in the player.
      */
     val canLike: Boolean = false,
-    /** Whether shuffle is on. Drawn by the 4×1 widget's Shuffle. */
+    /** Whether shuffle is on. */
     val shuffleEnabled: Boolean = false,
     /**
      * Where the playhead was when this was published, and how long the track is.
      *
-     * Both are needed by the 4×2 widget's progress row. Zero duration means the
-     * player did not know one yet — a live stream, or a track still resolving —
-     * and the row hides rather than drawing a bar against nothing.
+     * Both are needed by the cards' seek bars. Zero duration means the player
+     * did not know one yet — a live stream, or a track still resolving — and
+     * the bar hides rather than drawing against nothing.
      */
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
-    /**
-     * The player's repeat mode, drawn by every widget's Repeat key.
-     *
-     * `Player.REPEAT_MODE_OFF`, `ALL` or `ONE`; the default is off, which is
-     * also what a snapshot written before the field existed reads back as.
-     */
-    val repeatMode: Int = 0,
 ) {
     /** Whether there is a track to draw at all. */
     val hasTrack: Boolean get() = mediaId != null
@@ -90,7 +83,6 @@ internal data class MediaWidgetSnapshot(
                 .putBoolean(KEY_SHUFFLE, snapshot.shuffleEnabled)
                 .putLong(KEY_POSITION, snapshot.positionMs)
                 .putLong(KEY_DURATION, snapshot.durationMs)
-                .putInt(KEY_REPEAT, snapshot.repeatMode)
                 .apply()
         }
 
@@ -112,7 +104,6 @@ internal data class MediaWidgetSnapshot(
                     shuffleEnabled = prefs.getBoolean(KEY_SHUFFLE, false),
                     positionMs = prefs.getLong(KEY_POSITION, 0L),
                     durationMs = prefs.getLong(KEY_DURATION, 0L),
-                    repeatMode = prefs.getInt(KEY_REPEAT, 0),
                 )
             }
             return EMPTY
@@ -133,6 +124,5 @@ internal data class MediaWidgetSnapshot(
         private const val KEY_SHUFFLE = "shuffle"
         private const val KEY_POSITION = "position_ms"
         private const val KEY_DURATION = "duration_ms"
-        private const val KEY_REPEAT = "repeat_mode"
     }
 }

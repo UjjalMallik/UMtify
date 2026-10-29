@@ -125,9 +125,7 @@
     <string name="checking">Проверка…</string>
     <string name="failed">Ошибка</string>
     <string name="widget_square_label">Сейчас играет 2×2</string>
-    <string name="widget_wide_label">Сейчас играет 4×2</string>
     <string name="widget_square_description">Обложка альбома с элементами управления воспроизведением, квадратная.</string>
-    <string name="widget_wide_description">Обложка альбома с названием трека и элементами управления, во всю ширину.</string>
     <string name="widget_play">Играть</string>
     <string name="widget_pause">Пауза</string>
     <string name="widget_next">Далее</string>

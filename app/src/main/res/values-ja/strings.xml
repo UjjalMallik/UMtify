@@ -110,9 +110,7 @@
     <string name="checking">確認中…</string>
     <string name="failed">失敗しました</string>
     <string name="widget_square_label">再生中 2×2</string>
-    <string name="widget_wide_label">再生中 4×2</string>
     <string name="widget_square_description">再生コントロール付きのアルバムアート（正方形）。</string>
-    <string name="widget_wide_description">曲名と再生コントロール付きのアルバムアート（横幅いっぱい）。</string>
     <string name="widget_play">再生</string>
     <string name="widget_pause">一時停止</string>
     <string name="widget_next">次へ</string>

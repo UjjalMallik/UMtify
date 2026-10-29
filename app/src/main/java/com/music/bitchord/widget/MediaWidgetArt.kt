@@ -77,7 +77,7 @@ internal class FaceSpec(
 }
 
 /**
- * Draws the crystal glass of all four home-screen widgets.
+ * Draws the crystal glass of all three home-screen widgets.
  *
  * The recipe, in the order it is painted:
  *

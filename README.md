@@ -8,35 +8,50 @@ UMtify is a customized, lightweight, Android-only music streaming and local audi
 
 ### Redesigned Material 3 player UI
 
-A rebuilt Now Playing screen with artwork-themed Material You tonal controls:
+A rebuilt Now Playing screen, from the transport controls down to the progress row:
 
-- A pill-shaped Play/Pause button and circular previous/next transport buttons.
+- Crystal glossy glass transport controls: a pill-shaped Play/Pause button with an internal animated liquid wave, flanked by circular previous and next buttons.
 - A squiggly/wavy progress bar with a draggable scrubber.
-- A compact bottom action bar for queue, sleep timer, shuffle, lyrics, repeat, share, and favourite.
+- Responsive layout scaling that adapts cleanly across every phone screen size and DPI, without wrapping text or shrinking the cover art.
 - Colours extracted from the current cover art, with smooth crossfades on every track change.
 
-### Dynamic cover-art Material 3 theme
+### Dynamic cover-art Material 3 theme & music-reactive wave transition
 
-A theme option alongside **System**, **Light**, and **Dark**, enabled by default. UMtify reads the dominant and accent colours of the current cover and builds a complete Material 3 tonal palette from them — primary, secondary, tertiary, surfaces, and every container role. The whole app moves with the music, and the palette crossfades smoothly when the track changes. The feature respects the **Reduce animation** setting.
+A theme option alongside **System**, **Light**, and **Dark**, enabled by default. UMtify reads the dominant and accent colours of the current cover and builds a complete Material 3 tonal palette from them — primary, secondary, tertiary, surfaces, and every container role. The whole app moves with the music, and the palette crossfades smoothly when the track changes.
 
-### Dual cover art modes
+While music is playing, a smooth, continuous **wavy liquid ribbon transition** animates below the transport controls, paced by playback, and fades out cleanly when playback pauses. The feature respects the **Reduce animation** setting.
 
-The **Full-screen cover art** setting switches between two presentations without leaving the player:
+### Customizable bottom action toolbar (Hide / Show controls)
 
-- **On** — edge-to-edge artwork that reaches the top and side edges of the screen and fades smoothly into the controls below.
-- **Off** — an enlarged floating rounded-square photocard that fills nearly the full width of the phone.
+A compact single-row bottom action bar for queue, sleep timer, shuffle, lyrics, repeat, and more options.
+
+Settings carries the full customization: hide or unhide the entire bottom toolbar, or toggle which individual buttons appear in it.
+
+### Crystal Liquid Glass home screen widgets
+
+Three redesigned home screen music widgets — **Crystal Vinyl**, **Now playing 2×2** (square), and **Now playing 4×1** (bar) — crafted with a translucent frosted Liquid Crystal Glass aesthetic, 3D glossy crystal bubble buttons, and music-reactive wave transitions.
+
+### Smart cache management (200 MB minimum limit & auto-reset)
+
+The audio/media cache has a configurable maximum that can be set as low as **200 MB**. Once the limit is reached, the cache is reset and cleaned up automatically, so listening never quietly fills the phone's storage.
+
+### Custom cover art & song metadata editor
+
+Edit a track's title, artist, and album name, and set custom cover artwork from the gallery — for local files and downloaded tracks alike — with a one-tap reset back to the original metadata.
 
 ### Clean "Stats for Nerds" badge
 
 Audio details are shown in a compact glassmorphic pill directly below the cover art, styled as a centered Material 3 badge with a translucent artwork-tinted background, a hairline border, an equalizer icon, and monospace typography. It reports the active codec, bitrate, and sample rate, plus Automix analysis status when that feature is enabled. The badge can be toggled in Settings.
 
-### Lightweight and optimized (arm64-v8a)
+### Lightweight and optimized (arm64-v8a & 120Hz smooth)
 
 - Built for **arm64-v8a** Android devices only, keeping the release APK small.
 - Unused multiplatform modules removed, including Desktop, Web, TV, and native CMake targets.
 - Background remote update checks and update popups disabled for a faster, distraction-free experience.
 - Every build is signed with the same committed key, so new APKs install over older ones without uninstalling.
-- Version codes follow the GitHub Actions run number, so updates always move forward.
+- Version codes default to the GitHub Actions run number — or the value chosen on a manual release — so updates always move forward.
+- Release builds run through **R8** with resource shrinking, and native libraries are stored compressed, so the download stays small without giving up speed.
+- The UI is frame-paced for **120 Hz** displays and stays smooth while scrolling, animating, and playing.
 
 ### Core playback
 
@@ -50,9 +65,9 @@ Audio details are shown in a compact glassmorphic pill directly below the cover 
 
 ## Download & Builds
 
-Every push to `main` builds an optimized arm64-v8a APK with **GitHub Actions** and publishes it automatically to **[Releases](https://github.com/UjjalMallik/UMtify/releases)**. Download the newest `UMtify-v1.0.<run>-arm64-v8a.apk` and sideload it; because every release carries the same signing key and a higher version code, it installs directly over the previous one.
+Every push to `main` builds an optimized **arm64-v8a** APK in **GitHub Actions** and keeps it as a downloadable artifact on the run page — see the [Actions](https://github.com/UjjalMallik/UMtify/actions) tab, artifact `UMtify-v<versionName>`. A push never publishes a release.
 
-Build results are also kept as the `android-prod-release-arm64-v8a` artifact on the [Actions](https://github.com/UjjalMallik/UMtify/actions) tab.
+Official versioned releases are published to **[Releases](https://github.com/UjjalMallik/UMtify/releases)** on demand: run the **Android Production APK** workflow manually with a custom `versionName` and `versionCode` (plus optional release notes), or push a `v*` tag. Download the newest `UMtify-v<versionName>.apk` and sideload it; because every build carries the same signing key and a higher version code, it installs directly over the previous one.
 
 ### Build locally
 

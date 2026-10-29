@@ -110,9 +110,7 @@
     <string name="checking">正在检查…</string>
     <string name="failed">失败</string>
     <string name="widget_square_label">正在播放 2×2</string>
-    <string name="widget_wide_label">正在播放 4×2</string>
     <string name="widget_square_description">带有播放控件的正方形专辑封面。</string>
-    <string name="widget_wide_description">带有曲目和播放控件的全宽专辑封面。</string>
     <string name="widget_play">播放</string>
     <string name="widget_pause">暂停</string>
     <string name="widget_next">下一首</string>

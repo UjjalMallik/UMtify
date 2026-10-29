@@ -110,9 +110,7 @@
     <string name="checking">Memeriksa…</string>
     <string name="failed">Gagal</string>
     <string name="widget_square_label">Sedang diputar 2×2</string>
-    <string name="widget_wide_label">Sedang diputar 4×2</string>
     <string name="widget_square_description">Sampul album dengan kontrol pemutaran, berbentuk persegi.</string>
-    <string name="widget_wide_description">Sampul album dengan judul lagu dan kontrol pemutaran, selebar layar.</string>
     <string name="widget_play">Putar</string>
     <string name="widget_pause">Jeda</string>
     <string name="widget_next">Berikutnya</string>

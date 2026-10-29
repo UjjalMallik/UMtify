@@ -1,27 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The 4×1 entry in the widget picker: the crystal capsule with the 58dp cover,
-  the track and its twelve-bar wave, the seek bar, and Shuffle / Repeat beside
-  previous / play / next. Its own provider and layout, not another size of
-  MediaWidget — it has no artwork tile beside a deck, so none of that widget's
-  measuring applies.
+  The 4×1 entry in the widget picker: the crystal capsule with the 54dp cover,
+  the track and its twelve-bar wave, and the three big transport keys.
 
-  One row by the launcher's 70n − 30 arithmetic is 40dp; the capsule is 92dp and
-  centred, so minHeight asks for the height the capsule actually needs rather
-  than the nominal row. Resizable horizontally only, and not below three cells:
-  the title and five keys need that much before the buttons crowd. Below
-  MediaWidgetPill.COMPACT_WIDTH_DP the capsule drops the cover and the corner
-  keys and centres the title over three transport buttons.
+  One row, and only one: targetCellHeight is 1, and maxResizeHeight caps a
+  stretched instance at 90dp so the capsule can never claim a second row of
+  grid while drawing a single bar. minHeight is 56dp, the smallest row the
+  capsule's 48dp play key and 4dp margins need.
+
+  The capsule fills whatever height it is given (see widget_media_pill), which
+  is why vertical resizing is allowed at all — it follows the cell instead of
+  sitting at a fixed height inside it.
+
+  Below MediaWidgetPill.COMPACT_WIDTH_DP the capsule drops the cover and the
+  wave and centres the track over the three keys.
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_pill_description"
     android:initialLayout="@layout/widget_media_pill"
-    android:minHeight="92dp"
+    android:maxResizeHeight="90dp"
+    android:minHeight="56dp"
+    android:minResizeHeight="56dp"
     android:minResizeWidth="180dp"
     android:minWidth="250dp"
     android:previewImage="@drawable/widget_preview_pill"
     android:previewLayout="@layout/widget_media_pill"
-    android:resizeMode="horizontal"
+    android:resizeMode="horizontal|vertical"
     android:targetCellHeight="1"
     android:targetCellWidth="4"
     android:updatePeriodMillis="0"

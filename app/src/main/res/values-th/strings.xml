@@ -118,9 +118,7 @@
     <string name="checking">กำลังตรวจสอบ…</string>
     <string name="failed">ล้มเหลว</string>
     <string name="widget_square_label">กำลังเล่น 2×2</string>
-    <string name="widget_wide_label">กำลังเล่น 4×2</string>
     <string name="widget_square_description">ปกอัลบั้มพร้อมปุ่มควบคุมการเล่น แบบสี่เหลี่ยมจัตุรัส</string>
-    <string name="widget_wide_description">ปกอัลบั้มพร้อมชื่อเพลงและปุ่มควบคุมการเล่น ความกว้างเต็มจอ</string>
     <string name="widget_play">เล่น</string>
     <string name="widget_pause">หยุดชั่วคราว</string>
     <string name="widget_next">ถัดไป</string>

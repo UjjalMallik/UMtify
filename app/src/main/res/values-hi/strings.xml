@@ -115,9 +115,7 @@
     <string name="checking">जांच हो रही है…</string>
     <string name="failed">विफल</string>
     <string name="widget_square_label">अभी चल रहा है 2×2</string>
-    <string name="widget_wide_label">अभी चल रहा है 4×2</string>
     <string name="widget_square_description">प्लेबैक नियंत्रणों के साथ एल्बम आर्ट, चौकोर आकार में।</string>
-    <string name="widget_wide_description">ट्रैक और प्लेबैक नियंत्रणों के साथ एल्बम आर्ट, पूरी चौड़ाई में।</string>
     <string name="widget_play">चलाएं</string>
     <string name="widget_pause">रोकें</string>
     <string name="widget_next">अगला</string>

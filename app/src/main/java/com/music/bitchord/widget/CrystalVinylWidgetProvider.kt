@@ -24,7 +24,8 @@ import kotlin.math.roundToInt
 
 /**
  * The 3×3 (and shorter 3×2) vinyl card: a circular cover inside concentric
- * crystal rings, then the track, the wave, the seek bar and five bubble keys.
+ * crystal rings, then the track, the wave, the seek bar and the three large
+ * transport bubbles.
  *
  * The disc is the one widget part that is not a rectangle. [MediaWidgetArt]
  * draws it as a circular crop of the cover, a 1.2dp crystal rim and two glowing
@@ -146,9 +147,7 @@ class CrystalVinylWidgetProvider : AppWidgetProvider() {
             val showArtist: Boolean,
             val showWave: Boolean,
             val showSeek: Boolean,
-            /** Room for Shuffle and Repeat on top of previous / play / next. */
-            val showKeys: Boolean,
-            /** Room for previous and next on top of the toggle. */
+            /** Room for previous and next on either side of the toggle. */
             val showTransport: Boolean,
             val waveWidthPx: Int,
             val waveHeightPx: Int,
@@ -158,16 +157,16 @@ class CrystalVinylWidgetProvider : AppWidgetProvider() {
 
         /**
          * The card's bitmaps: the glass at the card's own size, and the disc at
-         * the largest square the fixed rows below it leave.
+         * the widest square the card can hold.
          *
-         * The disc is capped by the card's inner width, by the height left over,
-         * and by [MAX_DISC_DP] — beyond that the rings start to read as a plate
-         * rather than a disc under the track.
+         * The disc is capped by the card's inner width and by [MAX_DISC_DP] —
+         * beyond that the rings start to read as a plate rather than a disc
+         * under the track. The layout, not this, is what leaves room for the
+         * rows below it.
          */
         private fun specs(context: Context, manager: AppWidgetManager, id: Int): Specs {
             val resources = context.resources
             val density = resources.displayMetrics.density
-            val textScale = resources.configuration.fontScale.coerceAtLeast(1f)
             val (widthDp, heightDp) = sizeDp(context, manager, id)
             val rawWidth = widthDp * density
             val rawHeight = heightDp * density
@@ -177,28 +176,18 @@ class CrystalVinylWidgetProvider : AppWidgetProvider() {
             val padding = resources.getDimensionPixelSize(R.dimen.widget_vinyl_padding)
             val waveHeight = resources.getDimensionPixelSize(R.dimen.widget_vinyl_wave_height)
             val seekHeight = resources.getDimensionPixelSize(R.dimen.widget_vinyl_seek_height)
-            val transport = resources.getDimensionPixelSize(R.dimen.widget_vinyl_transport)
             val inner = (widthPx - 2 * padding).coerceAtLeast(1)
 
             val showArtist = heightDp >= ROOMY_HEIGHT_DP && widthDp >= ROOMY_WIDTH_DP
-            // The rows under the disc, as the layout builds them: the two label
-            // lines (at the user's font scale), their margins, the wave, the seek
-            // and the transport.
-            val titlePx = (TITLE_SP * 1.2f * textScale * density).roundToInt()
-            val artistPx = if (showArtist) {
-                (ARTIST_SP * 1.2f * textScale * density).roundToInt()
-            } else {
-                0
-            }
-            val gapsPx = ((4 + 1 + 6 + 2 + 6) * density).roundToInt()
-            val fixedPx = 2 * padding + gapsPx + titlePx + artistPx + waveHeight + seekHeight + transport
-            val available = (heightPx - fixedPx).coerceAtLeast(1)
-            val disc = minOf(inner, available, (MAX_DISC_DP * density).roundToInt())
+            // The layout gives the disc the height the fixed rows leave, with
+            // `fitCenter`; the bitmap is drawn at the widest it can be rather
+            // than at that leftover, because the options bundle's height is the
+            // 3-cell minimum, not the height the host actually gives the card.
+            // A larger bitmap is scaled down by the view and stays sharp; one
+            // sized from the minimum was scaled up and went soft.
+            val disc = minOf(inner, (MAX_DISC_DP * density).roundToInt())
                 .coerceAtLeast((MIN_DISC_DP * density).roundToInt())
 
-            val keyWidths = resources.getDimensionPixelSize(R.dimen.widget_vinyl_key) * 2 +
-                resources.getDimensionPixelSize(R.dimen.widget_vinyl_prev) * 2 +
-                resources.getDimensionPixelSize(R.dimen.widget_vinyl_play)
             val gap = resources.getDimensionPixelSize(R.dimen.widget_vinyl_button_gap)
             val transportWidth = resources.getDimensionPixelSize(R.dimen.widget_vinyl_prev) * 2 +
                 resources.getDimensionPixelSize(R.dimen.widget_vinyl_play) + 2 * gap
@@ -223,7 +212,6 @@ class CrystalVinylWidgetProvider : AppWidgetProvider() {
                 showArtist = showArtist,
                 showWave = heightDp >= FULL_HEIGHT_DP,
                 showSeek = heightDp >= SEEK_HEIGHT_DP,
-                showKeys = inner >= keyWidths + 4 * gap,
                 showTransport = inner >= transportWidth,
                 waveWidthPx = inner,
                 waveHeightPx = waveHeight,
@@ -300,21 +288,11 @@ class CrystalVinylWidgetProvider : AppWidgetProvider() {
 
             bindSeek(views, context, snapshot, specs, art)
 
-            val keys = hasTrack && specs.showKeys
-            views.setViewVisibility(R.id.widget_shuffle, if (keys) View.VISIBLE else View.GONE)
-            views.setViewVisibility(R.id.widget_repeat, if (keys) View.VISIBLE else View.GONE)
-            views.setImageViewResource(
-                R.id.widget_shuffle,
-                if (snapshot.shuffleEnabled) R.drawable.ic_widget_shuffle_on else R.drawable.ic_widget_shuffle,
-            )
-            views.setContentDescription(
-                R.id.widget_shuffle,
-                context.getString(if (snapshot.shuffleEnabled) R.string.shuffle_on else R.string.shuffle_off),
-            )
-            // At the narrowest two-cell width the disc and the five keys cannot
-            // share the card; previous and next go first, then Shuffle and
-            // Repeat, so the toggle — the one control that always makes sense —
-            // is what is left.
+            // Sits inside the card's 10dp padding at the 180dp three-cell
+            // minimum: 44 + 8 + 54 + 8 + 44 is 158dp against 160dp of room.
+            // Narrower than that the disc and the three keys cannot share the
+            // card; previous and next go before the toggle, so the one control
+            // that always makes sense is what is left.
             views.setViewVisibility(
                 R.id.widget_previous,
                 if (specs.showTransport) View.VISIBLE else View.GONE,
@@ -323,7 +301,6 @@ class CrystalVinylWidgetProvider : AppWidgetProvider() {
                 R.id.widget_next,
                 if (specs.showTransport) View.VISIBLE else View.GONE,
             )
-            WidgetRepeat.bind(views, context, snapshot.repeatMode)
 
             views.setImageViewResource(
                 R.id.widget_toggle,
@@ -350,25 +327,12 @@ class CrystalVinylWidgetProvider : AppWidgetProvider() {
                 for ((button, action) in TRANSPORT_CORE) {
                     views.setOnClickPendingIntent(button, MediaWidgetActions.pendingIntent(context, action))
                 }
-                if (keys) {
-                    for ((button, action) in KEYS) {
-                        views.setOnClickPendingIntent(button, MediaWidgetActions.pendingIntent(context, action))
-                    }
-                } else {
-                    for ((button, _) in KEYS) {
-                        views.setOnClickPendingIntent(button, open)
-                    }
-                }
             } else {
                 // Nothing to control yet; every button opens the app instead.
                 for ((button, _) in TRANSPORT_CORE) {
                     views.setImageAlpha(button, ALPHA_DISABLED)
                     views.setOnClickPendingIntent(button, open)
                 }
-                views.setImageAlpha(R.id.widget_shuffle, ALPHA_DISABLED)
-                views.setImageAlpha(R.id.widget_repeat, ALPHA_DISABLED)
-                views.setOnClickPendingIntent(R.id.widget_shuffle, open)
-                views.setOnClickPendingIntent(R.id.widget_repeat, open)
             }
             return views
         }
@@ -421,11 +385,6 @@ class CrystalVinylWidgetProvider : AppWidgetProvider() {
             R.id.widget_next to MediaWidgetActions.ACTION_NEXT,
         )
 
-        private val KEYS = listOf(
-            R.id.widget_shuffle to MediaWidgetActions.ACTION_SHUFFLE,
-            R.id.widget_repeat to MediaWidgetActions.ACTION_REPEAT,
-        )
-
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
         /** The face each instance currently shows. @see render */
@@ -437,25 +396,24 @@ class CrystalVinylWidgetProvider : AppWidgetProvider() {
         /** Three rows at the same arithmetic. */
         private const val FALLBACK_HEIGHT_DP = 180
 
-        /** The card is a disc plus five rows; below this the artist is dropped. */
-        private const val ROOMY_HEIGHT_DP = 220
-        private const val ROOMY_WIDTH_DP = 150
+        /** The card is a disc plus five rows; below three cells the artist is dropped. */
+        private const val ROOMY_HEIGHT_DP = 180
+        private const val ROOMY_WIDTH_DP = 180
 
-        /** With the wave row the card needs this much height. */
-        private const val FULL_HEIGHT_DP = 220
-
-        /** With the seek row (but no wave) the card needs this much height. */
-        private const val SEEK_HEIGHT_DP = 190
+        /**
+         * The wave and the seek bar are part of the 3×3 design, so they ride with
+         * the three rows rather than a taller threshold: the options bundle
+         * reports three rows as 180dp (70n − 30), and a taller figure would have
+         * hidden both on every phone.
+         */
+        private const val FULL_HEIGHT_DP = 180
+        private const val SEEK_HEIGHT_DP = 180
 
         /** Beyond this the rings read as a plate rather than a disc. */
         private const val MAX_DISC_DP = 200f
 
         /** Below this the disc stops being a disc worth looking at. */
         private const val MIN_DISC_DP = 48f
-
-        /** The label sizes the layout uses, for working out what the disc can have. */
-        private const val TITLE_SP = 16f
-        private const val ARTIST_SP = 12f
 
         private const val WAVE_BARS = 20
 

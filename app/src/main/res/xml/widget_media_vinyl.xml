@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   The 3×3 (and 3×2) vinyl entry in the widget picker: a circular cover inside
-  concentric crystal rings, the track, the wave, the seek bar and five bubble
-  keys. Its own provider — see CrystalVinylWidgetProvider.
+  concentric crystal rings, the track, the wave, the seek bar and the three
+  large transport bubbles. Its own provider — see CrystalVinylWidgetProvider.
 
   Three cells by the 70n − 30 arithmetic is 180dp, which is the narrowest the
-  disc and the five keys share politely; the same figure is the minimum resize
+  disc and the transport share politely; the same figure is the minimum resize
   width, so a two-cell version is not offered. Height can come down to two rows,
-  where the wave and the timestamps are dropped and the disc keeps what is left.
+  where the wave and the seek bar are dropped and the disc keeps what is left.
 
   previewLayout is the real layout, with stand-in text a render overwrites — the
   disc and the glass stay blank until a provider draws them, which is what the

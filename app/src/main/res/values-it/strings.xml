@@ -142,9 +142,7 @@
     <string name="checking">Verifica in corso…</string>
     <string name="failed">Non riuscito</string>
     <string name="widget_square_label">In riproduzione 2×2</string>
-    <string name="widget_wide_label">In riproduzione 4×2</string>
     <string name="widget_square_description">Copertina con controlli di riproduzione, in formato quadrato.</string>
-    <string name="widget_wide_description">Copertina con brano e controlli di riproduzione, a larghezza intera.</string>
     <string name="widget_play">Riproduci</string>
     <string name="widget_pause">Pausa</string>
     <string name="widget_next">Successivo</string>

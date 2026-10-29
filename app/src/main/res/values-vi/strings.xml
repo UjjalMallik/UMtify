@@ -124,9 +124,7 @@
     <string name="checking">Đang kiểm tra…</string>
     <string name="failed">Thất bại</string>
     <string name="widget_square_label">Đang phát 2×2</string>
-    <string name="widget_wide_label">Đang phát 4×2</string>
     <string name="widget_square_description">Ảnh bìa album kèm các nút điều khiển, dạng hình vuông.</string>
-    <string name="widget_wide_description">Ảnh bìa album kèm tên bản nhạc và điều khiển, toàn chiều rộng.</string>
     <string name="widget_play">Phát</string>
     <string name="widget_pause">Tạm dừng</string>
     <string name="widget_next">Tiếp theo</string>

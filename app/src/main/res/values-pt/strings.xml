@@ -117,9 +117,7 @@
     <string name="checking">Verificando…</string>
     <string name="failed">Falhou</string>
     <string name="widget_square_label">Tocando agora 2×2</string>
-    <string name="widget_wide_label">Tocando agora 4×2</string>
     <string name="widget_square_description">Capa do álbum com controles de reprodução, em formato quadrado.</string>
-    <string name="widget_wide_description">Capa do álbum com a faixa e os controles de reprodução, em largura total.</string>
     <string name="widget_play">Tocar</string>
     <string name="widget_pause">Pausar</string>
     <string name="widget_next">Próxima</string>

@@ -117,9 +117,7 @@
     <string name="checking">בודק…</string>
     <string name="failed">נכשל</string>
     <string name="widget_square_label">מתנגן כעת 2×2</string>
-    <string name="widget_wide_label">מתנגן כעת 4×2</string>
     <string name="widget_square_description">עטיפת אלבום עם פקדי הפעלה, בריבוע.</string>
-    <string name="widget_wide_description">עטיפת אלבום עם פרטי הרצועה ופקדי הפעלה, ברוחב מלא.</string>
     <string name="widget_play">הפעלה</string>
     <string name="widget_pause">השהיה</string>
     <string name="widget_next">הבא</string>

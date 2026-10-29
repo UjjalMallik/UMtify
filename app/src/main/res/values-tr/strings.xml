@@ -124,9 +124,7 @@
     <string name="checking">Kontrol ediliyor…</string>
     <string name="failed">Başarısız</string>
     <string name="widget_square_label">Şu an çalıyor 2×2</string>
-    <string name="widget_wide_label">Şu an çalıyor 4×2</string>
     <string name="widget_square_description">Kare biçimde, çalma kontrollü albüm kapağı.</string>
-    <string name="widget_wide_description">Parça ve çalma kontrolleriyle tam genişlikte albüm kapağı.</string>
     <string name="widget_play">Çal</string>
     <string name="widget_pause">Duraklat</string>
     <string name="widget_next">Sonraki</string>

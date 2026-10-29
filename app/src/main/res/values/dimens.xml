@@ -19,79 +19,70 @@
     <!-- The 2×2 card and the vinyl card: the reference's 26dp corner. -->
     <dimen name="widget_card_radius">26dp</dimen>
 
-    <!-- The 4×2 card, and the 4×1 capsule's 24dp corner. -->
-    <dimen name="widget_wide_radius">28dp</dimen>
+    <!-- The 4×1 capsule's 24dp corner. -->
     <dimen name="widget_pill_radius">24dp</dimen>
 
     <!--
-      The 2×2 square card: 12dp of padding, a 52dp tile in the top-left, the
-      equalizer and seek bar across the middle and the transport pinned to the
-      foot, with Shuffle and Repeat in the two bottom corners.
+      The 2×2 square card: a 64dp tile with the track beside it, the wave and
+      seek bar stacked across the middle, and the three transport bubbles in one
+      centred row along the foot.
     -->
-    <dimen name="widget_card_padding">12dp</dimen>
-    <dimen name="widget_card_art">52dp</dimen>
+    <dimen name="widget_card_padding">10dp</dimen>
+    <dimen name="widget_card_art">64dp</dimen>
     <dimen name="widget_card_art_corner">12dp</dimen>
     <dimen name="widget_card_art_rim">1dp</dimen>
     <dimen name="widget_card_gap">10dp</dimen>
-    <dimen name="widget_card_wave_height">18dp</dimen>
-    <dimen name="widget_card_seek_height">6dp</dimen>
-    <dimen name="widget_card_transport">34dp</dimen>
-    <dimen name="widget_card_key">20dp</dimen>
-    <dimen name="widget_card_prev">24dp</dimen>
-    <dimen name="widget_card_play">30dp</dimen>
-    <dimen name="widget_card_transport_gap">4dp</dimen>
-    <dimen name="widget_card_transport_inset">52dp</dimen>
+    <dimen name="widget_card_wave_height">10dp</dimen>
+    <dimen name="widget_card_wave_gap">6dp</dimen>
+    <dimen name="widget_card_seek_height">4dp</dimen>
+    <dimen name="widget_card_seek_gap">2dp</dimen>
+    <!--
+      The row is exactly the play bubble's height, and 36 + 6 + 40 + 6 + 36 is
+      the 124dp the three keys take: the card's own inner width at two cells is
+      never smaller than that once the host lays the layout out at its real
+      width (the options bundle reports the 70n − 30 cell minimum, not the
+      cell's own width).
+    -->
+    <dimen name="widget_card_transport">40dp</dimen>
+    <dimen name="widget_card_transport_gap">6dp</dimen>
+    <dimen name="widget_card_transport_top">6dp</dimen>
+    <dimen name="widget_card_prev">36dp</dimen>
+    <dimen name="widget_card_play">40dp</dimen>
 
     <!--
-      The 4×2 card: a 104dp tile beside the deck, the full-width 28dp crystal
-      ribbon along the foot.
+      The 4×1 capsule: a 54dp tile and the track on the left, the three bubble
+      keys on the right. The capsule fills whatever height the host gives it,
+      inset by [widget_pill_margin] top and bottom.
     -->
-    <dimen name="widget_wide_padding">14dp</dimen>
-    <dimen name="widget_wide_gap">14dp</dimen>
-    <dimen name="widget_wide_art">104dp</dimen>
-    <dimen name="widget_wide_art_corner">18dp</dimen>
-    <dimen name="widget_wide_art_rim">1.2dp</dimen>
-    <dimen name="widget_wide_key">22dp</dimen>
-    <dimen name="widget_wide_prev">36dp</dimen>
-    <dimen name="widget_wide_play">44dp</dimen>
-    <dimen name="widget_wide_transport">44dp</dimen>
-    <dimen name="widget_wide_button_gap">10dp</dimen>
-    <dimen name="widget_wide_progress_row">18dp</dimen>
-    <dimen name="widget_wide_seek_height">8dp</dimen>
-    <dimen name="widget_wide_wave_height">28dp</dimen>
-
-    <!--
-      The 4×1 capsule: 58dp tile, a 92dp-tall glass body, and the track split
-      into title row, progress row and control row.
-    -->
-    <dimen name="widget_pill_height">92dp</dimen>
-    <dimen name="widget_pill_art">58dp</dimen>
+    <dimen name="widget_pill_margin">4dp</dimen>
+    <dimen name="widget_pill_art">54dp</dimen>
     <dimen name="widget_pill_art_corner">14dp</dimen>
     <dimen name="widget_pill_art_rim">1dp</dimen>
     <dimen name="widget_pill_padding_h">12dp</dimen>
-    <dimen name="widget_pill_padding_v">6dp</dimen>
     <dimen name="widget_pill_gap">12dp</dimen>
-    <dimen name="widget_pill_key">20dp</dimen>
-    <dimen name="widget_pill_prev">26dp</dimen>
-    <dimen name="widget_pill_play">34dp</dimen>
-    <dimen name="widget_pill_transport">30dp</dimen>
-    <dimen name="widget_pill_button_gap">5dp</dimen>
-    <dimen name="widget_pill_seek_height">6dp</dimen>
-    <dimen name="widget_pill_wave_width">64dp</dimen>
     <dimen name="widget_pill_wave_height">12dp</dimen>
+    <dimen name="widget_pill_wave_width">64dp</dimen>
+    <dimen name="widget_pill_wave_gap">2dp</dimen>
+    <dimen name="widget_pill_transport">48dp</dimen>
+    <dimen name="widget_pill_prev">40dp</dimen>
+    <dimen name="widget_pill_play">48dp</dimen>
+    <dimen name="widget_pill_button_gap">8dp</dimen>
 
     <!--
       The 3×3 vinyl card: a circular disc inside two glowing rings, centred
-      title and artist, the wave and seek bar, and five bubble keys.
+      title and artist, the wave and seek bar, and the three transport bubbles.
     -->
-    <dimen name="widget_vinyl_padding">14dp</dimen>
-    <dimen name="widget_vinyl_disc">200dp</dimen>
+    <dimen name="widget_vinyl_padding">10dp</dimen>
     <dimen name="widget_vinyl_disc_rim">1.2dp</dimen>
     <dimen name="widget_vinyl_wave_height">16dp</dimen>
     <dimen name="widget_vinyl_seek_height">6dp</dimen>
-    <dimen name="widget_vinyl_key">20dp</dimen>
-    <dimen name="widget_vinyl_prev">28dp</dimen>
-    <dimen name="widget_vinyl_play">36dp</dimen>
-    <dimen name="widget_vinyl_transport">38dp</dimen>
-    <dimen name="widget_vinyl_button_gap">4dp</dimen>
+    <dimen name="widget_vinyl_transport">54dp</dimen>
+    <dimen name="widget_vinyl_prev">44dp</dimen>
+    <dimen name="widget_vinyl_play">54dp</dimen>
+    <!--
+      8dp, not 12: 44 + 8 + 54 + 8 + 44 is 158dp, which fits the 160dp inside the
+      card's 10dp padding at the 180dp three-cell minimum. At 12dp the row was
+      166dp and would have been trimmed by the card's clip.
+    -->
+    <dimen name="widget_vinyl_button_gap">8dp</dimen>
 </resources>

@@ -118,9 +118,7 @@
     <string name="checking">Sprawdzanie…</string>
     <string name="failed">Błąd</string>
     <string name="widget_square_label">Now playing 2×2</string>
-    <string name="widget_wide_label">Now playing 4×2</string>
     <string name="widget_square_description">Okładka albumu z kontrolkami odtwarzania, w kwadracie.</string>
-    <string name="widget_wide_description">Okładka albumu z utworem i kontrolkami odtwarzania, na pełną szerokość.</string>
     <string name="widget_play">Graj</string>
     <string name="widget_pause">Pauza</string>
     <string name="widget_next">Dalej</string>

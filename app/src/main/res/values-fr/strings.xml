@@ -116,9 +116,7 @@
     <string name="checking">Vérification…</string>
     <string name="failed">Échec</string>
     <string name="widget_square_label">Lecture en cours 2×2</string>
-    <string name="widget_wide_label">Lecture en cours 4×2</string>
     <string name="widget_square_description">Pochette d\'album avec les commandes de lecture, en carré.</string>
-    <string name="widget_wide_description">Pochette d\'album avec le titre et les commandes de lecture, pleine largeur.</string>
     <string name="widget_play">Lecture</string>
     <string name="widget_pause">Pause</string>
     <string name="widget_next">Suivant</string>

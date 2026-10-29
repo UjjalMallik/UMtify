@@ -1,19 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The 2×2 entry in the widget picker. Sizes follow the launcher grid's own
-  arithmetic — a span of n cells is 70n − 30 dp — so 2 cells is 110dp.
+  The 2×2 entry in the widget picker: one square card, two cells by two.
 
-  resizeMode is horizontal only: every size this widget is meant to take is two
-  rows tall, and the transport is pinned to the card's foot, so a widget
-  stretched vertically would just be more glass around an unchanged bar. Width
-  is free between two and four cells, and the layout swaps at
-  MediaWidget.WIDE_LAYOUT_MIN_DP, so growing this one wider picks up the 4×2's
-  own layout rather than leaving three buttons adrift in a wide band.
+  Sizes follow the launcher grid's own arithmetic — a span of n cells is
+  70n − 30 dp — so two cells is 110dp.
 
-  maxResizeWidth is 288dp rather than 4 cells' nominal 250dp on purpose: cells
-  are not really 70dp on every launcher, and a cap set at the nominal figure
-  stops a launcher with slightly wider cells one column short of the four the
-  widget is supposed to reach.
+  resizeMode is none on purpose. The card is a square by design: its 64dp tile,
+  its wave row and its transport are laid out for a square, and a cell that is
+  taller than it is wide (two cells on a dense grid, or one stretched instance)
+  used to leave a dead band between the seek bar and the buttons. The provider
+  cannot resize its views at runtime, so the shape is fixed here instead.
 
   previewLayout is the real layout: its title and artist carry stand-in strings
   that a render overwrites, so the picker sees the full crystal card even
@@ -23,13 +19,11 @@
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_square_description"
     android:initialLayout="@layout/widget_media_compact"
-    android:maxResizeWidth="288dp"
     android:minHeight="110dp"
-    android:minResizeWidth="110dp"
     android:minWidth="110dp"
     android:previewImage="@drawable/widget_preview_square"
     android:previewLayout="@layout/widget_media_compact"
-    android:resizeMode="horizontal"
+    android:resizeMode="none"
     android:targetCellHeight="2"
     android:targetCellWidth="2"
     android:updatePeriodMillis="0"
