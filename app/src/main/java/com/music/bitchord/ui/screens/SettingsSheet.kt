@@ -75,6 +75,7 @@ import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.SmartDisplay
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.SurroundSound
+import androidx.compose.material.icons.rounded.TextFields
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.WebAssetOff
@@ -110,7 +111,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -121,7 +121,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.viewinterop.AndroidView
 import com.music.bitchord.AppIcon
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.LinkAnnotation
@@ -150,6 +149,7 @@ import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.NerdStats
 import com.music.bitchord.data.listentogether.ListenTogether
 import com.music.bitchord.data.settings.AppSettings
+import com.music.bitchord.data.settings.CustomFont
 import com.music.bitchord.data.settings.OutputPcmMode
 import com.music.bitchord.playback.AudioOutputStatus
 import com.music.bitchord.data.settings.AutomixPerformanceMode
@@ -161,7 +161,9 @@ import com.music.bitchord.data.settings.ThemeMode
 import com.music.bitchord.data.stats.Backup
 import com.music.bitchord.playback.AudioCache
 import com.music.bitchord.ui.player.fullBleedArtworkAvailable
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import java.util.Locale
@@ -214,6 +216,7 @@ fun SettingsScreen(
     val nerdStats by AppSettings.showNerdStats.collectAsStateWithLifecycle()
     val reduceAnimation by AppSettings.reduceAnimation.collectAsStateWithLifecycle()
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    val customFont by AppSettings.customFont.collectAsStateWithLifecycle()
     val liquidGlass by AppSettings.liquidGlass.collectAsStateWithLifecycle()
     val liquidGlassSupported = isGlassSupported()
     val lyricsBlur by AppSettings.lyricsBlur.collectAsStateWithLifecycle()
@@ -354,6 +357,31 @@ fun SettingsScreen(
             )
         }
     }
+    /**
+     * Fonts are copied into the app's own storage rather than read through the
+     * picker's grant, which dies with the process: the face the listener chose
+     * has to still be there on the next cold start. The copy is done off the
+     * main thread because the file can be a few megabytes and a stalled frame
+     * while the sheet is open is exactly what makes the import feel broken.
+     */
+    val fontPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { source ->
+        if (source == null) return@rememberLauncherForActivityResult
+        backupScope.launch {
+            val name = withContext(Dispatchers.IO) { CustomFont.import(context, source) }
+            if (name == null) {
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.custom_font_failed),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            } else {
+                AppSettings.setCustomFont(name)
+            }
+        }
+    }
+
     var showListenBrainzTokenDialog by remember { mutableStateOf(false) }
 
     val version = remember(context) {
@@ -762,6 +790,33 @@ fun SettingsScreen(
                     selectedIndex = ThemeMode.entries.indexOf(theme),
                     onSelect = { AppSettings.setThemeMode(ThemeMode.entries[it]) },
                     modifier = Modifier.padding(start = ROW_INSET, end = ROW_INSET, bottom = 14.dp),
+                )
+            }
+            val customFontTitle = stringResource(R.string.custom_font)
+            row(customFontTitle, "font", "typeface", "ttf", "otf") {
+                SettingsRow(
+                    icon = Icons.Rounded.TextFields,
+                    title = customFontTitle,
+                    subtitle = customFont
+                        ?.let { stringResource(R.string.custom_font_active, it) }
+                        ?: stringResource(R.string.custom_font_subtitle),
+                    // Reset is its own button rather than a second row: the row
+                    // itself is the picker, and clearing takes one tap.
+                    trailing = if (customFont == null) {
+                        null
+                    } else {
+                        {
+                            TextButton(
+                                onClick = {
+                                    CustomFont.clear(context)
+                                    AppSettings.setCustomFont(null)
+                                },
+                            ) {
+                                Text(stringResource(R.string.custom_font_reset))
+                            }
+                        }
+                    },
+                    onClick = { fontPicker.launch(FONT_MIME_TYPES) },
                 )
             }
             val reduceAnimationTitle = stringResource(R.string.reduce_animation)
@@ -1631,29 +1686,18 @@ fun SettingsScreen(
                                 .padding(vertical = 6.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
-                            // A glass foreground holds the finished icon in its own shape on the
-                            // central 72 of 108 dp: scaled 1.5× it fills the tile as designed.
-                            // Only the default goes through an adaptive mask.
-                            val preview = option.previewRes
-                            if (preview == null) {
-                                AndroidView(
-                                    factory = { ctx ->
-                                        android.widget.ImageView(ctx).apply { setImageResource(option.iconRes) }
-                                    },
-                                    modifier = Modifier
-                                        .size(68.dp)
-                                        .clip(RoundedCornerShape(22.dp)),
-                                )
-                            } else {
-                                Image(
-                                    painter = painterResource(preview),
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier
-                                        .size(68.dp)
-                                        .scale(1.5f),
-                                )
-                            }
+                            // One 1:1 preview per variant, generated from the same
+                            // full-bleed crop the launcher icon uses: every card shows
+                            // identical scale and centring, and the rounded clip cuts
+                            // only the icon's own dark corner wedges.
+                            Image(
+                                painter = painterResource(option.previewRes),
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(68.dp)
+                                    .clip(RoundedCornerShape(22.dp)),
+                            )
                             Text(
                                 text = stringResource(option.labelRes),
                                 textAlign = TextAlign.Center,
@@ -1969,6 +2013,19 @@ internal fun openEqualizer(context: Context, sessionId: Int) {
         Toast.makeText(context, context.getString(R.string.no_equalizer), Toast.LENGTH_SHORT).show()
     }
 }
+
+/**
+ * What the font picker offers. The trailing wildcard is not a fallback for
+ * fonts: providers that hand out a generic octet-stream would otherwise hide
+ * every .ttf on the device. [CustomFont] still rejects anything unreadable.
+ */
+private val FONT_MIME_TYPES = arrayOf(
+    "font/ttf",
+    "font/otf",
+    "application/x-font-ttf",
+    "application/vnd.ms-opentype",
+    "*/*",
+)
 
 /** Above this, the cache limit slider's subtitle warns rather than reassures. */
 private const val CACHE_WARNING_MB = 2048

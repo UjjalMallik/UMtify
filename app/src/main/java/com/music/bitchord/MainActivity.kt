@@ -142,6 +142,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.music.bitchord.data.model.durationMillis
 import com.music.bitchord.data.settings.AppSettings
+import com.music.bitchord.data.settings.CustomFont
 import com.music.bitchord.data.settings.LibrarySort
 import com.music.bitchord.data.settings.ThemeMode
 import com.music.bitchord.ui.components.AccountProfileSelector
@@ -308,6 +309,8 @@ import com.music.bitchord.ui.replay.ReplayStories
 import com.music.bitchord.ui.replay.ReplayStoryPage
 import com.music.bitchord.ui.replay.rememberReplayState
 import com.music.bitchord.ui.theme.BitChordTheme
+import com.music.bitchord.ui.theme.appTypography
+import com.music.bitchord.ui.theme.customFontFamily
 import com.music.bitchord.ui.theme.rememberCoverColorScheme
 import com.music.bitchord.ui.theme.rememberArtworkPalette
 import com.music.bitchord.data.canvas.AppleArtistArtRepository
@@ -376,7 +379,21 @@ class MainActivity : AppCompatActivity() {
                 ThemeMode.DARK -> true
                 ThemeMode.DYNAMIC -> true
             }
-            BitChordTheme(darkTheme = darkTheme, colorScheme = dynamicScheme) {
+            // Keyed on the stored name: a pick or a reset swaps the face under
+            // every screen at once, since they all sit under this theme. The
+            // file is re-checked here too — a preference that outlived its file
+            // falls back to the app's own face instead of a blank one.
+            val customFontName by AppSettings.customFont.collectAsStateWithLifecycle()
+            val customFontRevision by AppSettings.customFontRevision.collectAsStateWithLifecycle()
+            val typography = remember(customFontName, customFontRevision) {
+                val file = customFontName?.let { CustomFont.existing(applicationContext) }
+                appTypography(file?.let { customFontFamily(it) })
+            }
+            BitChordTheme(
+                darkTheme = darkTheme,
+                colorScheme = dynamicScheme,
+                typography = typography,
+            ) {
                 // The glass surfaces sample this layer, and a layer records only
                 // what is drawn into it — which, for BitChord, is a page that
                 // paints no background of its own. Everywhere a page is not

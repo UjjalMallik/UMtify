@@ -61,7 +61,7 @@ val SFProDisplay = FontFamily(
 )
 
 // Heavy, tight typography — the backbone of the Apple Music look.
-private val BitChordTypography = Typography(
+internal val BitChordTypography = Typography(
     displayLarge = TextStyle(fontWeight = FontWeight.W800, fontSize = 34.sp, letterSpacing = (-0.8).sp),
     headlineLarge = TextStyle(fontWeight = FontWeight.W800, fontSize = 30.sp, letterSpacing = (-0.7).sp),
     headlineMedium = TextStyle(fontWeight = FontWeight.W700, fontSize = 22.sp, letterSpacing = (-0.4).sp),
@@ -72,6 +72,24 @@ private val BitChordTypography = Typography(
     labelMedium = TextStyle(fontWeight = FontWeight.W600, fontSize = 12.sp),
     labelSmall = TextStyle(fontWeight = FontWeight.W600, fontSize = 11.sp),
 ).withFamily(SFProDisplay)
+
+/**
+ * The app's type scale, optionally set in [family]. Every size, weight and
+ * tracking is the theme's own; only the face changes, so a listener's font
+ * keeps the hierarchy and line spacing the rest of the UI was laid out for.
+ */
+fun appTypography(family: FontFamily?): Typography =
+    if (family == null) BitChordTypography else BitChordTypography.withFamily(family)
+
+/**
+ * A single-file face from [file], as the listener imported it.
+ *
+ * One file, so every weight resolves to it: a font shipped without a bold cut
+ * still ends up bold-looking nowhere, which is the shape of the file and not
+ * something to fake by synthesising one.
+ */
+fun customFontFamily(file: java.io.File): FontFamily =
+    FontFamily(Font(file))
 
 /** Applies [family] to every style in the scale, so nothing is left on Roboto. */
 private fun Typography.withFamily(family: FontFamily) = Typography(
@@ -97,11 +115,13 @@ fun BitChordTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     /** The cover-derived scheme of the dynamic theme, or null for the fixed palettes. */
     colorScheme: ColorScheme? = null,
+    /** [appTypography] with the listener's imported face, or the theme's own. */
+    typography: Typography = BitChordTypography,
     content: @Composable () -> Unit,
 ) {
     MaterialTheme(
         colorScheme = colorScheme ?: if (darkTheme) DarkColors else LightColors,
-        typography = BitChordTypography,
+        typography = typography,
         content = content,
     )
 }

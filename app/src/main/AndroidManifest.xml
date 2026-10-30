@@ -243,109 +243,11 @@
         </activity-alias>
 
         <activity-alias
-            android:name=".LauncherGlassLight"
-            android:enabled="false"
-            android:exported="true"
-            android:icon="@mipmap/ic_liquid_glass"
-            android:roundIcon="@mipmap/ic_liquid_glass"
-            android:label="@string/app_name"
-            android:targetActivity=".MainActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".LauncherGlassDark"
-            android:enabled="false"
-            android:exported="true"
-            android:icon="@mipmap/ic_liquid_glass_dark"
-            android:roundIcon="@mipmap/ic_liquid_glass_dark"
-            android:label="@string/app_name"
-            android:targetActivity=".MainActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".LauncherGlassClear"
-            android:enabled="false"
-            android:exported="true"
-            android:icon="@mipmap/ic_liquid_glass_clear"
-            android:roundIcon="@mipmap/ic_liquid_glass_clear"
-            android:label="@string/app_name"
-            android:targetActivity=".MainActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".LauncherGlassClearDark"
-            android:enabled="false"
-            android:exported="true"
-            android:icon="@mipmap/ic_liquid_glass_clear_dark"
-            android:roundIcon="@mipmap/ic_liquid_glass_clear_dark"
-            android:label="@string/app_name"
-            android:targetActivity=".MainActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
             android:name=".LauncherSamsungGlass"
             android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_samsung_glass"
             android:roundIcon="@mipmap/ic_samsung_glass"
-            android:label="@string/app_name"
-            android:targetActivity=".MainActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".LauncherSamsungGlassDark"
-            android:enabled="false"
-            android:exported="true"
-            android:icon="@mipmap/ic_samsung_glass_dark"
-            android:roundIcon="@mipmap/ic_samsung_glass_dark"
-            android:label="@string/app_name"
-            android:targetActivity=".MainActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".LauncherSamsungGlassClear"
-            android:enabled="false"
-            android:exported="true"
-            android:icon="@mipmap/ic_samsung_glass_clear"
-            android:roundIcon="@mipmap/ic_samsung_glass_clear"
-            android:label="@string/app_name"
-            android:targetActivity=".MainActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".LauncherSamsungGlassClearDark"
-            android:enabled="false"
-            android:exported="true"
-            android:icon="@mipmap/ic_samsung_glass_clear_dark"
-            android:roundIcon="@mipmap/ic_samsung_glass_clear_dark"
             android:label="@string/app_name"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -369,39 +271,11 @@
         </activity-alias>
 
         <activity-alias
-            android:name=".LauncherPixelGlassDark"
+            android:name=".LauncherGlassClear"
             android:enabled="false"
             android:exported="true"
-            android:icon="@mipmap/ic_pixel_glass_dark"
-            android:roundIcon="@mipmap/ic_pixel_glass_dark"
-            android:label="@string/app_name"
-            android:targetActivity=".MainActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".LauncherPixelGlassClear"
-            android:enabled="false"
-            android:exported="true"
-            android:icon="@mipmap/ic_pixel_glass_clear"
-            android:roundIcon="@mipmap/ic_pixel_glass_clear"
-            android:label="@string/app_name"
-            android:targetActivity=".MainActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".LauncherPixelGlassClearDark"
-            android:enabled="false"
-            android:exported="true"
-            android:icon="@mipmap/ic_pixel_glass_clear_dark"
-            android:roundIcon="@mipmap/ic_pixel_glass_clear_dark"
+            android:icon="@mipmap/ic_liquid_glass_clear"
+            android:roundIcon="@mipmap/ic_liquid_glass_clear"
             android:label="@string/app_name"
             android:targetActivity=".MainActivity">
             <intent-filter>

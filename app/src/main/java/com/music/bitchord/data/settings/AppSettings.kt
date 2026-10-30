@@ -352,6 +352,12 @@ object AppSettings {
     /** Put the playing track's codec, bitrate and sample rate on the player. */
     val showNerdStats = MutableStateFlow(false)
 
+    /** Display name of the listener's imported .ttf/.otf, or null for the app's own face. */
+    val customFont = MutableStateFlow<String?>(null)
+
+    /** Bumped by every import, so picking a newer file under the same name re-sets the theme. */
+    val customFontRevision = MutableStateFlow(0)
+
     /** Freezes the main player's mesh gradient instead of letting it drift/crossfade. */
     val reduceAnimation = MutableStateFlow(false)
 
@@ -845,6 +851,7 @@ object AppSettings {
         shuffleEnabled.value = prefs.getBoolean(KEY_SHUFFLE_ENABLED, false)
         repeatMode.value = prefs.getInt(KEY_REPEAT_MODE, Player.REPEAT_MODE_OFF)
         showNerdStats.value = prefs.getBoolean(KEY_NERD_STATS, false)
+        customFont.value = prefs.getString(KEY_CUSTOM_FONT, null)
         reduceAnimation.value = prefs.getBoolean(KEY_REDUCE_ANIMATION, false)
         onboardingComplete.value = prefs.getBoolean(KEY_ONBOARDING_COMPLETE, false)
         highPerformanceMode.value = prefs.getBoolean(KEY_HIGH_PERFORMANCE_MODE, false)
@@ -1194,6 +1201,12 @@ object AppSettings {
     fun setShowNerdStats(value: Boolean) {
         showNerdStats.value = value
         prefs.edit().putBoolean(KEY_NERD_STATS, value).apply()
+    }
+
+    fun setCustomFont(value: String?) {
+        customFont.value = value
+        customFontRevision.value++
+        prefs.edit().putString(KEY_CUSTOM_FONT, value).apply()
     }
 
     fun setThemeMode(value: ThemeMode) {
@@ -1909,6 +1922,10 @@ object AppSettings {
         "downloaded_collections",
         KEY_LOCAL_MUSIC_FOLDER_URI,
         KEY_LAST_VERSION_CODE,
+        // The name is only ever the label of the file the listener imported
+        // here; the file itself is not in the backup, so restoring the name
+        // would leave a row promising a face the new device does not have.
+        KEY_CUSTOM_FONT,
     )
 
     /**
@@ -1968,6 +1985,7 @@ object AppSettings {
     private const val KEY_SHUFFLE_ENABLED = "shuffle_enabled"
     private const val KEY_REPEAT_MODE = "repeat_mode"
     private const val KEY_NERD_STATS = "show_nerd_stats"
+    private const val KEY_CUSTOM_FONT = "custom_font_name"
     private const val KEY_CACHE_LIMIT = "audio_cache_limit_bytes"
     private const val KEY_REDUCE_ANIMATION = "reduce_animation"
     private const val KEY_ONBOARDING_COMPLETE = "onboarding_complete"

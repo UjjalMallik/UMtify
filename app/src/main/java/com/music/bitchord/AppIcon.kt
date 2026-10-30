@@ -8,26 +8,17 @@ import android.content.pm.PackageManager
  * The home-screen icon choices. Each is an `<activity-alias>` in the manifest
  * carrying the launcher intent filter; exactly one is enabled at a time.
  *
- * The glass icons are adaptive icons whose foreground already holds the finished
- * icon in its own shape (Apple squircle, Samsung squircle or Pixel circle), so
- * [previewRes] — that foreground — shows the variant as designed rather than
- * through the device's launcher mask. The first two keep yesterday's alias
- * names so a choice made before the update stays enabled.
+ * The four variants are the four quadrants of the source artwork; the dimmed
+ * "dark" flavours were cut because they were only brightness-reduced copies.
+ * Alias names are kept stable so a choice made before an update stays enabled.
+ * [previewRes] is the finished 1:1 icon, identical in scale and centring to what
+ * the launcher draws, so the Settings cards never show a different crop.
  */
-enum class AppIcon(val alias: String, val iconRes: Int, val labelRes: Int, val previewRes: Int? = null) {
-    Default("LauncherDefault", R.mipmap.ic_launcher, R.string.app_icon_default),
-    LiquidGlass("LauncherGlassLight", R.mipmap.ic_liquid_glass, R.string.app_icon_liquid_glass, R.mipmap.ic_liquid_glass_foreground),
-    LiquidGlassDark("LauncherGlassDark", R.mipmap.ic_liquid_glass_dark, R.string.app_icon_liquid_glass_dark, R.mipmap.ic_liquid_glass_dark_foreground),
-    LiquidGlassClear("LauncherGlassClear", R.mipmap.ic_liquid_glass_clear, R.string.app_icon_liquid_glass_clear, R.mipmap.ic_liquid_glass_clear_foreground),
-    LiquidGlassClearDark("LauncherGlassClearDark", R.mipmap.ic_liquid_glass_clear_dark, R.string.app_icon_liquid_glass_clear_dark, R.mipmap.ic_liquid_glass_clear_dark_foreground),
-    SamsungGlass("LauncherSamsungGlass", R.mipmap.ic_samsung_glass, R.string.app_icon_samsung_glass, R.mipmap.ic_samsung_glass_foreground),
-    SamsungGlassDark("LauncherSamsungGlassDark", R.mipmap.ic_samsung_glass_dark, R.string.app_icon_samsung_glass_dark, R.mipmap.ic_samsung_glass_dark_foreground),
-    SamsungGlassClear("LauncherSamsungGlassClear", R.mipmap.ic_samsung_glass_clear, R.string.app_icon_samsung_glass_clear, R.mipmap.ic_samsung_glass_clear_foreground),
-    SamsungGlassClearDark("LauncherSamsungGlassClearDark", R.mipmap.ic_samsung_glass_clear_dark, R.string.app_icon_samsung_glass_clear_dark, R.mipmap.ic_samsung_glass_clear_dark_foreground),
-    PixelGlass("LauncherPixelGlass", R.mipmap.ic_pixel_glass, R.string.app_icon_pixel_glass, R.mipmap.ic_pixel_glass_foreground),
-    PixelGlassDark("LauncherPixelGlassDark", R.mipmap.ic_pixel_glass_dark, R.string.app_icon_pixel_glass_dark, R.mipmap.ic_pixel_glass_dark_foreground),
-    PixelGlassClear("LauncherPixelGlassClear", R.mipmap.ic_pixel_glass_clear, R.string.app_icon_pixel_glass_clear, R.mipmap.ic_pixel_glass_clear_foreground),
-    PixelGlassClearDark("LauncherPixelGlassClearDark", R.mipmap.ic_pixel_glass_clear_dark, R.string.app_icon_pixel_glass_clear_dark, R.mipmap.ic_pixel_glass_clear_dark_foreground);
+enum class AppIcon(val alias: String, val iconRes: Int, val labelRes: Int, val previewRes: Int) {
+    Default("LauncherDefault", R.mipmap.ic_launcher, R.string.app_icon_default, R.drawable.ic_preview_default),
+    LiquidGlassClear("LauncherGlassClear", R.mipmap.ic_liquid_glass_clear, R.string.app_icon_liquid_glass_clear, R.drawable.ic_preview_liquid_glass_clear),
+    SamsungGlass("LauncherSamsungGlass", R.mipmap.ic_samsung_glass, R.string.app_icon_samsung_glass, R.drawable.ic_preview_samsung_glass),
+    PixelGlass("LauncherPixelGlass", R.mipmap.ic_pixel_glass, R.string.app_icon_pixel_glass, R.drawable.ic_preview_pixel_glass);
 
     private fun component(context: Context) =
         ComponentName(context.packageName, "com.music.bitchord.$alias")
@@ -39,6 +30,22 @@ enum class AppIcon(val alias: String, val iconRes: Int, val labelRes: Int, val p
                 pm.getComponentEnabledSetting(it.component(context)) ==
                     PackageManager.COMPONENT_ENABLED_STATE_ENABLED
             } ?: Default
+        }
+
+        /**
+         * Repairs the one state [current] cannot represent: a device that had a
+         * now-removed alias enabled ends up with every known alias disabled
+         * (the old choice simply no longer exists in the manifest), which would
+         * leave the user with no launcher entry at all. Called from
+         * [BitChordApplication] before anything reads the current icon.
+         */
+        fun ensureValid(context: Context) {
+            val pm = context.packageManager
+            val anyEnabled = entries.any {
+                pm.getComponentEnabledSetting(it.component(context)) ==
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+            }
+            if (!anyEnabled) apply(context, Default)
         }
 
         /** Enables [icon] before disabling the rest so there is never a moment with no launcher entry. */

@@ -55,6 +55,9 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
         // the first composition — a reopened player must show the listener's
         // artwork rather than the source's for a frame.
         SongEditStore.init(this)
+        // A removed icon alias leaves every known alias disabled; repair that
+        // before anything reads the current icon, so the launcher entry survives.
+        AppIcon.ensureValid(this)
         PlayerPlatform.install(AndroidPlayerHost(this))
         com.music.bitchord.ui.AppUi.install(com.music.bitchord.ui.AndroidAppUiHost)
         // The shared data layer (lyrics, the YouTube Music client) logs to

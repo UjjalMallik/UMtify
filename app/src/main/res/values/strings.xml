@@ -303,19 +303,15 @@
     <string name="show_nerd_stats_subtitle">Codec, bitrate and sample rate on the player</string>
     <string name="app_icon">App icon</string>
     <string name="app_icon_default">Default</string>
-    <string name="app_icon_liquid_glass" translatable="false">Liquid Glass</string>
-    <string name="app_icon_liquid_glass_dark" translatable="false">Liquid Glass Dark</string>
     <string name="app_icon_liquid_glass_clear" translatable="false">Liquid Glass Clear</string>
-    <string name="app_icon_liquid_glass_clear_dark" translatable="false">Liquid Glass Clear Dark</string>
     <string name="app_icon_samsung_glass" translatable="false">Samsung Glass</string>
-    <string name="app_icon_samsung_glass_dark" translatable="false">Samsung Glass Dark</string>
-    <string name="app_icon_samsung_glass_clear" translatable="false">Samsung Glass Clear</string>
-    <string name="app_icon_samsung_glass_clear_dark" translatable="false">Samsung Glass Clear Dark</string>
     <string name="app_icon_pixel_glass" translatable="false">Pixel Glass</string>
-    <string name="app_icon_pixel_glass_dark" translatable="false">Pixel Glass Dark</string>
-    <string name="app_icon_pixel_glass_clear" translatable="false">Pixel Glass Clear</string>
-    <string name="app_icon_pixel_glass_clear_dark" translatable="false">Pixel Glass Clear Dark</string>
     <string name="theme">Theme</string>
+    <string name="custom_font">Custom font</string>
+    <string name="custom_font_subtitle">Use a .ttf or .otf file from your storage</string>
+    <string name="custom_font_active">Using %1$s</string>
+    <string name="custom_font_reset">Reset</string>
+    <string name="custom_font_failed">That file could not be read as a font</string>
     <string name="reduce_animation">Reduce animation</string>
     <string name="reduce_animation_subtitle">Freezes the main player\'s gradient instead of drifting</string>
     <string name="reduce_dynamic_blur">Reduce dynamic blur</string>
