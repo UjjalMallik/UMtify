@@ -134,6 +134,7 @@ import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.ShelfItem
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.isUnresolvedSpotify
+import com.music.bitchord.data.model.hasShareableVideoId
 import com.music.bitchord.data.model.UiState
 import com.music.bitchord.data.model.UserPlaylist
 import com.music.bitchord.data.model.EntityType
@@ -2396,7 +2397,10 @@ private fun BitChordApp(
                 songActions = song
             },
             onShare = {
-                if (displayedSong.videoId.isNotBlank()) {
+                // A device file's media-store URI is not a watch id. Guarding
+                // here as well as at the button keeps a redirected tap from
+                // sending a dead link.
+                if (displayedSong.hasShareableVideoId) {
                     val sendIntent = Intent(Intent.ACTION_SEND).apply {
                         type = "text/plain"
                         putExtra(
@@ -4484,7 +4488,7 @@ private fun BitChordApp(
                 // this row to build a link from — SongActionsSheet already
                 // drops it for a local file via `isOffline`, this catches
                 // the rest.
-                onShare = share.takeIf { song.videoId.isNotBlank() },
+                onShare = share.takeIf { song.hasShareableVideoId },
                 // Offered for anything the sheet already treats as offline —
                 // a file the listener holds, not a catalogue row. Closing the
                 // menu first keeps the editor as the one thing on screen.

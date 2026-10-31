@@ -164,6 +164,7 @@ import com.music.bitchord.data.model.LikeStatus
 import com.music.bitchord.data.model.PlaybackSourceType
 import com.music.bitchord.data.model.PLAYER_ART_PX
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.model.hasShareableVideoId
 import com.music.bitchord.playback.BACK_RESTARTS_AFTER_MS
 import dev.chrisbanes.haze.HazeInputScale
 import dev.chrisbanes.haze.HazeState
@@ -3549,7 +3550,10 @@ fun NowPlayingScreen(
                                     haptic = if (lyricPicker.picking) Haptic.Tap else Haptic.Select,
                                 )
                                 Spacer(Modifier.width(8.dp))
-                            } else if (song.videoId.isNotBlank()) {
+                            } else if (song.hasShareableVideoId) {
+                                // A device file's identity is its own URI, so
+                                // there is no watch page to send — the heart
+                                // stays, and the title takes the room.
                                 PlayerSurfaceButton(
                                     icon = Icons.Rounded.IosShare,
                                     contentDescription = stringResource(Res.string.share),

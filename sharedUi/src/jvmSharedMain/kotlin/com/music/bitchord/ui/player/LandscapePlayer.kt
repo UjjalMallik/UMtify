@@ -65,6 +65,7 @@ import com.music.bitchord.ui.theme.stableStatusBarInsets
 import com.music.bitchord.data.canvas.CanvasArtwork
 import com.music.bitchord.data.model.LikeStatus
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.model.hasShareableVideoId
 
 /**
  * The widest the two columns are allowed to get between them, centred in
@@ -463,7 +464,7 @@ internal fun LandscapeCredits(
             }
         }
         Spacer(Modifier.width(10.dp))
-        if (song.videoId.isNotBlank()) {
+        if (song.hasShareableVideoId) {
             PlayerSurfaceButton(
                 icon = Icons.Rounded.IosShare,
                 contentDescription = stringResource(Res.string.share),
