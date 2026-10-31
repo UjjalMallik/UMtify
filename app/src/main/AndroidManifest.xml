@@ -233,7 +233,7 @@
             android:enabled="true"
             android:exported="true"
             android:icon="@mipmap/ic_launcher"
-            android:roundIcon="@mipmap/ic_launcher"
+            android:roundIcon="@mipmap/ic_launcher_round"
             android:label="@string/app_name"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -247,7 +247,7 @@
             android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_normal"
-            android:roundIcon="@mipmap/ic_launcher_normal"
+            android:roundIcon="@mipmap/ic_launcher_normal_round"
             android:label="@string/app_name"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -261,7 +261,7 @@
             android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_liquid_glass_dark"
-            android:roundIcon="@mipmap/ic_launcher_liquid_glass_dark"
+            android:roundIcon="@mipmap/ic_launcher_liquid_glass_dark_round"
             android:label="@string/app_name"
             android:targetActivity=".MainActivity">
             <intent-filter>
