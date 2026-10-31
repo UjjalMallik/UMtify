@@ -68,6 +68,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # Caches the Gradle User Home (dependencies, wrappers, build cache) across
+      # runs, so a red dependency host costs one retry, not a full re-download.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
