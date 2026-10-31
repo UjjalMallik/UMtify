@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The brand badge: the headphone mark used by the Replay poster ("Share my
-  Replay" card), Replay stories and the lyrics share card, drawn left of the
-  canvas-set wordmark. The 36×24 viewport matches the ~3:2 boxes the callers
-  size it in (ReplayPoster.kt bounds, story/story-header modifiers), so the
-  badge never stretches. White fill — the draw-time tint controls the color.
+  The brand badge: the wave-music-note mark used by the Replay poster
+  ("Share my Replay" card), Replay stories and the lyrics share card, drawn
+  left of the canvas-set wordmark. The 36x24 viewport matches the ~3:2 boxes
+  the callers size it in (ReplayPoster.kt bounds, story/story-header
+  modifiers), so the badge never stretches; the mark itself sits in the
+  central 24x24 of the viewport. White fill - the draw-time tint controls
+  the color.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="36dp"
@@ -13,5 +15,5 @@
     android:viewportHeight="24">
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M10.5,13.2c0-4.42,3.38-8,7.5-8s7.5,3.58,7.5,8V18a2.25,2.25 0 0 1-2.25,2.25h-0.75A1.5,1.5 0 0 1,21,18.75v-4.5a1.5,1.5 0 0 1,1.5-1.5h1.5v-0.55c0-3.31-2.69-6-6-6s-6,2.69-6,6V13h1.5A1.5,1.5 0 0 1,15,14.5v4.5A1.5,1.5 0 0 1,13.5,20.5h-0.75A2.25,2.25 0 0 1,10.5,18.25Z" />
+        android:pathData="M15.40,6.90L24.90,4.40L24.90,6.80L15.40,9.20ZM15.40,7.90L16.90,7.60L16.90,14.60L15.40,15.00ZM23.80,5.30L25.70,4.80L25.30,13.30L23.80,13.70ZM15.92,16.00C16.18,16.96 15.39,18.01 14.17,18.34C12.94,18.67 11.74,18.16 11.48,17.20C11.22,16.24 12.01,15.19 13.23,14.86C14.46,14.53 15.66,15.04 15.92,16.00ZM24.73,14.26C24.97,15.16 24.26,16.14 23.14,16.44C22.02,16.74 20.91,16.25 20.67,15.34C20.43,14.44 21.14,13.46 22.26,13.16C23.38,12.86 24.49,13.35 24.73,14.26ZM7.50,20.99L7.64,19.31L7.86,18.54L8.36,17.53L8.78,16.96L9.28,16.51L9.85,16.17L10.63,15.95L11.12,16.07L11.31,16.49L11.51,16.34L10.27,17.98L10.80,18.62L12.25,20.03L13.30,20.80L14.97,21.65L16.15,21.99L17.37,22.11L18.60,22.00L19.21,21.86L20.17,21.42L20.92,20.89L21.52,20.27L21.98,19.60L22.49,18.60L22.84,18.35L22.73,18.28L22.79,18.48L24.45,19.74L25.06,18.80L25.58,18.22L26.40,17.62L27.20,17.34L27.90,17.37L28.32,17.54L28.50,17.75L28.79,18.52L28.65,19.36L30.75,20.04L30.95,19.24L30.98,18.37L30.82,17.50L30.43,16.68L30.06,16.18L29.48,15.66L28.95,15.40L27.91,15.14L26.85,15.17L25.37,15.68L24.48,16.26L23.32,17.44L22.35,19.06L24.26,20.12L24.62,19.71L24.88,19.23L25.01,18.71L24.96,17.91L24.78,17.41L24.31,16.75L23.69,16.32L23.15,16.17L22.34,16.20L21.38,16.62L20.66,17.38L20.09,18.48L19.60,19.11L18.90,19.61L18.19,19.84L16.98,19.89L16.16,19.73L15.33,19.42L14.49,18.95L13.65,18.34L12.13,16.82L11.15,18.51L11.66,18.54L12.16,18.44L12.83,18.05L13.17,17.66L13.39,17.19L13.49,16.17L13.36,15.58L13.09,15.02L12.45,14.32L11.57,13.87L10.54,13.75L9.43,13.96L8.42,14.44L7.54,15.10L6.81,15.90L6.23,16.81L5.62,18.31L5.39,19.39L5.30,21.01Z" />
 </vector>

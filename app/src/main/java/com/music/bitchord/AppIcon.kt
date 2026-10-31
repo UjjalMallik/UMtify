@@ -8,17 +8,18 @@ import android.content.pm.PackageManager
  * The home-screen icon choices. Each is an `<activity-alias>` in the manifest
  * carrying the launcher intent filter; exactly one is enabled at a time.
  *
- * The four variants are the four quadrants of the source artwork; the dimmed
- * "dark" flavours were cut because they were only brightness-reduced copies.
- * Alias names are kept stable so a choice made before an update stays enabled.
- * [previewRes] is the finished 1:1 icon, identical in scale and centring to what
- * the launcher draws, so the Settings cards never show a different crop.
+ * The three variants are sliced from one sheet of wave-music-note artwork at
+ * identical scale and centring; Liquid Glass is the shipped default. Older
+ * aliases were removed, so a device that still has one enabled ends up with
+ * every known alias disabled — [ensureValid] repairs that by re-enabling
+ * Default. [previewRes] is the finished 1:1 icon, identical in scale and
+ * centring to what the launcher draws, so the Settings cards never show a
+ * different crop.
  */
 enum class AppIcon(val alias: String, val iconRes: Int, val labelRes: Int, val previewRes: Int) {
     Default("LauncherDefault", R.mipmap.ic_launcher, R.string.app_icon_default, R.drawable.ic_preview_default),
-    LiquidGlassClear("LauncherGlassClear", R.mipmap.ic_liquid_glass_clear, R.string.app_icon_liquid_glass_clear, R.drawable.ic_preview_liquid_glass_clear),
-    SamsungGlass("LauncherSamsungGlass", R.mipmap.ic_samsung_glass, R.string.app_icon_samsung_glass, R.drawable.ic_preview_samsung_glass),
-    PixelGlass("LauncherPixelGlass", R.mipmap.ic_pixel_glass, R.string.app_icon_pixel_glass, R.drawable.ic_preview_pixel_glass);
+    Normal("LauncherNormal", R.mipmap.ic_launcher_normal, R.string.app_icon_normal, R.drawable.ic_preview_normal),
+    LiquidGlassDark("LauncherLiquidGlassDark", R.mipmap.ic_launcher_liquid_glass_dark, R.string.app_icon_liquid_glass_dark, R.drawable.ic_preview_liquid_glass_dark);
 
     private fun component(context: Context) =
         ComponentName(context.packageName, "com.music.bitchord.$alias")

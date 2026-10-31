@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The notification small icon: a pure white headphone silhouette.
+  The notification small icon: a pure white wave-music-note silhouette.
 
   The single-color fill (no gradients) is required by the status-bar tint
-  rules; the cups, band and wave fin are unioned into one path at 24dp so
-  the mark stays legible at 24px. The wave fin inside the cups mirrors the
-  main mark so the icon reads as UMtify at a glance.
+  rules; the beamed note, both heads and the curling wave underneath are
+  unioned into one path at 24dp so the mark stays legible at 24px. It
+  mirrors the wave-music-note launcher artwork so the icon reads as
+  UMtify at a glance.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
@@ -14,5 +15,5 @@
     android:viewportHeight="24">
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M4.5,13.2c0-4.42,3.38-8,7.5-8s7.5,3.58,7.5,8V18a2.25,2.25 0 0 1-2.25,2.25h-0.75A1.5,1.5 0 0 1,15,18.75v-4.5a1.5,1.5 0 0 1,1.5-1.5h1.5v-0.55c0-3.31-2.69-6-6-6s-6,2.69-6,6V13h1.5A1.5,1.5 0 0 1,9,14.5v4.5A1.5,1.5 0 0 1,7.5,20.5h-0.75A2.25,2.25 0 0 1,4.5,18.25Z" />
+        android:pathData="M9.40,6.90L18.90,4.40L18.90,6.80L9.40,9.20ZM9.40,7.90L10.90,7.60L10.90,14.60L9.40,15.00ZM17.80,5.30L19.70,4.80L19.30,13.30L17.80,13.70ZM9.92,16.00C10.18,16.96 9.39,18.01 8.17,18.34C6.94,18.67 5.74,18.16 5.48,17.20C5.22,16.24 6.01,15.19 7.23,14.86C8.46,14.53 9.66,15.04 9.92,16.00ZM18.73,14.26C18.97,15.16 18.26,16.14 17.14,16.44C16.02,16.74 14.91,16.25 14.67,15.34C14.43,14.44 15.14,13.46 16.26,13.16C17.38,12.86 18.49,13.35 18.73,14.26ZM1.50,20.99L1.64,19.31L1.86,18.54L2.36,17.53L2.78,16.96L3.28,16.51L3.85,16.17L4.63,15.95L5.12,16.07L5.31,16.49L5.51,16.34L4.27,17.98L4.80,18.62L6.25,20.03L7.30,20.80L8.97,21.65L10.15,21.99L11.37,22.11L12.60,22.00L13.21,21.86L14.17,21.42L14.92,20.89L15.52,20.27L15.98,19.60L16.49,18.60L16.84,18.35L16.73,18.28L16.79,18.48L18.45,19.74L19.06,18.80L19.58,18.22L20.40,17.62L21.20,17.34L21.90,17.37L22.32,17.54L22.50,17.75L22.79,18.52L22.65,19.36L24.00,20.04L24.00,19.24L24.00,18.37L24.00,17.50L24.00,16.68L24.00,16.18L23.48,15.66L22.95,15.40L21.91,15.14L20.85,15.17L19.37,15.68L18.48,16.26L17.32,17.44L16.35,19.06L18.26,20.12L18.62,19.71L18.88,19.23L19.01,18.71L18.96,17.91L18.78,17.41L18.31,16.75L17.69,16.32L17.15,16.17L16.34,16.20L15.38,16.62L14.66,17.38L14.09,18.48L13.60,19.11L12.90,19.61L12.19,19.84L10.98,19.89L10.16,19.73L9.33,19.42L8.49,18.95L7.65,18.34L6.13,16.82L5.15,18.51L5.66,18.54L6.16,18.44L6.83,18.05L7.17,17.66L7.39,17.19L7.49,16.17L7.36,15.58L7.09,15.02L6.45,14.32L5.57,13.87L4.54,13.75L3.43,13.96L2.42,14.44L1.54,15.10L0.81,15.90L0.23,16.81L0.00,18.31L0.00,19.39L0.00,21.01Z" />
 </vector>
