@@ -1782,6 +1782,10 @@ class PlaybackService : MediaLibraryService() {
         )
             .setId(SESSION_ID)
             .setSessionActivity(sessionActivity())
+            // The notification provider resolves the playing track's cover
+            // through this, and Media3's own reads local files only — these
+            // covers are https URLs, so without it the art never arrives.
+            .setBitmapLoader(SessionArtworkLoader(applicationContext, scope))
             .build()
         refreshCustomLayouts()
 
