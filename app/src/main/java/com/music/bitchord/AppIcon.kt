@@ -7,7 +7,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
+import android.os.Build
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -83,26 +83,44 @@ enum class AppIcon(val alias: String, val iconRes: Int, val labelRes: Int, val p
         }
 
         /**
-         * Recents does not read the launcher icon — it shows the bitmap its task
+         * Recents does not read the launcher icon — it shows the artwork its task
          * was handed, which is set once and kept. So a pick in Settings repaints
          * the home screen and nothing else until [Activity.setTaskDescription]
-         * runs again with the new artwork; -1 as the header colour leaves that to
-         * the launcher rather than painting a band the theme does not own.
+         * runs again with the new icon.
+         *
+         * The resource-id forms arrived late and the bitmap forms left early: a
+         * drawable res id needs API 28 and [ActivityManager.TaskDescription.Builder]
+         * needs 33, so the two oldest releases rasterise [AppIcon.previewRes] by
+         * hand. None of the three sets a header colour, which leaves that to the
+         * launcher rather than painting a band the theme does not own.
          */
+        @Suppress("DEPRECATION")
         fun refreshTaskDescription(activity: Activity) {
             val icon = current(activity)
-            val drawable = ContextCompat.getDrawable(activity, icon.previewRes) ?: return
-            val size = (96f * activity.resources.displayMetrics.density).toInt()
+            val label = activity.getString(R.string.app_name)
+            val description = when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
+                    ActivityManager.TaskDescription.Builder()
+                        .setLabel(label)
+                        .setIcon(icon.previewRes)
+                        .build()
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.P ->
+                    ActivityManager.TaskDescription(label, icon.previewRes)
+                else ->
+                    ActivityManager.TaskDescription(label, previewBitmap(activity, icon))
+            }
+            activity.setTaskDescription(description)
+        }
+
+        /** [previewRes] drawn at the density Recents would have produced for it. */
+        private fun previewBitmap(context: Context, icon: AppIcon): Bitmap {
+            val drawable = ContextCompat.getDrawable(context, icon.previewRes)
+                ?: return Bitmap.createBitmap(1, 1, Bitmap.Config.ALPHA_8)
+            val size = (96f * context.resources.displayMetrics.density).toInt()
             val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
             drawable.setBounds(0, 0, size, size)
             drawable.draw(Canvas(bitmap))
-            activity.setTaskDescription(
-                ActivityManager.TaskDescription(
-                    activity.getString(R.string.app_name),
-                    Color.TRANSPARENT,
-                    bitmap,
-                ),
-            )
+            return bitmap
         }
     }
 }

@@ -121,7 +121,9 @@ fun OfflineHomeScreen(
                 networkAvailable = networkAvailable,
                 manualOffline = manualOffline,
                 onExit = onExitOfflineMode,
-                modifier = Modifier.padding(horizontal = PAGE_GUTTER, bottom = 18.dp),
+                modifier = Modifier
+                    .padding(horizontal = PAGE_GUTTER)
+                    .padding(bottom = 18.dp),
             )
         }
         val snapshot = data ?: return@LazyColumn

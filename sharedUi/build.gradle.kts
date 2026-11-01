@@ -108,6 +108,12 @@ android {
     defaultConfig {
         minSdk = 26
     }
+    lint {
+        // Depends on jars carrying newer Kotlin metadata than lint reads; that is
+        // not a reason to stop a release build.
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
 }
 
 compose.resources {
