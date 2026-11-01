@@ -65,6 +65,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.channels.BufferOverflow
@@ -184,18 +185,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * and cached and scanned by MediaStore — so a track is kept only in the
      * first of them, which is what makes three groups readable as three
      * different facts rather than one list said thrice.
+     *
+     * The match runs off the main thread: the readers below already do, but they
+     * hand back to the caller's dispatcher when they return, and filtering every
+     * file on the device is exactly the work that must not land on a keystroke.
      */
     private suspend fun offlineGroups(term: String): List<OfflineSearchGroup> {
-        val snapshot = readOfflineHome()
-        val seen = mutableSetOf<String>()
-        fun matched(songs: List<Song>): List<Song> = songs
-            .filter { it.matchesSearch(term) }
-            .filter { seen.add(it.videoId) }
-        return listOf(
-            OfflineSearchGroup(text(R.string.downloads), matched(snapshot.downloads)),
-            OfflineSearchGroup(text(R.string.local_music), matched(snapshot.local)),
-            OfflineSearchGroup(text(R.string.cached_songs), matched(snapshot.cached)),
-        ).filter { it.songs.isNotEmpty() }
+        // Read the labels before leaving the caller's thread — that is a
+        // resource lookup and the work below is not.
+        val labels = listOf(
+            text(R.string.downloads),
+            text(R.string.local_music),
+            text(R.string.cached_songs),
+        )
+        return withContext(Dispatchers.IO) {
+            val snapshot = readOfflineHome()
+            val seen = mutableSetOf<String>()
+            fun matched(songs: List<Song>): List<Song> = songs
+                .filter { it.matchesSearch(term) }
+                .filter { seen.add(it.videoId) }
+            labels.zip(
+                listOf(matched(snapshot.downloads), matched(snapshot.local), matched(snapshot.cached)),
+            ) { label, songs -> OfflineSearchGroup(label, songs) }
+                .filter { it.songs.isNotEmpty() }
+        }
     }
 
     /**
@@ -228,26 +241,39 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * it first.
      */
     private suspend fun localSuggestions(input: String, limit: Int = 8): List<String> {
-        val snapshot = runCatching { readOfflineHome() }.getOrNull() ?: return emptyList()
         val term = input.trim()
+        // Asked before the device is read, not after: an emptied field is the
+        // common case and the scan is the expensive one.
         if (term.isEmpty()) return emptyList()
-        return buildList {
+        return withContext(Dispatchers.IO) {
+            val snapshot = runCatching { readOfflineHome() }.getOrNull()
+                ?: return@withContext emptyList()
             val seen = mutableSetOf<String>()
+            val words = mutableListOf<String>()
             fun offer(value: String?) {
                 val word = value?.trim().orEmpty()
                 if (word.isNotEmpty() &&
                     word.contains(term, ignoreCase = true) &&
                     seen.add(word.lowercase(Locale.ROOT))
                 ) {
-                    add(word)
+                    words += word
                 }
             }
-            (snapshot.downloads + snapshot.local + snapshot.cached).forEach { song ->
-                offer(song.title)
-                offer(song.artist)
-                if (size >= limit) return@buildList
+            // Three walks rather than one list built out of the three homes:
+            // this answers every keystroke, and concatenating every file on the
+            // device to find eight words is the whole cost of doing it naively.
+            fun offerFrom(songs: List<Song>) {
+                for (song in songs) {
+                    offer(song.title)
+                    offer(song.artist)
+                    if (words.size >= limit) return
+                }
             }
-        }.take(limit)
+            offerFrom(snapshot.downloads)
+            offerFrom(snapshot.local)
+            offerFrom(snapshot.cached)
+            words
+        }
     }
 
     /**
