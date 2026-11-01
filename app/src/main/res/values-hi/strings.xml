@@ -811,7 +811,6 @@
 
     <string name="dolby_atmos_subtitle">उपलब्ध होने पर अधिक सराउंड और इमर्सिव संस्करण चलाएं।</string>
 
-    <string name="dolby_atmos_unavailable">यह डिवाइस Atmos का समर्थन नहीं करता, गाने सामान्य संस्करण में बजेंगे</string>
 
     <string name="export_compatible_downloads">संगत डाउनलोड निर्यात करें</string>
 

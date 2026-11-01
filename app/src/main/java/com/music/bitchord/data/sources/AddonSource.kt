@@ -2,7 +2,6 @@ package com.music.bitchord.data.sources
 
 import com.music.bitchord.data.TrackLog
 import com.music.bitchord.data.model.Song
-import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.sources.addon.AddonClient
 import com.music.bitchord.data.sources.addon.AddonException
 import com.music.bitchord.data.sources.addon.AddonManifest
@@ -335,16 +334,11 @@ class AddonSource(
         }
 
         val format = formatOf(answer, url, tier)
-        val playsAtmos = DeviceCodecs.playsDolbyAtmos
-        if (ModuleSource.unplayable(format, atmosAllowed = playsAtmos && AppSettings.dolbyAtmos.value)) {
-            val why = if (playsAtmos) {
-                "which is switched off in Settings"
-            } else {
-                "which this device has no decoder for"
-            }
+        if (ModuleSource.unplayable(format, atmosAllowed = DeviceCodecs.offersDolbyAtmos)) {
             TrackLog.w(
                 TAG,
-                "${config.displayName}: answered a $tier request with ${format.summary}, $why — passing",
+                "${config.displayName}: answered a $tier request with ${format.summary}, " +
+                    "which is switched off in Settings — passing",
             )
             return null
         }

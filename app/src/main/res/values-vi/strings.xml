@@ -146,7 +146,6 @@
     <string name="upgrade_quality">Nâng cấp chất lượng</string>
     <string name="dolby_atmos">Dolby Atmos</string>
     <string name="dolby_atmos_subtitle">Phát phiên bản âm thanh vòm sống động hơn khi có sẵn.</string>
-    <string name="dolby_atmos_unavailable">Thiết bị này không hỗ trợ Atmos, các bài hát sẽ phát ở phiên bản thông thường</string>
     <string name="spatial_audio">Âm thanh không gian</string>
     <string name="spatial_audio_subtitle">Mở rộng âm trường stereo cho cảm giác đắm chìm hơn</string>
     <string name="spatial_audio_atmos_subtitle">Tạm dừng ở bản nhạc này — Dolby Atmos vốn đã có âm thanh không gian</string>

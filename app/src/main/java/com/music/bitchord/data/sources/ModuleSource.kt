@@ -3,7 +3,6 @@ package com.music.bitchord.data.sources
 import android.util.Log
 import com.music.bitchord.data.TrackLog
 import com.music.bitchord.data.model.Song
-import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.sources.module.ModuleManager
 import com.music.bitchord.data.sources.module.ModuleSearchResult
 import com.music.bitchord.data.sources.module.SpineModule
@@ -273,17 +272,11 @@ class ModuleSource(
                 }?.takeIf { it > 0 },
                 bitDepth = trackMeta?.bitDepth?.takeIf { it > 0 },
             )
-            val playsAtmos = DeviceCodecs.playsDolbyAtmos
-            if (unplayable(format, atmosAllowed = playsAtmos && AppSettings.dolbyAtmos.value)) {
-                val why = if (playsAtmos) {
-                    "which is switched off in Settings"
-                } else {
-                    "which this device has no decoder for"
-                }
+            if (unplayable(format, atmosAllowed = DeviceCodecs.offersDolbyAtmos)) {
                 TrackLog.w(
                     TAG,
                     "${config.displayName}: $moduleId answered a ${request.tier} request with " +
-                        "${format.summary}, $why — passing",
+                        "${format.summary}, which is switched off in Settings — passing",
                 )
                 return@withContext null
             }
@@ -369,7 +362,7 @@ class ModuleSource(
         // ignore anything it is handed — the Tidal one ignores the tier and
         // asks its backend for `MAX` regardless — so this is the polite ask
         // and the check on the response is the guarantee.
-        "dolbyAtmos" to (DeviceCodecs.playsDolbyAtmos && AppSettings.dolbyAtmos.value).toString(),
+        "dolbyAtmos" to DeviceCodecs.offersDolbyAtmos.toString(),
     )
 
     private val StreamRequest.tier: String
@@ -475,18 +468,19 @@ class ModuleSource(
          * Whether the rendition a module has just handed over is one that must
          * not be played.
          *
-         * Only Dolby Atmos, and only because it is the one tier a module can
-         * serve that a phone can be flatly unable to decode — see
-         * [DeviceCodecs] for why the player is the wrong place to find that
-         * out. Every other codec a module returns is either in Android's own
+         * Only Dolby Atmos. It is the one tier a module can serve that a phone
+         * used to be flatly unable to decode, and it is the one tier that is
+         * *lossy* while a bit-exact copy of the same recording usually exists —
+         * which is why turning it off is a real preference rather than a safety
+         * valve. Every other codec a module returns is either in Android's own
          * set or fails loudly enough for the recovery path to hear it.
          *
-         * [atmosAllowed] is the two answers folded into one, because from here
-         * they mean the same thing and neither is more binding than the other:
-         * the device has no decoder
-         * ([DeviceCodecs.playsDolbyAtmos]) or the listener turned it off
-         * ([AppSettings.dolbyAtmos]). The caller keeps them apart only to say
-         * which it was in the log.
+         * [atmosAllowed] is the listener's switch, as
+         * [DeviceCodecs.offersDolbyAtmos] answers it. The device's own decoder
+         * used to be folded in here, on the grounds of what MediaCodec would do
+         * with a stream it cannot decode; with the FFmpeg renderer registered
+         * behind it, that reason is gone and refusing on the hardware's behalf
+         * only costs the listener a rendition.
          *
          * Caught *here*, where the module answers, rather than by ranking it
          * lower in [SourceResolver]: an Atmos rendition is routinely the only
@@ -497,9 +491,10 @@ class ModuleSource(
          * so a track with an Atmos master answers a `LOSSLESS` request with
          * Atmos, over a FLAC of the same recording the same backend serves
          * happily when asked for one. Refusing is what lets [SourceResolver]
-         * move to a source that can be heard. Nothing on this side can reach
-         * past the module to the copy it declined to offer, so on a device with
-         * no Dolby decoder that track is YouTube's until the module is fixed.
+         * move to a source the listener actually wants. Nothing on this side can
+         * reach past the module to the copy it declined to offer, so with Atmos
+         * switched off that track is YouTube's until the module answers a tier
+         * it is given.
          */
         internal fun unplayable(format: StreamFormat, atmosAllowed: Boolean): Boolean =
             format.isDolbyAtmos && !atmosAllowed

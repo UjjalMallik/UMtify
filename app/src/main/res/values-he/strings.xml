@@ -816,7 +816,6 @@
 
     <string name="dolby_atmos_subtitle">משמיע גרסה מרחבית עשירה יותר כאשר זמינה.</string>
 
-    <string name="dolby_atmos_unavailable">מכשיר זה אינו תומך ב-Atmos, שירים ינוגנו בגרסה רגילה</string>
 
     <string name="export_compatible_downloads">ייצא הורדות תואמות</string>
 

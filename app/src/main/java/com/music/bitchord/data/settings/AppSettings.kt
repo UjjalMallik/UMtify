@@ -211,6 +211,33 @@ object AppSettings {
     /** Whether the active network charges for data. `null` while offline. */
     val meteredConnection = MutableStateFlow<Boolean?>(null)
 
+    /**
+     * Whether a network that can actually reach the internet is up.
+     *
+     * Stricter than [meteredConnection] being non-null, which only says the
+     * framework has an active network: a Wi-Fi association with no upstream —
+     * a plane's, a hotel's, a captive portal's — is active and un-metered and
+     * will fail every request. This one needs the system's own
+     * `INTERNET` + `VALIDATED` verdict, which is a probe the platform already
+     * runs, so it costs nothing to trust.
+     *
+     * Starts true rather than false: the first callback lands a frame after
+     * [init], and Home asking for the feed is better than Home showing an
+     * offline library to somebody with a connection.
+     */
+    val internetAvailable = MutableStateFlow(true)
+
+    /**
+     * Manual Offline Mode: Home shows only what is already on this device.
+     *
+     * Deliberately independent of [internetAvailable] — the point of the switch
+     * is to get the offline screen *with* a connection, to stop Home spending
+     * data on a train, or to read a download on a plane without the feed
+     * half-loading behind it. Home answers `!internetAvailable || this`, so a
+     * lost connection is enough on its own and the switch only ever adds.
+     */
+    val offlineModeEnabled = MutableStateFlow(false)
+
     // `losslessAudio` used to live here, behind a "Prefer lossless" switch on
     // the Sources screen. It is gone: sources are asked for their best and each
     // degrades on its own terms, so the switch's only real effect was to ask a
@@ -282,12 +309,18 @@ object AppSettings {
      * [ModuleSource.unplayable][com.music.bitchord.data.sources.ModuleSource],
      * which is where the refusal is applied.
      *
-     * Independent of whether the device *can* decode it — that question is
+     * Independent of whether the device has a Dolby decoder of its own — that
+     * question is
      * [DeviceCodecs.playsDolbyAtmos][com.music.bitchord.data.sources.DeviceCodecs],
      * and the two are deliberately not folded together: this one is the
      * listener's answer, is persisted, and must survive being read on a phone
      * that cannot honour it (a restored backup, a swapped device) without
-     * quietly rewriting itself.
+     * quietly rewriting itself. Since the FFmpeg decoder took over the
+     * rendering on those devices, this alone decides whether an Atmos rendition
+     * is asked for — see
+     * [DeviceCodecs.offersDolbyAtmos][com.music.bitchord.data.sources.DeviceCodecs.offersDolbyAtmos]
+     * — and the switch is therefore enabled on every device rather than greyed
+     * out where Dolby's own decoder is missing.
      */
     val dolbyAtmos = MutableStateFlow(true)
 
@@ -905,6 +938,7 @@ object AppSettings {
         com.music.bitchord.data.lyrics.PaxSenix.setApiKey(paxSenixApiKey.value)
         audioCacheLimitBytes.value = clampCacheLimit(prefs.getLong(KEY_CACHE_LIMIT, DEFAULT_CACHE_LIMIT_BYTES))
         showCacheFolder.value = prefs.getBoolean(KEY_SHOW_CACHE_FOLDER, false)
+        offlineModeEnabled.value = prefs.getBoolean(KEY_OFFLINE_MODE, false)
         listenBrainzEnabled.value = prefs.getBoolean(KEY_LISTENBRAINZ_ENABLED, false)
         listenBrainzToken.value = prefs.getString(KEY_LISTENBRAINZ_TOKEN, "").orEmpty()
         listenBrainzPrimaryArtistOnly.value = prefs.getBoolean(KEY_LISTENBRAINZ_PRIMARY_ARTIST_ONLY, false)
@@ -1032,24 +1066,37 @@ object AppSettings {
      * touching ConnectivityManager. Stream resolution happens off the main
      * thread mid-playback; a callback keeps that lookup off the hot path and
      * lets the settings page show which ceiling is currently in force.
+     *
+     * The same callback publishes [internetAvailable]. It reads the
+     * capabilities the framework just handed it where it has them —
+     * `onCapabilitiesChanged` is precisely the "this network turned out to be
+     * validated" event — and re-queries the active network otherwise, because
+     * after an `onLost` the answer is whichever network replaced the one that
+     * went, which is not the one the callback names.
      */
     private fun watchConnection(context: Context) {
         val manager = context.getSystemService(ConnectivityManager::class.java) ?: return
-        val refresh = {
+        val refresh: (NetworkCapabilities?) -> Unit = { capabilities ->
+            val caps = capabilities
+                ?: runCatching { manager.getNetworkCapabilities(manager.activeNetwork) }.getOrNull()
+            internetAvailable.value = caps != null &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
             meteredConnection.value = runCatching {
                 if (manager.activeNetwork == null) null else manager.isActiveNetworkMetered
             }.getOrNull()
         }
-        refresh()
+        refresh(null)
         runCatching {
             manager.registerDefaultNetworkCallback(
                 object : ConnectivityManager.NetworkCallback() {
-                    override fun onAvailable(network: Network) = refresh()
-                    override fun onLost(network: Network) = refresh()
+                    override fun onAvailable(network: Network) = refresh(null)
+                    override fun onLost(network: Network) = refresh(null)
+                    override fun onUnavailable() = refresh(null)
                     override fun onCapabilitiesChanged(
                         network: Network,
                         capabilities: NetworkCapabilities,
-                    ) = refresh()
+                    ) = refresh(capabilities)
                 },
             )
         }
@@ -1526,6 +1573,11 @@ object AppSettings {
     fun setShowCacheFolder(value: Boolean) {
         showCacheFolder.value = value
         prefs.edit().putBoolean(KEY_SHOW_CACHE_FOLDER, value).apply()
+    }
+
+    fun setOfflineModeEnabled(value: Boolean) {
+        offlineModeEnabled.value = value
+        prefs.edit().putBoolean(KEY_OFFLINE_MODE, value).apply()
     }
 
     fun setSpotifySpdcToken(value: String) {
@@ -2029,6 +2081,7 @@ object AppSettings {
     private const val KEY_PAXSENIX_API_KEY = "paxsenix_api_key"
     private const val KEY_FILTER_NON_MUSIC_AUDIO = "filter_non_music_audio"
     private const val KEY_SHOW_CACHE_FOLDER = "show_cache_folder"
+    private const val KEY_OFFLINE_MODE = "offline_mode_enabled"
     private const val KEY_LOCAL_MUSIC_SORT = "local_music_sort"
     private const val KEY_DOWNLOADED_MUSIC_SORT = "downloaded_music_sort"
     private const val KEY_LIBRARY_SORT = "library_sort"

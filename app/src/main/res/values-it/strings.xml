@@ -826,7 +826,6 @@
 
     <string name="dolby_atmos_subtitle">Riproduce la versione audio surround più immersiva quando disponibile.</string>
 
-    <string name="dolby_atmos_unavailable">Questo dispositivo non supporta Atmos, i brani saranno riprodotti nella versione standard</string>
 
     <string name="export_compatible_downloads">Esporta download compatibili</string>
 

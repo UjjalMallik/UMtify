@@ -790,7 +790,6 @@
 
     <string name="dolby_atmos_subtitle">Putar versi suara surround yang lebih imersif jika tersedia.</string>
 
-    <string name="dolby_atmos_unavailable">Perangkat ini tidak mendukung Atmos, lagu diputar dalam versi standar</string>
 
     <string name="export_compatible_downloads">Ekspor unduhan yang kompatibel</string>
 

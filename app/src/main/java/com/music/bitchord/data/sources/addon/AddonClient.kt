@@ -2,7 +2,6 @@ package com.music.bitchord.data.sources.addon
 
 import com.music.bitchord.data.Http
 import com.music.bitchord.data.TrackLog
-import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.sources.DeviceCodecs
 import com.music.bitchord.data.sources.module.SharedCalls
 import kotlinx.coroutines.CancellationException
@@ -249,26 +248,23 @@ class AddonClient(rawBaseUrl: String) {
      *    mode, where a track with no immersive mix is an error rather than a
      *    stereo answer — which would turn every ordinary track on an
      *    Atmos-capable addon into a miss. `auto` is try-Atmos-then-stereo.
-     *  - **It is asked for, not asserted.** Both gates are the same two the
+     *  - **It is asked for, not asserted.** The gate is the same one the
      *    playback side enforces in
      *    [ModuleSource.unplayable][com.music.bitchord.data.sources.ModuleSource.unplayable],
      *    so an addon is only ever offered Atmos when an Atmos answer would
-     *    actually be accepted. With either gate shut the parameter is absent
-     *    entirely and the addon's own default — stereo — stands.
+     *    actually be accepted. With it shut the parameter is absent entirely and
+     *    the addon's own default — stereo — stands.
      *  - **[putIfAbsent], never an override.** An addon that declared its own
      *    `atmos` setting has said what it wants; the manifest's default wins
      *    and this adds nothing. Addons that have never heard of the parameter
      *    ignore it, which is the same basis on which `quality` is already sent
      *    unconditionally.
      *
-     * Nothing here names a particular addon. The decoder probe is cached per
-     * process and the settings read is a flow's current value, so this costs
-     * nothing on the IO thread it already runs on.
+     * Nothing here names a particular addon. The one read is a flow's current
+     * value, so this costs nothing on the IO thread it already runs on.
      */
-    private fun atmosHint(): String? {
-        val wanted = DeviceCodecs.playsDolbyAtmos && AppSettings.dolbyAtmos.value
-        return if (wanted) ATMOS_AUTO else null
-    }
+    private fun atmosHint(): String? =
+        if (DeviceCodecs.offersDolbyAtmos) ATMOS_AUTO else null
 
     /**
      * The option in [options] that best answers a request for [tier], or null

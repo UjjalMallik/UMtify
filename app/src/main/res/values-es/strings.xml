@@ -796,7 +796,6 @@
 
     <string name="dolby_atmos_subtitle">Reproduce la versión envolvente y más inmersiva cuando esté disponible.</string>
 
-    <string name="dolby_atmos_unavailable">Este dispositivo no admite Atmos, por lo que las canciones se reproducirán en su versión habitual</string>
 
     <string name="export_compatible_downloads">Exportar descargas compatibles</string>
 

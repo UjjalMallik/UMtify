@@ -164,6 +164,7 @@ import com.music.bitchord.ui.screens.ListenTogetherScreen
 import com.music.bitchord.ui.screens.PartyServerEditor
 import com.music.bitchord.ui.screens.SignatureApiEditor
 import com.music.bitchord.ui.screens.SettingsScreen
+import com.music.bitchord.ui.screens.OfflineHomeScreen
 import com.music.bitchord.ui.screens.SourceEditorAlert
 import com.music.bitchord.ui.screens.SourcesScreen
 import com.music.bitchord.ui.screens.SpotifyCanvasAuthScreen
@@ -355,6 +356,11 @@ class MainActivity : AppCompatActivity() {
         // Likewise for a link tapped or shared from another app — see [MusicLink].
         MusicLink.consume(intent)
         setContent {
+            // Recents shows the bitmap its task was given, not the launcher icon,
+            // so the chosen variant has to be handed over here — and handed over
+            // again the moment a pick in Settings changes it.
+            val selectedIcon by AppIcon.selected.collectAsStateWithLifecycle()
+            LaunchedEffect(selectedIcon) { AppIcon.refreshTaskDescription(this@MainActivity) }
             val theme by AppSettings.themeMode.collectAsStateWithLifecycle()
             val highPerformance by AppSettings.highPerformanceMode.collectAsStateWithLifecycle()
             val liquidGlassEnabled by AppSettings.liquidGlass.collectAsStateWithLifecycle()
@@ -752,6 +758,20 @@ private fun BitChordApp(
     val homeLoadingMore by viewModel.homeLoadingMore.collectAsStateWithLifecycle()
     val homeRecentlyPlayedLoading by viewModel.homeRecentlyPlayedLoading.collectAsStateWithLifecycle()
 
+    // Home has two faces and the device decides which: no network takes it
+    // offline by itself, and Settings can ask for the offline one while there is
+    // a network to use. Either way the feed is read off disk, so the online one
+    // is never even tried — there is no error to show underneath this page.
+    val internetAvailable by AppSettings.internetAvailable.collectAsStateWithLifecycle()
+    val offlineModeEnabled by AppSettings.offlineModeEnabled.collectAsStateWithLifecycle()
+    val showOfflineHome = !internetAvailable || offlineModeEnabled
+    val offlineHome by viewModel.offlineHome.collectAsStateWithLifecycle()
+    // Read on the way in rather than once: a download that finished while the
+    // listener was on another tab is on this page the moment they come back.
+    LaunchedEffect(showOfflineHome, selectedTab) {
+        if (showOfflineHome && selectedTab == TAB_HOME) viewModel.loadOfflineHome()
+    }
+
     val query by viewModel.query.collectAsStateWithLifecycle()
     val results by viewModel.results.collectAsStateWithLifecycle()
     val exploreState by viewModel.explore.collectAsStateWithLifecycle()
@@ -1057,6 +1077,10 @@ private fun BitChordApp(
     }
 
     val homeListState = rememberLazyListState()
+    // The offline Home is a second feed rather than the same one redrawn, and
+    // the crossfade between them composes both for a moment — one list state
+    // cannot be attached to two.
+    val offlineHomeListState = rememberLazyListState()
     val exploreListState = rememberLazyListState()
     val moodGenreListState = rememberLazyListState()
     val libraryListState = rememberLazyListState()
@@ -3114,43 +3138,85 @@ private fun BitChordApp(
                             contentPadding = listPadding,
                         )
                     } else when (key.removePrefix(TAB_KEY).toIntOrNull() ?: selectedTab) {
-                        TAB_HOME -> HomeScreen(
-                            state = homeState,
-                            listState = homeListState,
-                            currentSong = player.song,
-                            isPlaying = player.isPlaying,
-                            title = stringResource(R.string.listen_now),
-                            signedIn = signedIn,
-                            onSignIn = { webSession = WebSessionMode.SIGN_IN },
-                            onItemClick = { item, shelfTitle ->
-                                val song = shelfSong(item)
-                                // Hoisted because ShelfItem lives in :shared, and
-                                // Kotlin will not smart-cast a public nullable
-                                // property declared in another module.
-                                val browseId = item.browseId
-                                when {
-                                    song != null -> playRadio(
-                                        song,
-                                        QueueSource(shelfTitle, PlaybackSourceType.HOME),
-                                    )
-                                    browseId != null -> viewModel.openDetail(
-                                        browseId = browseId,
-                                        title = item.title,
-                                        subtitle = item.subtitle,
-                                        thumbnailUrl = item.thumbnailUrl,
-                                    )
-                                }
-                            },
-                            onItemLongPress = onShelfLongPress,
-                            onRetry = viewModel::loadHome,
-                            refreshing = MainViewModel.Feed.HOME in refreshing,
-                            onRefresh = { viewModel.refresh(MainViewModel.Feed.HOME) },
-                            pullState = homePull,
-                            contentPadding = listPadding,
-                            onLoadMore = viewModel::loadMoreHome,
-                            loadingMore = homeLoadingMore,
-                            recentlyPlayedLoading = homeRecentlyPlayedLoading,
-                        )
+                        TAB_HOME -> AnimatedContent(
+                            targetState = showOfflineHome,
+                            transitionSpec = { fadeIn(tween(260)) togetherWith fadeOut(tween(140)) },
+                            label = "HomeFeed",
+                        ) { offline ->
+                            if (offline) {
+                                OfflineHomeScreen(
+                                    data = offlineHome,
+                                    listState = offlineHomeListState,
+                                    contentPadding = listPadding,
+                                    title = stringResource(R.string.listen_now),
+                                    networkAvailable = internetAvailable,
+                                    manualOffline = offlineModeEnabled,
+                                    onExitOfflineMode = { AppSettings.setOfflineModeEnabled(false) },
+                                    onOpenFolder = { browseId, folderTitle, subtitle ->
+                                        viewModel.openDetail(browseId, folderTitle, subtitle)
+                                    },
+                                    onOpenGroup = viewModel::openLocalGroup,
+                                    onPlay = { songs, index, source ->
+                                        if (songs.isNotEmpty() && index in songs.indices) {
+                                            playFrom(songs, index, QueueSource(source, PlaybackSourceType.HOME))
+                                        }
+                                    },
+                                    onShuffleAll = { songs, source ->
+                                        if (songs.isNotEmpty()) {
+                                            // Shuffled on the way in, like every other
+                                            // shuffle here: the queue is built in the
+                                            // service's own order, not reordered after.
+                                            QueueShuffle.enableForNextQueue()
+                                            playFrom(
+                                                songs,
+                                                songs.indices.random(),
+                                                QueueSource(source, PlaybackSourceType.HOME),
+                                            )
+                                        }
+                                    },
+                                    currentSong = player.song,
+                                    isPlaying = player.isPlaying,
+                                )
+                            } else {
+                                HomeScreen(
+                                    state = homeState,
+                                    listState = homeListState,
+                                    currentSong = player.song,
+                                    isPlaying = player.isPlaying,
+                                    title = stringResource(R.string.listen_now),
+                                    signedIn = signedIn,
+                                    onSignIn = { webSession = WebSessionMode.SIGN_IN },
+                                    onItemClick = { item, shelfTitle ->
+                                        val song = shelfSong(item)
+                                        // Hoisted because ShelfItem lives in :shared, and
+                                        // Kotlin will not smart-cast a public nullable
+                                        // property declared in another module.
+                                        val browseId = item.browseId
+                                        when {
+                                            song != null -> playRadio(
+                                                song,
+                                                QueueSource(shelfTitle, PlaybackSourceType.HOME),
+                                            )
+                                            browseId != null -> viewModel.openDetail(
+                                                browseId = browseId,
+                                                title = item.title,
+                                                subtitle = item.subtitle,
+                                                thumbnailUrl = item.thumbnailUrl,
+                                            )
+                                        }
+                                    },
+                                    onItemLongPress = onShelfLongPress,
+                                    onRetry = viewModel::loadHome,
+                                    refreshing = MainViewModel.Feed.HOME in refreshing,
+                                    onRefresh = { viewModel.refresh(MainViewModel.Feed.HOME) },
+                                    pullState = homePull,
+                                    contentPadding = listPadding,
+                                    onLoadMore = viewModel::loadMoreHome,
+                                    loadingMore = homeLoadingMore,
+                                    recentlyPlayedLoading = homeRecentlyPlayedLoading,
+                                )
+                            }
+                        }
                         TAB_EXPLORE -> selectedMoodGenre?.let { category ->
                             MoodGenrePlaylistsScreen(
                                 title = category.title,

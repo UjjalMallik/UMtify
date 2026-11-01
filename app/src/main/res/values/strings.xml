@@ -184,7 +184,7 @@
     <string name="upgrade_quality">Upgrade quality</string>
     <string name="dolby_atmos">Dolby Atmos</string>
     <string name="dolby_atmos_subtitle">Play the more immersive, surround version of a song when there is one.</string>
-    <string name="dolby_atmos_unavailable">This device can\'t play Atmos, so these songs play in their usual version</string>
+    <string name="dolby_atmos_fallback_subtitle">Play Dolby Atmos &amp; spatial audio tracks (uses built-in binaural spatializer on unsupported devices)</string>
     <string name="spatial_audio">Spatial audio</string>
     <string name="spatial_audio_subtitle">Widens stereo tracks for a more immersive feel</string>
     <string name="spatial_audio_atmos_subtitle">Paused for this track — Dolby Atmos is already spatial</string>
@@ -303,7 +303,7 @@
     <string name="show_nerd_stats_subtitle">Codec, bitrate and sample rate on the player</string>
     <string name="app_icon">App icon</string>
     <string name="app_icon_default">Default</string>
-    <string name="app_icon_normal" translatable="false">Normal</string>
+    <string name="app_icon_liquid_glass" translatable="false">Liquid Glass</string>
     <string name="app_icon_liquid_glass_dark" translatable="false">Liquid Glass Dark</string>
     <string name="theme">Theme</string>
     <string name="custom_font">Custom font</string>
@@ -868,6 +868,18 @@
     <string name="use_this_profile">Use this profile</string>
     <string name="switch_profile_hint">Switch using the avatar, then use this profile.</string>
     <string name="profile_unavailable">No signed-in profile is available on this page yet.</string>
+
+    <!-- Offline -->
+    <string name="offline_mode">Offline mode</string>
+    <string name="offline_mode_subtitle">Show only downloaded, cached, and local music on Home</string>
+    <string name="offline_mode_on">Offline Mode</string>
+    <string name="offline_mode_no_internet">No internet</string>
+    <string name="offline_mode_turn_off">Turn off</string>
+    <string name="offline_quick_access">Quick access</string>
+    <string name="offline_play_all">Play all</string>
+    <string name="offline_shuffle_all">Shuffle all</string>
+    <string name="offline_recently_played">Recently played offline</string>
+    <string name="offline_nothing_yet">Nothing to play offline yet.</string>
 
     <!-- Listen together -->
     <string name="listen_together">Listen together</string>

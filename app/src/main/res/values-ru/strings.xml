@@ -839,7 +839,6 @@
 
     <string name="dolby_atmos_subtitle">Воспроизводит более объемный объемный звук, если доступно.</string>
 
-    <string name="dolby_atmos_unavailable">Это устройство не поддерживает Atmos, треки будут играть в обычном формате</string>
 
     <string name="export_compatible_downloads">Экспорт совместимых загрузок</string>
 

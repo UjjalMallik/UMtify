@@ -101,6 +101,7 @@ import com.music.bitchord.data.model.BrowseItem
 import com.music.bitchord.data.model.ShelfItem
 import com.music.bitchord.data.model.artworkAt
 import com.music.bitchord.data.model.QueueTier
+import com.music.bitchord.data.sources.DeviceCodecs
 import com.music.bitchord.data.sources.SourceRegistry
 import com.music.bitchord.download.Downloads
 import java.util.concurrent.ConcurrentHashMap
@@ -6147,6 +6148,16 @@ class PlaybackService : MediaLibraryService() {
         loudness: LoudnessProcessor,
     ) = object : DefaultRenderersFactory(this) {
         init {
+            // Where the platform advertises a decoder for a format and it
+            // cannot actually handle it — a vendor E-AC-3 blocklist entry, a
+            // 24-bit FLAC the hardware refuses — take the next candidate
+            // rather than failing the period. On this app that is how an Atmos
+            // stream reaches the FFmpeg renderer below on the devices where
+            // MediaCodec claims support it shouldn't; without it the track
+            // skips itself silently, which is the failure mode
+            // [com.music.bitchord.data.sources.DeviceCodecs] was first written
+            // to avoid, and the reason the Atmos switch used to be greyed out.
+            setEnableDecoderFallback(true)
             // Do not force PCM_FLOAT onto an OEM speaker mixer merely because
             // the preference asks for it. The selected route must advertise
             // the format; otherwise Media3 uses its stable PCM16 path.
@@ -6644,7 +6655,13 @@ class PlaybackService : MediaLibraryService() {
             }
         }
         scope.launch {
-            AppSettings.spatialAudio.collect { applySpatialAudioEnabled() }
+            // The Atmos switch, as well as the spatial-audio one: on a device
+            // with no Dolby decoder the second *is* the Atmos rendering, so
+            // turning Atmos off has to take the widening back with it — see
+            // [applySpatialAudioEnabled].
+            combine(AppSettings.spatialAudio, AppSettings.dolbyAtmos) { spatial, atmos ->
+                spatial to atmos
+            }.collect { applySpatialAudioEnabled() }
         }
         scope.launch {
             AppSettings.loudnessNormalization.collect {
@@ -6710,14 +6727,24 @@ class PlaybackService : MediaLibraryService() {
     }
 
     /**
-     * The effective spatial-audio state: the user's toggle, unless the
-     * active player's decoder is currently on a Dolby Atmos (E-AC-3 JOC)
-     * stream, in which case it's forced off. [activeTrackIsDolbyAtmos] only
-     * ever describes the active player — see [formatListener] — so both
-     * processors are kept in lockstep rather than tracking a role swap.
+     * The effective spatial-audio state.
+     *
+     * Two cases, and they are opposites. Dolby's own mix (an Atmos stream on a
+     * device with the licensed decoder) is object-based already, so widening it
+     * would fight the mix — the effect holds off for the duration, and
+     * [activeTrackIsDolbyAtmos] only ever describes the active player, see
+     * [formatListener]. On a device *without* that decoder there is no Dolby
+     * render to fight: FFmpeg hands back the bed as ordinary PCM, and this
+     * widening is the whole of the "spatial" the listener switched on, so it
+     * runs for exactly as long as an Atmos track does.
+     *
+     * Both processors are kept in lockstep rather than tracking a role swap.
      */
     private fun applySpatialAudioEnabled() {
-        val enabled = AppSettings.spatialAudio.value && !activeTrackIsDolbyAtmos
+        val atmosFallback = activeTrackIsDolbyAtmos &&
+            !DeviceCodecs.playsDolbyAtmos &&
+            AppSettings.dolbyAtmos.value
+        val enabled = (AppSettings.spatialAudio.value && !activeTrackIsDolbyAtmos) || atmosFallback
         spatialAudioProcessorA.enabled = enabled
         spatialAudioProcessorB.enabled = enabled
     }

@@ -816,7 +816,6 @@
 
     <string name="dolby_atmos_subtitle">Toca a versão surround mais imersiva de uma música quando disponível.</string>
 
-    <string name="dolby_atmos_unavailable">Este dispositivo não suporta Atmos, as músicas tocarão na versão padrão</string>
 
     <string name="export_compatible_downloads">Exportar downloads compatíveis</string>
 

@@ -422,16 +422,20 @@ class AddonSourceTest {
         assertNull(requestFor("/stream/t1").queryParameter("atmos"))
     }
 
-    /** A device with no E-AC-3 decoder would only have to refuse what it asked for. */
+    /**
+     * No Dolby decoder is not a reason to stop asking. FFmpeg decodes E-AC-3 on
+     * any device, so a phone without the licensed one still plays the mix — as
+     * its bed, widened by the spatializer rather than as Dolby's own render.
+     */
     @Test
-    fun `no atmos hint is sent when the device cannot decode it`() = runBlocking {
+    fun `the atmos hint is still sent on a device with no Dolby decoder`() = runBlocking {
         DeviceCodecs.forced = false
         route("/manifest.json", manifest())
         route("/stream/t1", json("""{"url":"https://cdn/a.flac","codec":"flac"}"""))
 
         AddonSource(config()).stream("t1", StreamRequest.Lossless)
 
-        assertNull(requestFor("/stream/t1").queryParameter("atmos"))
+        assertEquals("auto", requestFor("/stream/t1").queryParameter("atmos"))
     }
 
     /**
@@ -893,16 +897,19 @@ class AddonSourceTest {
 
     /**
      * An immersive rendition is routinely the only one an addon will give for a
-     * track, so a device that cannot decode it has to refuse here — there is no
-     * lower-ranked sibling for the resolver to fall to.
+     * track, so refusing one on the device's behalf used to leave the listener
+     * with nothing. It no longer decides anything: FFmpeg plays the bed wherever
+     * Dolby's decoder is absent.
      */
     @Test
-    fun `an Atmos rendition is refused on a device that cannot decode it`() = runBlocking {
+    fun `an Atmos rendition is accepted on a device with no Dolby decoder`() = runBlocking {
         DeviceCodecs.forced = false
         route("/manifest.json", manifest())
         route("/stream/t1", json("""{"url":"https://cdn/a.mp4","codec":"eac3_joc","quality":"Dolby Atmos"}"""))
 
-        assertNull(AddonSource(config()).stream("t1", StreamRequest.Lossless))
+        val stream = AddonSource(config()).stream("t1", StreamRequest.Lossless)
+        assertNotNull(stream)
+        assertTrue(stream!!.format.isDolbyAtmos)
     }
 
     @Test

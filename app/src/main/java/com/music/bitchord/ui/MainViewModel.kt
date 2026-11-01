@@ -11,6 +11,7 @@ import com.music.bitchord.auth.YouTubeProfile
 import com.music.bitchord.auth.profileId
 import com.music.bitchord.auth.sessionId
 import com.music.bitchord.auth.adjacentProfile
+import com.music.bitchord.data.LocalGroup
 import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.LikeState
 import com.music.bitchord.data.YtMusicRepository
@@ -101,6 +102,24 @@ import java.util.concurrent.atomic.AtomicLong
 /** What the Search tab searches: YouTube Music, or the Local Music folder on this device. */
 enum class SearchSource { YOUTUBE, LIBRARY, ADDONS }
 
+/**
+ * Everything Home can show when there is nothing to stream: the three folders
+ * on this device, the releases their files group into, and the song cache in
+ * the order it was last heard.
+ *
+ * A snapshot rather than three flows, because the offline page reads them all
+ * at once and a half-loaded one would draw a shelf that is about to move.
+ */
+data class OfflineHome(
+    val downloads: List<Song>,
+    /** Playlists and albums downloaded whole, merged with what the files' own tags say. */
+    val downloadedAlbums: List<LocalGroup>,
+    /** Most recently played first — the cache's own running order. */
+    val cached: List<Song>,
+    val local: List<Song>,
+    val localAlbums: List<LocalGroup>,
+)
+
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val authStore = AuthStore(app)
@@ -111,6 +130,40 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _home = MutableStateFlow<UiState<List<HomeShelf>>>(UiState.Loading)
     val home: StateFlow<UiState<List<HomeShelf>>> = _home.asStateFlow()
+
+    private val _offlineHome = MutableStateFlow<OfflineHome?>(null)
+    val offlineHome: StateFlow<OfflineHome?> = _offlineHome.asStateFlow()
+
+    /**
+     * Reads this device for the offline Home. Null until the first read lands,
+     * and the previous snapshot stays on screen while a later one is taken —
+     * the page is drawn from files, so a refresh must never blank it.
+     */
+    fun loadOfflineHome() {
+        viewModelScope.launch {
+            val context = getApplication<Application>()
+            val downloads = runCatching { Downloads.getDownloadedSongs(context) }.getOrDefault(emptyList())
+            val cached = runCatching { AudioCache.cachedSongs().map { it.song } }.getOrDefault(emptyList())
+            // Unpermitted is not the same as empty, but offline the page has no
+            // way to ask for it politely; the folder still can when opened.
+            val local = if (LocalMediaRepository.hasStoragePermission(context)) {
+                runCatching { LocalMediaRepository.getLocalMusic(context) }.getOrDefault(emptyList())
+            } else {
+                emptyList()
+            }
+            _offlineHome.value = OfflineHome(
+                downloads = downloads,
+                downloadedAlbums = LocalGroups.albumsOf(
+                    "local:downloads",
+                    downloads,
+                    Downloads.collectionsAmong(downloads),
+                ),
+                cached = cached,
+                local = local,
+                localAlbums = LocalGroups.albumsOf("local:all", local, emptyList()),
+            )
+        }
+    }
 
     /**
      * Token for the next page of Home shelves; null once there's nothing

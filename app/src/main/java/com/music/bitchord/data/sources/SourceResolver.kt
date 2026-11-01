@@ -1010,13 +1010,12 @@ object SourceResolver {
     }
 
     /**
-     * Whether an immersive mix is worth preferring right now — the same two
-     * gates the playback side enforces in [ModuleSource.unplayable] and the
+     * Whether an immersive mix is worth preferring right now — the same gate
+     * the playback side enforces in [ModuleSource.unplayable] and the
      * addon path sends its `?atmos=` hint on, asked in the one place that
      * chooses between rows.
      */
-    private fun atmosWanted(): Boolean =
-        DeviceCodecs.playsDolbyAtmos && AppSettings.dolbyAtmos.value
+    private fun atmosWanted(): Boolean = DeviceCodecs.offersDolbyAtmos
 
     private suspend fun streamBest(
         source: MusicSource,

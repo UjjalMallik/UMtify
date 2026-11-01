@@ -808,7 +808,6 @@
 
     <string name="dolby_atmos_subtitle">Varsa parçanın daha etkileyici surround versiyonunu oynatır.</string>
 
-    <string name="dolby_atmos_unavailable">Bu cihaz Atmos\'u desteklemiyor, parçalar normal versiyonda çalınacak</string>
 
     <string name="export_compatible_downloads">Uyumlu indirmeleri dışa aktar</string>
 

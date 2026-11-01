@@ -812,7 +812,6 @@
 
     <string name="dolby_atmos_subtitle">Joue la version surround plus immersive quand disponible.</string>
 
-    <string name="dolby_atmos_unavailable">Cet appareil ne prend pas en charge Atmos, lecture en version normale</string>
 
     <string name="export_compatible_downloads">Exporter les téléchargements compatibles</string>
 

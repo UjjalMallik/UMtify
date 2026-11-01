@@ -849,7 +849,6 @@
 
     <string name="dolby_atmos_subtitle">Odtwarza bardziej wciągający dźwięk przestrzenny, jeśli jest dostępny.</string>
 
-    <string name="dolby_atmos_unavailable">To urządzenie nie obsługuje Atmos, utwory będą odtwarzane w wersji standardowej</string>
 
     <string name="export_compatible_downloads">Eksportuj zgodne pobrane pliki</string>
 

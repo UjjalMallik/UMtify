@@ -45,6 +45,7 @@ import androidx.compose.material.icons.rounded.Brightness4
 import androidx.compose.material.icons.rounded.Cached
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.FileDownload
@@ -203,6 +204,7 @@ fun SettingsScreen(
     val wifiQuality by AppSettings.audioQualityWifi.collectAsStateWithLifecycle()
     val cellularQuality by AppSettings.audioQualityCellular.collectAsStateWithLifecycle()
     val metered by AppSettings.meteredConnection.collectAsStateWithLifecycle()
+    val offlineMode by AppSettings.offlineModeEnabled.collectAsStateWithLifecycle()
     val crossfade by AppSettings.crossfadeSeconds.collectAsStateWithLifecycle()
     val smartFade by AppSettings.smartFadeEnabled.collectAsStateWithLifecycle()
     val automixPerformance by AppSettings.automixPerformanceMode.collectAsStateWithLifecycle()
@@ -459,6 +461,31 @@ fun SettingsScreen(
                     onClick = onListenTogether,
                 )
             }
+            // Offline is a way of *using* the app rather than a setting about
+            // the music in it, so it sits with the two other ways of being
+            // connected here: an account, a party, and then neither. A lost
+            // connection puts Home into this screen by itself — the switch is
+            // for asking for it while there is one, which is what somebody on
+            // a train with a metered hotspot wants.
+            val offlineModeTitle = stringResource(R.string.offline_mode)
+            row(offlineModeTitle, "offline", "downloaded", "local", "no internet") {
+                SettingsRow(
+                    icon = Icons.Rounded.CloudOff,
+                    title = offlineModeTitle,
+                    subtitle = stringResource(R.string.offline_mode_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = offlineMode,
+                            onCheckedChange = AppSettings::setOfflineModeEnabled,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setOfflineModeEnabled(!offlineMode) },
+                )
+            }
         }
 
         // The row that used to sit at the top of this group was called
@@ -502,12 +529,15 @@ fun SettingsScreen(
             // decides which version of a track gets fetched, the same question
             // the two rows above answer, and not how one is played back.
             //
-            // Greyed rather than hidden where the device can't decode E-AC-3.
-            // A missing row reads as a feature the app doesn't have; a disabled
-            // one with a reason under it is the difference between "BitChord
-            // has no Atmos" and "this phone has no Dolby decoder", and only the
-            // second is true. The stored preference is left untouched either
-            // way — see [AppSettings.dolbyAtmos].
+            // Switchable on every device. It used to be greyed where the vendor
+            // image shipped no Dolby decoder, which was honest while MediaCodec
+            // was the only decoder in reach — an Atmos stream on such a phone
+            // skipped itself rather than failing. The FFmpeg renderer behind it
+            // now plays the bed on those devices and the built-in spatializer
+            // widens it, so the only thing that can refuse Atmos is this switch
+            // — see [AppSettings.dolbyAtmos]. The subtitle is where the two
+            // cases still differ, because "the more immersive version" means
+            // Dolby's own mix on one device and the app's stand-in on another.
             val dolbyAtmosTitle = stringResource(R.string.dolby_atmos)
             row(dolbyAtmosTitle, "surround", "e-ac-3") {
                 SettingsRow(
@@ -517,15 +547,13 @@ fun SettingsScreen(
                         if (dolbyAtmosSupported) {
                             R.string.dolby_atmos_subtitle
                         } else {
-                            R.string.dolby_atmos_unavailable
+                            R.string.dolby_atmos_fallback_subtitle
                         },
                     ),
-                    enabled = dolbyAtmosSupported,
                     trailing = {
                         Switch(
-                            checked = dolbyAtmos && dolbyAtmosSupported,
+                            checked = dolbyAtmos,
                             onCheckedChange = AppSettings::setDolbyAtmos,
-                            enabled = dolbyAtmosSupported,
                             colors = SwitchDefaults.colors(
                                 checkedTrackColor = MaterialTheme.colorScheme.primary,
                                 checkedBorderColor = MaterialTheme.colorScheme.primary,
@@ -747,8 +775,10 @@ fun SettingsScreen(
                     // row because the switch stays where the listener left it,
                     // and a switch reading "on" over an effect that is not
                     // running is the same silent lie the equaliser screen used
-                    // to tell.
-                    subtitle = if (playingDolbyAtmos) {
+                    // to tell. Only where Dolby's own decoder is the one
+                    // rendering: on a device without it, this effect *is* the
+                    // Atmos playback, and it runs.
+                    subtitle = if (playingDolbyAtmos && dolbyAtmosSupported) {
                         stringResource(R.string.spatial_audio_atmos_subtitle)
                     } else {
                         stringResource(R.string.spatial_audio_subtitle)

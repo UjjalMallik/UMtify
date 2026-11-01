@@ -790,7 +790,6 @@
 
     <string name="dolby_atmos_subtitle">如果歌曲有更沉浸的环绕声版本，则优先播放。</string>
 
-    <string name="dolby_atmos_unavailable">此设备不支持杜比全景声，歌曲将以普通版本播放</string>
 
     <string name="export_compatible_downloads">导出兼容的下载</string>
 

@@ -817,7 +817,6 @@
 
     <string name="dolby_atmos_subtitle">Play the more immersive, surround version of a song when there is one.</string>
 
-    <string name="dolby_atmos_unavailable">This device can\'t play Atmos, so these songs play in their usual version</string>
 
     <string name="prefer_music_only">Prefer music-only version</string>
 

@@ -907,7 +907,6 @@
 
     <string name="dolby_atmos_subtitle">利用可能な場合は、より臨場感のあるサラウンド バージョンの曲を再生します。</string>
 
-    <string name="dolby_atmos_unavailable">このデバイスは Atmos を再生できないため、通常バージョンで再生されます</string>
 
     <string name="legacy_mesh_gradient">従来のメッシュ グラデーション</string>
 
