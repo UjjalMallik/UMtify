@@ -238,6 +238,20 @@ object AppSettings {
      */
     val offlineModeEnabled = MutableStateFlow(false)
 
+    /**
+     * Whether the app should keep off the network right now — asked for with
+     * [offlineModeEnabled], or forced by [internetAvailable] going false.
+     *
+     * This is the gate for things that *cost* data, like search: either half is
+     * a reason not to ask a server, and a dead connection makes the question
+     * unanswerable anyway. [offlineModeEnabled] read on its own is the gate for
+     * things that are worth a promise instead of a guess — the player refuses an
+     * online stream only when the switch is on, because a false negative from
+     * `NET_CAPABILITY_VALIDATED` (a network that blocks the platform's own
+     * connectivity probe) would then silence a working connection.
+     */
+    val isOffline: Boolean get() = offlineModeEnabled.value || !internetAvailable.value
+
     // `losslessAudio` used to live here, behind a "Prefer lossless" switch on
     // the Sources screen. It is gone: sources are asked for their best and each
     // degrades on its own terms, so the switch's only real effect was to ask a

@@ -42,6 +42,7 @@ import com.music.bitchord.data.model.LibraryState
 import com.music.bitchord.data.model.LikeStatus
 import com.music.bitchord.data.model.MoodGenre
 import com.music.bitchord.data.model.MoodGenreSection
+import com.music.bitchord.data.model.OfflineSearchGroup
 import com.music.bitchord.data.model.PlaylistPrivacy
 import com.music.bitchord.data.model.SearchFilter
 import com.music.bitchord.data.model.SearchResult
@@ -75,6 +76,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
@@ -134,34 +136,118 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val offlineHome: StateFlow<OfflineHome?> = _offlineHome.asStateFlow()
 
     /**
+     * Offline Mode's answer to a search: the device's own tracks, in the three
+     * homes they come from. Null whenever the app is not in Offline Mode — that
+     * null is what the Search page reads as "show the online feed", and the
+     * pipelines below read [AppSettings.isOffline] as "do not open a socket".
+     */
+    private val _offlineSearch = MutableStateFlow<UiState<List<OfflineSearchGroup>>?>(null)
+    val offlineSearch: StateFlow<UiState<List<OfflineSearchGroup>>?> = _offlineSearch.asStateFlow()
+
+    /** Every track this device can play without a network, read straight off disk. */
+    private suspend fun readOfflineHome(): OfflineHome = withContext(Dispatchers.IO) {
+        val context = getApplication<Application>()
+        val downloads = runCatching { Downloads.getDownloadedSongs(context) }.getOrDefault(emptyList())
+        val cached = runCatching { AudioCache.cachedSongs().map { it.song } }.getOrDefault(emptyList())
+        // Unpermitted is not the same as empty, but offline the page has no
+        // way to ask for it politely; the folder still can when opened.
+        val local = if (LocalMediaRepository.hasStoragePermission(context)) {
+            runCatching { LocalMediaRepository.getLocalMusic(context) }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+        OfflineHome(
+            downloads = downloads,
+            downloadedAlbums = LocalGroups.albumsOf(
+                "local:downloads",
+                downloads,
+                Downloads.collectionsAmong(downloads),
+            ),
+            cached = cached,
+            local = local,
+            localAlbums = LocalGroups.albumsOf("local:all", local, emptyList()),
+        )
+    }
+
+    /**
      * Reads this device for the offline Home. Null until the first read lands,
      * and the previous snapshot stays on screen while a later one is taken —
      * the page is drawn from files, so a refresh must never blank it.
      */
     fun loadOfflineHome() {
+        viewModelScope.launch { _offlineHome.value = readOfflineHome() }
+    }
+
+    /**
+     * The offline groups for [term], each narrowed by the same match a folder's
+     * own filter box uses. A file is often in more than one home — downloaded
+     * and cached and scanned by MediaStore — so a track is kept only in the
+     * first of them, which is what makes three groups readable as three
+     * different facts rather than one list said thrice.
+     */
+    private suspend fun offlineGroups(term: String): List<OfflineSearchGroup> {
+        val snapshot = readOfflineHome()
+        val seen = mutableSetOf<String>()
+        fun matched(songs: List<Song>): List<Song> = songs
+            .filter { it.matchesSearch(term) }
+            .filter { seen.add(it.videoId) }
+        return listOf(
+            OfflineSearchGroup(text(R.string.downloads), matched(snapshot.downloads)),
+            OfflineSearchGroup(text(R.string.local_music), matched(snapshot.local)),
+            OfflineSearchGroup(text(R.string.cached_songs), matched(snapshot.cached)),
+        ).filter { it.songs.isNotEmpty() }
+    }
+
+    /**
+     * Answers [query] from the device alone. There is nothing to wait for
+     * beyond the disk, so the request is never put on a server's hands: no
+     * continuation, no page, no source fan-out, and no entry in the online
+     * result cache that a later search could mistake for a network answer.
+     */
+    private fun publishOfflineSearch(query: String, requestId: Long) {
         viewModelScope.launch {
-            val context = getApplication<Application>()
-            val downloads = runCatching { Downloads.getDownloadedSongs(context) }.getOrDefault(emptyList())
-            val cached = runCatching { AudioCache.cachedSongs().map { it.song } }.getOrDefault(emptyList())
-            // Unpermitted is not the same as empty, but offline the page has no
-            // way to ask for it politely; the folder still can when opened.
-            val local = if (LocalMediaRepository.hasStoragePermission(context)) {
-                runCatching { LocalMediaRepository.getLocalMusic(context) }.getOrDefault(emptyList())
+            val groups = runCatching { offlineGroups(query) }.getOrDefault(emptyList())
+            // Superseded by a keystroke or by going back online — either way the
+            // online pipeline owns the screen now and this must not land on it.
+            if (requestId != newestRequestId.get() || !AppSettings.isOffline) return@launch
+            searchSession = null
+            _searchLoadingMore.value = false
+            _results.value = null
+            _offlineSearch.value = if (groups.isEmpty()) {
+                UiState.Error(text(R.string.search_offline_no_results, query))
             } else {
-                emptyList()
+                UiState.Success(groups)
             }
-            _offlineHome.value = OfflineHome(
-                downloads = downloads,
-                downloadedAlbums = LocalGroups.albumsOf(
-                    "local:downloads",
-                    downloads,
-                    Downloads.collectionsAmong(downloads),
-                ),
-                cached = cached,
-                local = local,
-                localAlbums = LocalGroups.albumsOf("local:all", local, emptyList()),
-            )
         }
+    }
+
+    /**
+     * Completions made of what is on this device: titles and artists already
+     * downloaded, cached or scanned, which is all Offline Mode can honestly
+     * suggest. The typed text still leads, exactly as the online pipeline puts
+     * it first.
+     */
+    private suspend fun localSuggestions(input: String, limit: Int = 8): List<String> {
+        val snapshot = runCatching { readOfflineHome() }.getOrNull() ?: return emptyList()
+        val term = input.trim()
+        if (term.isEmpty()) return emptyList()
+        return buildList {
+            val seen = mutableSetOf<String>()
+            fun offer(value: String?) {
+                val word = value?.trim().orEmpty()
+                if (word.isNotEmpty() &&
+                    word.contains(term, ignoreCase = true) &&
+                    seen.add(word.lowercase(Locale.ROOT))
+                ) {
+                    add(word)
+                }
+            }
+            (snapshot.downloads + snapshot.local + snapshot.cached).forEach { song ->
+                offer(song.title)
+                offer(song.artist)
+                if (size >= limit) return@buildList
+            }
+        }.take(limit)
     }
 
     /**
@@ -1466,6 +1552,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         startSearchPipeline()
         startSuggestPipeline()
         startTypeaheadMediaPipeline()
+        // Offline Mode is a switch that can be thrown with a query already on
+        // screen, and a connection can drop under one too. Either way the page
+        // has to be re-answered by whichever half owns it now: the same words
+        // find the device's copies offline, and YouTube's again online.
+        viewModelScope.launch {
+            combine(AppSettings.offlineModeEnabled, AppSettings.internetAvailable) { manual, live ->
+                manual || !live
+            }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect {
+                    val hadOfflineResults = _offlineSearch.value != null
+                    _offlineSearch.value = null
+                    when {
+                        (hadOfflineResults || searchSubmitted) && _query.value.isNotBlank() ->
+                            runSearch(anonymous = true)
+                        _query.value.isNotBlank() -> suggestRequests.tryEmit(_query.value)
+                    }
+                }
+        }
         loadHome()
         loadExplore()
         if (_signedIn.value) {
@@ -1983,6 +2089,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _suggestions.value = emptyList()
             _typeaheadResults.value = emptyList()
             _results.value = null
+            _offlineSearch.value = null
             addonSearchJob?.cancel()
             _addonResults.value = null
             // The list is about to switch from search results to recent
@@ -2028,6 +2135,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         SearchHistory.recordAddonQuery(q)
         addonSearchJob?.cancel()
         _searchScrollReset.value += 1
+        // An addon is a server, offline or not. The device's own tracks answer
+        // instead, on the same page the YouTube tab would have shown.
+        if (AppSettings.isOffline) {
+            _addonResults.value = null
+            runSearch(anonymous = true)
+            return
+        }
         val addons = SourceRegistry.active().filterIsInstance<AddonSource>()
         if (addons.isEmpty()) {
             _addonResults.value = UiState.Error(text(R.string.search_addons_none))
@@ -2066,7 +2180,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _typeaheadResults.value = emptyList()
         _searchScrollReset.value += 1
         when (source) {
-            SearchSource.LIBRARY -> loadLibrarySongs()
+            // The folder's own page answers this one, live off the last read, so
+            // the grouped offline page stands down rather than cover it.
+            SearchSource.LIBRARY -> {
+                _offlineSearch.value = null
+                loadLibrarySongs()
+            }
             SearchSource.YOUTUBE -> submitSearch()
             SearchSource.ADDONS -> if (_query.value.isNotBlank()) submitSearch()
         }
@@ -2139,6 +2258,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             searchSession = null
             _searchLoadingMore.value = false
             _results.value = null
+            _offlineSearch.value = null
             return
         }
         val id = newestRequestId.incrementAndGet()
@@ -2170,6 +2290,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun startSearchPipeline() = viewModelScope.launch {
         searchRequests
             .collectLatest { request ->
+                // Offline Mode answers from the device and opens no socket —
+                // see [publishOfflineSearch]. Checked here rather than only at
+                // the callers because this is the one place a search can reach
+                // the network: a keystroke, a filter tab, a suggestion or the
+                // switch flipping mid-flight all arrive as a request.
+                if (AppSettings.isOffline) {
+                    publishOfflineSearch(request.query, request.requestId)
+                    return@collectLatest
+                }
+                _offlineSearch.value = null
                 val key = cacheKey(request.query, request.filter)
                 // Something to look at immediately: the exact answer if this
                 // query has been run before, otherwise the closest earlier
@@ -2211,6 +2341,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * continuation was the reason a search sat on a spinner for seconds.
      */
     fun loadMoreSearchResults() {
+        // Offline Mode answers a query in one read of the disk; there is no
+        // further page to ask for, and nothing to ask with.
+        if (AppSettings.isOffline) return
         val session = searchSession ?: return
         val token = session.continuation ?: return
         if (_searchLoadingMore.value) return
@@ -2261,8 +2394,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .debounce(SUGGEST_DEBOUNCE_MS)
             .collectLatest { input ->
                 if (!stillWanted(input)) return@collectLatest
-                val fetched = YtMusicRepository.searchSuggestions(input).getOrNull()
-                    ?: return@collectLatest
+                // Offline Mode still gets a dropdown, made of this device's own
+                // titles and artists; only the round trip is gone.
+                val fetched = if (AppSettings.isOffline) {
+                    localSuggestions(input)
+                } else {
+                    YtMusicRepository.searchSuggestions(input).getOrNull() ?: return@collectLatest
+                }
                 // Asked again on the way back; the field is live throughout.
                 if (!stillWanted(input)) return@collectLatest
                 _suggestions.value = listOf(input) +
@@ -2291,6 +2429,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // typeahead dropdown under an already-committed search.
                 if (searchSubmitted) {
                     _typeaheadResults.value = emptyList()
+                    return@collectLatest
+                }
+                // The media half of the dropdown is YouTube's, so offline it is
+                // answered from the disk instead — the same rows, only nearer.
+                if (AppSettings.isOffline) {
+                    _typeaheadResults.value = runCatching { offlineGroups(input) }
+                        .getOrDefault(emptyList())
+                        .flatMap { it.songs }
+                        .distinctBy { it.videoId }
+                        .take(TYPEAHEAD_MAX_RESULTS)
+                        .map { SearchResult.Track(it) }
                     return@collectLatest
                 }
                 val result = YtMusicRepository.searchTypeahead(input).getOrNull()
@@ -3446,4 +3595,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun text(id: Int): String = getApplication<Application>().getString(id)
+
+    private fun text(id: Int, vararg args: Any): String =
+        getApplication<Application>().getString(id, *args)
 }

@@ -880,6 +880,9 @@
     <string name="offline_shuffle_all">Shuffle all</string>
     <string name="offline_recently_played">Recently played offline</string>
     <string name="offline_nothing_yet">Nothing to play offline yet.</string>
+    <string name="offline_search_hint">Offline · only what is on this device</string>
+    <string name="search_offline_no_results">Nothing called \"%1$s\" is on this device.</string>
+    <string name="offline_playback_blocked">Offline Mode is on, so nothing is streamed. Turn it off in Settings to play this track.</string>
 
     <!-- Listen together -->
     <string name="listen_together">Listen together</string>

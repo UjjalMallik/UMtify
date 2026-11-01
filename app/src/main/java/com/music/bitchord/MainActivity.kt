@@ -781,6 +781,7 @@ private fun BitChordApp(
     val filter by viewModel.filter.collectAsStateWithLifecycle()
     val searchSource by viewModel.searchSource.collectAsStateWithLifecycle()
     val libraryResults by viewModel.libraryResults.collectAsStateWithLifecycle()
+    val offlineSearch by viewModel.offlineSearch.collectAsStateWithLifecycle()
     val addonResults by viewModel.addonResults.collectAsStateWithLifecycle()
     val signedIn by viewModel.signedIn.collectAsStateWithLifecycle()
     val incomingJamInvite by JamInviteLink.pending.collectAsStateWithLifecycle()
@@ -3431,6 +3432,21 @@ private fun BitChordApp(
                                             "local:all",
                                         )
                                     },
+                                )
+                            },
+                            // Offline Mode's answer, when it has one. A tapped
+                            // row plays the running order of the group it was
+                            // found in, the same queue the folder itself opens.
+                            offlineResults = offlineSearch,
+                            offlineHint = stringResource(R.string.offline_search_hint),
+                            onOfflineSongClick = { songs, index ->
+                                playFrom(
+                                    songs,
+                                    index,
+                                    QueueSource(
+                                        context.getString(R.string.offline_mode_on),
+                                        PlaybackSourceType.SEARCH,
+                                    ),
                                 )
                             },
                         )

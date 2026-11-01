@@ -382,6 +382,16 @@ sealed interface SearchResult {
     data class Browse(val item: BrowseItem) : SearchResult
 }
 
+/**
+ * One labelled block of on-device tracks — the shape Offline Mode's search page
+ * is built from, since the question it answers ("which of mine is called X?")
+ * has three different homes an answer can come from and a flat list would hide.
+ *
+ * [label] arrives already localised: the page is shared but the strings are the
+ * app's, and the model has no business owning either.
+ */
+data class OfflineSearchGroup(val label: String, val songs: List<Song>)
+
 enum class SearchFilter(val label: String, val params: String?) {
     /** YouTube Music's mixed search page: songs, artists, albums and playlists. */
     ALL("All", null),

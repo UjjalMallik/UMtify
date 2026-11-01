@@ -67,6 +67,7 @@ import com.music.bitchord.data.model.BrowseItem
 import com.music.bitchord.data.model.BrowseType
 import com.music.bitchord.data.model.ROW_ART_PX
 import com.music.bitchord.data.model.SearchFilter
+import com.music.bitchord.data.model.OfflineSearchGroup
 import com.music.bitchord.data.model.artworkAt
 import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.Song
@@ -155,6 +156,16 @@ fun SearchScreen(
     libraryResults: UiState<List<Song>>? = null,
     /** Files on the device are a running order to play through, not a station seed. */
     onLibrarySongClick: (List<Song>, Int) -> Unit = onSongClick,
+    /**
+     * Offline Mode's answer: this device's own tracks, grouped by the folder
+     * each was found in. Non-null only for a submitted query — typing still
+     * gets the suggestion list, which offline is made of the same files.
+     */
+    offlineResults: UiState<List<OfflineSearchGroup>>? = null,
+    /** Read above the groups, so the page can say where the answers came from. */
+    offlineHint: String = "",
+    /** A device file plays as the running order of its own group. */
+    onOfflineSongClick: (List<Song>, Int) -> Unit = onLibrarySongClick,
     /**
      * The YouTube / Library switcher, full width at the head of the page. Up
      * only while the field is empty: once something is typed the page is
@@ -249,20 +260,10 @@ fun SearchScreen(
             contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
         ) {
             when {
-                searchingLibrary || searchingAddons -> librarySearchResults(
-                    query = query.trim(),
-                    results = if (searchingAddons) addonResults else libraryResults,
-                    addons = searchingAddons,
-                    addonHistory = addonHistory,
-                    onAddonHistoryClick = onAddonHistoryClick,
-                    onAddonHistoryRemove = onAddonHistoryRemove,
-                    onAddonHistoryClear = onAddonHistoryClear,
-                    currentSong = currentSong,
-                    isPlaying = isPlaying,
-                    onSongClick = onLibrarySongClick,
-                    onSongLongPress = onSongLongPress,
-                    onSongSwipe = onSongSwipe,
-                )
+                // Completions come first: a field mid-edit is being typed in, and
+                // whatever page sits under it belongs to the query before this
+                // edit began. [suggesting] is false on the Library and Addons
+                // sources, so this and the next two arms never compete.
                 suggesting -> {
                     searchSuggestions(
                         suggestions = suggestions,
@@ -287,6 +288,29 @@ fun SearchScreen(
                         )
                     }
                 }
+                offlineResults != null -> offlineSearchResults(
+                    state = offlineResults,
+                    hint = offlineHint,
+                    currentSong = currentSong,
+                    isPlaying = isPlaying,
+                    onSongClick = onOfflineSongClick,
+                    onSongLongPress = onSongLongPress,
+                    onSongSwipe = onSongSwipe,
+                )
+                searchingLibrary || searchingAddons -> librarySearchResults(
+                    query = query.trim(),
+                    results = if (searchingAddons) addonResults else libraryResults,
+                    addons = searchingAddons,
+                    addonHistory = addonHistory,
+                    onAddonHistoryClick = onAddonHistoryClick,
+                    onAddonHistoryRemove = onAddonHistoryRemove,
+                    onAddonHistoryClear = onAddonHistoryClear,
+                    currentSong = currentSong,
+                    isPlaying = isPlaying,
+                    onSongClick = onLibrarySongClick,
+                    onSongLongPress = onSongLongPress,
+                    onSongSwipe = onSongSwipe,
+                )
                 results == null -> if (history.isEmpty()) {
                     item { MessageState(stringResource(Res.string.search_empty)) }
                 } else {
@@ -463,6 +487,83 @@ private fun LazyListScope.librarySearchResults(
                         thickness = 0.5.dp,
                         color = MaterialTheme.colorScheme.outline,
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Offline Mode's page: the device's own tracks, in a block per folder they were
+ * found in. YouTube's filters have nothing to narrow here — an on-device file is
+ * not an album, an artist or a playlist result, it is a track — so the groups
+ * are the whole of it, and an empty search says so in one line.
+ */
+private fun LazyListScope.offlineSearchResults(
+    state: UiState<List<OfflineSearchGroup>>,
+    hint: String,
+    currentSong: Song?,
+    isPlaying: Boolean,
+    onSongClick: (List<Song>, Int) -> Unit,
+    onSongLongPress: (Song) -> Unit,
+    onSongSwipe: (Song) -> Unit,
+) {
+    when (state) {
+        UiState.Loading -> songListSkeleton(keyPrefix = "skeleton:search:offline")
+        is UiState.Error -> item(key = "offline:no-match") { MessageState(state.message) }
+        is UiState.Success -> {
+            if (hint.isNotEmpty()) {
+                item(key = "offline:hint") {
+                    Text(
+                        text = hint,
+                        modifier = Modifier.padding(
+                            start = PAGE_GUTTER,
+                            end = PAGE_GUTTER,
+                            top = 12.dp,
+                            bottom = 4.dp,
+                        ),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            state.data.forEach { group ->
+                val tracks = group.songs
+                val isCurrentRow = playingRowMatcher(tracks, currentSong)
+                item(key = "offline-group:${group.label}") {
+                    Text(
+                        text = group.label,
+                        modifier = Modifier.padding(
+                            start = PAGE_GUTTER,
+                            end = PAGE_GUTTER,
+                            top = 16.dp,
+                            bottom = 6.dp,
+                        ),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                itemsIndexed(
+                    items = tracks,
+                    key = { index, song -> "offline_${group.label}_${song.videoId}_$index" },
+                ) { index, song ->
+                    SongRow(
+                        song = song,
+                        onClick = { onSongClick(tracks, index) },
+                        onLongPress = { onSongLongPress(song) },
+                        onSwipeToQueue = { onSongSwipe(song) },
+                        isCurrent = isCurrentRow(song),
+                        isPlaying = isPlaying && isCurrentRow(song),
+                        searchPlayingStyle = true,
+                        activeTint = PlayingAccent,
+                    )
+                    if (index < tracks.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                            thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
                 }
             }
         }

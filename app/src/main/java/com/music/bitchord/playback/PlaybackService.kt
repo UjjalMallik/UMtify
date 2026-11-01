@@ -89,6 +89,7 @@ import com.music.bitchord.data.listentogether.partyQueueIndexOf
 import com.music.bitchord.data.listentogether.partyUpcomingAfter
 import com.music.bitchord.R
 import com.music.bitchord.data.LocalMediaRepository
+import com.music.bitchord.data.matchesSearch
 import com.music.bitchord.data.innertube.InnertubeParser
 import com.music.bitchord.data.YtMusicRepository
 import com.music.bitchord.data.lyrics.EmbeddedLyrics
@@ -1631,6 +1632,20 @@ class PlaybackService : MediaLibraryService() {
             // why an open-ended read of one is worth avoiding.
             ChunkedDataSource.Factory(OkHttpDataSource.Factory(Http.client), STREAM_CHUNK_BYTES),
         ) { dataSpec ->
+            // Offline Mode is a promise about data, and this is the one seam
+            // where a queued track becomes a URL. A track already on the device
+            // never reaches it — [toMediaItem] hands the player its file or
+            // content URI first — and one the cache can serve whole is read
+            // above this factory, so arriving here with the switch on means the
+            // bytes would have to come off a network. Refuse, and say why: the
+            // gate is the switch, so nothing is lost by naming it.
+            if (AppSettings.offlineModeEnabled.value && dataSpec.uri.scheme == "bitchord") {
+                throw PlaybackException(
+                    getString(R.string.offline_playback_blocked),
+                    /* cause= */ null,
+                    PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+                )
+            }
             // Wrapped rather than folded into the resolver above so the record
             // is made in one place for every branch of it, and made from what
             // the resolver *returned* rather than from what each branch meant
@@ -7919,6 +7934,9 @@ class PlaybackService : MediaLibraryService() {
                 .setExtras(rootExtras)
                 .build()
             scope.launch(Dispatchers.IO) {
+                // Offline Mode is a promise about data, and a car connecting is
+                // not a reason to break it.
+                if (AppSettings.isOffline) return@launch
                 try {
                     cachedHomeFeed()
                 } catch (_: Exception) {}
@@ -8480,6 +8498,10 @@ class PlaybackService : MediaLibraryService() {
     private suspend fun searchAll(query: String): Pair<List<Song>, List<BrowseItem>> {
         val safeQuery = query.trim().take(MAX_AUTO_SEARCH_QUERY_CHARS)
         if (safeQuery.isEmpty()) return emptyList<Song>() to emptyList()
+        // The car asks the same question the phone does, so Offline Mode answers
+        // it the same way: off this device, with no request to make. Albums and
+        // artists are YouTube's shapes; what is on disk is all tracks.
+        if (AppSettings.isOffline) return offlineSearchSongs(safeQuery) to emptyList()
         val results = try {
             withTimeoutOrNull(3_500L) {
                 YtMusicRepository.search(safeQuery, SearchFilter.ALL).getOrNull()
@@ -8497,6 +8519,25 @@ class PlaybackService : MediaLibraryService() {
         val browses = results.mapNotNull { (it as? SearchResult.Browse)?.item }
             .distinctBy { it.browseId }
         return songs to browses
+    }
+
+    /**
+     * The tracks this device can play without a network, narrowed by [query]
+     * with the same match the on-device folders use. Downloads lead because a
+     * download is a file this app put there on purpose, and the cache is what a
+     * stream left behind — MediaStore's own library sits between them.
+     */
+    private suspend fun offlineSearchSongs(query: String): List<Song> {
+        val downloaded = runCatching { Downloads.getDownloadedSongs(this) }.getOrDefault(emptyList())
+        val local = if (LocalMediaRepository.hasStoragePermission(this)) {
+            runCatching { LocalMediaRepository.getLocalMusic(this) }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+        val cached = runCatching { AudioCache.cachedSongs().map { it.song } }.getOrDefault(emptyList())
+        return (downloaded + local + cached)
+            .filter { it.matchesSearch(query) }
+            .distinctBy { it.videoId }
     }
 
     private fun storeSearchResults(query: String, songs: List<Song>, browses: List<BrowseItem>) {
