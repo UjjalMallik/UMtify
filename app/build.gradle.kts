@@ -78,16 +78,29 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        /*
-         * Only the languages this app is actually translated into ship. AGP
-         * otherwise keeps every locale any library carries — androidx, Media3,
-         * Play Services each bring dozens — and each one is a values table that
-         * is never read and never displayed, because there is no translation to
-         * select it. This list mirrors the `values-*` folders under res/ and
-         * sharedUi's composeResources, so dropping a language here means
-         * dropping its folder first.
-         */
-        resourceConfigurations += listOf(
+        buildConfigField(
+            "String",
+            "LISTEN_TOGETHER_SERVER",
+            "\"${listenTogetherServer.replace("\\", "\\\\").replace("\"", "\\\"")}\"",
+        )
+    }
+
+    /*
+     * Only the languages this app is actually translated into ship. AGP
+     * otherwise keeps every locale any library carries — androidx, Media3,
+     * Play Services each bring dozens — and each one is a values table that
+     * is never read and never displayed, because there is no translation to
+     * select it. This list mirrors the `values-*` folders under res/ and
+     * sharedUi's composeResources, so dropping a language here means dropping
+     * its folder first.
+     *
+     * `androidResources.localeFilters` replaces the deprecated
+     * `defaultConfig.resourceConfigurations`; AGP rejects the two together, and
+     * the entries are the same resource-qualifier tags ("zh-rTW", "b+zh+Hant")
+     * the old list carried, so which translations survive is unchanged.
+     */
+    androidResources {
+        localeFilters += listOf(
             "en",
             "b+zh+Hant",
             "de",
@@ -107,12 +120,6 @@ android {
             "zh",
             "zh-rHK",
             "zh-rTW",
-        )
-
-        buildConfigField(
-            "String",
-            "LISTEN_TOGETHER_SERVER",
-            "\"${listenTogetherServer.replace("\\", "\\\\").replace("\"", "\\\"")}\"",
         )
     }
 
@@ -176,18 +183,6 @@ android {
              */
             isMinifyEnabled = true
             isShrinkResources = true
-            /*
-             * The `splits.abi` block above already builds only an arm64 APK, so
-             * this is not what keeps the other ABIs out of the download. It is
-             * what keeps them out of the build: `jniLibs` still carries an
-             * `armeabi-v7a` and an `x86_64` `libffmpegJNI.so`, and filtering here
-             * stops them being merged, stripped and signed on the way to a split
-             * that was never going to hold them. A debug build is left unfiltered
-             * so an emulator of any architecture still gets its ffmpeg.
-             */
-            ndk {
-                abiFilters += "arm64-v8a"
-            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
