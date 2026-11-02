@@ -18,10 +18,15 @@ import com.google.common.collect.ImmutableList
  * so a notification that only sets the MediaStyle without the flag is what makes
  * the pill appear on a Pixel and stay missing on an iQOO.
  *
- * Everything else is left exactly as [androidx.media3.session.DefaultMediaNotificationProvider]
- * built it, including the large icon it loads through the session's
- * [SessionArtworkLoader]. Re-implementing that here would mean rebuilding the
- * action buttons, the custom layout and the seek bar by hand for one bit.
+ * The remaining flags are the strict set those same capsules look for: the
+ * notification must read as an un-dismissable, max-priority, lockscreen-visible
+ * ongoing event. [androidx.media3.session.DefaultMediaNotificationProvider]
+ * already attaches `MediaStyle(mediaSession)`, already loads the `setLargeIcon()`
+ * bitmap through the session's [SessionArtworkLoader], and already asks for
+ * `FOREGROUND_SERVICE_IMMEDIATE` on API 31+, so this class only fills in what it
+ * leaves at its default: no-clear, priority and visibility. Re-implementing the
+ * notification here would mean rebuilding the action buttons, the custom layout
+ * and the seek bar by hand for a few bits.
  */
 class PromotedOngoingNotificationProvider(
     private val delegate: MediaNotification.Provider,
@@ -39,10 +44,14 @@ class PromotedOngoingNotificationProvider(
             actionFactory,
             onNotificationChangedCallback,
         )
-        if (Build.VERSION.SDK_INT < PROMOTED_ONGOING_SINCE) return built
-        val flags = built.notification.flags or Notification.FLAG_PROMOTED_ONGOING
-        if (flags == built.notification.flags) return built
-        built.notification.flags = flags
+        val n = built.notification
+        var flags = n.flags or Notification.FLAG_ONGOING_EVENT or Notification.FLAG_NO_CLEAR
+        if (Build.VERSION.SDK_INT >= PROMOTED_ONGOING_SINCE) {
+            flags = flags or Notification.FLAG_PROMOTED_ONGOING
+        }
+        n.flags = flags
+        n.priority = Notification.PRIORITY_MAX
+        n.visibility = Notification.VISIBILITY_PUBLIC
         return built
     }
 
