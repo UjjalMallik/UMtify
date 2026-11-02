@@ -28,12 +28,17 @@ class PromotedOngoingNotificationProvider(
 ) : MediaNotification.Provider {
 
     override fun createNotification(
-        session: MediaSession?,
-        customLayout: ImmutableList<CommandButton>?,
-        actionFactory: MediaNotification.ActionFactory?,
-        callback: MediaNotification.Provider.Callback?,
+        mediaSession: MediaSession,
+        customLayout: ImmutableList<CommandButton>,
+        actionFactory: MediaNotification.ActionFactory,
+        onNotificationChangedCallback: MediaNotification.Provider.Callback,
     ): MediaNotification {
-        val built = delegate.createNotification(session, customLayout, actionFactory, callback)
+        val built = delegate.createNotification(
+            mediaSession,
+            customLayout,
+            actionFactory,
+            onNotificationChangedCallback,
+        )
         if (Build.VERSION.SDK_INT < PROMOTED_ONGOING_SINCE) return built
         val flags = built.notification.flags or Notification.FLAG_PROMOTED_ONGOING
         if (flags == built.notification.flags) return built
@@ -42,9 +47,9 @@ class PromotedOngoingNotificationProvider(
     }
 
     override fun handleCustomCommand(
-        session: MediaSession?,
-        action: String?,
-        extras: Bundle?,
+        session: MediaSession,
+        action: String,
+        extras: Bundle,
     ): Boolean = delegate.handleCustomCommand(session, action, extras)
 
     override fun getNotificationChannelInfo(): MediaNotification.Provider.NotificationChannelInfo =
