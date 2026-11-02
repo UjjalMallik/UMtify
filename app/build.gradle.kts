@@ -176,6 +176,18 @@ android {
              */
             isMinifyEnabled = true
             isShrinkResources = true
+            /*
+             * The `splits.abi` block above already builds only an arm64 APK, so
+             * this is not what keeps the other ABIs out of the download. It is
+             * what keeps them out of the build: `jniLibs` still carries an
+             * `armeabi-v7a` and an `x86_64` `libffmpegJNI.so`, and filtering here
+             * stops them being merged, stripped and signed on the way to a split
+             * that was never going to hold them. A debug build is left unfiltered
+             * so an emulator of any architecture still gets its ffmpeg.
+             */
+            ndk {
+                abiFilters += "arm64-v8a"
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

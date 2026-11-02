@@ -10,6 +10,7 @@ import android.media.AudioManager
 import android.media.MediaMetadataRetriever
 import android.media.audiofx.AudioEffect
 import android.net.Uri
+import android.provider.Settings
 import android.widget.Toast
 import android.os.Bundle
 import android.os.Handler
@@ -29,6 +30,9 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.SonicAudioProcessor
@@ -793,6 +797,17 @@ class PlaybackService : MediaLibraryService() {
     private var artworkBytesJob: Job? = null
     /** Queue slot and cover address of that load, so one track is not asked twice. */
     private var artworkBytesTarget: Pair<Int, Uri>? = null
+    /** Cover address of the *playing* track whose bytes are being turned into metadata. */
+    private var currentArtworkBytesJob: Job? = null
+    private var currentArtworkBytesTarget: Uri? = null
+    /** The pill drawn over other apps; built the first time one is wanted. */
+    private var islandCapsule: IslandCapsule? = null
+    /** Watches the process going off screen, which is when the pill becomes useful. */
+    private var islandForegroundObserver: LifecycleEventObserver? = null
+    /** Whether this process has a screen up, as the platform lifecycle reports it. */
+    private var processInForeground = true
+    /** The track the pill is showing, so a refresh does not re-fetch its cover. */
+    private var capsuleMediaId: String? = null
     private var autoplaySeed: String? = null
 
     /** Index in the live queue represented by entry zero of the persisted window. */
@@ -853,7 +868,13 @@ class PlaybackService : MediaLibraryService() {
     private val playbackListener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
             val activePlayer = this@PlaybackService.player ?: return
-            if (player === activePlayer) updateAudioEffectSession(activePlayer)
+            if (player === activePlayer) {
+                updateAudioEffectSession(activePlayer)
+                // One hook for the whole pill: this fires after every specific
+                // callback below, so a transition, a pause and a seek all arrive
+                // here with the player already describing the new state.
+                refreshIslandCapsule(activePlayer)
+            }
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -1299,12 +1320,36 @@ class PlaybackService : MediaLibraryService() {
         QualityUpgrade.forgetLastSession()
 
         setMediaNotificationProvider(
-            DefaultMediaNotificationProvider.Builder(this)
-                .setChannelId(CHANNEL_ID)
-                .setChannelName(R.string.playback_channel_name)
-                .build()
-                .apply { setSmallIcon(R.drawable.ic_notification_logo) },
+            PromotedOngoingNotificationProvider(
+                DefaultMediaNotificationProvider.Builder(this)
+                    .setChannelId(CHANNEL_ID)
+                    .setChannelName(R.string.playback_channel_name)
+                    .build()
+                    .apply { setSmallIcon(R.drawable.ic_notification_logo) },
+            ),
         )
+
+        // The pill drawn over other apps answers to three things the player does
+        // not: the switch, the process going off screen, and the overlay
+        // permission being revoked mid-session. Player events cover the third of
+        // those it can see; [refreshIslandCapsule] reads the other two.
+        islandForegroundObserver = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> {
+                    processInForeground = true
+                    player?.let(::refreshIslandCapsule)
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    processInForeground = false
+                    player?.let(::refreshIslandCapsule)
+                }
+                else -> Unit
+            }
+        }.also { ProcessLifecycleOwner.get().lifecycle.addObserver(it) }
+        scope.launch {
+            AppSettings.dynamicIslandCapsule
+                .collectLatest { player?.let(::refreshIslandCapsule) }
+        }
 
         // Both the player screen and notification route their Shuffle command
         // here. Observe its state so either surface's icon follows the queue
@@ -3563,6 +3608,7 @@ class PlaybackService : MediaLibraryService() {
         savePlaybackState(exoPlayer)
         prefetchAround(exoPlayer)
         publishArtworkBytes(exoPlayer)
+        publishCurrentArtworkBytes(exoPlayer)
         // The second look belongs to the track it was started for; the
         // queue moving on ends it — unless it is already proving what it
         // found, see [cancelStaleUpgradeJob] — and starts the new
@@ -6142,6 +6188,125 @@ class PlaybackService : MediaLibraryService() {
     }
 
     /**
+     * Puts the *playing* track's cover into the session metadata as bytes.
+     *
+     * [publishArtworkBytes] can only reach the queue ahead of the playhead,
+     * because rewriting the current window's `MediaItem` rebuilds its media
+     * source and the listener hears the stream re-resolve. The playlist metadata
+     * has no such hold on the audio: `Player.getMediaMetadata()` is the playlist
+     * metadata with the current item's own fields written over it, and that
+     * merge copies only the fields the item actually sets. So an item carrying
+     * an `artworkUri` but no `artworkData` leaves ours in the merged result.
+     *
+     * That merged bitmap is what the legacy bundle the platform session publishes
+     * is built from — `METADATA_KEY_ALBUM_ART` — which is the entry OEM pills and
+     * mini-capsules read when they decline to fetch a URI themselves. It is also
+     * the difference between a lock screen showing a cover and showing a note.
+     *
+     * The first track of a session used to have no route at all; now the queued
+     * rewrite covers the tracks after it and this one covers the track under the
+     * playhead, so the whole run has bytes from the moment it starts.
+     */
+    private fun publishCurrentArtworkBytes(exoPlayer: ExoPlayer) {
+        if (ListenTogether.state.value.inParty || castPlayback.active) return
+        val metadata = exoPlayer.currentMediaItem?.mediaMetadata
+        if (metadata?.artworkData != null) return
+        val artworkUri = metadata?.artworkUri
+        if (artworkUri == null) {
+            currentArtworkBytesJob?.cancel()
+            currentArtworkBytesJob = null
+            currentArtworkBytesTarget = null
+            // A track with no cover must not inherit the last one's bytes: the
+            // merged metadata would keep painting art over a song that has none.
+            if (exoPlayer.playlistMetadata.artworkData == null) return
+            exoPlayer.playlistMetadata = exoPlayer.playlistMetadata.buildUpon()
+                .setArtworkData(null, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+                .build()
+            triggerNotificationUpdate()
+            return
+        }
+        // A repeat call for the track already being loaded is the one case worth
+        // dropping; every other one means the playhead moved to a new cover.
+        if (currentArtworkBytesTarget == artworkUri && currentArtworkBytesJob?.isActive == true) return
+        currentArtworkBytesJob?.cancel()
+        currentArtworkBytesTarget = artworkUri
+        currentArtworkBytesJob = scope.launch {
+            val bytes = sessionArtworkBytes(applicationContext, artworkUri)
+            if (currentArtworkBytesTarget == artworkUri) currentArtworkBytesTarget = null
+            if (bytes == null) return@launch
+            val active = player ?: return@launch
+            if (active.currentMediaItem?.mediaMetadata?.artworkUri != artworkUri) return@launch
+            active.playlistMetadata = active.mediaMetadata.buildUpon()
+                .setArtworkData(bytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+                .build()
+            // A metadata event alone does not redraw the notification — Media3
+            // rebuilds it on playback-state, timeline and loading changes — so
+            // ask for the repaint once the bytes are actually in hand.
+            triggerNotificationUpdate()
+        }
+    }
+
+    /**
+     * Brings the floating pill up to date with what is playing, or takes it down.
+     *
+     * Three things have to agree before a window is added over the listener's
+     * screen: the switch in Settings, an actual stream coming out, and this app
+     * not being the thing they are looking at. A pill drawn behind the player is
+     * the same information twice, and one drawn while paused is a lie about audio
+     * that is not happening.
+     *
+     * The fourth condition is the permission, checked here rather than at the
+     * Settings row because it can be taken away at any time from system settings —
+     * [IslandCapsule.setVisible] answers with nothing when it is not held.
+     */
+    private fun refreshIslandCapsule(exoPlayer: ExoPlayer) {
+        val wanted = AppSettings.dynamicIslandCapsule.value &&
+            exoPlayer.isPlaying &&
+            !processInForeground &&
+            Settings.canDrawOverlays(this)
+        val capsule = islandCapsule ?: IslandCapsule(
+            context = applicationContext,
+            scope = scope,
+            onOpenPlayer = ::openPlayerFromCapsule,
+            onTogglePlay = ::togglePlayFromCapsule,
+            onNext = ::skipForwardFromCapsule,
+        ).also { islandCapsule = it }
+        capsule.setVisible(wanted)
+        if (!wanted) {
+            capsuleMediaId = null
+            return
+        }
+        val metadata = exoPlayer.currentMediaItem?.mediaMetadata
+        val mediaId = exoPlayer.currentMediaItem?.mediaId
+        if (mediaId != capsuleMediaId) {
+            capsuleMediaId = mediaId
+            capsule.setTrack(
+                title = metadata?.title?.toString(),
+                artist = metadata?.artist?.toString(),
+                artworkUri = metadata?.artworkUri,
+            )
+        }
+        capsule.setPlaying(exoPlayer.isPlaying)
+    }
+
+    private fun openPlayerFromCapsule() {
+        packageManager.getLaunchIntentForPackage(packageName)?.let {
+            startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
+        }
+    }
+
+    private fun togglePlayFromCapsule() {
+        val exoPlayer = player ?: return
+        if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+    }
+
+    private fun skipForwardFromCapsule() {
+        val exoPlayer = player ?: return
+        exoPlayer.seekToNextMediaItem()
+        exoPlayer.play()
+    }
+
+    /**
      * Feeds played-seconds to [PlaybackTracker]. The tracker can't read the
      * player itself — ExoPlayer is confined to this thread — and a history
      * entry with no watchtime behind it barely registers as a listen, so the
@@ -7263,13 +7428,17 @@ class PlaybackService : MediaLibraryService() {
      * Called by Android when the user swipes this app's task away from the
      * recent apps screen.
      *
-     * When [AppSettings.stopOnTaskRemoved] is on we stop the player and let the
-     * service die naturally; otherwise we leave it running in the background so
-     * music continues past the swipe, which is the default Android behaviour for
-     * a foreground-service-backed media session.
+     * A swipe is not a stop request, so nothing here dismisses the notification
+     * or tears the session down while audio is live: the foreground service and
+     * the media session both stay in `STATE_PLAYING` and the stream runs on.
+     * [AppSettings.stopOnTaskRemoved] is honoured only once nothing is actually
+     * playing, because a listener who turned it on and then swipes a *paused*
+     * queue away means it — whereas cutting a track mid-flight is the failure
+     * this guard exists to prevent.
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
+        if (isPlayingAnywhere()) return
         if (AppSettings.stopOnTaskRemoved.value) {
             // A receiver left playing with nothing on the phone to drive it
             // would run out its few queued tracks and stop on its own anyway;
@@ -7282,8 +7451,23 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
+    /**
+     * Whether this device is putting sound out right now — locally or through a
+     * cast receiver — as opposed to merely holding a queue it was told to play.
+     */
+    private fun isPlayingAnywhere(): Boolean =
+        player?.isPlaying == true || spare?.isPlaying == true || castPlayback.isPlaying
 
     override fun onDestroy() {
+        // A window the service added is a window the service has to take back,
+        // or the pill stays on the screen after the app is gone with nothing
+        // behind it to answer the taps.
+        islandCapsule?.release()
+        islandCapsule = null
+        islandForegroundObserver?.let { ProcessLifecycleOwner.get().lifecycle.removeObserver(it) }
+        islandForegroundObserver = null
+        artworkBytesJob?.cancel()
+        currentArtworkBytesJob?.cancel()
         WearBridge.attachStreams(null)
         WearBridge.releaseSpeaker()
         // Let go of the receiver's player but leave its session alone: a

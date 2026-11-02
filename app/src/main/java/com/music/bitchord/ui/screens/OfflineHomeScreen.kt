@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -115,8 +116,8 @@ fun OfflineHomeScreen(
         modifier = modifier.fillMaxSize(),
         contentPadding = contentPadding,
     ) {
-        item { OfflineTitle(title) }
-        item {
+        item(key = "offline-title") { OfflineTitle(title) }
+        item(key = "offline-network-chip") {
             OfflineChip(
                 networkAvailable = networkAvailable,
                 manualOffline = manualOffline,
@@ -127,7 +128,7 @@ fun OfflineHomeScreen(
             )
         }
         val snapshot = data ?: return@LazyColumn
-        item {
+        item(key = "offline-quick-access") {
             OfflineSectionHeader(quickAccessLabel)
             Row(
                 modifier = Modifier
@@ -168,7 +169,7 @@ fun OfflineHomeScreen(
             }
         }
         if (snapshot.cached.isEmpty() && snapshot.downloads.isEmpty() && snapshot.local.isEmpty()) {
-            item { MessageState(nothingLabel) }
+            item(key = "offline-empty") { MessageState(nothingLabel) }
             return@LazyColumn
         }
         // The cache is kept in the order playback last touched it, which is as
@@ -229,15 +230,15 @@ private fun LazyListScope.shelf(
     onSongClick: (Song) -> Unit,
 ) {
     if (songs.isEmpty()) return
-    item { OfflineSectionHeader(title) }
-    item {
+    item(key = "$title-header") { OfflineSectionHeader(title) }
+    item(key = "$title-shelf") {
         val isCurrent = playingRowMatcher(songs, currentSong)
         ShelfRow(
             contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             state = rememberLazyListState(),
         ) {
-            items(songs) { song ->
+            itemsIndexed(songs, key = { position, song -> "$position-${song.videoId}" }) { _, song ->
                 SongCard(
                     song = song,
                     isCurrent = isCurrent(song),
@@ -256,14 +257,14 @@ private fun LazyListScope.shelfCards(
     onOpenGroup: (LocalGroup) -> Unit,
 ) {
     if (groups.isEmpty()) return
-    item { OfflineSectionHeader(title) }
-    item {
+    item(key = "$title-header") { OfflineSectionHeader(title) }
+    item(key = "$title-shelf") {
         ShelfRow(
             contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             state = rememberLazyListState(),
         ) {
-            items(groups) { group ->
+            itemsIndexed(groups, key = { position, group -> "$position-${group.browseId}" }) { _, group ->
                 Column(
                     modifier = Modifier
                         .width(SHELF_CARD_WIDTH)
@@ -331,7 +332,7 @@ private fun LazyListScope.songRows(
             isPlaying = isCurrent && isPlaying,
         )
     }
-    item { Spacer(Modifier.height(14.dp)) }
+    item(key = "$title-spacer") { Spacer(Modifier.height(14.dp)) }
 }
 
 /** The page heading: the wordmark and the tab's name, as the online feed has them. */

@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import com.music.bitchord.ui.components.liquidGlassRim
+import com.music.bitchord.ui.graphics.forPixelAccess
 import com.music.bitchord.ui.components.longPressMenuClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -1257,7 +1258,12 @@ private fun ArtistHeader(
                     } else {
                         size(coil3.size.Size.ORIGINAL)
                     }
-                    if (isSignatureScan) transformations(SignatureInkTransformation)
+                    if (isSignatureScan) {
+                        // [SignatureInkTransformation] reads every pixel back, and
+                        // a hardware bitmap has no pixels to read on the CPU.
+                        forPixelAccess()
+                        transformations(SignatureInkTransformation)
+                    }
                 }.build()
             }
             // A dropped fetch gets two more tries before the name is left in place.
@@ -1803,6 +1809,9 @@ private fun AboutSignature(
                 size(SVG_DECODE_WIDTH, (SVG_DECODE_WIDTH / aspect).roundToInt())
             } else {
                 size(coil3.size.Size.ORIGINAL)
+                // Same reason as the other signature request: the ink pass
+                // reads the bitmap back, so it has to be software.
+                forPixelAccess()
                 transformations(SignatureInkTransformation)
             }
         }.build()

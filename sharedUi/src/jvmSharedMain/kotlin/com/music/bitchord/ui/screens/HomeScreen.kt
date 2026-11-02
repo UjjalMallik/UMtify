@@ -29,7 +29,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import com.music.bitchord.ui.components.ShelfRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -166,10 +166,10 @@ fun HomeScreen(
             },
         ) {
             if (title != null) {
-                item { HomeTitle(title) }
+                item(key = "home-title") { HomeTitle(title) }
             }
             if (!signedIn && onSignIn != null) {
-                item {
+                item(key = "sign-in-banner") {
                     SignInBanner(onSignIn = onSignIn, modifier = Modifier.padding(bottom = 8.dp))
                 }
             }
@@ -185,7 +185,7 @@ fun HomeScreen(
                         feedSkeleton(firstIsHero = leadHero)
                     }
                 }
-                is UiState.Error -> item {
+                is UiState.Error -> item(key = "home-error") {
                     MessageState(state.message, actionLabel = stringResource(Res.string.retry), onAction = onRetry)
                 }
                 is UiState.Success -> {
@@ -238,6 +238,17 @@ fun HomeScreen(
         }
     }
 }
+
+/**
+ * A key for one card inside a shelf's own row.
+ *
+ * The id is what survives a refresh — a track that is still the same track keeps
+ * its scroll position and its already-decoded thumbnail — and the position is
+ * what keeps a repeated single out of a duplicate-key crash, because a home feed
+ * can and does show one video twice in the same carousel.
+ */
+private fun shelfCardKey(position: Int, item: ShelfItem): String =
+    "$position-${item.videoId ?: item.browseId ?: item.title}"
 
 /**
  * Recents mirrors the artist page's top-tracks pager. Any other lead shelf keeps
@@ -313,7 +324,10 @@ private fun RecentShelf(
                     contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    items(shelf.items.chunked(RECENT_TRACKS_PER_COLUMN)) { column ->
+                    itemsIndexed(
+                        shelf.items.chunked(RECENT_TRACKS_PER_COLUMN),
+                        key = { position, _ -> "recent-column-$position" },
+                    ) { _, column ->
                         Column(Modifier.width(columnWidth)) {
                             column.forEach { item ->
                                 RecentTrackRow(
@@ -335,7 +349,7 @@ private fun RecentShelf(
                     contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    items(shelf.items) { item ->
+                    itemsIndexed(shelf.items, key = { position, item -> shelfCardKey(position, item) }) { _, item ->
                         HeroCard(
                             item = item,
                             onClick = { onItemClick(item) },
@@ -763,7 +777,7 @@ private fun HeroShelf(
                 contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                items(shelf.items) { item ->
+                itemsIndexed(shelf.items, key = { position, item -> shelfCardKey(position, item) }) { _, item ->
                     HeroCard(
                         item = item,
                         onClick = { onItemClick(item) },
@@ -862,7 +876,7 @@ internal fun Shelf(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             leadingCard?.let { card -> item(key = "leading") { card() } }
-            items(shelf.items) { item ->
+            itemsIndexed(shelf.items, key = { position, item -> shelfCardKey(position, item) }) { _, item ->
                 ShelfCard(
                     item = item,
                     onClick = { onItemClick(item) },

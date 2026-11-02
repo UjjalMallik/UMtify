@@ -117,6 +117,27 @@ internal suspend fun sessionArtworkBytes(context: Context, uri: Uri): ByteArray?
         }.getOrNull()
     }
 
+/**
+ * The cover as a bitmap, at the size a caller will actually draw it.
+ *
+ * Left on Coil's default of hardware bitmaps, because this one only ever goes
+ * into an `ImageView` and a hardware bitmap is drawn by the GPU without a copy
+ * into RAM. Anything that reads pixels back — the notification's large icon, the
+ * legacy metadata bundle, the palette — goes through [sessionArtworkBytes] or
+ * [SessionArtworkLoader.loadBitmap] instead, both of which ask for software.
+ */
+internal suspend fun sessionArtworkBitmap(context: Context, uri: Uri, px: Int): Bitmap? =
+    withContext(Dispatchers.IO) {
+        val request = ImageRequest.Builder(context)
+            .data(uri)
+            .size(px)
+            .networkCachePolicy(
+                if (AppSettings.isOffline) CachePolicy.DISABLED else CachePolicy.ENABLED
+            )
+            .build()
+        (SingletonImageLoader.get(context).execute(request) as? SuccessResult)?.image?.toBitmap()
+    }
+
 /** The edge the published cover is resized to, and the quality it is encoded at. */
 private const val SESSION_ART_PX = 512
 private const val SESSION_ART_JPEG_QUALITY = 85
