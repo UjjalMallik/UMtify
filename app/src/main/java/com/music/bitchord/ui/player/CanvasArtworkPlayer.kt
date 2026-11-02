@@ -309,8 +309,14 @@ internal fun AndroidCanvasArtworkPlayer(
     // folded into the one above: that one is keyed on [rendered] so it fires
     // again on every fade-in, and this one only needs to start once a fade-in
     // has actually happened and then keep going for as long as it holds.
-    LaunchedEffect(rendered, refreshFrameEveryMs, frameCapturePx, clipAspect, contentMode, alignPortraitTop) {
+    LaunchedEffect(rendered, foreground, refreshFrameEveryMs, frameCapturePx, clipAspect, contentMode, alignPortraitTop) {
         val interval = refreshFrameEveryMs ?: return@LaunchedEffect
+        // Nothing is looking at the backdrop that these captures feed, and a
+        // readback is the most expensive thing this component does: it allocates
+        // a bitmap and copies the surface out of the GPU. The decoder is already
+        // parked above; this is the same promise, kept for the copy of it that
+        // runs on a timer.
+        if (!foreground) return@LaunchedEffect
         Log.d(TAG, "periodic frame refresh started, interval=$interval")
         if (!rendered) return@LaunchedEffect
         while (isActive) {

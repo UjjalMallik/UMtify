@@ -789,6 +789,10 @@ class PlaybackService : MediaLibraryService() {
     private var preferredPrefetchJob: Job? = null
     /** Logical queue request, before a video id is replaced by its audio counterpart. */
     private var preferredPrefetchRequest: Pair<Boolean, List<String>>? = null
+    /** The queued track whose cover is being turned into metadata bytes. */
+    private var artworkBytesJob: Job? = null
+    /** Queue slot and cover address of that load, so one track is not asked twice. */
+    private var artworkBytesTarget: Pair<Int, Uri>? = null
     private var autoplaySeed: String? = null
 
     /** Index in the live queue represented by entry zero of the persisted window. */
@@ -2699,6 +2703,11 @@ class PlaybackService : MediaLibraryService() {
 
     /** Follows the continuation independently of the detail-page lifecycle. */
     private fun startBoundedContinuationLoading(contextToken: String) {
+        // The rest of an album or playlist is a request away, and Offline Mode
+        // says no requests. Without this the walk keeps appending rows the gate
+        // refuses, and the top-up that mirrors the logical window into the player
+        // puts back exactly what [pruneQueueToOffline] took out.
+        if (AppSettings.isOffline) return
         boundedContinuationJob?.cancel()
         boundedContinuationJob = scope.launch {
             var failures = 0
@@ -2917,6 +2926,11 @@ class PlaybackService : MediaLibraryService() {
      */
     private fun loadAutoplayForCurrentTrack() {
         val exoPlayer = player ?: return
+        // Suggestions are fetched, and a suggestion is a track that is not on
+        // this device yet. Offline Mode is not a network that might fail — it is
+        // a promise that nothing is asked of one, so the radio stays off rather
+        // than filling the queue with rows the gate is about to refuse.
+        if (AppSettings.isOffline) return
         val party = ListenTogether.state.value
         if (!autoplayEnabled(party) ||
             exoPlayer.repeatMode == Player.REPEAT_MODE_ALL ||
@@ -3548,6 +3562,7 @@ class PlaybackService : MediaLibraryService() {
         if (exoPlayer.isPlaying) registerCurrentPlay()
         savePlaybackState(exoPlayer)
         prefetchAround(exoPlayer)
+        publishArtworkBytes(exoPlayer)
         // The second look belongs to the track it was started for; the
         // queue moving on ends it — unless it is already proving what it
         // found, see [cancelStaleUpgradeJob] — and starts the new
@@ -3704,6 +3719,18 @@ class PlaybackService : MediaLibraryService() {
         val item = player.currentMediaItem ?: return
         val mediaId = item.mediaId
         val uri = item.localConfiguration?.uri
+        // Offline Mode refused this one, and everything below would re-prepare
+        // the same refusal: the gate sits in the data source every recovery
+        // passes through, so the attempts spend themselves and the track is
+        // skipped by budget rather than by anything learned about it. Against a
+        // queue of streamed rows that is the rapid-fire skipping the report
+        // describes — [MAX_RECOVERIES] failures and a skip per song, in a few
+        // seconds. Retiring the refused item is bounded: one removal per track,
+        // and the queue shrinks toward what this device can actually play.
+        if (AppSettings.offlineModeEnabled.value && uri?.scheme == "bitchord") {
+            retireOfflineBlockedItem(player, mediaId)
+            return
+        }
         val position = player.currentPosition.coerceAtLeast(0L)
         val attempts = recoveries.getOrDefault(mediaId, 0) + 1
         recoveries[mediaId] = attempts
@@ -4132,6 +4159,37 @@ class PlaybackService : MediaLibraryService() {
         }
         consecutiveErrorSkips++
         return "failed to start after $attempts attempts (${error.errorCodeName})"
+    }
+
+    /**
+     * Take a track Offline Mode refused out of the queue and carry on.
+     *
+     * The opposite call from [skipPastUnplayable], and deliberately so: that one
+     * leaves a stream that failed *now* queued, because a signature or a region
+     * can change inside the hour. A refusal by the offline gate says nothing
+     * about the stream and everything about the queue — this device has said it
+     * will not fetch this track, and asking it again on the next play is the
+     * same three seconds of skipping. Removal is what makes the queue converge
+     * on the tracks Offline Mode was switched on for.
+     *
+     * Removing the playing item moves the player to the next one by itself, so
+     * no seek and no prepare: the queue simply gets shorter, and the listener
+     * hears the next song rather than an error tone.
+     *
+     * The last item is left alone. With nothing else queued, taking it away
+     * stops the music *and* empties the screen; keeping it leaves the gate's own
+     * message to be shown, which is the truer report of "there is nothing here
+     * to play offline".
+     */
+    private fun retireOfflineBlockedItem(exoPlayer: ExoPlayer, mediaId: String) {
+        val index = exoPlayer.currentMediaItemIndex
+        if (index == C.INDEX_UNSET || exoPlayer.currentMediaItem?.mediaId != mediaId) return
+        if (exoPlayer.mediaItemCount <= 1) {
+            TrackLog.w("BitChord", "$mediaId refused by Offline Mode, and it is the only track queued", about = mediaId)
+            return
+        }
+        TrackLog.w("BitChord", "$mediaId refused by Offline Mode; taking it out of the queue", about = mediaId)
+        exoPlayer.removeMediaItem(index)
     }
 
     /**
@@ -6021,6 +6079,69 @@ class PlaybackService : MediaLibraryService() {
     }
 
     /**
+     * Attaches the next track's cover to its metadata as bytes, while it is
+     * still queued rather than playing.
+     *
+     * The session publishes whatever the current [MediaItem] carries, and a
+     * streamed item carries a `https` artwork URI. Surfaces that decode that
+     * URI themselves — the notification, through the loader handed to the
+     * session builder — get their cover; surfaces that only read the bitmap
+     * Media3 puts in the legacy metadata bundle get nothing, because that
+     * entry is made from `artworkData` and this app never had any. Which is
+     * the difference between a lock screen that describes the track correctly
+     * and an OEM pill that either shows no cover or does not appear.
+     *
+     * Doing it here, one track ahead of the playhead, is what keeps the cost
+     * honest. [Player.replaceMediaItem] rebuilds that window's media source, so
+     * applied to the *playing* item it re-runs the stream resolver and the
+     * listener hears the gap; applied to a queued one it changes nothing the
+     * player has committed to, and the cover is already in hand — decoded from
+     * the same cache entry the row on screen filled — by the time the track
+     * reaches the front. The first track of a session is the one exception
+     * this cannot reach, and it keeps relying on the notification's loader.
+     *
+     * Skipped while another surface owns the queue: a party's copy and a Cast
+     * receiver both track this playlist, and a metadata-only rewrite would
+     * look to them like the listener edited the running order.
+     */
+    private fun publishArtworkBytes(exoPlayer: ExoPlayer) {
+        if (ListenTogether.state.value.inParty || castPlayback.active) return
+        if (crossfade?.isTransitioning() == true) return
+        val index = exoPlayer.nextMediaItemIndex
+        if (index == C.INDEX_UNSET || index !in 0 until exoPlayer.mediaItemCount) return
+        val item = exoPlayer.getMediaItemAt(index)
+        val artworkUri = item.mediaMetadata.artworkUri ?: return
+        if (item.mediaMetadata.artworkData != null) return
+        val target = index to artworkUri
+        if (target == artworkBytesTarget) return
+        artworkBytesTarget = target
+        artworkBytesJob?.cancel()
+        artworkBytesJob = scope.launch {
+            val bytes = sessionArtworkBytes(applicationContext, artworkUri)
+            if (artworkBytesTarget == target) artworkBytesTarget = null
+            if (bytes == null) return@launch
+            val active = player ?: return@launch
+            // The queue moved on, or moved this track out of the slot it was
+            // loaded for. Either way the bytes belong to nothing now.
+            if (active.nextMediaItemIndex != index) return@launch
+            val pending = active.getMediaItemAt(index)
+            if (pending.mediaId != item.mediaId || pending.mediaMetadata.artworkData != null) {
+                return@launch
+            }
+            active.replaceMediaItem(
+                index,
+                pending.buildUpon()
+                    .setMediaMetadata(
+                        pending.mediaMetadata.buildUpon()
+                            .setArtworkData(bytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+                            .build(),
+                    )
+                    .build(),
+            )
+        }
+    }
+
+    /**
      * Feeds played-seconds to [PlaybackTracker]. The tracker can't read the
      * player itself — ExoPlayer is confined to this thread — and a history
      * entry with no watchtime behind it barely registers as a listen, so the
@@ -6629,9 +6750,72 @@ class PlaybackService : MediaLibraryService() {
         spare?.let(body)
     }
 
+    /**
+     * Leaves the live queue holding only what this device can play with the
+     * network put away: a file or content URI, a download still where its record
+     * says it is, or a track the read-ahead cache kept the bytes of.
+     *
+     * Run when Offline Mode is switched on, because a queue built a minute
+     * earlier was built with the internet in mind and nothing else takes those
+     * rows out. Left alone, the player walks into them one at a time — each a
+     * refused resolve, a retry, and a skip, which is the sound of a phone
+     * firing through a playlist in three seconds.
+     *
+     * The active player only: [CrossfadeController] rebuilds the standby from
+     * this one at every handoff, so what is pruned here is what gets copied
+     * there. A blend already in flight keeps its own copy of its incoming
+     * track, and if that track is a refused one, [recoverFrom]'s offline branch
+     * retires it in place rather than starting the cascade again.
+     *
+     * A queue with nothing offline in it is left as it is. Emptying it would
+     * look like Offline Mode deleted the listener's playlist; the gate's
+     * message is the honest version of the same outcome.
+     */
+    private fun pruneQueueToOffline() {
+        val exoPlayer = player ?: return
+        // Both surfaces own their running order; neither asks this device to
+        // decide what is playable.
+        if (ListenTogether.state.value.inParty || castPlayback.active) return
+        // Stop the walk for the same reason the queue is being cut: what it
+        // loads next is what would come back in.
+        boundedContinuationJob?.cancel()
+        boundedContinuationJob = null
+        val items = (0 until exoPlayer.mediaItemCount).map(exoPlayer::getMediaItemAt)
+        if (items.isEmpty()) return
+        scope.launch {
+            // Read on the player's own thread, judged off it: what survives is a
+            // question about files on disk.
+            val keepIds = withContext(Dispatchers.IO) {
+                val cached = runCatching {
+                    AudioCache.cachedSongs().mapTo(mutableSetOf()) { it.song.videoId }
+                }.getOrDefault(emptySet())
+                items.mapNotNull { item ->
+                    item.mediaId.takeIf { it in cached || isLocalPlayback(it, item) }
+                }.toSet()
+            }
+            if (keepIds.isEmpty()) return@launch
+            // Back to front, so removing one never moves the index of the next.
+            (exoPlayer.mediaItemCount - 1 downTo 0).forEach { index ->
+                if (exoPlayer.getMediaItemAt(index).mediaId !in keepIds) {
+                    exoPlayer.removeMediaItem(index)
+                }
+            }
+        }
+    }
+
     private fun observeSettings() {
         scope.launch {
             AppSettings.skipSilence.collect { on -> eachPlayer { it.skipSilenceEnabled = on } }
+        }
+        scope.launch {
+            // Flipping Offline Mode on is a promise about what plays next, and a
+            // queue built while the network was up does not keep it: the rows
+            // ahead of the playhead are URIs the gate in [streamResolver] now
+            // refuses. Take them out at the switch instead of letting the player
+            // discover them one error at a time.
+            AppSettings.offlineModeEnabled.drop(1).collect { on ->
+                if (on) pruneQueueToOffline()
+            }
         }
         scope.launch {
             // Re-evaluate the already queued next track immediately when this

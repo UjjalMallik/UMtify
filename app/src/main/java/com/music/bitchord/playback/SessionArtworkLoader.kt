@@ -17,6 +17,8 @@ import com.music.bitchord.data.settings.AppSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.guava.future
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 
 /**
@@ -76,3 +78,48 @@ internal class SessionArtworkLoader(
             ?: throw IOException("No artwork at $uri.")
     }
 }
+
+/**
+ * The cover as encoded bytes, for a track's `MediaMetadata.artworkData`.
+ *
+ * A URI is not enough for every surface. Media3's legacy bridge hands the
+ * system a `MediaMetadataCompat` built from these fields, and the bitmap it
+ * puts in that bundle — the one the OEM status-bar pills read, Vivo's Mini
+ * Capsule among them — comes from decoding `artworkData`. An `artworkUri`
+ * pointing at `https` arrives as a URL string those surfaces never fetch for
+ * themselves, which is why a track can be fully described on the lock screen
+ * and still render a pill with no cover, or none at all.
+ *
+ * JPEG at [SESSION_ART_PX], because the whole payload travels inside a Bundle:
+ * Media3 drops `artworkData` rather than sending it once it passes
+ * 500,000 bytes, and a 512px cover at this quality sits an order of magnitude
+ * under that. Returns null on any failure — a cover that cannot be reached is
+ * metadata with the art left out, not a track that stops playing.
+ */
+internal suspend fun sessionArtworkBytes(context: Context, uri: Uri): ByteArray? =
+    withContext(Dispatchers.IO) {
+        val request = ImageRequest.Builder(context)
+            .data(uri)
+            .size(SESSION_ART_PX)
+            .allowHardware(false)
+            .networkCachePolicy(
+                if (AppSettings.isOffline) CachePolicy.DISABLED else CachePolicy.ENABLED
+            )
+            .build()
+        val bitmap = (SingletonImageLoader.get(context).execute(request) as? SuccessResult)
+            ?.image?.toBitmap()
+            ?: return@withContext null
+        runCatching {
+            ByteArrayOutputStream().use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, SESSION_ART_JPEG_QUALITY, out)
+                out.toByteArray().takeIf { it.size <= LEGACY_ARTWORK_DATA_LIMIT && it.isNotEmpty() }
+            }
+        }.getOrNull()
+    }
+
+/** The edge the published cover is resized to, and the quality it is encoded at. */
+private const val SESSION_ART_PX = 512
+private const val SESSION_ART_JPEG_QUALITY = 85
+
+/** Media3's own ceiling for `artworkData` in a Bundle. */
+private const val LEGACY_ARTWORK_DATA_LIMIT = 500_000
