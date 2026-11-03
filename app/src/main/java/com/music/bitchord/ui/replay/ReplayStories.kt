@@ -3,6 +3,7 @@ package com.music.bitchord.ui.replay
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -52,6 +53,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
@@ -414,10 +416,10 @@ private fun StoryChrome(
             )
             // The wordmark on its own: the mark and the name it spells used to be
             // two things side by side, and the asset now carries both.
-            Icon(
+            Image(
                 painter = painterResource(R.drawable.ic_umtify_wordmark),
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.9f),
+                contentDescription = "UMtify",
+                colorFilter = ColorFilter.tint(Color.White.copy(alpha = 0.9f)),
                 contentScale = ContentScale.FillHeight,
                 modifier = Modifier
                     .height(22.dp)
