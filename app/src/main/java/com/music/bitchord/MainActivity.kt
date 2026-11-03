@@ -28,6 +28,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -101,12 +102,14 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
@@ -282,6 +285,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.layout.offset
 import com.music.bitchord.ui.components.MiniPlayerPull
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import com.music.bitchord.ui.player.LocalPlayerDock
 import com.music.bitchord.ui.player.PlayerDock
@@ -3185,6 +3189,17 @@ private fun BitChordApp(
                                     currentSong = player.song,
                                     isPlaying = player.isPlaying,
                                     title = stringResource(R.string.listen_now),
+                                    wordmark = {
+                                        Image(
+                                            painter = painterResource(R.drawable.ic_umtify_wordmark),
+                                            contentDescription = null,
+                                            colorFilter = ColorFilter.tint(
+                                                MaterialTheme.colorScheme.onBackground,
+                                            ),
+                                            contentScale = ContentScale.FillHeight,
+                                            modifier = Modifier.fillMaxSize(),
+                                        )
+                                    },
                                     signedIn = signedIn,
                                     onSignIn = { webSession = WebSessionMode.SIGN_IN },
                                     onItemClick = { item, shelfTitle ->

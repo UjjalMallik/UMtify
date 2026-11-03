@@ -340,9 +340,6 @@
     <string name="dont_repeat_songs">Don’t repeat songs in current session</string>
     <string name="stop_music_on_close">Stop music on close from recents</string>
     <string name="stop_music_on_close_subtitle">Stops playback when swiped away from recent apps</string>
-    <string name="dynamic_island_capsule">Dynamic Island capsule</string>
-    <string name="dynamic_island_capsule_subtitle">Shows a floating pill with the cover and a live waveform while music plays with UMtify in the background. Tap it to open the player, hold it for play, pause and next.</string>
-    <string name="dynamic_island_capsule_needs_permission">Needs the \"Display over other apps\" permission to appear. Tap to open the setting.</string>
     <string name="capsule_artwork_description">Album cover</string>
     <string name="capsule_play_pause_description">Play or pause</string>
     <string name="capsule_next_description">Next track</string>

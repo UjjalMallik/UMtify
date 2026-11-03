@@ -1,5 +1,6 @@
 package com.music.bitchord.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -34,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -48,8 +50,6 @@ import com.music.bitchord.data.model.CARD_ART_PX
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.artworkAt
 import com.music.bitchord.data.model.playingRowMatcher
-import com.music.bitchord.sharedui.resources.Res
-import com.music.bitchord.sharedui.resources.ic_logo
 import com.music.bitchord.ui.OfflineHome
 import com.music.bitchord.ui.components.MessageState
 import com.music.bitchord.ui.components.PAGE_GUTTER
@@ -61,13 +61,16 @@ import com.music.bitchord.ui.components.thumbnailBorder
 import com.music.bitchord.ui.icons.BitChordIcons
 import com.music.bitchord.ui.player.MeshGradientBackground
 import com.music.bitchord.ui.player.MeshPalette
-import org.jetbrains.compose.resources.painterResource
+import androidx.compose.ui.res.painterResource
 
 /** How many rows a section shows before sending the reader to the folder for the rest. */
 private const val ROWS_PER_SECTION = 6
 
-/** ic_logo's viewport, 730 x 484 — the same wordmark the online feed leads with. */
-private const val LOGO_ASPECT = 730f / 484f
+/** ic_umtify_wordmark's viewport, 800 x 275 — the same wordmark the online feed leads with. */
+private const val WORDMARK_ASPECT = 800f / 275f
+
+/** The wordmark's height against the heading's font size, as the online feed sizes it. */
+private const val LOGO_TO_FONT = 1.1f
 
 /**
  * Home when there is nothing to stream.
@@ -339,16 +342,17 @@ private fun LazyListScope.songRows(
 @Composable
 private fun OfflineTitle(title: String) {
     val style = MaterialTheme.typography.displayLarge
-    val logoHeight = with(LocalDensity.current) { (style.fontSize * 0.9f).toDp() }
+    val logoHeight = with(LocalDensity.current) { (style.fontSize * LOGO_TO_FONT).toDp() }
     Column(Modifier.padding(horizontal = PAGE_GUTTER, vertical = 8.dp)) {
-        Icon(
-            painter = painterResource(Res.drawable.ic_logo),
+        Image(
+            painter = painterResource(R.drawable.ic_umtify_wordmark),
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onBackground,
+            colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground),
+            contentScale = ContentScale.FillHeight,
             modifier = Modifier
                 .padding(bottom = 14.dp)
                 .height(logoHeight)
-                .aspectRatio(LOGO_ASPECT),
+                .aspectRatio(WORDMARK_ASPECT),
         )
         Text(text = title, style = style, color = MaterialTheme.colorScheme.onBackground)
     }

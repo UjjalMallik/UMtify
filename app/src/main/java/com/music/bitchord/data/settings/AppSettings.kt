@@ -424,19 +424,6 @@ object AppSettings {
     /** Stop playback when the app is swiped away from the recent apps screen. */
     val stopOnTaskRemoved = MutableStateFlow(false)
 
-    /**
-     * The floating playback capsule drawn over other apps while music plays.
-     *
-     * On by default because it is the only island this app can guarantee: the
-     * system pills on Vivo, realme, OnePlus and Xiaomi whitelist the apps allowed
-     * to draw one, and UMtify is not on those lists, so the capsule is the whole
-     * of the feature on an iQOO Z9x. It still only ever appears once the listener
-     * grants "Display over other apps" — the switch controls the intent, the
-     * permission controls the drawing — and turning it off hides the capsule and
-     * stops the overlay's animation with it.
-     */
-    val dynamicIslandCapsule = MutableStateFlow(true)
-
     /** Hides the volume slider on the main player, leaving the rest of the layout to reflow. */
     val hideVolumeBar = MutableStateFlow(false)
 
@@ -919,7 +906,6 @@ object AppSettings {
             prefs.getInt(KEY_PERFORMANCE_REFRESH_RATE, DEFAULT_PERFORMANCE_REFRESH_RATE),
         )
         stopOnTaskRemoved.value = prefs.getBoolean(KEY_STOP_ON_TASK_REMOVED, false)
-        dynamicIslandCapsule.value = prefs.getBoolean(KEY_DYNAMIC_ISLAND_CAPSULE, true)
         hideVolumeBar.value = prefs.getBoolean(KEY_HIDE_VOLUME_BAR, false)
         showPlayerBottomToolbar.value = prefs.getBoolean(KEY_SHOW_PLAYER_BOTTOM_TOOLBAR, true)
         showQueueButton.value = prefs.getBoolean(KEY_SHOW_QUEUE_BUTTON, true)
@@ -1305,11 +1291,6 @@ object AppSettings {
     fun setStopOnTaskRemoved(value: Boolean) {
         stopOnTaskRemoved.value = value
         prefs.edit().putBoolean(KEY_STOP_ON_TASK_REMOVED, value).apply()
-    }
-
-    fun setDynamicIslandCapsule(value: Boolean) {
-        dynamicIslandCapsule.value = value
-        prefs.edit().putBoolean(KEY_DYNAMIC_ISLAND_CAPSULE, value).apply()
     }
 
     fun setHideVolumeBar(value: Boolean) {
@@ -2077,7 +2058,6 @@ object AppSettings {
     private const val KEY_HIGH_PERFORMANCE_MODE = "high_performance_mode"
     private const val KEY_PERFORMANCE_REFRESH_RATE = "performance_refresh_rate"
     private const val KEY_STOP_ON_TASK_REMOVED = "stop_on_task_removed"
-    private const val KEY_DYNAMIC_ISLAND_CAPSULE = "dynamic_island_capsule"
     private const val KEY_HIDE_VOLUME_BAR = "hide_volume_bar"
     private const val KEY_SHOW_PLAYER_BOTTOM_TOOLBAR = "show_player_bottom_toolbar"
     private const val KEY_SHOW_QUEUE_BUTTON = "show_queue_button"

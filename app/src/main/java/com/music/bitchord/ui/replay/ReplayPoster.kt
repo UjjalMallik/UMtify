@@ -403,15 +403,9 @@ private fun drawHeader(
         "Replay · $label"
     }
     canvas.drawText(title, MARGIN, 132f, type.heading(46f, 0xFFFFFFFF.toInt()))
-    val brand = type.heading(46f, 0xE6FFFFFF.toInt()).apply {
-        textAlign = Paint.Align.RIGHT
-    }
-    canvas.drawText("UMtify", POSTER_W - MARGIN, 132f, brand)
-    // The mark, to the left of the word, exactly as the story header and the
-    // card carry it. Without it the one artefact of this app that ends up in
-    // somebody else's chat was the only place the logo didn't appear.
-    val wordWidth = brand.measureText("UMtify")
-    drawLogo(canvas, context, POSTER_W - MARGIN - wordWidth - LOGO_GAP, 132f)
+    // The wordmark rather than the mark and the word beside it — the asset
+    // spells the name, so drawing both would say it twice in the same corner.
+    drawWordmark(canvas, context, POSTER_W - MARGIN, 132f)
 
     val credit = listOfNotNull(
         holder.ifBlank { context.getString(R.string.default_replay_holder) },
@@ -710,6 +704,24 @@ internal fun drawLogo(canvas: Canvas, context: Context, right: Float, baseline: 
     logo.draw(canvas)
 }
 
+/**
+ * The wordmark, its foot on [baseline] and its right edge on [right].
+ *
+ * The exported card is the one place the brand arrives as pixels somebody else
+ * will zoom into, so it carries the same wordmark the header on screen does,
+ * at the size the 46 px heading beside it implies.
+ */
+internal fun drawWordmark(canvas: Canvas, context: Context, right: Float, baseline: Float) {
+    val mark = runCatching {
+        ResourcesCompat.getDrawable(context.resources, R.drawable.ic_umtify_wordmark, null)
+    }.getOrNull() ?: return
+    val left = right - WORDMARK_W
+    val top = baseline - WORDMARK_H
+    mark.setTint(0xE6FFFFFF.toInt())
+    mark.setBounds(left.toInt(), top.toInt(), right.toInt(), baseline.toInt())
+    mark.draw(canvas)
+}
+
 /** Trims [text] to [width], with an ellipsis, the way a single-line row would. */
 internal fun ellipsised(text: String, paint: Paint, width: Float): String {
     if (paint.measureText(text) <= width) return text
@@ -770,7 +782,10 @@ private const val MARGIN = 72f
 /** The mark's drawn size. 730×484 in the vector, so this keeps its proportions. */
 private const val LOGO_W = 66f
 private const val LOGO_H = 44f
-private const val LOGO_GAP = 20f
+
+/** The wordmark's drawn size: 800×275 in the asset, set to the 46 px heading. */
+private const val WORDMARK_H = 48f
+private const val WORDMARK_W = WORDMARK_H * 800f / 275f
 
 /** The width type and artwork are laid out in. */
 private const val CONTENT_W = POSTER_W - MARGIN * 2

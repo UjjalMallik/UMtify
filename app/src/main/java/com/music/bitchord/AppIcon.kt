@@ -19,13 +19,15 @@ import kotlinx.coroutines.flow.asStateFlow
  * only place the launcher entry lives — so exactly one is enabled at a time and
  * switching is a component toggle, never a rebuild.
  *
- * The three variants are sliced from one sheet of wave-music-note artwork at
- * identical scale and centring; Default is the pastel one and what a fresh
- * install gets. Older aliases were removed, so a device that still has one
+ * The three variants are sliced from one sheet of wave-music-note artwork;
+ * Default is the pastel one and what a fresh install gets. Its note and wave
+ * band are the busiest of the three, so it is drawn a little smaller and lower
+ * than the glass pair to keep both inside the launcher's safe zone. Older
+ * aliases were removed, so a device that still has one
  * enabled ends up with every known alias disabled — [ensureValid] repairs that
- * by re-enabling Default. [previewRes] is the finished 1:1 icon, identical in
- * scale and centring to what the launcher draws, so the Settings cards never
- * show a different crop.
+ * by re-enabling Default. [previewRes] is the finished 1:1 icon, drawn to the
+ * same crop the launcher shows, so the Settings cards
+ * never show a different picture of the choice.
  */
 enum class AppIcon(val alias: String, val iconRes: Int, val labelRes: Int, val previewRes: Int) {
     Default("LauncherDefault", R.mipmap.ic_launcher, R.string.app_icon_default, R.drawable.ic_preview_default),
@@ -88,11 +90,15 @@ enum class AppIcon(val alias: String, val iconRes: Int, val labelRes: Int, val p
          * the home screen and nothing else until [Activity.setTaskDescription]
          * runs again with the new icon.
          *
-         * The resource-id forms arrived late and the bitmap forms left early: a
-         * drawable res id needs API 28 and [ActivityManager.TaskDescription.Builder]
-         * needs 33, so the two oldest releases rasterise [AppIcon.previewRes] by
-         * hand. None of the three sets a header colour, which leaves that to the
-         * launcher rather than painting a band the theme does not own.
+         * From API 28 the *mipmap* id goes over, not the Settings preview: the
+         * system resolves the resource itself, so on a device that reads the
+         * adaptive XML it gets the masked launcher icon and on one that doesn't it
+         * gets the same square PNG the launcher falls back to. The two agree with
+         * the home screen by construction, which the flat preview never quite did.
+         *
+         * API 26 and 27 have no resource-id form at all, so that release still
+         * rasterises [AppIcon.previewRes] by hand — the adaptive drawable would
+         * draw with the launcher's 108dp padding baked into the bitmap.
          */
         @Suppress("DEPRECATION")
         fun refreshTaskDescription(activity: Activity) {
@@ -102,10 +108,10 @@ enum class AppIcon(val alias: String, val iconRes: Int, val labelRes: Int, val p
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
                     ActivityManager.TaskDescription.Builder()
                         .setLabel(label)
-                        .setIcon(icon.previewRes)
+                        .setIcon(icon.iconRes)
                         .build()
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.P ->
-                    ActivityManager.TaskDescription(label, icon.previewRes)
+                    ActivityManager.TaskDescription(label, icon.iconRes)
                 else ->
                     ActivityManager.TaskDescription(label, previewBitmap(activity, icon))
             }

@@ -29,15 +29,16 @@ import java.io.IOException
  * session built without one gets Media3's fallback, which reads local files and
  * nothing else. This app's covers are `https` URLs — [toMediaItem]'s
  * `setArtworkUri` — so the question has been going unanswered for every streamed
- * track: the notification has gone out with no large icon, and the pill One UI
- * draws, ColorOS's and realme's Mini Capsule and HyperOS's status-bar capsule,
- * has had no circular cover to draw. The metadata itself was always complete;
- * only the step that turns its URI into pixels was missing.
+ * track: the notification has gone out with no large icon, and the surfaces
+ * that ask the session for a bitmap of their own have had nothing to draw.
+ * The metadata itself was always complete; only the step that turns its URI
+ * into pixels was missing.
  *
  * Coil, not a hand-rolled fetch: [com.music.bitchord.BitChordApplication] owns
  * the one loader that knows how to reach a cover here, so WebDAV credentials,
  * the SMB share and the sized-URL cache entries the rows and the widget already
- * filled all come with it — a track visible on screen reaches the pill off disk.
+ * filled all come with it — a track visible on screen reaches the notification
+ * off disk.
  *
  * [scope] is the service's, so a load still in flight when the service is torn
  * down goes with it rather than outliving the session it was answering for.
@@ -67,8 +68,8 @@ internal class SessionArtworkLoader(
             .allowHardware(false)
             // A cover is a thing that costs data, so Offline Mode's promise
             // reaches here too: reads stay served, so a download whose art the
-            // UI already filled still shows it in the pill, and nothing new is
-            // fetched for it.
+            // UI already filled still shows it in the notification, and nothing
+            // new is fetched for it.
             .networkCachePolicy(
                 if (AppSettings.isOffline) CachePolicy.DISABLED else CachePolicy.ENABLED
             )
@@ -84,11 +85,10 @@ internal class SessionArtworkLoader(
  *
  * A URI is not enough for every surface. Media3's legacy bridge hands the
  * system a `MediaMetadataCompat` built from these fields, and the bitmap it
- * puts in that bundle — the one the OEM status-bar pills read, Vivo's Mini
- * Capsule among them — comes from decoding `artworkData`. An `artworkUri`
+ * puts in that bundle comes from decoding `artworkData`. An `artworkUri`
  * pointing at `https` arrives as a URL string those surfaces never fetch for
  * themselves, which is why a track can be fully described on the lock screen
- * and still render a pill with no cover, or none at all.
+ * and still render with no cover, or none at all.
  *
  * JPEG at [SESSION_ART_PX], because the whole payload travels inside a Bundle:
  * Media3 drops `artworkData` rather than sending it once it passes

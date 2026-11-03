@@ -134,8 +134,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
@@ -248,7 +246,6 @@ fun SettingsScreen(
     val wifiOnlyDownloads by AppSettings.wifiOnlyDownloads.collectAsStateWithLifecycle()
     val exportDownloads by AppSettings.exportDownloads.collectAsStateWithLifecycle()
     val stopOnTaskRemoved by AppSettings.stopOnTaskRemoved.collectAsStateWithLifecycle()
-    val dynamicIslandCapsule by AppSettings.dynamicIslandCapsule.collectAsStateWithLifecycle()
     val hideVolumeBar by AppSettings.hideVolumeBar.collectAsStateWithLifecycle()
     val showPlayerBottomToolbar by AppSettings.showPlayerBottomToolbar.collectAsStateWithLifecycle()
     val showQueueButton by AppSettings.showQueueButton.collectAsStateWithLifecycle()
@@ -311,18 +308,6 @@ fun SettingsScreen(
         ActivityResultContracts.StartActivityForResult(),
     ) {
         showPerformanceConfirmation = true
-    }
-    // "Display over other apps" is a settings screen, not a runtime grant, so
-    // the only answer comes back when the listener returns from it — and on the
-    // OEM skins that open it straight from the app's own details page there is
-    // no result at all. Re-read on every resume for the same reason.
-    var canDrawOverlays by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
-    val overlayPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { canDrawOverlays = Settings.canDrawOverlays(context) }
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        val nowAllowed = Settings.canDrawOverlays(context)
-        if (nowAllowed != canDrawOverlays) canDrawOverlays = nowAllowed
     }
     val localMusicFolderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
@@ -1574,55 +1559,6 @@ fun SettingsScreen(
                         )
                     },
                     onClick = { AppSettings.setStopOnTaskRemoved(!stopOnTaskRemoved) },
-                )
-            }
-            val islandCapsuleTitle = stringResource(R.string.dynamic_island_capsule)
-            row(islandCapsuleTitle, "island", "capsule", "overlay", "pill") {
-                SettingsRow(
-                    icon = Icons.Rounded.SmartDisplay,
-                    title = islandCapsuleTitle,
-                    subtitle = stringResource(
-                        if (canDrawOverlays) {
-                            R.string.dynamic_island_capsule_subtitle
-                        } else {
-                            R.string.dynamic_island_capsule_needs_permission
-                        },
-                    ),
-                    trailing = {
-                        Switch(
-                            checked = dynamicIslandCapsule,
-                            onCheckedChange = { wanted ->
-                                AppSettings.setDynamicIslandCapsule(wanted)
-                                // Asking once, here, is kinder than a capsule
-                                // that silently never appears because the one
-                                // permission it needs was never offered.
-                                if (wanted && !Settings.canDrawOverlays(context)) {
-                                    overlayPermissionLauncher.launch(
-                                        Intent(
-                                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                            Uri.parse("package:${context.packageName}"),
-                                        ),
-                                    )
-                                }
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                checkedBorderColor = MaterialTheme.colorScheme.primary,
-                            ),
-                        )
-                    },
-                    onClick = {
-                        if (dynamicIslandCapsule && !Settings.canDrawOverlays(context)) {
-                            overlayPermissionLauncher.launch(
-                                Intent(
-                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                    Uri.parse("package:${context.packageName}"),
-                                ),
-                            )
-                        } else {
-                            AppSettings.setDynamicIslandCapsule(!dynamicIslandCapsule)
-                        }
-                    },
                 )
             }
             val hideVolumeBarTitle = stringResource(R.string.hide_volume_bar)

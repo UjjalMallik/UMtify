@@ -12,13 +12,6 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- The playback capsule that floats over the home screen and other apps
-         while music plays. Declared here so the system lists it under the app's
-         own "Display over other apps" entry; it is never granted by the manifest
-         and the Settings row asks for it. A build without the permission simply
-         never draws the capsule. -->
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-
     <!-- Touch feedback. The system's own haptics switch is honoured on top of
          this, so granting it doesn't override a user who turned buzzing off. -->
     <uses-permission android:name="android.permission.VIBRATE" />

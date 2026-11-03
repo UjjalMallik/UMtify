@@ -39,19 +39,15 @@ A lightweight, Android-only music streaming & local audio player — a personal 
 
 | 📊 **"Stats for Nerds" Badge** | ⚡ **Lightweight & 120Hz Optimized** |
 | --- | --- |
-| A translucent, artwork-tinted glass pill reporting codec, bitrate, sample rate, and Automix analysis status. | **arm64-v8a** only, R8-shrunk with compressed native libraries, and frame-paced for buttery 120 Hz rendering. |
+| A translucent, artwork-tinted glass pill reporting codec, bitrate, sample rate, and Automix analysis status. | **arm64-v8a** only, R8-shrunk with compressed native libraries, frame-paced for buttery 120 Hz rendering, and gated so nothing expensive keeps running in the background. |
 
 | 🎧 **Universal Dolby Atmos & Spatial Audio** | 📶 **Smart Offline Mode & Auto Offline Home Feed** |
 | --- | --- |
 | Atmos and spatial playback unlocked on every device — no OEM whitelist, with a software decoder fallback and the app's own spatializer standing in for ordinary headphones. | A Settings toggle plus automatic network detection that swaps the home feed to an offline hub: Downloads, Local Music, Cached Songs and Recently Played Offline. |
 
-| 🏝️ **Dynamic Island / Mini Capsule** | 🚗 **Android Auto Support** |
+| 🚗 **Android Auto Support** | 🎨 **Custom 3D App Icon Switcher** |
 | --- | --- |
-| Live playback capsule on OriginOS/FuntouchOS, ColorOS and HyperOS, backed by a built-in floating pill with cover art and a live waveform that survives minimising and swipe-away. | A full `MediaLibraryService`, so Downloads, Local Music and Playlists are browsable and playable from the car head unit. |
-
-| 🎨 **Custom 3D App Icon Switcher** | 🔋 **Battery-Aware Smooth Rendering** |
-| --- | --- |
-| Three launcher icons — *Default*, *Liquid Glass*, *Liquid Glass Dark* — that swap the home screen and Recents instantly, plus a clean vector monochrome layer. | Lifecycle-aware rendering, background GPU frame-capture gating, and an online share button that hides itself for local tracks. |
+| A full `MediaLibraryService`, so Downloads, Local Music and Playlists are browsable and playable from the car head unit. | Three launcher icons — *Default*, *Liquid Glass*, *Liquid Glass Dark* — that swap the home screen and Recents instantly, plus a clean vector monochrome layer. |
 
 ---
 
@@ -125,17 +121,9 @@ Dolby Atmos and spatial-audio playback are **unlocked on all devices**, not just
 - Search and the queue are restricted to **tracks that can actually be played**, so nothing in the offline feed is a dead end, and online stream resolution is blocked while offline instead of stalling on a timeout.
 - Queued tracks stay queued: an offline queue is played from cache instead of being skipped.
 
-### 🏝️ Universal Dynamic Island / Mini Capsule Support
-
-Playback follows you out of the app, on every skin:
-
-- The session publishes **artwork and metadata** the way OEM capsules expect, so the pill shows real cover art on **OriginOS / FuntouchOS** (iQOO & Vivo), **ColorOS** (Oppo & OnePlus) and **HyperOS** (Xiaomi & Redmi).
-- The playback notification is marked as a **promoted ongoing** event, which is what Android 16 and the OEM capsules use to decide that a media notification earns extra room.
-- Where there is no system capsule at all, UMtify's **built-in floating capsule** takes over: a hardware-accelerated pill with cover art and a live animated waveform, drawn at the top of the screen. It survives minimising the app and survives being swiped away, and it can be turned off in Settings.
-
 ### 🚗 Android Auto Support
 
-UMtify registers a full **`MediaLibraryService`** with a browsable media tree, so the car head unit can walk **Downloads**, **Local Music** and **Playlists** and play them — no phone interaction needed once you are on the road. Playback controls, artwork and metadata arrive through the same media session that drives the notification and the capsule.
+UMtify registers a full **`MediaLibraryService`** with a browsable media tree, so the car head unit can walk **Downloads**, **Local Music** and **Playlists** and play them — no phone interaction needed once you are on the road. Playback controls, artwork and metadata arrive through the same media session that drives the notification.
 
 ### 🎨 Custom 3D App Icon Switcher
 
@@ -148,8 +136,8 @@ Three hand-built 3D icons, switchable from **Settings → App icon**:
 | **Liquid Glass Dark** | The same artwork on obsidian dark (`#0A0C12`) |
 
 - Switching updates the **launcher icon and Recents immediately** — no reboot, no launcher cache clear.
-- All three are drawn to the **same adaptive geometry** (artwork at 300 px on the 432 px canvas, edge-blended into the layer background), so they are identical in scale inside the circular mask and none of them shows a box edge.
-- A **clean vector monochrome** layer is included, so themed icons on Android 13+ and the Dynamic-Island cutout render as crisp line art instead of a jagged bitmap.
+- Each is edge-blended into its own layer background, so no launcher mask ever shows a box edge. The two glass icons sit at 300 px on the 432 px adaptive canvas; the pastel **Default** is drawn at 270 px and 10 px lower, because its note and wave band are the busiest of the three and need the extra room to stay inside the 264 px safe zone.
+- A **clean vector monochrome** layer is included, so themed icons on Android 13+ render as crisp line art instead of a jagged bitmap.
 
 ### 🔋 120Hz Smooth UI & Battery Optimization
 
@@ -217,7 +205,7 @@ app/build/outputs/apk/prod/release/app-prod-arm64-v8a-release.apk
 
 UMtify is built on the open-source [BitChord](https://github.com/kushagrasinghx/BitChord) project. All credit for the original application, its architecture, and its upstream playback, streaming, lyrics, and library features goes to the BitChord developers and contributors. UMtify exists only as a customized derivative for personal use.
 
-**UMtify is developed by [Ujjal Mallik](https://github.com/UjjalMallik)** — the Liquid Crystal Glass player UI, widgets, cover-art theming, spatial-audio unlock, offline hub, Dynamic Island / mini-capsule support, Android Auto browsing and the 3D icon set are all part of this fork.
+**UMtify is developed by [Ujjal Mallik](https://github.com/UjjalMallik)** — the Liquid Crystal Glass player UI, widgets, cover-art theming, spatial-audio unlock, offline hub, Android Auto browsing and the 3D icon set are all part of this fork.
 
 BitChord is licensed under the **GNU General Public License v3.0 (GPLv3)**, and UMtify is distributed under the same license. Original copyright remains with the BitChord developers; any redistribution must preserve the license and provide the corresponding source.
 

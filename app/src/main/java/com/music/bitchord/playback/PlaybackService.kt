@@ -10,7 +10,6 @@ import android.media.AudioManager
 import android.media.MediaMetadataRetriever
 import android.media.audiofx.AudioEffect
 import android.net.Uri
-import android.provider.Settings
 import android.widget.Toast
 import android.os.Bundle
 import android.os.Handler
@@ -30,9 +29,6 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.SonicAudioProcessor
@@ -800,14 +796,6 @@ class PlaybackService : MediaLibraryService() {
     /** Cover address of the *playing* track whose bytes are being turned into metadata. */
     private var currentArtworkBytesJob: Job? = null
     private var currentArtworkBytesTarget: Uri? = null
-    /** The pill drawn over other apps; built the first time one is wanted. */
-    private var islandCapsule: IslandCapsule? = null
-    /** Watches the process going off screen, which is when the pill becomes useful. */
-    private var islandForegroundObserver: LifecycleEventObserver? = null
-    /** Whether this process has a screen up, as the platform lifecycle reports it. */
-    private var processInForeground = true
-    /** The track the pill is showing, so a refresh does not re-fetch its cover. */
-    private var capsuleMediaId: String? = null
     private var autoplaySeed: String? = null
 
     /** Index in the live queue represented by entry zero of the persisted window. */
@@ -870,10 +858,6 @@ class PlaybackService : MediaLibraryService() {
             val activePlayer = this@PlaybackService.player ?: return
             if (player === activePlayer) {
                 updateAudioEffectSession(activePlayer)
-                // One hook for the whole pill: this fires after every specific
-                // callback below, so a transition, a pause and a seek all arrive
-                // here with the player already describing the new state.
-                refreshIslandCapsule(activePlayer)
             }
         }
 
@@ -1320,36 +1304,12 @@ class PlaybackService : MediaLibraryService() {
         QualityUpgrade.forgetLastSession()
 
         setMediaNotificationProvider(
-            PromotedOngoingNotificationProvider(
-                DefaultMediaNotificationProvider.Builder(this)
-                    .setChannelId(CHANNEL_ID)
-                    .setChannelName(R.string.playback_channel_name)
-                    .build()
-                    .apply { setSmallIcon(R.drawable.ic_notification_logo) },
-            ),
+            DefaultMediaNotificationProvider.Builder(this)
+                .setChannelId(CHANNEL_ID)
+                .setChannelName(R.string.playback_channel_name)
+                .build()
+                .apply { setSmallIcon(R.drawable.ic_notification_logo) },
         )
-
-        // The pill drawn over other apps answers to three things the player does
-        // not: the switch, the process going off screen, and the overlay
-        // permission being revoked mid-session. Player events cover the third of
-        // those it can see; [refreshIslandCapsule] reads the other two.
-        islandForegroundObserver = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_START -> {
-                    processInForeground = true
-                    player?.let(::refreshIslandCapsule)
-                }
-                Lifecycle.Event.ON_STOP -> {
-                    processInForeground = false
-                    player?.let(::refreshIslandCapsule)
-                }
-                else -> Unit
-            }
-        }.also { ProcessLifecycleOwner.get().lifecycle.addObserver(it) }
-        scope.launch {
-            AppSettings.dynamicIslandCapsule
-                .collectLatest { player?.let(::refreshIslandCapsule) }
-        }
 
         // Both the player screen and notification route their Shuffle command
         // here. Observe its state so either surface's icon follows the queue
@@ -6199,8 +6159,8 @@ class PlaybackService : MediaLibraryService() {
      * an `artworkUri` but no `artworkData` leaves ours in the merged result.
      *
      * That merged bitmap is what the legacy bundle the platform session publishes
-     * is built from — `METADATA_KEY_ALBUM_ART` — which is the entry OEM pills and
-     * mini-capsules read when they decline to fetch a URI themselves. It is also
+     * is built from — `METADATA_KEY_ALBUM_ART` — which is the entry surfaces read
+     * when they decline to fetch a URI themselves. It is also
      * the difference between a lock screen showing a cover and showing a note.
      *
      * The first track of a session used to have no route at all; now the queued
@@ -6244,66 +6204,6 @@ class PlaybackService : MediaLibraryService() {
             // ask for the repaint once the bytes are actually in hand.
             triggerNotificationUpdate()
         }
-    }
-
-    /**
-     * Brings the floating pill up to date with what is playing, or takes it down.
-     *
-     * Three things have to agree before a window is added over the listener's
-     * screen: the switch in Settings, an actual stream coming out, and this app
-     * not being the thing they are looking at. A pill drawn behind the player is
-     * the same information twice, and one drawn while paused is a lie about audio
-     * that is not happening.
-     *
-     * The fourth condition is the permission, checked here rather than at the
-     * Settings row because it can be taken away at any time from system settings —
-     * [IslandCapsule.setVisible] answers with nothing when it is not held.
-     */
-    private fun refreshIslandCapsule(exoPlayer: ExoPlayer) {
-        val wanted = AppSettings.dynamicIslandCapsule.value &&
-            exoPlayer.isPlaying &&
-            !processInForeground &&
-            Settings.canDrawOverlays(this)
-        val capsule = islandCapsule ?: IslandCapsule(
-            context = applicationContext,
-            scope = scope,
-            onOpenPlayer = ::openPlayerFromCapsule,
-            onTogglePlay = ::togglePlayFromCapsule,
-            onNext = ::skipForwardFromCapsule,
-        ).also { islandCapsule = it }
-        capsule.setVisible(wanted)
-        if (!wanted) {
-            capsuleMediaId = null
-            return
-        }
-        val metadata = exoPlayer.currentMediaItem?.mediaMetadata
-        val mediaId = exoPlayer.currentMediaItem?.mediaId
-        if (mediaId != capsuleMediaId) {
-            capsuleMediaId = mediaId
-            capsule.setTrack(
-                title = metadata?.title?.toString(),
-                artist = metadata?.artist?.toString(),
-                artworkUri = metadata?.artworkUri,
-            )
-        }
-        capsule.setPlaying(exoPlayer.isPlaying)
-    }
-
-    private fun openPlayerFromCapsule() {
-        packageManager.getLaunchIntentForPackage(packageName)?.let {
-            startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
-        }
-    }
-
-    private fun togglePlayFromCapsule() {
-        val exoPlayer = player ?: return
-        if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
-    }
-
-    private fun skipForwardFromCapsule() {
-        val exoPlayer = player ?: return
-        exoPlayer.seekToNextMediaItem()
-        exoPlayer.play()
     }
 
     /**
@@ -7459,13 +7359,6 @@ class PlaybackService : MediaLibraryService() {
         player?.isPlaying == true || spare?.isPlaying == true || castPlayback.isPlaying
 
     override fun onDestroy() {
-        // A window the service added is a window the service has to take back,
-        // or the pill stays on the screen after the app is gone with nothing
-        // behind it to answer the taps.
-        islandCapsule?.release()
-        islandCapsule = null
-        islandForegroundObserver?.let { ProcessLifecycleOwner.get().lifecycle.removeObserver(it) }
-        islandForegroundObserver = null
         artworkBytesJob?.cancel()
         currentArtworkBytesJob?.cancel()
         WearBridge.attachStreams(null)

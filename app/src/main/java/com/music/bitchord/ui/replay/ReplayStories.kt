@@ -412,19 +412,16 @@ private fun StoryChrome(
                 color = Color.White,
                 modifier = Modifier.weight(1f),
             )
-            // The mark and the word together, the way the card carries it.
+            // The wordmark on its own: the mark and the name it spells used to be
+            // two things side by side, and the asset now carries both.
             Icon(
-                painter = painterResource(R.drawable.ic_logo),
+                painter = painterResource(R.drawable.ic_umtify_wordmark),
                 contentDescription = null,
                 tint = Color.White.copy(alpha = 0.9f),
-                modifier = Modifier.size(width = 26.dp, height = 17.dp),
-            )
-            Spacer(Modifier.width(7.dp))
-            Text(
-                text = "UMtify",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.W700,
-                color = Color.White.copy(alpha = 0.9f),
+                contentScale = ContentScale.FillHeight,
+                modifier = Modifier
+                    .height(22.dp)
+                    .aspectRatio(WORDMARK_ASPECT),
             )
         }
     }
@@ -922,6 +919,9 @@ private const val STORY_ROWS = 5
  * rather than following the screen.
  */
 private const val STORY_ASPECT = 9f / 16f
+
+/** ic_umtify_wordmark's viewport, 800 x 275. */
+private const val WORDMARK_ASPECT = 800f / 275f
 
 /** How long a card holds before moving on, unless a finger is on the screen. */
 private const val PAGE_MILLIS = 14_000f
