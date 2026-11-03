@@ -21,8 +21,11 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * The three variants are sliced from one sheet of wave-music-note artwork;
  * Default is the pastel one and what a fresh install gets. Its note and wave
- * band are the busiest of the three, so it is drawn a little smaller and lower
- * than the glass pair to keep both inside the launcher's safe zone. Older
+ * band carry colour right out to the edges of the artwork, where the glass pair
+ * fades to near-black and reads as empty space, so Default is drawn at 255 px on
+ * the 432 px adaptive canvas — about 59% — against the pair's 300 px, and its rim
+ * is dissolved into the background over the last 34 px so nothing ends in a hard
+ * cut inside the mask. Older
  * aliases were removed, so a device that still has one
  * enabled ends up with every known alias disabled — [ensureValid] repairs that
  * by re-enabling Default. [previewRes] is the finished 1:1 icon, drawn to the
@@ -66,7 +69,15 @@ enum class AppIcon(val alias: String, val iconRes: Int, val labelRes: Int, val p
             current(context)
         }
 
-        /** Enables [icon] before disabling the rest so there is never a moment with no launcher entry. */
+        /**
+         * Enables [icon] before disabling the rest so there is never a moment with
+         * no launcher entry. The home screen follows, because the launcher draws the
+         * icon off the enabled alias — and [refreshTaskDescription] repaints Recents.
+         *
+         * A settings page that reads the *application* icon instead of the launcher
+         * component is outside reach: PackageManager exposes no runtime write for it,
+         * so that one keeps showing Default until the next install.
+         */
         fun apply(context: Context, icon: AppIcon) {
             val pm = context.packageManager
             pm.setComponentEnabledSetting(

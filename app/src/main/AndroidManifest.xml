@@ -227,6 +227,18 @@
           The launcher entries live on aliases, not on MainActivity, so the user can
           swap the home-screen icon by enabling one alias and disabling the others
           (see AppIcon). Exactly one is enabled at a time; Default is the shipped one.
+
+          Each alias carries its own android:icon and android:roundIcon, because the
+          icon a launcher draws comes from the component it actually launched — the
+          alias — and not from <application>. Same for the Settings > Apps > "App
+          info" page on the skins that resolve the launcher component first.
+
+          The ones that read ApplicationInfo.icon instead cannot be followed: the
+          package manager has no public runtime setter for the application-level
+          icon (getApplicationIcon is read-only, and the only write API is
+          setComponentEnabledSetting, which acts on components). Those pages keep
+          showing Default until the next install updates the package's own icon.
+          That is a limitation of the platform, not a missed step here.
         -->
         <activity-alias
             android:name=".LauncherDefault"

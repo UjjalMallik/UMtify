@@ -135,9 +135,11 @@ Three hand-built 3D icons, switchable from **Settings → App icon**:
 | **Liquid Glass** | Full-colour note and waves on deep ocean blue (`#061539`) |
 | **Liquid Glass Dark** | The same artwork on obsidian dark (`#0A0C12`) |
 
-- Switching updates the **launcher icon and Recents immediately** — no reboot, no launcher cache clear.
-- Each is edge-blended into its own layer background, so no launcher mask ever shows a box edge. The two glass icons sit at 300 px on the 432 px adaptive canvas; the pastel **Default** is drawn at 270 px and 10 px lower, because its note and wave band are the busiest of the three and need the extra room to stay inside the 264 px safe zone.
+- Switching updates the **launcher icon and Recents immediately** — no reboot, no launcher cache clear. Every alias declares its own `android:icon` and `android:roundIcon`, so the launcher and the App Info pages that resolve the launcher component both read the picked skin.
+- Each is edge-blended into its own layer background, so no launcher mask ever shows a box edge. The two glass icons sit at 300 px on the 432 px adaptive canvas; the pastel **Default** is drawn at 255 px — 59% of the canvas, the band Android's own guidance puts a foreground at — and centred, with a 34 px rim fade, because its note and wave band carry colour right out to the artwork edge where the glass pair fades to near-black and reads as empty.
+- **One thing Android will not do:** a settings page that reads the *application* icon rather than the launcher component keeps showing *Default* until the next install. `PackageManager` has no runtime write for `ApplicationInfo.icon` — `getApplicationIcon` is read-only and `setComponentEnabledSetting` only acts on components — so this is a platform limit, not a missed step.
 - A **clean vector monochrome** layer is included, so themed icons on Android 13+ render as crisp line art instead of a jagged bitmap.
+- Inside the app the brand is one asset — `ic_umtify_wordmark`, a white PNG that carries the lettering in its alpha channel — tinted to the surface it sits on and used by the Home and Offline headers, the Replay story and credit cards, the onboarding page and both exported share images.
 
 ### 🔋 120Hz Smooth UI & Battery Optimization
 

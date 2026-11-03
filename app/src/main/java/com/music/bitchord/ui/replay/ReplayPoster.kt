@@ -686,25 +686,6 @@ private fun drawRuns(
 }
 
 /**
- * The BitChord mark, baseline-aligned with the word beside it.
- *
- * The same vector the app draws everywhere, tinted and given bounds rather than
- * rasterised to a PNG first — a vector drawable renders into an ordinary canvas
- * on every version this app supports, so there is nothing to be gained by
- * keeping a second copy of the logo around at a fixed size.
- */
-internal fun drawLogo(canvas: Canvas, context: Context, right: Float, baseline: Float) {
-    val logo = runCatching {
-        ResourcesCompat.getDrawable(context.resources, R.drawable.ic_logo, null)
-    }.getOrNull() ?: return
-    val left = right - LOGO_W
-    val top = baseline - LOGO_H
-    logo.setTint(0xE6FFFFFF.toInt())
-    logo.setBounds(left.toInt(), top.toInt(), (left + LOGO_W).toInt(), (top + LOGO_H).toInt())
-    logo.draw(canvas)
-}
-
-/**
  * The wordmark, its foot on [baseline] and its right edge on [right].
  *
  * The exported card is the one place the brand arrives as pixels somebody else
@@ -778,10 +759,6 @@ private const val POSTER_W = 1080
 private const val POSTER_H = 1920
 
 private const val MARGIN = 72f
-
-/** The mark's drawn size. 730×484 in the vector, so this keeps its proportions. */
-private const val LOGO_W = 66f
-private const val LOGO_H = 44f
 
 /** The wordmark's drawn size: 800×275 in the asset, set to the 46 px heading. */
 private const val WORDMARK_H = 48f

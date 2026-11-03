@@ -8,12 +8,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,7 +34,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import com.music.bitchord.sharedui.resources.*
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import com.music.bitchord.ui.player.MeshGradientBackground
 import com.music.bitchord.ui.player.rememberArtworkColors
@@ -96,6 +93,12 @@ fun ReplayCreditCard(
     holder: String,
     /** `MM/YY`, or null when there is nothing to date it from. */
     memberSince: String?,
+    /**
+     * The brand mark for the top-right corner. A slot rather than a resource
+     * because the wordmark lives in the app module and this card is in sharedUi,
+     * which the app depends on and so cannot reach into it.
+     */
+    wordmark: @Composable () -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -131,9 +134,9 @@ fun ReplayCreditCard(
         Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 16.dp)) {
             // The two things a card says about itself, at the two corners a card
             // says them from: what it is on the left, whose it is on the right.
-            // The wordmark that used to sit here is gone — the logo says it, and
-            // saying it twice on an object this small is the difference between
-            // a card and an advert.
+            // The mark is the word, so it has to stay small — the label beside it
+            // is the longer of the two, and a card that wraps its own heading is
+            // worse than one with a modest logo.
             Row(verticalAlignment = Alignment.Top) {
                 Text(
                     text = stringResource(Res.string.your_listening_experience).uppercase(Locale.getDefault()),
@@ -145,12 +148,7 @@ fun ReplayCreditCard(
                     modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.width(10.dp))
-                Icon(
-                    painter = painterResource(Res.drawable.ic_logo),
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(width = 34.dp, height = 22.dp),
-                )
+                wordmark()
             }
 
             Spacer(Modifier.weight(1f))

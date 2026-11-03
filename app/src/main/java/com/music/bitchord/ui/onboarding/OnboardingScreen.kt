@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -57,9 +58,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -72,7 +75,6 @@ import androidx.compose.ui.unit.sp
 import com.music.bitchord.R
 import com.music.bitchord.sharedui.resources.Res
 import com.music.bitchord.sharedui.resources.ic_google_g
-import com.music.bitchord.sharedui.resources.ic_logo
 import org.jetbrains.compose.resources.painterResource
 import com.music.bitchord.ui.icons.BitChordIcons
 import com.music.bitchord.ui.player.MeshGradientBackground
@@ -219,10 +221,14 @@ private fun ColumnScope.NamePage(
     ) {
         Column {
             Spacer(Modifier.height(56.dp))
+            // The app's own word, set white against the mesh — the same mark
+            // the Home header and the exported cards carry.
             Image(
-                painter = painterResource(Res.drawable.ic_logo),
+                painter = androidx.compose.ui.res.painterResource(R.drawable.ic_umtify_wordmark),
                 contentDescription = null,
-                modifier = Modifier.size(width = 46.dp, height = 30.dp),
+                colorFilter = ColorFilter.tint(Color.White.copy(alpha = 0.92f)),
+                contentScale = ContentScale.FillHeight,
+                modifier = Modifier.height(30.dp).aspectRatio(WORDMARK_ASPECT),
             )
         }
     }
@@ -438,6 +444,9 @@ private const val PAGE_CONNECT = 1
 
 /** Long enough for a full name; the party server keeps the first 80. */
 private const val NAME_LIMIT = 40
+
+/** The wordmark asset is 800×275; holding this ratio is what keeps it undistorted. */
+private const val WORDMARK_ASPECT = 800f / 275f
 
 /** The account page keeps leaning into YouTube's red while it moves. */
 private val ConnectPalettes = listOf(

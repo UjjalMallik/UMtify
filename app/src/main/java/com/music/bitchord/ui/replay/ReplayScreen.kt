@@ -58,6 +58,7 @@ import com.music.bitchord.data.model.artworkAt
 import com.music.bitchord.data.stats.ReplayPeriod
 import com.music.bitchord.data.stats.ReplaySummary
 import com.music.bitchord.ui.components.PAGE_GUTTER
+import com.music.bitchord.ui.components.UmifyWordmark
 import com.music.bitchord.ui.icons.BitChordIcons
 import com.music.bitchord.ui.player.MeshGradientBackground
 import com.music.bitchord.ui.player.rememberArtworkColors
@@ -332,6 +333,10 @@ internal fun ReplayCardRow(
                 artworkUrl = card.artworkUrl,
                 holder = holder,
                 memberSince = memberSince,
+                // The card's foot is dark scrim and its heading is pale, so the
+                // mark is pale too; the row supplies it because the card itself
+                // lives in sharedUi and cannot see the app's own assets.
+                wordmark = { UmifyWordmark(height = 18.dp, color = Color.White.copy(alpha = 0.9f)) },
                 onClick = { onCardClick(card.page) },
                 modifier = Modifier.width(300.dp),
             )
