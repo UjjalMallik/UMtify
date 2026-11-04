@@ -15,6 +15,8 @@
     <string name="autoplay_on">AutoPlay on</string>
     <string name="autoplay_queue_description">Similar music, selected to play next</string>
     <string name="bit_depth">%1$d-bit</string>
+    <string name="nerd_stats_source">from %1$s</string>
+    <string name="nerd_stats_requested">set to %1$s</string>
     <string name="cancel">Cancel</string>
     <string name="cast">Cast</string>
     <string name="album_label">Album</string>

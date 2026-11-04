@@ -425,11 +425,56 @@ object StreamResolver {
     private suspend fun resolveUncached(videoId: String): Stream {
         val resolveStart = MonotonicClock.nowMs()
         val stream = try {
-            timed("$videoId InnerTubeX") { innerTubeXStream(videoId) }
-                ?: run {
-                    TrackLog.w(TAG, "InnerTubeX found no usable stream for $videoId; falling back to extraction")
-                    timed("$videoId newPipeStream") { newPipeStream(videoId, ::pickForQuality) }
+            // InnerTubeX reaches its catalogue as "smallest" or "best" and hands
+            // back one rung, so a ceiling between the two — Medium's 160kbps — is
+            // a request it cannot answer. The stream it does return is therefore
+            // not a failure but the wrong rung, and the only place this app can
+            // actually sort by bitrate is the format list extraction walks. So
+            // ask that ladder first, and keep the over-ceiling copy for the case
+            // the ladder has nothing under budget in it: a rung over what was
+            // asked for still beats no audio at all, which is the same rule
+            // [downloadStream] already applies.
+            val ceiling = maxKbps()
+            val probed = timed("$videoId InnerTubeX") { innerTubeXStream(videoId) }
+            if (probed != null && (ceiling == Int.MAX_VALUE || probed.kbps <= ceiling)) {
+                probed
+            } else {
+                if (probed != null) {
+                    TrackLog.d(
+                        TAG,
+                        "InnerTubeX served $videoId at ${probed.kbps}kbps, over the ${ceiling}kbps ceiling; sorting the extracted ladder",
+                    )
                 }
+                // Handled rather than [runCatching] because the answer this
+                // branch gives depends on which kind of failure it was: a
+                // cancellation has to leave, a linkage error has to reach the
+                // clause below that converts it, and only an extraction that
+                // genuinely found nothing is a question the probed stream can
+                // answer for.
+                var extractionFailure: Exception? = null
+                val extracted: Stream? = try {
+                    timed("$videoId newPipeStream") { newPipeStream(videoId, ::pickForQuality) }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    extractionFailure = e
+                    null
+                }
+                when {
+                    extracted != null -> extracted
+                    probed != null -> {
+                        TrackLog.w(
+                            TAG,
+                            "nothing under the ${ceiling}kbps ceiling for $videoId; taking InnerTubeX's ${probed.kbps}kbps rather than failing the track",
+                        )
+                        probed
+                    }
+                    else -> {
+                        TrackLog.w(TAG, "InnerTubeX found no usable stream for $videoId; falling back to extraction")
+                        throw extractionFailure ?: IOException("No playable audio for $videoId")
+                    }
+                }
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: LinkageError) {

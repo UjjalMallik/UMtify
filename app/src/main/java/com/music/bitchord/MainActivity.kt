@@ -422,10 +422,34 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 val appBackdrop = rememberLayerBackdrop(onDraw = paintBackdrop)
+                // The app's own type and layout size, multiplied into the
+                // density this window was given rather than put in place of it.
+                //
+                // `LocalDensity.current` here already carries whatever the phone
+                // is set to — its font scale, its display size, the density of
+                // the screen — so "Default" in Settings means "as the system has
+                // it", and a phone set to large text keeps that instead of having
+                // it taken back the moment UMtify draws a frame.
+                //
+                // Provided at the root, which is what makes the row live: every
+                // dp, sp and font size under here is resolved through this object
+                // at draw time, so the next frame after a change is already drawn
+                // at the new size. Nothing here re-reads a preference on launch,
+                // and nothing needs the process restarted.
+                val systemDensity = LocalDensity.current
+                val appFontScale by AppSettings.fontScale.collectAsStateWithLifecycle()
+                val appDisplayScale by AppSettings.displayScale.collectAsStateWithLifecycle()
+                val scaledDensity = remember(systemDensity, appFontScale, appDisplayScale) {
+                    Density(
+                        density = systemDensity.density * appDisplayScale,
+                        fontScale = systemDensity.fontScale * appFontScale,
+                    )
+                }
                 CompositionLocalProvider(
                     LocalOverscrollFactory provides iosOverscrollFactory,
                     LocalLiquidGlassEnabled provides liquidGlassEnabled,
                     LocalAppBackdrop provides appBackdrop,
+                    LocalDensity provides scaledDensity,
                 ) {
                 // The window's width, measured rather than asked for.
                 //

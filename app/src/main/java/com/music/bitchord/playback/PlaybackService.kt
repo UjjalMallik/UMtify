@@ -128,6 +128,7 @@ import com.music.bitchord.data.settings.EqualizerMode
 import com.music.bitchord.data.sources.SourceResolver
 import com.music.bitchord.data.sources.SourceStream
 import com.music.bitchord.data.sources.StreamFormat
+import com.music.bitchord.data.sources.StreamRequest
 import com.music.bitchord.data.sources.TrackMatcher
 import com.music.bitchord.playback.smart.AutomixAnalysisSource
 import com.music.bitchord.playback.smart.VersionAudioAligner
@@ -796,6 +797,8 @@ class PlaybackService : MediaLibraryService() {
     /** Cover address of the *playing* track whose bytes are being turned into metadata. */
     private var currentArtworkBytesJob: Job? = null
     private var currentArtworkBytesTarget: Uri? = null
+    /** Whether the cover in the playlist metadata is UMtify's own sleeve. */
+    private var currentArtworkIsDefault = false
     private var autoplaySeed: String? = null
 
     /** Index in the live queue represented by entry zero of the persisted window. */
@@ -5271,24 +5274,41 @@ class PlaybackService : MediaLibraryService() {
             runCatching { StreamResolver.resolve(videoId) }
         }
 
-        // First past the post. A null because [lookup] won is a module miss; a
-        // null because [fallback] won means YouTube has a URL and the modules
-        // are still looking — [lookup.isActive] below is what tells those
-        // apart, which is the question the old head start answered by timing
-        // out rather than by asking.
-        val quick: SourceStream? = select {
-            lookup.onAwait { it }
-            // A fallback that finished without a URL has not won anything.
-            //
-            // This clause used to yield null unconditionally, which treats "the
-            // YouTube walk is over" as "YouTube has a URL" — true only while
-            // failing was the slow outcome. It no longer is: [StreamResolver]
-            // now answers a known-unplayable track immediately, so the losing
-            // leg crosses the line first and, before this, took the track down
-            // with it while a module lookup that was about to succeed was still
-            // running. Exactly the case in the report — an age-gated track that
-            // YouTube would never serve and a catalogue that had it all along.
-            fallback.onAwait { resolved -> if (resolved.isSuccess) null else lookup.await() }
+        // First past the post — except when Lossless was asked for, where the
+        // add-on gets the first say rather than merely the same start. Its copy
+        // is the one the listener wants and YouTube's Opus is the downgrade they
+        // turned down, so [LOSSLESS_HEAD_START_MS] of its run is spent waiting
+        // on the catalogue alone before any YouTube URL may win. A module that
+        // has the file answers inside that and plays from the first frame; one
+        // that doesn't costs a breath before the fallback is taken, and the
+        // fallback still started at the same moment — so the miss is not made
+        // slower by the priority, only the win is made certain.
+        val losslessFirst = SourceResolver.requestForNow() is StreamRequest.Lossless
+        val headStart = if (losslessFirst) {
+            withTimeoutOrNull(LOSSLESS_HEAD_START_MS) { lookup.await() }
+        } else null
+        val quick: SourceStream? = when {
+            headStart != null -> headStart
+            // Answered inside the head start with nothing: the result is already
+            // in hand, so take it instead of re-racing it against a completed
+            // deferred. [select] picks at random between two ready clauses, and
+            // a module miss that finished first would otherwise be able to lose
+            // to a YouTube URL that was there all along.
+            losslessFirst && lookup.isCompleted -> lookup.getCompleted()
+            else -> select {
+                lookup.onAwait { it }
+                // A fallback that finished without a URL has not won anything.
+                //
+                // This clause used to yield null unconditionally, which treats "the
+                // YouTube walk is over" as "YouTube has a URL" — true only while
+                // failing was the slow outcome. It no longer is: [StreamResolver]
+                // now answers a known-unplayable track immediately, so the losing
+                // leg crosses the line first and, before this, took the track down
+                // with it while a module lookup that was about to succeed was still
+                // running. Exactly the case in the report — an age-gated track that
+                // YouTube would never serve and a catalogue that had it all along.
+                fallback.onAwait { resolved -> if (resolved.isSuccess) null else lookup.await() }
+            }
         }
 
         // A manifest cannot be substituted here, however good it is. This
@@ -5723,6 +5743,7 @@ class PlaybackService : MediaLibraryService() {
             bitDepth = if (dsd != null) 1 else if (isLossless) measured?.bitDepth else null,
             claimed = NerdStats.declaredFormat(mediaId),
             sourceName = currentSourceName(mediaId, player.currentMediaItem),
+            requestedQuality = AppSettings.effectiveAudioQuality,
             container = when (format?.containerMimeType) {
                 "audio/x-dsf" -> "DSF"
                 "audio/x-dff" -> "DFF"
@@ -6165,7 +6186,10 @@ class PlaybackService : MediaLibraryService() {
      *
      * The first track of a session used to have no route at all; now the queued
      * rewrite covers the tracks after it and this one covers the track under the
-     * playhead, so the whole run has bytes from the moment it starts.
+     * playhead, so the whole run has bytes from the moment it starts. A track
+     * with no cover of its own gets the app's own sleeve through the same door,
+     * which is also the only way the default reaches surfaces that read bytes
+     * and never fetch a URI.
      */
     private fun publishCurrentArtworkBytes(exoPlayer: ExoPlayer) {
         if (ListenTogether.state.value.inParty || castPlayback.active) return
@@ -6173,16 +6197,28 @@ class PlaybackService : MediaLibraryService() {
         if (metadata?.artworkData != null) return
         val artworkUri = metadata?.artworkUri
         if (artworkUri == null) {
+            // A track with no cover of its own gets UMtify's sleeve. This branch
+            // has to write even when the field is already filled, because what
+            // fills it is the *previous* track's cover — the merged metadata the
+            // notification is built from copies that onto a song which has none,
+            // which is the stale-art bug this always had and the bare note glyph
+            // on the surfaces that cleared it. One picture, put here, is the same
+            // answer everywhere.
+            if (currentArtworkIsDefault) return
             currentArtworkBytesJob?.cancel()
-            currentArtworkBytesJob = null
             currentArtworkBytesTarget = null
-            // A track with no cover must not inherit the last one's bytes: the
-            // merged metadata would keep painting art over a song that has none.
-            if (exoPlayer.playlistMetadata.artworkData == null) return
-            exoPlayer.playlistMetadata = exoPlayer.playlistMetadata.buildUpon()
-                .setArtworkData(null, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
-                .build()
-            triggerNotificationUpdate()
+            currentArtworkBytesJob = scope.launch {
+                val bytes = defaultSessionArtworkBytes(applicationContext) ?: return@launch
+                val active = player ?: return@launch
+                // The playhead moved to a track that does have a cover; the
+                // sleeve belongs to nothing now.
+                if (active.currentMediaItem?.mediaMetadata?.artworkUri != null) return@launch
+                active.playlistMetadata = active.playlistMetadata.buildUpon()
+                    .setArtworkData(bytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+                    .build()
+                currentArtworkIsDefault = true
+                triggerNotificationUpdate()
+            }
             return
         }
         // A repeat call for the track already being loaded is the one case worth
@@ -6199,6 +6235,7 @@ class PlaybackService : MediaLibraryService() {
             active.playlistMetadata = active.mediaMetadata.buildUpon()
                 .setArtworkData(bytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
                 .build()
+            currentArtworkIsDefault = false
             // A metadata event alone does not redraw the notification — Media3
             // rebuilds it on playback-state, timeline and loading changes — so
             // ask for the repaint once the bytes are actually in hand.
@@ -9075,6 +9112,18 @@ class PlaybackService : MediaLibraryService() {
          * enough that a dead server costs a pause rather than a stall.
          */
         const val SUBSTITUTE_TIMEOUT_MS = 20_000L
+
+        /**
+         * How long a Lossless request waits on the add-on alone before a YouTube
+         * URL is allowed to win the race.
+         *
+         * Long enough for a catalogue that has the file — its search and its
+         * stream URL both come off one connection that is already warm — and
+         * short enough that a catalogue that hasn't is a pause rather than a
+         * stall. Beyond it the ordinary first-past-the-post rules apply, with
+         * [QualityUpgrade]'s mid-track swap as the route back up.
+         */
+        const val LOSSLESS_HEAD_START_MS = 1_500L
 
         /**
          * How much of a track has to be left for a mid-track quality swap to

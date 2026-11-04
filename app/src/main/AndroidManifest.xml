@@ -113,6 +113,15 @@
                   entry alone is not enough, which is why BitChord was missing
                   from that dialog while every other player on the device was in
                   it.
+
+                  Deliberately no category.LAUNCHER anywhere on this activity: the
+                  three aliases below are the only MAIN/LAUNCHER components in the
+                  package, which is what lets a launcher resolve the picked icon off
+                  the enabled alias. This filter cannot be the reason an App Info
+                  page shows the wrong icon either — it has no LAUNCHER category, so
+                  it is not the component those pages look up, and the icon they
+                  reach for is the application-level one no manifest edit can move
+                  at runtime.
                 -->
                 <category android:name="android.intent.category.APP_MUSIC" />
             </intent-filter>

@@ -23,6 +23,7 @@ import com.music.bitchord.ui.player.PlayerPlatform
 import com.music.bitchord.data.canvas.CanvasCache
 import com.music.bitchord.data.smb.SmbCoverFetcher
 import com.music.bitchord.data.webdav.WebDavCoilAuth
+import com.music.bitchord.image.DefaultCoverFallback
 import com.music.bitchord.data.canvas.SpotifyToken
 import com.music.bitchord.data.spotify.SpotifyLibrary
 import com.music.bitchord.playback.AudioCache
@@ -221,6 +222,10 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
                 add(SvgDecoder.Factory())
                 // Wikimedia 403s Coil's default client; see [coilHttpClient].
                 add(OkHttpNetworkFetcherFactory(callFactory = { coilHttpClient }))
+                // Last, so it decorates the requests the others shaped: every
+                // cover in the app now fails over to UMtify's own sleeve
+                // instead of a blank box. See DefaultCoverFallback.
+                add(DefaultCoverFallback())
             }
             .memoryCache {
                 MemoryCache.Builder()

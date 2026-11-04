@@ -39,7 +39,11 @@ A lightweight, Android-only music streaming & local audio player — a personal 
 
 | 📊 **"Stats for Nerds" Badge** | ⚡ **Lightweight & 120Hz Optimized** |
 | --- | --- |
-| A translucent, artwork-tinted glass pill reporting codec, bitrate, sample rate, and Automix analysis status. | **arm64-v8a** only, R8-shrunk with compressed native libraries, frame-paced for buttery 120 Hz rendering, and gated so nothing expensive keeps running in the background. |
+| A translucent, artwork-tinted glass pill reporting codec, bitrate, sample rate, **which source served the stream and which quality you asked for**, and Automix analysis status. | **arm64-v8a** only, R8-shrunk with compressed native libraries, frame-paced for buttery 120 Hz rendering, and gated so nothing expensive keeps running in the background. |
+
+| 🖼️ **UMtify Cover for Every Sleeve** | 🔠 **Live Font & Display Size** |
+| --- | --- |
+| A track with no artwork — local file, WebDAV share, dead thumbnail URL — shows UMtify's own cover instead of a blank box, in lists, the player, the notification, Android Auto and the widgets. | Two sliders in Appearance, **80%–135%**, for type size and layout size. They stack on the system's own scales and apply in the next frame — no restart, no relaunch. |
 
 | 🎧 **Universal Dolby Atmos & Spatial Audio** | 📶 **Smart Offline Mode & Auto Offline Home Feed** |
 | --- | --- |
@@ -48,6 +52,10 @@ A lightweight, Android-only music streaming & local audio player — a personal 
 | 🚗 **Android Auto Support** | 🎨 **Custom 3D App Icon Switcher** |
 | --- | --- |
 | A full `MediaLibraryService`, so Downloads, Local Music and Playlists are browsable and playable from the car head unit. | Three launcher icons — *Default*, *Liquid Glass*, *Liquid Glass Dark* — that swap the home screen and Recents instantly, plus a clean vector monochrome layer. |
+
+| 🎚️ **Quality Tiers That Pick the Stream** | 🔁 **Mid-Track Quality Upgrade** |
+| --- | --- |
+| Lossless and Hi-Res ask your add-ons before YouTube; High, Medium and Low sort the format ladder by `itag`, codec and bitrate instead of taking the default rung — and the badge tells you which source actually served the track. | A track that started on less than Settings asked for is quietly re-resolved and swapped up while it plays, as long as enough of it is left to make the swap worth the seam. |
 
 ---
 
@@ -87,6 +95,17 @@ Settings carries the full customization: **hide or unhide the entire bottom tool
 
 Edit a track's **title, artist, and album name**, and set **custom cover artwork from the gallery** — for local files and downloaded tracks alike — with a **one-tap reset** back to the original metadata.
 
+### 🖼️ UMtify's Own Cover Whenever a Track Has None
+
+A missing sleeve used to read three different ways — a blank square in a list, a grey note glyph in the player, no large icon in the notification — for a state that is completely normal: a local file with no embedded picture, a WebDAV or SMB share, an offline cache miss, a deleted YouTube thumbnail.
+
+Now all three show **the same custom UMtify cover**, and nothing has to ask for it:
+
+- Every image request in the app gets the cover as its `error` and `fallback`, so a null, blank or unreachable artwork URL lands on it without each list deciding separately.
+- The media session publishes it as `artworkData`, so the **notification, lock screen, Android Auto and Recents** draw a cover rather than their own idea of "no artwork" — and a track that follows one with art never inherits the previous song's cover.
+- The **widgets** and the player's full-screen sleeve draw the same picture, at their own sizes.
+- Collection tiles (playlists, folders, artists) keep their tinted, glyph-marked placeholders, because "a playlist with nothing on it" is a different message from "this song has no cover".
+
 ### 🧹 Smart Cache Management (200 MB Minimum Limit & Auto-Reset)
 
 The audio/media cache has a configurable maximum that can be set as low as **200 MB**. Once the limit is reached, the cache is **reset and cleaned up automatically**, so listening never quietly fills the phone's storage.
@@ -94,6 +113,14 @@ The audio/media cache has a configurable maximum that can be set as low as **200
 ### 📊 Clean "Stats for Nerds" Glass Badge
 
 Audio details are shown in a compact glassmorphic pill directly below the cover art, styled as a centered Material 3 badge with a translucent artwork-tinted background, a hairline border, an equalizer icon, and monospace typography. It reports the active **codec, bitrate, and sample rate**, plus **Automix analysis status** when that feature is enabled. The badge can be toggled in Settings.
+
+### 🎚️ Quality Tiers That Pick the Stream — and Add-ons That Answer First
+
+The quality setting is a promise UMtify keeps, not a label:
+
+- **Lossless and Hi-Res give your add-ons the first say.** The add-on / lossless resolver is queried ahead of YouTube's InnerTube streams — matched by title, artist, album and duration — and the YouTube URL is only taken when the add-ons come back with nothing. A module that has the 24-bit file answers inside that window and plays from the first frame; one that doesn't costs a breath before the fallback is used, so the miss is never made slower by the priority, only the win made certain.
+- **High, Medium and Low sort the format ladder instead of taking the default rung.** A tier is a bitrate ceiling enforced on the *result*, not only on the request: `itag`, codec and bitrate are chosen to match what Settings asked for — Opus at up to **160 kbps** for Medium, ~64 for Low, the top of the ladder for High — so a 48 kbps copy and a 256 kbps AAC one are never handed over as the same thing. Where the fast path can only answer "smallest" or "best", the resolver goes to the full extracted list and picks the rung under the ceiling, keeping the over-budget copy only when nothing else exists.
+- **The badge shows both halves.** "Opus · 160 kbps · from YouTube · set to Lossless" is an add-on that had no copy of this track — the reading that a codec line alone cannot give you.
 
 ### ⚡ Lightweight & 120Hz Optimized (arm64-v8a)
 
@@ -135,11 +162,19 @@ Three hand-built 3D icons, switchable from **Settings → App icon**:
 | **Liquid Glass** | Full-colour note and waves on deep ocean blue (`#061539`) |
 | **Liquid Glass Dark** | The same artwork on obsidian dark (`#0A0C12`) |
 
-- Switching updates the **launcher icon and Recents immediately** — no reboot, no launcher cache clear. Every alias declares its own `android:icon` and `android:roundIcon`, so the launcher and the App Info pages that resolve the launcher component both read the picked skin.
-- Each is edge-blended into its own layer background, so no launcher mask ever shows a box edge. The two glass icons sit at 300 px on the 432 px adaptive canvas; the pastel **Default** is drawn at 255 px — 59% of the canvas, the band Android's own guidance puts a foreground at — and centred, with a 34 px rim fade, because its note and wave band carry colour right out to the artwork edge where the glass pair fades to near-black and reads as empty.
+- Switching updates the **launcher icon and Recents immediately** — no reboot, no launcher cache clear. On Android 13+ the whole alias set is written in **one atomic** component call, so the package is never briefly in a state with two launcher entries or none; below that the same order is reached one call at a time, enabling the pick before the others retire. Every alias declares its own `android:icon` and `android:roundIcon`, and they are the only `MAIN`/`LAUNCHER` entries in the package, so the launcher resolves the picked skin off the enabled alias.
+- Each is edge-blended into its own layer background, so no launcher mask ever shows a box edge. All three sit at **exactly the same size and position** — the artwork drawn into a 276 px square centred on the 432 px adaptive canvas, comfortably inside the 66 dp safe zone — so switching icons never rescales the launcher tile. The background is extended to the canvas edge and rim-faded on every variant, which is what keeps a circular or squircle mask from finding a border to cut.
 - **One thing Android will not do:** a settings page that reads the *application* icon rather than the launcher component keeps showing *Default* until the next install. `PackageManager` has no runtime write for `ApplicationInfo.icon` — `getApplicationIcon` is read-only and `setComponentEnabledSetting` only acts on components — so this is a platform limit, not a missed step.
 - A **clean vector monochrome** layer is included, so themed icons on Android 13+ render as crisp line art instead of a jagged bitmap.
 - Inside the app the brand is one asset — `ic_umtify_wordmark`, a white PNG that carries the lettering in its alpha channel — tinted to the surface it sits on and used by the Home and Offline headers, the Replay story and credit cards, the onboarding page and both exported share images.
+
+### 🔠 Font Size & Display Size, Applied Live
+
+**Settings → Appearance** carries two sliders, each running **80% to 135%** in 5% steps with a one-tap reset:
+
+- **Font size** scales type; **Display size** scales layout — spacing, icons and tile sizes, the text inside them included.
+- Both are **multiplied into** the system's own font scale and screen density rather than replacing them, so a phone already set to large text keeps it and UMtify simply goes further on top. "Reset" is 100% — the phone's own settings, nothing added.
+- The change lands in **the next frame**: the app's root provides its own density, and every `dp`, `sp` and font size below it resolves through that at draw time. No restart, no relaunch, no activity recreation — drag the slider and the whole UI, player included, is redrawn at the new size while you watch.
 
 ### 🔋 120Hz Smooth UI & Battery Optimization
 

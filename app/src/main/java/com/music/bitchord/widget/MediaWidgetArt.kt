@@ -24,6 +24,7 @@ import com.music.bitchord.data.model.NOTIFICATION_ART_PX
 import com.music.bitchord.data.model.PLAYER_ART_PX
 import com.music.bitchord.data.model.ROW_ART_PX
 import com.music.bitchord.data.model.artworkAt
+import com.music.bitchord.image.DefaultCoverArt
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 
@@ -129,12 +130,16 @@ internal object MediaWidgetArt {
         if (failed && key != null) failures[key] = SystemClock.elapsedRealtime()
 
         val accent = cover?.let { accentOfBitmap(it) } ?: DEFAULT_ACCENT
+        // Nothing to draw is not the same as nothing to show: a track whose cover
+        // is absent, unreachable or still cooling off gets UMtify's own sleeve —
+        // the answer the rows, the player and the notification already give.
+        val art = cover ?: DefaultCoverArt.bitmap(context, maxOf(spec.widthPx, spec.heightPx))
         val rounded = if (spec.disc) {
-            drawDiscArt(spec, cover, accent)
+            drawDiscArt(spec, art, accent)
         } else {
             val base = Bitmap.createBitmap(spec.widthPx, spec.heightPx, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(base)
-            if (cover != null) canvas.fillCentreCropped(cover) else canvas.fillPlaceholder(accent)
+            canvas.fillCentreCropped(art)
 
             val tile = if (spec.cornerPx > 0f) base.withRoundedCorners(spec.cornerPx) else base
             if (tile !== base) base.recycle()

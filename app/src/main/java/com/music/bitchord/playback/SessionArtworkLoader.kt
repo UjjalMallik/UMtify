@@ -14,6 +14,7 @@ import coil3.toBitmap
 import com.google.common.util.concurrent.ListenableFuture
 import com.music.bitchord.data.model.NOTIFICATION_ART_PX
 import com.music.bitchord.data.settings.AppSettings
+import com.music.bitchord.image.DefaultCoverArt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.guava.future
@@ -75,8 +76,12 @@ internal class SessionArtworkLoader(
             )
             .build()
         val result = SingletonImageLoader.get(context).execute(request)
+        // UMtify's own sleeve rather than a failed future: Media3 turns a thrown
+        // load into "this track has no artwork", which is the blank notification
+        // this class exists to prevent. A cover that can't be reached is still a
+        // track with a cover as far as every system surface is concerned.
         (result as? SuccessResult)?.image?.toBitmap()
-            ?: throw IOException("No artwork at $uri.")
+            ?: DefaultCoverArt.bitmap(context, NOTIFICATION_ART_PX)
     }
 }
 
@@ -108,13 +113,28 @@ internal suspend fun sessionArtworkBytes(context: Context, uri: Uri): ByteArray?
             .build()
         val bitmap = (SingletonImageLoader.get(context).execute(request) as? SuccessResult)
             ?.image?.toBitmap()
-            ?: return@withContext null
+            ?: DefaultCoverArt.bitmap(context, SESSION_ART_PX)
         runCatching {
             ByteArrayOutputStream().use { out ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, SESSION_ART_JPEG_QUALITY, out)
                 out.toByteArray().takeIf { it.size <= LEGACY_ARTWORK_DATA_LIMIT && it.isNotEmpty() }
             }
         }.getOrNull()
+    }
+
+/**
+ * UMtify's own sleeve as `artworkData`, for the track with no cover URL at all.
+ *
+ * [sessionArtworkBytes] can only answer for a URI; a local file with no embedded
+ * picture, or a queue item whose thumbnail was never learned, has none. Without
+ * this the session metadata goes out with the art field empty and every surface
+ * that reads it — the lock screen, the legacy bundle, Android Auto's now-playing
+ * — draws its own idea of "no cover", which is rarely the same picture twice.
+ */
+internal suspend fun defaultSessionArtworkBytes(context: Context): ByteArray? =
+    withContext(Dispatchers.IO) {
+        DefaultCoverArt.jpeg(context, SESSION_ART_PX, SESSION_ART_JPEG_QUALITY)
+            ?.takeIf { it.size <= LEGACY_ARTWORK_DATA_LIMIT }
     }
 
 /**

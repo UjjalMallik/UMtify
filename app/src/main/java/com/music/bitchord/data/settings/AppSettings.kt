@@ -474,6 +474,28 @@ object AppSettings {
     /** Real backdrop-sampled glass (blur, lens refraction) on the floating nav bar, Android 12+ only. */
     val liquidGlass = MutableStateFlow(false)
 
+    /**
+     * Type size, multiplied into whatever the *system* font scale already is.
+     *
+     * Applied at the root of the UI, where [androidx.compose.ui.platform.LocalDensity]
+     * is handed a density built from these two — see
+     * [com.music.bitchord.MainActivity]. A root override like that is read on
+     * every recomposition, which is why the row in Settings takes effect in the
+     * frame after it is moved rather than on the next launch.
+     *
+     * Multiplied rather than replacing, because a phone already set to its own
+     * large-text mode is the exact device this is meant to go further on, not one
+     * to quietly reset.
+     */
+    val fontScale = MutableStateFlow(1f)
+
+    /**
+     * Layout size — the dp-to-px step, so spacing, icon and tile sizes as well as
+     * the text inside them. Android's own "Display size", but for this app only
+     * and without the restart the system setting asks for.
+     */
+    val displayScale = MutableStateFlow(1f)
+
     /** Blurs unfocused lyric lines, keeping the active line sharp. */
     val lyricsBlur = MutableStateFlow(true)
 
@@ -923,6 +945,8 @@ object AppSettings {
         smartVersionAlignment.value = prefs.getBoolean(KEY_SMART_VERSION_ALIGNMENT, true)
         reduceDynamicBlur.value = prefs.getBoolean(KEY_REDUCE_BLUR, false)
         liquidGlass.value = prefs.getBoolean(KEY_LIQUID_GLASS, false)
+        fontScale.value = prefs.getFloat(KEY_FONT_SCALE, 1f).coerceIn(MIN_INTERFACE_SCALE, MAX_INTERFACE_SCALE)
+        displayScale.value = prefs.getFloat(KEY_DISPLAY_SCALE, 1f).coerceIn(MIN_INTERFACE_SCALE, MAX_INTERFACE_SCALE)
         lyricsBlur.value = prefs.getBoolean(KEY_LYRICS_BLUR, true)
         lyricsOffsetMs.value = prefs.getInt(KEY_LYRICS_OFFSET_MS, 0)
             .coerceIn(MIN_LYRICS_OFFSET_MS, MAX_LYRICS_OFFSET_MS)
@@ -1379,6 +1403,30 @@ object AppSettings {
     fun setLiquidGlass(value: Boolean) {
         liquidGlass.value = value
         prefs.edit().putBoolean(KEY_LIQUID_GLASS, value).apply()
+    }
+
+    /**
+     * Type size as a multiplier on the system's own. Out-of-range values land on
+     * the nearest end rather than being dropped, so a slider dragged past 1.35
+     * stops at 1.35 and stays there when the row is next read.
+     */
+    fun setFontScale(value: Float) {
+        val clamped = value.coerceIn(MIN_INTERFACE_SCALE, MAX_INTERFACE_SCALE)
+        fontScale.value = clamped
+        prefs.edit().putFloat(KEY_FONT_SCALE, clamped).apply()
+    }
+
+    /** Layout size as a multiplier on the system's own. See [setFontScale]. */
+    fun setDisplayScale(value: Float) {
+        val clamped = value.coerceIn(MIN_INTERFACE_SCALE, MAX_INTERFACE_SCALE)
+        displayScale.value = clamped
+        prefs.edit().putFloat(KEY_DISPLAY_SCALE, clamped).apply()
+    }
+
+    /** Both multipliers back to 1.0, which is "whatever the phone is set to". */
+    fun resetInterfaceScale() {
+        setFontScale(1f)
+        setDisplayScale(1f)
     }
 
     fun setHighPerformanceMode(value: Boolean) {
@@ -2008,6 +2056,16 @@ object AppSettings {
     const val MIN_LYRICS_OFFSET_MS = -5_000
     const val MAX_LYRICS_OFFSET_MS = 5_000
 
+    /**
+     * How far the type and layout multipliers reach either way.
+     *
+     * 0.80 is about where text stops being worth reading in a list; 1.35 is where
+     * a phone-width layout starts breaking instead of growing. Both ends apply to
+     * either multiplier, so one row of presets serves both.
+     */
+    const val MIN_INTERFACE_SCALE = 0.80f
+    const val MAX_INTERFACE_SCALE = 1.35f
+
     const val DEFAULT_UPGRADE_LENGTH_SLACK_SECONDS = 3
     const val MIN_UPGRADE_LENGTH_SLACK_SECONDS = 0
     const val MAX_UPGRADE_LENGTH_SLACK_SECONDS = 10
@@ -2075,6 +2133,8 @@ object AppSettings {
     private const val KEY_SMART_VERSION_ALIGNMENT = "smart_version_alignment"
     private const val KEY_REDUCE_BLUR = "reduce_dynamic_blur"
     private const val KEY_LIQUID_GLASS = "liquid_glass"
+    private const val KEY_FONT_SCALE = "font_scale"
+    private const val KEY_DISPLAY_SCALE = "display_scale"
     private const val KEY_LYRICS_BLUR = "lyrics_blur"
     private const val KEY_LYRICS_OFFSET_MS = "lyrics_offset_ms"
     private const val KEY_TRANSLATION_LANGUAGE = "translation_language"

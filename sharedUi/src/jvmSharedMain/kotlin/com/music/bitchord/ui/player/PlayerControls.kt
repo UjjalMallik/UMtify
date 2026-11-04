@@ -2273,6 +2273,12 @@ private fun NerdStats.Snapshot.describe(): String? {
                 },
             )
         }
+        // Where the bytes came from, and what Settings asked for. Read together
+        // they are the whole answer to "did my Lossless switch do anything": an
+        // add-on with no copy of this track falls through to YouTube, and the
+        // codec line alone cannot tell that from a route that never looked.
+        sourceName?.let { add(stringResource(Res.string.nerd_stats_source, it)) }
+        requestedQuality?.let { add(stringResource(Res.string.nerd_stats_requested, it.label)) }
     }
     return parts.joinToString(" · ").takeIf { it.isNotEmpty() }
 }

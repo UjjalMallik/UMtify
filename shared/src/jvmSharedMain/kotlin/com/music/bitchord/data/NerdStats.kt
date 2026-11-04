@@ -2,6 +2,7 @@ package com.music.bitchord.data
 
 import com.music.bitchord.data.sources.SourceTrackKeys
 import com.music.bitchord.data.sources.StreamFormat
+import com.music.bitchord.data.settings.AudioQuality
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import java.util.concurrent.ConcurrentHashMap
@@ -50,6 +51,16 @@ object NerdStats {
         val claimed: StreamFormat? = null,
         /** Authoritative source/provider that supplied this stream. */
         val sourceName: String? = null,
+        /**
+         * What the quality setting asked for when this stream was chosen.
+         *
+         * Kept next to [sourceName] rather than left in Settings because the two
+         * together are the only place the app shows what the Lossless switch
+         * actually did: "Opus · 160 kbps · from YouTube · set to Lossless" is an
+         * add-on that had no copy of this track, and the same line without the
+         * "set to" half would read as though nothing was wrong.
+         */
+        val requestedQuality: AudioQuality? = null,
         /**
          * The file's container where it says something the codec doesn't —
          * "DSF" or "DFF" for DSD, which reaches the decoder as plain PCM.

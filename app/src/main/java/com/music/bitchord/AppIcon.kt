@@ -70,9 +70,19 @@ enum class AppIcon(val alias: String, val iconRes: Int, val labelRes: Int, val p
         }
 
         /**
-         * Enables [icon] before disabling the rest so there is never a moment with
-         * no launcher entry. The home screen follows, because the launcher draws the
-         * icon off the enabled alias — and [refreshTaskDescription] repaints Recents.
+         * Writes the whole alias set in one go, so the device is never in a state
+         * the launcher can read wrongly: no moment with two entries — which is what
+         * makes some launchers put up a duplicate icon — and no moment with none.
+         *
+         * API 33 has [PackageManager.setComponentEnabledSettings], which applies a
+         * list atomically. Below it the same result is reached one call at a time in
+         * the order that keeps an entry live throughout: enable the pick first, then
+         * retire the others.
+         *
+         * The [selected] flow is written last and [refreshTaskDescription] is what
+         * Recents listens to, so the repaint is already queued by the time this
+         * returns — the package manager's own write is synchronous, there is no
+         * broadcast to wait on.
          *
          * A settings page that reads the *application* icon instead of the launcher
          * component is outside reach: PackageManager exposes no runtime write for it,
@@ -80,17 +90,30 @@ enum class AppIcon(val alias: String, val iconRes: Int, val labelRes: Int, val p
          */
         fun apply(context: Context, icon: AppIcon) {
             val pm = context.packageManager
-            pm.setComponentEnabledSetting(
-                icon.component(context),
-                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-                PackageManager.DONT_KILL_APP,
-            )
-            entries.filter { it != icon }.forEach {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.setComponentEnabledSettings(
+                    entries.map {
+                        PackageManager.ComponentEnabledSetting(
+                            it.component(context),
+                            if (it == icon) PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                            else PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                            PackageManager.DONT_KILL_APP,
+                        )
+                    },
+                )
+            } else {
                 pm.setComponentEnabledSetting(
-                    it.component(context),
-                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                    icon.component(context),
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
                     PackageManager.DONT_KILL_APP,
                 )
+                entries.filter { it != icon }.forEach {
+                    pm.setComponentEnabledSetting(
+                        it.component(context),
+                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                        PackageManager.DONT_KILL_APP,
+                    )
+                }
             }
             _selected.value = icon
         }

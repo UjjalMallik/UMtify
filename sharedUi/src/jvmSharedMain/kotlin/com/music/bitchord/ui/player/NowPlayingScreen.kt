@@ -145,6 +145,7 @@ import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.music.bitchord.ui.components.ExplicitBadge
+import com.music.bitchord.ui.components.DefaultCoverTile
 import com.music.bitchord.ui.theme.HideStatusBar
 import com.music.bitchord.ui.theme.StatusBarIcons
 import com.music.bitchord.ui.theme.stableStatusBarInsets
@@ -3193,17 +3194,12 @@ fun NowPlayingScreen(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 if (!art.loaded && !canvasRendered) {
-                                    Icon(
-                                        imageVector = BitChordIcons.MusicNote,
-                                        contentDescription = null,
-                                        tint = Color.White.copy(alpha = 0.35f),
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .graphicsLayer {
-                                                val scale = 1f - 0.5f * p()
-                                                scaleX = scale
-                                                scaleY = scale
-                                            },
+                                    DefaultCoverTile(
+                                        modifier = Modifier.graphicsLayer {
+                                            val scale = 1f - 0.5f * p()
+                                            scaleX = scale
+                                            scaleY = scale
+                                        },
                                     )
                                 }
                             }

@@ -232,6 +232,8 @@ fun SettingsScreen(
     val lyricsSources by AppSettings.lyricsSources.collectAsStateWithLifecycle()
     val translationLanguage by AppSettings.translationLanguage.collectAsStateWithLifecycle()
     val theme by AppSettings.themeMode.collectAsStateWithLifecycle()
+    val fontScale by AppSettings.fontScale.collectAsStateWithLifecycle()
+    val displayScale by AppSettings.displayScale.collectAsStateWithLifecycle()
     val sessionId by AppSettings.audioSessionId.collectAsStateWithLifecycle()
     val outputPcmMode by AppSettings.outputPcmMode.collectAsStateWithLifecycle()
     val preferUsbDac by AppSettings.preferUsbDac.collectAsStateWithLifecycle()
@@ -847,6 +849,46 @@ fun SettingsScreen(
                         }
                     },
                     onClick = { fontPicker.launch(FONT_MIME_TYPES) },
+                )
+            }
+            // Text and layout size get sliders rather than the four named steps
+            // the theme row uses: the two controls sit one above the other, and
+            // "Small / Default / Large / Extra large" twice over reads as a
+            // choice already made. Twelve stops on each, five percent apart, is
+            // the same range in a form that shows the number it is on.
+            val fontSizeTitle = stringResource(R.string.font_size)
+            row(fontSizeTitle, "text size", "type", "scale", "bigger", "smaller", "accessibility") {
+                SliderRow(
+                    icon = Icons.Rounded.TextFields,
+                    title = fontSizeTitle,
+                    subtitle = stringResource(R.string.font_size_subtitle),
+                    value = stringResource(R.string.interface_scale_value, (fontScale * 100f).roundToInt()),
+                    sliderValue = fontScale,
+                    onSliderValue = AppSettings::setFontScale,
+                    valueRange = AppSettings.MIN_INTERFACE_SCALE..AppSettings.MAX_INTERFACE_SCALE,
+                    steps = INTERFACE_SCALE_STEPS,
+                )
+            }
+            val displaySizeTitle = stringResource(R.string.display_size)
+            row(displaySizeTitle, "layout size", "zoom", "scale", "bigger", "smaller", "accessibility") {
+                SliderRow(
+                    icon = Icons.Rounded.Fullscreen,
+                    title = displaySizeTitle,
+                    subtitle = stringResource(R.string.display_size_subtitle),
+                    value = stringResource(R.string.interface_scale_value, (displayScale * 100f).roundToInt()),
+                    sliderValue = displayScale,
+                    onSliderValue = AppSettings::setDisplayScale,
+                    valueRange = AppSettings.MIN_INTERFACE_SCALE..AppSettings.MAX_INTERFACE_SCALE,
+                    steps = INTERFACE_SCALE_STEPS,
+                )
+            }
+            val interfaceScaleResetTitle = stringResource(R.string.interface_scale_reset)
+            row(interfaceScaleResetTitle, "reset", "default", "scale", "font", "display", "text") {
+                SettingsRow(
+                    icon = Icons.Rounded.Cached,
+                    title = interfaceScaleResetTitle,
+                    subtitle = stringResource(R.string.interface_scale_reset_subtitle),
+                    onClick = { AppSettings.resetInterfaceScale() },
                 )
             }
             val reduceAnimationTitle = stringResource(R.string.reduce_animation)
@@ -2090,6 +2132,13 @@ private val CACHE_LIMIT_STOPS_MB = intArrayOf(
 /** Which rung [mb] is nearest, so a value stored off the ladder still lands on one. */
 private fun cacheStopIndex(mb: Int): Int =
     CACHE_LIMIT_STOPS_MB.indices.minByOrNull { abs(CACHE_LIMIT_STOPS_MB[it] - mb) } ?: 0
+
+/**
+ * The text and layout size sliders' rungs: twelve stops, five percent apart,
+ * across [AppSettings.MIN_INTERFACE_SCALE] to [AppSettings.MAX_INTERFACE_SCALE]
+ * — so ten of them between the two ends.
+ */
+private const val INTERFACE_SCALE_STEPS = 10
 
 /** "512 MB", "2 GB", "2.5 GB" — whichever reads more naturally at that size. */
 private fun formatCacheSize(mb: Int): String {

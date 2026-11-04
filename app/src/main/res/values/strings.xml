@@ -311,6 +311,13 @@
     <string name="custom_font_active">Using %1$s</string>
     <string name="custom_font_reset">Reset</string>
     <string name="custom_font_failed">That file could not be read as a font</string>
+    <string name="font_size">Font size</string>
+    <string name="font_size_subtitle">Type size, on top of the system\'s own font scale</string>
+    <string name="display_size">Display size</string>
+    <string name="display_size_subtitle">Spacing, icons and layout, on top of the system\'s display scale</string>
+    <string name="interface_scale_value">%1$d%%</string>
+    <string name="interface_scale_reset">Reset text and layout size</string>
+    <string name="interface_scale_reset_subtitle">Both back to 100 — the system\'s own scales, nothing added</string>
     <string name="reduce_animation">Reduce animation</string>
     <string name="reduce_animation_subtitle">Freezes the main player\'s gradient instead of drifting</string>
     <string name="reduce_dynamic_blur">Reduce dynamic blur</string>
