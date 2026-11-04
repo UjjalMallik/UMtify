@@ -5566,6 +5566,27 @@ class PlaybackService : MediaLibraryService() {
         return false
     }
 
+    /**
+     * The word the stats badge shows for [raw].
+     *
+     * The provider's own name is what pushed the badge past its width, and a
+     * listener comparing two streams does not care which build answered — only
+     * whether it was YouTube, the add-on, or the device. So the three routes the
+     * app can actually take are named once, here, and anything else keeps the
+     * name its manifest chose. An unknown route says nothing at all rather than
+     * "Unknown", which is a stat about the app and not about the audio.
+     */
+    private fun providerLabel(raw: String?): String? {
+        val name = raw?.trim()?.takeIf { it.isNotEmpty() && it != "Unknown" } ?: return null
+        return when {
+            name == "Local Storage" -> "Local"
+            name.contains("youtube", ignoreCase = true) ||
+                name.equals("InnerTube", ignoreCase = true) -> "YouTube"
+            name.contains("umtify", ignoreCase = true) || name == "Module" -> "UMtify"
+            else -> name
+        }
+    }
+
     private fun currentSourceName(mediaId: String?, mediaItem: MediaItem?): String? {
         val id = mediaId ?: return null
         if (isLocalPlayback(id, mediaItem)) {
@@ -5742,7 +5763,7 @@ class PlaybackService : MediaLibraryService() {
             channels = measured?.channels,
             bitDepth = if (dsd != null) 1 else if (isLossless) measured?.bitDepth else null,
             claimed = NerdStats.declaredFormat(mediaId),
-            sourceName = currentSourceName(mediaId, player.currentMediaItem),
+            sourceName = providerLabel(currentSourceName(mediaId, player.currentMediaItem)),
             requestedQuality = AppSettings.effectiveAudioQuality,
             container = when (format?.containerMimeType) {
                 "audio/x-dsf" -> "DSF"

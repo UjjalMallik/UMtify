@@ -26,7 +26,9 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -402,6 +404,7 @@ internal val NERD_STATS_BADGE_HEIGHT = 22.dp
  * belongs to the sleeve without competing with it.
  */
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 internal fun NerdStatsBadge(song: Song, modifier: Modifier = Modifier) {
     val showNerdStats by PlayerSettings.showNerdStats.collectAsStateWithLifecycle()
     if (!showNerdStats) return
@@ -473,9 +476,14 @@ internal fun NerdStatsBadge(song: Song, modifier: Modifier = Modifier) {
                 letterSpacing = 0.3.sp,
             ),
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+            // Scrolled rather than cut. The slot this sits in is one fixed line
+            // high, so wrapping is not available, and an ellipsis would hide the
+            // one part of the line a listener is most likely looking for — the
+            // source. Whatever does not fit walks past instead.
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            overflow = TextOverflow.Clip,
             textAlign = TextAlign.Start,
+            modifier = Modifier.basicMarquee(),
         )
     }
 }
@@ -2273,14 +2281,15 @@ private fun NerdStats.Snapshot.describe(): String? {
                 },
             )
         }
-        // Where the bytes came from, and what Settings asked for. Read together
-        // they are the whole answer to "did my Lossless switch do anything": an
-        // add-on with no copy of this track falls through to YouTube, and the
-        // codec line alone cannot tell that from a route that never looked.
-        // Phrased here rather than in the string resources, next to the "kbps"
-        // and "kHz" fragments above that have always been written inline.
+        // Where the bytes came from. Phrased here rather than in the string
+        // resources, next to the "kbps" and "kHz" fragments above that have
+        // always been written inline.
+        //
+        // The quality Settings was asked for is no longer appended: it restates
+        // a switch the listener already knows about, and it was the segment that
+        // pushed this line past the pill's width. The figure is still published
+        // on the snapshot, so a future read of it has not lost anything.
         sourceName?.let { add("from $it") }
-        requestedQuality?.let { add("set to ${it.label}") }
     }
     return parts.joinToString(" · ").takeIf { it.isNotEmpty() }
 }

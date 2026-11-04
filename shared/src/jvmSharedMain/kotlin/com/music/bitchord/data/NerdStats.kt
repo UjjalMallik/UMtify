@@ -54,11 +54,14 @@ object NerdStats {
         /**
          * What the quality setting asked for when this stream was chosen.
          *
-         * Kept next to [sourceName] rather than left in Settings because the two
-         * together are the only place the app shows what the Lossless switch
-         * actually did: "Opus · 160 kbps · from YouTube · set to Lossless" is an
-         * add-on that had no copy of this track, and the same line without the
-         * "set to" half would read as though nothing was wrong.
+         * Recorded next to [sourceName] because the two together are the whole
+         * answer to "did my Lossless switch do anything": an add-on that had no
+         * copy of this track falls through to YouTube, and the codec line alone
+         * cannot tell that from a route that never looked.
+         *
+         * Not shown on the stats pill any more — the pill has one line's width
+         * and the source is the half a listener is reading for. Nothing here
+         * decides that; see the badge's own comment in PlayerControls.
          */
         val requestedQuality: AudioQuality? = null,
         /**
