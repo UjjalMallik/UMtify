@@ -9,7 +9,7 @@ import coil3.request.ImageResult
 import coil3.request.error
 import coil3.request.fallback
 import coil3.request.placeholder
-import com.music.bitchord.R
+import com.music.bitchord.sharedui.R
 import java.io.ByteArrayOutputStream
 
 /**
@@ -27,7 +27,14 @@ import java.io.ByteArrayOutputStream
  */
 object DefaultCoverArt {
 
-    /** The shared artwork, at 1024px — square, so any tile can centre-crop it. */
+    /**
+     * The shared artwork, at 1024px — square, so any tile can centre-crop it.
+     *
+     * The file lives in `:sharedUi`'s `androidMain` resources, which is where
+     * [com.music.bitchord.ui.components.DefaultCoverTile] reads it from too;
+     * `nonTransitiveRClass` is on, so reaching it takes that module's `R` and not
+     * this app's.
+     */
     val RES_ID = R.drawable.default_cover
 
     /**

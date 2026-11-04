@@ -2277,8 +2277,10 @@ private fun NerdStats.Snapshot.describe(): String? {
         // they are the whole answer to "did my Lossless switch do anything": an
         // add-on with no copy of this track falls through to YouTube, and the
         // codec line alone cannot tell that from a route that never looked.
-        sourceName?.let { add(stringResource(Res.string.nerd_stats_source, it)) }
-        requestedQuality?.let { add(stringResource(Res.string.nerd_stats_requested, it.label)) }
+        // Phrased here rather than in the string resources, next to the "kbps"
+        // and "kHz" fragments above that have always been written inline.
+        sourceName?.let { add("from $it") }
+        requestedQuality?.let { add("set to ${it.label}") }
     }
     return parts.joinToString(" · ").takeIf { it.isNotEmpty() }
 }

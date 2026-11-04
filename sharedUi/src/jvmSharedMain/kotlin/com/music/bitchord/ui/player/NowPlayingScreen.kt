@@ -3200,6 +3200,7 @@ fun NowPlayingScreen(
                                             scaleX = scale
                                             scaleY = scale
                                         },
+                                        contentScale = ContentScale.Crop,
                                     )
                                 }
                             }
