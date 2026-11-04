@@ -8,7 +8,6 @@ import coil3.intercept.Interceptor
 import coil3.request.ImageResult
 import coil3.request.error
 import coil3.request.fallback
-import coil3.request.placeholder
 import com.music.bitchord.sharedui.R
 import java.io.ByteArrayOutputStream
 
@@ -77,10 +76,16 @@ object DefaultCoverArt {
  *
  * Where it lands: a null or blank URL (Coil's `NullRequestDataException` path
  * resolves `fallback`, which is the row's case for a track with no
- * `thumbnailUrl`), a 404 or an offline failure (`error`), and any `ImageView`
- * or `SubcomposeAsyncImage` while loading (`placeholder`). Compose's plain
- * `AsyncImage` paints nothing until a result arrives, so those tiles show their
- * own background for a moment and the cover instead of a blank box after.
+ * `thumbnailUrl`) and a 404 or an offline failure (`error`) — both of which are
+ * answers that do not change, so painting them costs the user nothing to look
+ * at.
+ *
+ * Never as a `placeholder`, which is the same picture one step earlier and is
+ * the wrong step: a placeholder is shown while a real cover is still on its way,
+ * so every track with artwork would open on UMtify's sleeve and swap a moment
+ * later. An unloaded tile therefore stays exactly as its host drew it — the
+ * palette-tinted square behind a row or the player sleeve — and the cover
+ * arrives once, when there is a cover or when there never will be.
  */
 class DefaultCoverFallback : Interceptor {
     override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
@@ -91,7 +96,6 @@ class DefaultCoverFallback : Interceptor {
         if (chosenByCaller) return chain.proceed()
         return chain.withRequest(
             request.newBuilder()
-                .placeholder(DefaultCoverArt.RES_ID)
                 .error(DefaultCoverArt.RES_ID)
                 .fallback(DefaultCoverArt.RES_ID)
                 .build(),

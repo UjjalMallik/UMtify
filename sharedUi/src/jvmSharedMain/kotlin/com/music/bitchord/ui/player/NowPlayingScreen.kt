@@ -3193,7 +3193,14 @@ fun NowPlayingScreen(
                                     },
                                 contentAlignment = Alignment.Center,
                             ) {
-                                if (!art.loaded && !canvasRendered) {
+                                // Absence, not loading. `!art.loaded` is true for
+                                // every track whose cover is still on its way, so
+                                // the sleeve flashed over the real artwork on
+                                // every one of them; it shows now only when the
+                                // URL was never there, or the retries used it up.
+                                val artIsGone = art.url == null ||
+                                    (art.failed && art.attempt >= ART_RETRIES)
+                                if (artIsGone && !canvasRendered) {
                                     DefaultCoverTile(
                                         modifier = Modifier.graphicsLayer {
                                             val scale = 1f - 0.5f * p()
