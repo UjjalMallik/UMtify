@@ -26,9 +26,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -45,6 +43,7 @@ import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -391,8 +390,13 @@ internal fun PlaybackQualityLabel(
     )
 }
 
-/** The pill's height, reserved by the layouts that place it. */
-internal val NERD_STATS_BADGE_HEIGHT = 22.dp
+/**
+ * The pill's height, reserved by the layouts that place it.
+ *
+ * Its line is 10sp inside a 16sp line box, plus the 4dp the pill pads above and
+ * below. Anything shorter and the clip would shave the glyphs.
+ */
+internal val NERD_STATS_BADGE_HEIGHT = 24.dp
 
 /**
  * Stats for nerds as a whisper of glass: the measured stream and, when Automix
@@ -404,7 +408,6 @@ internal val NERD_STATS_BADGE_HEIGHT = 22.dp
  * belongs to the sleeve without competing with it.
  */
 @Composable
-@OptIn(ExperimentalFoundationApi::class)
 internal fun NerdStatsBadge(song: Song, modifier: Modifier = Modifier) {
     val showNerdStats by PlayerSettings.showNerdStats.collectAsStateWithLifecycle()
     if (!showNerdStats) return
@@ -451,12 +454,13 @@ internal fun NerdStatsBadge(song: Song, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
             .widthIn(max = 320.dp)
-            .height(NERD_STATS_BADGE_HEIGHT)
+            .wrapContentWidth()
+            .heightIn(min = NERD_STATS_BADGE_HEIGHT)
             .clip(shape)
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.16f))
             .background(Color.White.copy(alpha = 0.08f))
             .border(0.5.dp, Color.White.copy(alpha = 0.16f), shape)
-            .padding(horizontal = 10.dp, vertical = 3.dp),
+            .padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
@@ -476,14 +480,16 @@ internal fun NerdStatsBadge(song: Song, modifier: Modifier = Modifier) {
                 letterSpacing = 0.3.sp,
             ),
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
-            // Scrolled rather than cut. The slot this sits in is one fixed line
-            // high, so wrapping is not available, and an ellipsis would hide the
-            // one part of the line a listener is most likely looking for — the
-            // source. Whatever does not fit walks past instead.
+            // One still line, and the pill is sized to it rather than the other
+            // way round: no wrap (which the reserved slot has no room for) and no
+            // scroll (which turned a figure you meant to read into one you had to
+            // wait for). Only a line longer than any track's stats can be — the
+            // Automix wording — reaches the 320dp ceiling, and there it is cut
+            // rather than moved.
             maxLines = 1,
+            softWrap = false,
             overflow = TextOverflow.Clip,
             textAlign = TextAlign.Start,
-            modifier = Modifier.basicMarquee(),
         )
     }
 }
@@ -2281,15 +2287,15 @@ private fun NerdStats.Snapshot.describe(): String? {
                 },
             )
         }
-        // Where the bytes came from. Phrased here rather than in the string
-        // resources, next to the "kbps" and "kHz" fragments above that have
-        // always been written inline.
+        // Where the bytes came from is deliberately absent. It is the segment
+        // that pushed this line past the pill's width, and a source name is a
+        // thing you look up rather than a figure you watch: the audio pipeline
+        // sheet still says it, and the snapshot still carries it.
         //
-        // The quality Settings was asked for is no longer appended: it restates
-        // a switch the listener already knows about, and it was the segment that
-        // pushed this line past the pill's width. The figure is still published
-        // on the snapshot, so a future read of it has not lost anything.
-        sourceName?.let { add("from $it") }
+        // The quality Settings was asked for is no longer appended either: it
+        // restates a switch the listener already knows about. That figure is
+        // still published on the snapshot, so a future read of it has not lost
+        // anything.
     }
     return parts.joinToString(" · ").takeIf { it.isNotEmpty() }
 }
