@@ -232,26 +232,6 @@
     <string name="storage">Storage</string>
     <string name="your_data">Your data</string>
     <string name="miscellaneous">Miscellaneous</string>
-    <!-- The six category cards the Settings hub is made of, and the section
-         headers those sub-screens are split into. English only: every locale
-         falls back to these until they are translated. -->
-    <string name="settings_category_audio">Audio &amp; Playback</string>
-    <string name="settings_category_audio_summary">Audio sources, Lossless quality, Dolby Atmos, Equalizer &amp; Automix</string>
-    <string name="settings_category_appearance">Appearance &amp; Display</string>
-    <string name="settings_category_appearance_summary">Theme, Custom font, Font &amp; Display size, App icon &amp; Performance</string>
-    <string name="settings_category_player">Player &amp; Lyrics</string>
-    <string name="settings_category_player_summary">Cover art styles, Synced lyrics, Action bar buttons &amp; Player UI</string>
-    <string name="settings_category_storage">Downloads, Local &amp; Storage</string>
-    <string name="settings_category_storage_summary">Download quality, Local folders, Song cache &amp; Storage cleanup</string>
-    <string name="settings_category_data">Your Data &amp; Behavior</string>
-    <string name="settings_category_data_summary">Replay stats, Backup/Restore &amp; Playback behavior</string>
-    <string name="settings_category_language">Language &amp; Advanced</string>
-    <string name="settings_category_language_summary">App language, Smart audio alignment &amp; Stats for nerds</string>
-    <string name="settings_section_cover_art">Cover art</string>
-    <string name="settings_section_lyrics">Lyrics</string>
-    <string name="settings_section_action_bar">Action bar</string>
-    <string name="settings_section_player">Player</string>
-    <string name="settings_section_behavior">Behavior</string>
     <string name="lossless_hq_audio">Lossless / HQ Audio</string>
     <string name="on_wifi">On Wi-Fi</string>
     <string name="on_mobile_data">On mobile data</string>
