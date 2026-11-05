@@ -463,10 +463,18 @@ class MainActivity : AppCompatActivity() {
                 // A measured constraint cannot be stale — it is the very width
                 // the split is about to be laid out in.
                 BoxWithConstraints(Modifier.fillMaxSize()) {
+                    // The cap on the floating bars is a physical width, but dp is
+                    // the unit that stretches when the display size is set below
+                    // 100%: a phone shrunk to 85% suddenly reports more dp than a
+                    // tablet's limit, and its bars stop short of the page's edges
+                    // instead of running to them. Counted back up by the same
+                    // factor the density was counted down by, the limit stays the
+                    // width it was drawn for at every scale.
                     BitChordApp(
                         darkTheme = darkTheme,
                         windowWidth = maxWidth,
                         windowHeight = maxHeight,
+                        floatingBarMaxWidth = FLOATING_BAR_MAX_WIDTH / appDisplayScale,
                         appBackdrop = appBackdrop,
                         controller = controller,
                         player = player,
@@ -528,6 +536,13 @@ private fun BitChordApp(
      * would fire in portrait too if it only ever asked about width.
      */
     windowHeight: Dp,
+    /**
+     * How wide the bars at the foot of the page may get, already corrected for
+     * the app's display size — see the call site. Measured the same way as
+     * [windowWidth] so the two are counted in the same dp and the bars can stop
+     * short of a limit the page itself has already passed.
+     */
+    floatingBarMaxWidth: Dp,
     appBackdrop: LayerBackdrop,
     /** Bound above the theme so the dynamic scheme can read the current song. */
     controller: MediaController?,
@@ -4091,7 +4106,7 @@ private fun BitChordApp(
                 if (glassActive) Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .widthIn(max = FLOATING_BAR_MAX_WIDTH)
+                        .widthIn(max = floatingBarMaxWidth)
                         .fillMaxWidth()
                         .onSizeChanged { floatingBarsHeight.intValue = it.height },
                 ) {
@@ -4128,12 +4143,12 @@ private fun BitChordApp(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         // Capped and centred rather than run to the page's edges
-                        // — see [FLOATING_BAR_MAX_WIDTH]. It sits on the Column
+                        // — see [floatingBarMaxWidth]. It sits on the Column
                         // rather than on each bar so the two are held to the same
                         // width and keep the shared left and right edge they have
                         // on a phone. Before fillMaxWidth, so the fill has
                         // already been bounded by the time it is applied.
-                        .widthIn(max = FLOATING_BAR_MAX_WIDTH)
+                        .widthIn(max = floatingBarMaxWidth)
                         .fillMaxWidth()
                         .onSizeChanged { floatingBarsHeight.intValue = it.height },
                     horizontalAlignment = Alignment.CenterHorizontally,
