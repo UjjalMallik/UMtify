@@ -67,6 +67,7 @@ fun AccountProfileSelector(
     onOpenSettings: () -> Unit,
     onDismiss: () -> Unit,
     bottomPadding: Dp = 100.dp,
+    maxWidth: Dp = FLOATING_BAR_MAX_WIDTH,
     modifier: Modifier = Modifier,
 ) {
     var managing by remember { mutableStateOf(false) }
@@ -86,73 +87,80 @@ fun AccountProfileSelector(
             .clickable(onClick = onDismiss),
         contentAlignment = Alignment.BottomCenter,
     ) {
-        Surface(
-            color = Color.Transparent,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            shape = shape,
+        Box(
             modifier = Modifier
-                .padding(start = 20.dp, end = 20.dp, bottom = bottomPadding)
-                .widthIn(max = 400.dp)
-                .fillMaxWidth()
-                .clip(shape)
-                .then(
-                    when {
-                        useGlass && !reduceDynamicBlur -> Modifier.liquidGlass(shape = shape)
-                        reduceDynamicBlur -> Modifier.background(MaterialTheme.colorScheme.surface)
-                        else -> Modifier
-                            .optimizedHazeEffect(
-                                state = hazeState,
-                                style = HazeMaterials.regular(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)),
-                            )
-                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.65f))
-                    },
-                )
-                .border(1.dp, borderBrush, shape)
-                .clickable(onClick = {}),
+                .widthIn(max = maxWidth)
+                .fillMaxWidth(),
+            contentAlignment = Alignment.BottomEnd,
         ) {
-            LazyColumn(
-                modifier = Modifier.heightIn(max = 420.dp),
-            ) {
-                item(key = "title", contentType = "header") {
-                    Text(
-                        stringResource(R.string.switch_account),
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(20.dp, 18.dp, 20.dp, 8.dp),
+            Surface(
+                color = Color.Transparent,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                shape = shape,
+                modifier = Modifier
+                    .padding(start = 24.dp, end = 16.dp, bottom = bottomPadding)
+                    .widthIn(max = 330.dp)
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .then(
+                        when {
+                            useGlass && !reduceDynamicBlur -> Modifier.liquidGlass(shape = shape)
+                            reduceDynamicBlur -> Modifier.background(MaterialTheme.colorScheme.surface)
+                            else -> Modifier
+                                .optimizedHazeEffect(
+                                    state = hazeState,
+                                    style = HazeMaterials.regular(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)),
+                                )
+                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.65f))
+                        },
                     )
-                }
-                accounts.forEach { account ->
-                    item(key = "account_label_${account.accountId}", contentType = "account_label") {
+                    .border(1.dp, borderBrush, shape)
+                    .clickable(onClick = {}),
+            ) {
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 420.dp),
+                ) {
+                    item(key = "title", contentType = "header") {
                         Text(
-                            account.email.ifBlank { account.name.ifBlank { stringResource(R.string.accounts) } },
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(20.dp, 12.dp, 20.dp, 4.dp),
+                            stringResource(R.string.switch_account),
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(20.dp, 18.dp, 20.dp, 8.dp),
                         )
                     }
-                    items(
-                        count = account.profiles.size,
-                        key = { index -> "profile_${account.accountId}_${account.profiles[index].profileId}" },
-                        contentType = { "profile_row" },
-                    ) { index ->
-                        val profile = account.profiles[index]
-                        ProfileRow(
-                            profile,
-                            account.accountId == activeAccountId && profile.profileId == activeProfileId,
-                            managing,
-                            { onSelect(account, profile); onDismiss() },
-                            { onRemoveAccount(account) },
-                        )
+                    accounts.forEach { account ->
+                        item(key = "account_label_${account.accountId}", contentType = "account_label") {
+                            Text(
+                                account.email.ifBlank { account.name.ifBlank { stringResource(R.string.accounts) } },
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(20.dp, 12.dp, 20.dp, 4.dp),
+                            )
+                        }
+                        items(
+                            count = account.profiles.size,
+                            key = { index -> "profile_${account.accountId}_${account.profiles[index].profileId}" },
+                            contentType = { "profile_row" },
+                        ) { index ->
+                            val profile = account.profiles[index]
+                            ProfileRow(
+                                profile,
+                                account.accountId == activeAccountId && profile.profileId == activeProfileId,
+                                managing,
+                                { onSelect(account, profile); onDismiss() },
+                                { onRemoveAccount(account) },
+                            )
+                        }
                     }
-                }
-                item(key = "add_account", contentType = "action") {
-                    SelectorAction(Icons.Rounded.Add, stringResource(R.string.add_account), onAddAccount)
-                }
-                item(key = "manage_accounts", contentType = "action") {
-                    SelectorAction(Icons.Rounded.ManageAccounts, stringResource(R.string.manage_accounts)) { managing = !managing }
-                }
-                item(key = "settings", contentType = "action") {
-                    SelectorAction(Icons.Rounded.Settings, stringResource(R.string.settings), onOpenSettings)
+                    item(key = "add_account", contentType = "action") {
+                        SelectorAction(Icons.Rounded.Add, stringResource(R.string.add_account), onAddAccount)
+                    }
+                    item(key = "manage_accounts", contentType = "action") {
+                        SelectorAction(Icons.Rounded.ManageAccounts, stringResource(R.string.manage_accounts)) { managing = !managing }
+                    }
+                    item(key = "settings", contentType = "action") {
+                        SelectorAction(Icons.Rounded.Settings, stringResource(R.string.settings), onOpenSettings)
+                    }
                 }
             }
         }

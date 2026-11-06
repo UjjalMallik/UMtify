@@ -5266,6 +5266,7 @@ private fun BitChordApp(
                 },
                 onDismiss = { showAccountSelector = false },
                 bottomPadding = bottomBarsDp + 10.dp,
+                maxWidth = floatingBarMaxWidth,
             )
         }
 
