@@ -777,6 +777,29 @@ private fun BitChordApp(
     // signal to focus the input field.
     var searchFocusRequested by remember { mutableStateOf(false) }
     val searchFieldFocus = remember { FocusRequester() }
+    // One tab handler across the whole app.
+    val onTabSelected: (Int) -> Unit = { index ->
+        viewModel.clearDetail()
+        viewModel.closeMoodGenre()
+        showSettings = false
+        showAccountScrobbling = false
+        showSources = false
+        showListenTogether = false
+        showWearOs = false
+        showEqualizer = false
+        showReplay = false
+        settingsSubScreen = null
+        showHistory = false
+        libraryShowAll = null
+        selectedTab = index
+
+        // Every search tab tap resets the field, focuses it, and opens
+        // the keyboard through SearchScreen's focus request.
+        if (index == TAB_SEARCH) {
+            viewModel.onQueryChange("")
+            searchFocusRequested = true
+        }
+    }
     // Invalidates an in-flight radio lookup when a later play request wins.
     var playRequestGeneration by remember { mutableIntStateOf(0) }
     // Starting radio from the item already playing must not replace that media
@@ -4067,30 +4090,6 @@ private fun BitChordApp(
                     barsHeight = { floatingBarsHeight.intValue },
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
-
-                // One tab handler, whichever bar is drawing it.
-                val onTabSelected: (Int) -> Unit = { index ->
-                    viewModel.clearDetail()
-                    viewModel.closeMoodGenre()
-                    showSettings = false
-                    showAccountScrobbling = false
-                    showSources = false
-                    showListenTogether = false
-                    showWearOs = false
-                    showEqualizer = false
-                    showReplay = false
-                    settingsSubScreen = null
-                    showHistory = false
-                    libraryShowAll = null
-                    selectedTab = index
-
-                    // Every search tab tap resets the field, focuses it, and opens
-                    // the keyboard through SearchScreen's focus request.
-                    if (index == TAB_SEARCH) {
-                        viewModel.onQueryChange("")
-                        searchFocusRequested = true
-                    }
-                }
 
                 if (glassActive) Column(
                     modifier = Modifier
