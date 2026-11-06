@@ -25,7 +25,10 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -45,13 +48,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
+import com.music.bitchord.R
+import com.music.bitchord.data.model.Account
 import com.music.bitchord.data.settings.AppSettings
+import com.music.bitchord.ui.components.thumbnailBorder
 import com.music.bitchord.ui.haptics.Haptic
 import com.music.bitchord.ui.haptics.rememberHaptics
 import dev.chrisbanes.haze.HazeState
@@ -155,9 +164,13 @@ fun FloatingBottomBar(
     selectedIndex: Int,
     onTabSelected: (Int) -> Unit,
     hazeState: HazeState,
+    account: Account? = null,
+    onProfileClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val pillTabs = if (tabs.size > 3) tabs.dropLast(1) else tabs
     val pillShape = RoundedCornerShape(percent = 50)
+    val circleShape = CircleShape
     val container = MaterialTheme.colorScheme.surface
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
     val useGlass = LocalLiquidGlassEnabled.current && isGlassSupported()
@@ -174,7 +187,7 @@ fun FloatingBottomBar(
 
     var rowSize by remember { mutableStateOf(IntSize.Zero) }
     val gapPx = with(density) { 6.dp.toPx() }
-    val n = tabs.size
+    val n = pillTabs.size
 
     // With weight(1f) + spacedBy(gap):
     //   tabWidth = (rowWidth - gap*(n-1)) / n
@@ -187,7 +200,7 @@ fun FloatingBottomBar(
     } else 0f
 
     val pillTargetPx = if (tabStepPx > 0f) {
-        selectedIndex * tabStepPx + dragOffset
+        selectedIndex.coerceIn(0, pillTabs.lastIndex) * tabStepPx + dragOffset
     } else 0f
 
     val animatedPillOffset by animateFloatAsState(
@@ -211,106 +224,172 @@ fun FloatingBottomBar(
 
     LaunchedEffect(selectedIndex) { dragOffset = 0f }
 
-    Box(
+    val glassModifier = if (reduceDynamicBlur) {
+        Modifier.background(container)
+    } else if (useGlass) {
+        Modifier.liquidGlass(shape = pillShape)
+    } else {
+        Modifier.optimizedHazeEffect(
+            state = hazeState,
+            style = HazeMaterials.regular(container),
+        )
+    }
+
+    val circleGlassModifier = if (reduceDynamicBlur) {
+        Modifier.background(container)
+    } else if (useGlass) {
+        Modifier.liquidGlass(shape = circleShape)
+    } else {
+        Modifier.optimizedHazeEffect(
+            state = hazeState,
+            style = HazeMaterials.regular(container),
+        )
+    }
+
+    Row(
         modifier = modifier
             .windowInsetsPadding(floatingBarInsets)
             .padding(horizontal = BAR_GUTTER)
             .padding(bottom = 2.dp)
-            .fillMaxWidth()
-            .clip(pillShape)
-            .then(
-                if (reduceDynamicBlur) {
-                    Modifier.background(container)
-                } else if (useGlass) {
-                    Modifier.liquidGlass(shape = pillShape)
-                } else {
-                    Modifier.optimizedHazeEffect(
-                        state = hazeState,
-                        style = HazeMaterials.regular(container),
-                    )
-                },
-            )
-            .border(GLASS_EDGE_WIDTH, GLASS_EDGE_COLOR, pillShape)
-            .padding(horizontal = PILL_INSET, vertical = PILL_INSET),
+            .fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (tabWidthPx > 0f) {
-            Box(
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .clip(pillShape)
+                .then(glassModifier)
+                .border(GLASS_EDGE_WIDTH, GLASS_EDGE_COLOR, pillShape)
+                .padding(horizontal = PILL_INSET, vertical = PILL_INSET),
+        ) {
+            if (tabWidthPx > 0f && selectedIndex in pillTabs.indices) {
+                Box(
+                    modifier = Modifier
+                        .width(with(density) { tabWidthPx.toDp() })
+                        .height(with(density) { rowSize.height.toDp() })
+                        .graphicsLayer {
+                            translationX = animatedPillOffset
+                            // Around its own centre, so the indicator draws out
+                            // both ways rather than growing a tail off one edge —
+                            // a leading edge that ran ahead of the glyph it is
+                            // meant to be behind would read as two things moving,
+                            // not one thing stretching.
+                            scaleX = 1f + lag * STRETCH
+                            scaleY = 1f - lag * STRETCH * SQUASH
+                        }
+                        .clip(pillShape)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+                )
+            }
+
+            Row(
                 modifier = Modifier
-                    .width(with(density) { tabWidthPx.toDp() })
-                    .height(with(density) { rowSize.height.toDp() })
-                    .graphicsLayer {
-                        translationX = animatedPillOffset
-                        // Around its own centre, so the indicator draws out
-                        // both ways rather than growing a tail off one edge —
-                        // a leading edge that ran ahead of the glyph it is
-                        // meant to be behind would read as two things moving,
-                        // not one thing stretching.
-                        scaleX = 1f + lag * STRETCH
-                        scaleY = 1f - lag * STRETCH * SQUASH
-                    }
-                    .clip(pillShape)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
-            )
+                    .fillMaxWidth()
+                    .onSizeChanged { rowSize = it }
+                    .pointerInput(Unit) {
+                        var totalDrag = 0f
+                        var dragStartIndex = selectedIndex.coerceIn(0, pillTabs.lastIndex)
+                        detectHorizontalDragGestures(
+                            onDragStart = {
+                                totalDrag = 0f
+                                dragStartIndex = selectedIndex.coerceIn(0, pillTabs.lastIndex)
+                            },
+                            onDragCancel = { dragOffset = 0f },
+                            onDragEnd = {
+                                if (tabStepPx > 0f) {
+                                    val absoluteIndexFloat = (dragStartIndex + totalDrag / tabStepPx)
+                                        .coerceIn(0f, pillTabs.lastIndex.toFloat())
+                                    val newIndex = absoluteIndexFloat.roundToInt()
+                                    if (newIndex != selectedIndex) {
+                                        onTabSelected(newIndex)
+                                    }
+                                }
+                                dragOffset = 0f
+                            },
+                            onHorizontalDrag = { _, delta ->
+                                totalDrag += delta
+                                val absoluteIndexFloat = (dragStartIndex + totalDrag / tabStepPx)
+                                    .coerceIn(0f, pillTabs.lastIndex.toFloat())
+                                dragOffset = absoluteIndexFloat * tabStepPx - selectedIndex * tabStepPx
+
+                                val approxTab = absoluteIndexFloat.roundToInt()
+                                if (approxTab != lastHapticTab) {
+                                    haptics.play(Haptic.Tick)
+                                    lastHapticTab = approxTab
+                                }
+                            },
+                        )
+                    },
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // A real glass pill samples whatever artwork is behind it, not the
+                // theme's surface color, so a fixed onSurfaceVariant gray can lose
+                // contrast against it. Glass mode reads luminance off the surface
+                // color instead and picks pure black or white, same as the tint
+                // Echo's floating nav bar uses for its own liquid glass.
+                val glassTint = glassContentColor()
+                val adaptiveTint = if (useGlass) glassTint else null
+                pillTabs.forEachIndexed { index, tab ->
+                    BottomBarItem(
+                        tab = tab,
+                        selected = index == selectedIndex,
+                        glassSpec = glassSpec,
+                        selectedTint = adaptiveTint,
+                        unselectedTint = adaptiveTint?.copy(alpha = 0.65f),
+                        onClick = { onTabSelected(index) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
         }
 
-        Row(
+        val circleSize = with(density) {
+            if (rowSize.height > 0) (rowSize.height.toDp() + PILL_INSET * 2) else 50.dp
+        }
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .onSizeChanged { rowSize = it }
-                .pointerInput(Unit) {
-                    var totalDrag = 0f
-                    var dragStartIndex = selectedIndex
-                    detectHorizontalDragGestures(
-                        onDragStart = {
-                            totalDrag = 0f
-                            dragStartIndex = selectedIndex
-                        },
-                        onDragCancel = { dragOffset = 0f },
-                        onDragEnd = {
-                            if (tabStepPx > 0f) {
-                                val absoluteIndexFloat = (dragStartIndex + totalDrag / tabStepPx)
-                                    .coerceIn(0f, tabs.lastIndex.toFloat())
-                                val newIndex = absoluteIndexFloat.roundToInt()
-                                if (newIndex != selectedIndex) {
-                                    onTabSelected(newIndex)
-                                }
-                            }
-                            dragOffset = 0f
-                        },
-                        onHorizontalDrag = { _, delta ->
-                            totalDrag += delta
-                            val absoluteIndexFloat = (dragStartIndex + totalDrag / tabStepPx)
-                                .coerceIn(0f, tabs.lastIndex.toFloat())
-                            dragOffset = absoluteIndexFloat * tabStepPx - selectedIndex * tabStepPx
-
-                            val approxTab = absoluteIndexFloat.roundToInt()
-                            if (approxTab != lastHapticTab) {
-                                haptics.play(Haptic.Tick)
-                                lastHapticTab = approxTab
-                            }
-                        },
-                    )
+                .size(circleSize)
+                .clip(circleShape)
+                .then(circleGlassModifier)
+                .border(GLASS_EDGE_WIDTH, GLASS_EDGE_COLOR, circleShape)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) {
+                    haptics.play(Haptic.Select)
+                    onProfileClick()
                 },
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            contentAlignment = Alignment.Center,
         ) {
-            // A real glass pill samples whatever artwork is behind it, not the
-            // theme's surface color, so a fixed onSurfaceVariant gray can lose
-            // contrast against it. Glass mode reads luminance off the surface
-            // color instead and picks pure black or white, same as the tint
-            // Echo's floating nav bar uses for its own liquid glass.
-            val glassTint = glassContentColor()
-            val adaptiveTint = if (useGlass) glassTint else null
-            tabs.forEachIndexed { index, tab ->
-                BottomBarItem(
-                    tab = tab,
-                    selected = index == selectedIndex,
-                    glassSpec = glassSpec,
-                    selectedTint = adaptiveTint,
-                    unselectedTint = adaptiveTint?.copy(alpha = 0.65f),
-                    onClick = { onTabSelected(index) },
-                    modifier = Modifier.weight(1f),
+            val photo = account?.thumbnailUrl
+            if (photo != null) {
+                AsyncImage(
+                    model = photo,
+                    contentDescription = stringResource(R.string.settings),
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .thumbnailBorder(CircleShape),
                 )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f))
+                        .thumbnailBorder(CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Person,
+                        contentDescription = stringResource(R.string.settings),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(17.dp),
+                    )
+                }
             }
         }
     }

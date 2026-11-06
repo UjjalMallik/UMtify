@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -101,6 +102,7 @@ fun OfflineHomeScreen(
     onShuffleAll: (songs: List<Song>, source: String) -> Unit,
     currentSong: Song?,
     isPlaying: Boolean,
+    onSearchClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val downloadsLabel = stringResource(R.string.downloads)
@@ -119,7 +121,7 @@ fun OfflineHomeScreen(
         modifier = modifier.fillMaxSize(),
         contentPadding = contentPadding,
     ) {
-        item(key = "offline-title") { OfflineTitle(title) }
+        item(key = "offline-title") { OfflineTitle(title, onSearchClick) }
         item(key = "offline-network-chip") {
             OfflineChip(
                 networkAvailable = networkAvailable,
@@ -340,20 +342,54 @@ private fun LazyListScope.songRows(
 
 /** The page heading: the wordmark and the tab's name, as the online feed has them. */
 @Composable
-private fun OfflineTitle(title: String) {
+private fun OfflineTitle(title: String, onSearchClick: (() -> Unit)? = null) {
     val style = MaterialTheme.typography.displayLarge
-    val logoHeight = with(LocalDensity.current) { (style.fontSize * LOGO_TO_FONT).toDp() }
+    val pillShape = RoundedCornerShape(percent = 50)
     Column(Modifier.padding(horizontal = PAGE_GUTTER, vertical = 8.dp)) {
-        Image(
-            painter = painterResource(R.drawable.ic_umtify_wordmark),
-            contentDescription = null,
-            colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground),
-            contentScale = ContentScale.FillHeight,
+        Row(
             modifier = Modifier
                 .padding(bottom = 14.dp)
-                .height(logoHeight)
-                .aspectRatio(WORDMARK_ASPECT),
-        )
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Image(
+                painter = painterResource(R.drawable.ic_umtify_wordmark),
+                contentDescription = null,
+                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground),
+                contentScale = ContentScale.FillHeight,
+                modifier = Modifier
+                    .height(30.dp)
+                    .aspectRatio(WORDMARK_ASPECT),
+            )
+            if (onSearchClick != null) {
+                Spacer(Modifier.width(12.dp))
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(38.dp)
+                        .clip(pillShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                        .clickable(onClick = onSearchClick)
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Search,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "Search songs, artists...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
         Text(text = title, style = style, color = MaterialTheme.colorScheme.onBackground)
     }
 }

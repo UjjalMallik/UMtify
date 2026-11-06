@@ -29,9 +29,11 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -51,7 +53,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 import com.music.bitchord.R
+import com.music.bitchord.ui.components.thumbnailBorder
 import com.music.bitchord.data.model.ROW_ART_PX
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.artworkAt
@@ -97,6 +101,8 @@ fun GlassNavBar(
     /** @see com.music.bitchord.data.listentogether.ListenTogether.State.controlsLocked */
     controlsLocked: Boolean = false,
     onBlockedControl: () -> Unit = {},
+    account: com.music.bitchord.data.model.Account? = null,
+    onProfileClick: () -> Unit = {},
     /** Where the player's artwork lands when it closes into this bar. */
     dock: PlayerDock? = null,
     /** Dragging the bar's player up into the full player. */
@@ -206,8 +212,8 @@ fun GlassNavBar(
         ),
         // Held too: this is declared `Any?`, so a fresh list every pass is a
         // changed argument by identity and defeats skipping on its own.
-        contentKey = remember(selectedIndex, tabs, contentColor) {
-            listOf(selectedIndex, tabs, contentColor)
+        contentKey = remember(selectedIndex, tabs, contentColor, account) {
+            listOf(selectedIndex, tabs, contentColor, account)
         },
     ) {
         tabs.forEachIndexed { index, tab ->
@@ -221,14 +227,12 @@ fun GlassNavBar(
                 standaloneTab(
                     key = index,
                     icon = {
-                        Icon(
-                            imageVector = tab.icon,
-                            contentDescription = tab.label,
-                            tint = tint,
-                            modifier = Modifier.size(25.dp),
+                        ProfileCircle(
+                            account = account,
+                            contentColor = tint,
                         )
                     },
-                    onClick = onClick,
+                    onClick = { haptics.play(Haptic.Select); onProfileClick() },
                 )
             } else {
                 tab(
@@ -444,6 +448,41 @@ private fun GlassNowPlaying(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ProfileCircle(
+    account: com.music.bitchord.data.model.Account?,
+    contentColor: Color,
+) {
+    val photo = account?.thumbnailUrl
+    if (photo != null) {
+        AsyncImage(
+            model = photo,
+            contentDescription = stringResource(R.string.settings),
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(26.dp)
+                .clip(CircleShape)
+                .thumbnailBorder(CircleShape),
+        )
+    } else {
+        Box(
+            modifier = Modifier
+                .size(26.dp)
+                .clip(CircleShape)
+                .background(contentColor.copy(alpha = 0.15f))
+                .thumbnailBorder(CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Rounded.Person,
+                contentDescription = stringResource(R.string.settings),
+                tint = contentColor,
+                modifier = Modifier.size(17.dp),
+            )
         }
     }
 }

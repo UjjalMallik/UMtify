@@ -59,6 +59,7 @@ import androidx.compose.material.icons.rounded.Cached
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Storage
 import com.music.bitchord.ui.icons.BitChordIcons
 import coil3.compose.AsyncImage
@@ -147,6 +148,7 @@ fun HomeScreen(
     leadHero: Boolean = true,
     currentSong: Song? = null,
     isPlaying: Boolean = false,
+    onSearchClick: (() -> Unit)? = null,
 ) {
     val recentsViewType by AppUi.host.homeRecentsViewType.collectAsStateWithLifecycle()
 
@@ -171,7 +173,7 @@ fun HomeScreen(
             },
         ) {
             if (title != null) {
-                item(key = "home-title") { HomeTitle(title, wordmark) }
+                item(key = "home-title") { HomeTitle(title, wordmark, onSearchClick) }
             }
             if (!signedIn && onSignIn != null) {
                 item(key = "sign-in-banner") {
@@ -519,19 +521,54 @@ fun CompactTrackRow(
 private fun HomeTitle(
     title: String,
     wordmark: @Composable () -> Unit,
+    onSearchClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val style = MaterialTheme.typography.displayLarge
-    val logoHeight = with(LocalDensity.current) { (style.fontSize * LOGO_TO_FONT).toDp() }
+    val pillShape = RoundedCornerShape(percent = 50)
     Column(modifier = modifier.padding(horizontal = PAGE_GUTTER, vertical = 8.dp)) {
-        Box(
+        Row(
             modifier = Modifier
                 .padding(bottom = 14.dp)
-                .height(logoHeight)
-                .aspectRatio(WORDMARK_ASPECT),
-            contentAlignment = Alignment.CenterStart,
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            wordmark()
+            Box(
+                modifier = Modifier
+                    .height(30.dp)
+                    .aspectRatio(WORDMARK_ASPECT),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                wordmark()
+            }
+            if (onSearchClick != null) {
+                Spacer(Modifier.width(12.dp))
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(38.dp)
+                        .clip(pillShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                        .clickable(onClick = onSearchClick)
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Search,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "Search songs, artists...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
         Text(
             text = title,

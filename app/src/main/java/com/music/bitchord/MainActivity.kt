@@ -3220,6 +3220,7 @@ private fun BitChordApp(
                                     },
                                     currentSong = player.song,
                                     isPlaying = player.isPlaying,
+                                    onSearchClick = { onTabSelected(TAB_SEARCH) },
                                 )
                             } else {
                                 HomeScreen(
@@ -3269,6 +3270,7 @@ private fun BitChordApp(
                                     onLoadMore = viewModel::loadMoreHome,
                                     loadingMore = homeLoadingMore,
                                     recentlyPlayedLoading = homeRecentlyPlayedLoading,
+                                    onSearchClick = { onTabSelected(TAB_SEARCH) },
                                 )
                             }
                         }
@@ -4044,19 +4046,6 @@ private fun BitChordApp(
                             // [TopBarDownloadButton], which decides that for
                             // itself rather than being told.
                             TopBarDownloadButton(onClick = { showDownloadManager = true })
-                            // Not on a release page, whose pill already carries
-                            // three of its own controls — Apple Music leaves the
-                            // profile off its album pages too.
-                            if (!isReleaseDetail) TopBarAccountButton(
-                                account = account,
-                                onClick = {
-                                    if (signedIn) {
-                                        viewModel.loadChannels()
-                                        showAccountSelector = true
-                                    } else showSettings = true
-                                },
-                                onSwipeProfile = { forward -> viewModel.stepProfile(forward) },
-                            )
                         }
                     },
                 )
@@ -4135,6 +4124,13 @@ private fun BitChordApp(
                         },
                         controlsLocked = controlsLocked,
                         onBlockedControl = showHostOnlyNotice,
+                        account = account,
+                        onProfileClick = {
+                            if (signedIn) {
+                                viewModel.loadChannels()
+                                showAccountSelector = true
+                            } else showSettings = true
+                        },
                         dock = activeDock,
                         pull = playerSheetMotion.takeIf { !reducePlayerMotion },
                         modifier = Modifier.fillMaxWidth(),
@@ -4182,6 +4178,13 @@ private fun BitChordApp(
                         tabs = tabs,
                         selectedIndex = selectedTab,
                         hazeState = hazeState,
+                        account = account,
+                        onProfileClick = {
+                            if (signedIn) {
+                                viewModel.loadChannels()
+                                showAccountSelector = true
+                            } else showSettings = true
+                        },
                         onTabSelected = onTabSelected,
                     )
                 }
