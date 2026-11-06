@@ -534,7 +534,7 @@ private fun HomeTitle(
         ) {
             Box(
                 modifier = Modifier
-                    .height(34.dp)
+                    .height(36.dp)
                     .aspectRatio(WORDMARK_ASPECT),
                 contentAlignment = Alignment.CenterStart,
             ) {
@@ -553,9 +553,9 @@ private fun HomeTitle(
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .height(48.dp)
+                        .height(36.dp)
                         .shadow(
-                            elevation = 6.dp,
+                            elevation = 4.dp,
                             shape = pillShape,
                             clip = false,
                             ambientColor = Color.Black.copy(alpha = 0.45f),
@@ -569,16 +569,16 @@ private fun HomeTitle(
                             shape = pillShape,
                         )
                         .clickable(onClick = onSearchClick)
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Search,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(18.dp),
                     )
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(8.dp))
                     Text(
                         text = "Search songs, artists...",
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
