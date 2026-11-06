@@ -20,6 +20,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -2273,6 +2274,12 @@ private fun BitChordApp(
         top = topBarContentPadding(),
         bottom = if (player.song != null) 210.dp else 140.dp,
     )
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val homeListPadding = PaddingValues(
+        top = statusBarTop + 6.dp,
+        bottom = listPadding.calculateBottomPadding(),
+    )
+    val floatingBarsHeight = remember { mutableIntStateOf(0) }
 
     // What colour the page currently under the bars is. The fades either end
     // of the screen are flat colour wherever their blur has least to say, so
@@ -3214,7 +3221,7 @@ private fun BitChordApp(
                                 OfflineHomeScreen(
                                     data = offlineHome,
                                     listState = offlineHomeListState,
-                                    contentPadding = listPadding,
+                                    contentPadding = homeListPadding,
                                     title = stringResource(R.string.listen_now),
                                     networkAvailable = internetAvailable,
                                     manualOffline = offlineModeEnabled,
@@ -3289,7 +3296,7 @@ private fun BitChordApp(
                                     refreshing = MainViewModel.Feed.HOME in refreshing,
                                     onRefresh = { viewModel.refresh(MainViewModel.Feed.HOME) },
                                     pullState = homePull,
-                                    contentPadding = listPadding,
+                                    contentPadding = homeListPadding,
                                     onLoadMore = viewModel::loadMoreHome,
                                     loadingMore = homeLoadingMore,
                                     recentlyPlayedLoading = homeRecentlyPlayedLoading,
@@ -4085,7 +4092,6 @@ private fun BitChordApp(
 
                 // Whichever bar is drawing reports its height here, for the
                 // guard to read at layout — never in composition, see the guard.
-                val floatingBarsHeight = remember { mutableIntStateOf(0) }
                 FloatingBarsTapGuard(
                     barsHeight = { floatingBarsHeight.intValue },
                     modifier = Modifier.align(Alignment.BottomCenter),
@@ -5223,8 +5229,21 @@ private fun BitChordApp(
             )
         }
 
-        if (showAccountSelector) {
+        AnimatedVisibility(
+            visible = showAccountSelector,
+            enter = fadeIn(animationSpec = tween(200)) + slideInVertically(
+                animationSpec = tween(280, easing = CubicBezierEasing(0.2f, 0f, 0f, 1f)),
+            ) { it },
+            exit = fadeOut(animationSpec = tween(160)) + slideOutVertically(
+                animationSpec = tween(220),
+            ) { it },
+        ) {
             BackHandler { showAccountSelector = false }
+            val bottomBarsDp = with(LocalDensity.current) {
+                if (floatingBarsHeight.intValue > 0) floatingBarsHeight.intValue.toDp()
+                else if (player.song != null) 140.dp
+                else 80.dp
+            }
             AccountProfileSelector(
                 accounts = googleAccounts,
                 activeAccountId = activeAccountId,
@@ -5244,6 +5263,7 @@ private fun BitChordApp(
                     showSettings = true
                 },
                 onDismiss = { showAccountSelector = false },
+                bottomPadding = bottomBarsDp + 10.dp,
             )
         }
 

@@ -161,22 +161,13 @@ fun HomeScreen(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            // The heading sits higher than the other tabs' first row: pull the
-            // whole feed up by [HOME_TITLE_LIFT] with it.
-            contentPadding = if (title != null) {
-                PaddingValues(
-                    top = (contentPadding.calculateTopPadding() - HOME_TITLE_LIFT).coerceAtLeast(0.dp),
-                    bottom = contentPadding.calculateBottomPadding(),
-                )
-            } else {
-                contentPadding
-            },
+            contentPadding = contentPadding,
         ) {
             if (title != null) {
-                item(key = "home-title") { HomeTitle(title, wordmark, onSearchClick) }
+                item(key = "home-title", contentType = "header") { HomeTitle(title, wordmark, onSearchClick) }
             }
             if (!signedIn && onSignIn != null) {
-                item(key = "sign-in-banner") {
+                item(key = "sign-in-banner", contentType = "banner") {
                     SignInBanner(onSignIn = onSignIn, modifier = Modifier.padding(bottom = 8.dp))
                 }
             }
@@ -272,7 +263,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedShelves(
     onRecentsViewTypeToggle: () -> Unit,
 ) {
     shelves.forEachIndexed { index, shelf ->
-        item(key = shelf.title + index) {
+        item(key = shelf.title + index, contentType = "shelf") {
             val openItem: (ShelfItem) -> Unit = { item -> onItemClick(item, shelf.title) }
             if (index == 0 && shelf.title.equals(RECENTS_TITLE, ignoreCase = true)) {
                 RecentShelf(
@@ -334,6 +325,7 @@ private fun RecentShelf(
                     itemsIndexed(
                         shelf.items.chunked(RECENT_TRACKS_PER_COLUMN),
                         key = { position, _ -> "recent-column-$position" },
+                        contentType = { _, _ -> "recent_column" },
                     ) { _, column ->
                         Column(Modifier.width(columnWidth)) {
                             column.forEach { item ->
@@ -356,7 +348,11 @@ private fun RecentShelf(
                     contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    itemsIndexed(shelf.items, key = { position, item -> shelfCardKey(position, item) }) { _, item ->
+                    itemsIndexed(
+                        shelf.items,
+                        key = { position, item -> shelfCardKey(position, item) },
+                        contentType = { _, _ -> "hero_card" },
+                    ) { _, item ->
                         HeroCard(
                             item = item,
                             onClick = { onItemClick(item) },
@@ -526,7 +522,7 @@ private fun HomeTitle(
 ) {
     val style = MaterialTheme.typography.displayLarge
     val pillShape = RoundedCornerShape(percent = 50)
-    Column(modifier = modifier.padding(horizontal = PAGE_GUTTER, vertical = 8.dp)) {
+    Column(modifier = modifier.padding(horizontal = PAGE_GUTTER).padding(top = 2.dp, bottom = 8.dp)) {
         Row(
             modifier = Modifier
                 .padding(bottom = 14.dp)
@@ -823,7 +819,11 @@ private fun HeroShelf(
                 contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                itemsIndexed(shelf.items, key = { position, item -> shelfCardKey(position, item) }) { _, item ->
+                itemsIndexed(
+                    shelf.items,
+                    key = { position, item -> shelfCardKey(position, item) },
+                    contentType = { _, _ -> "hero_card" },
+                ) { _, item ->
                     HeroCard(
                         item = item,
                         onClick = { onItemClick(item) },
@@ -922,7 +922,11 @@ internal fun Shelf(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             leadingCard?.let { card -> item(key = "leading") { card() } }
-            itemsIndexed(shelf.items, key = { position, item -> shelfCardKey(position, item) }) { _, item ->
+            itemsIndexed(
+                shelf.items,
+                key = { position, item -> shelfCardKey(position, item) },
+                contentType = { _, _ -> "shelf_card" },
+            ) { _, item ->
                 ShelfCard(
                     item = item,
                     onClick = { onItemClick(item) },

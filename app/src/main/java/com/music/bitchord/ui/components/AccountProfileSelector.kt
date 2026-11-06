@@ -1,7 +1,9 @@
 package com.music.bitchord.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,7 +13,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
@@ -30,12 +34,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.music.bitchord.R
@@ -60,56 +66,94 @@ fun AccountProfileSelector(
     onRemoveAccount: (GoogleAccountSession) -> Unit,
     onOpenSettings: () -> Unit,
     onDismiss: () -> Unit,
+    bottomPadding: Dp = 100.dp,
     modifier: Modifier = Modifier,
 ) {
     var managing by remember { mutableStateOf(false) }
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
-    val shape = MaterialTheme.shapes.extraLarge
-    Column(
-        modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = .48f))
+    val shape = RoundedCornerShape(28.dp)
+    val useGlass = LocalLiquidGlassEnabled.current && isGlassSupported()
+    val borderBrush = Brush.verticalGradient(
+        listOf(
+            Color.White.copy(alpha = 0.18f),
+            Color.White.copy(alpha = 0.05f),
+        ),
+    )
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = .48f))
             .clickable(onClick = onDismiss),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        contentAlignment = Alignment.BottomCenter,
     ) {
         Surface(
             color = Color.Transparent,
             contentColor = MaterialTheme.colorScheme.onSurface,
             shape = shape,
             modifier = Modifier
-                .padding(top = 56.dp, start = 20.dp, end = 20.dp)
+                .padding(start = 20.dp, end = 20.dp, bottom = bottomPadding)
+                .widthIn(max = 400.dp)
                 .fillMaxWidth()
                 .clip(shape)
                 .then(
-                    if (reduceDynamicBlur) {
-                        Modifier.background(MaterialTheme.colorScheme.surface)
-                    } else {
-                        Modifier.optimizedHazeEffect(
-                            state = hazeState,
-                            style = HazeMaterials.thin(MaterialTheme.colorScheme.surface),
-                        )
+                    when {
+                        useGlass && !reduceDynamicBlur -> Modifier.liquidGlass(shape = shape)
+                        reduceDynamicBlur -> Modifier.background(MaterialTheme.colorScheme.surface)
+                        else -> Modifier
+                            .optimizedHazeEffect(
+                                state = hazeState,
+                                style = HazeMaterials.regular(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)),
+                            )
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.65f))
                     },
                 )
+                .border(1.dp, borderBrush, shape)
                 .clickable(onClick = {}),
         ) {
-            LazyColumn {
-                item { Text(stringResource(R.string.switch_account), style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(20.dp, 18.dp, 20.dp, 8.dp)) }
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 420.dp),
+            ) {
+                item(key = "title", contentType = "header") {
+                    Text(
+                        stringResource(R.string.switch_account),
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(20.dp, 18.dp, 20.dp, 8.dp),
+                    )
+                }
                 accounts.forEach { account ->
-                item {
-                    Text(account.email.ifBlank { account.name.ifBlank { stringResource(R.string.accounts) } },
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(20.dp, 12.dp, 20.dp, 4.dp))
+                    item(key = "account_label_${account.accountId}", contentType = "account_label") {
+                        Text(
+                            account.email.ifBlank { account.name.ifBlank { stringResource(R.string.accounts) } },
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(20.dp, 12.dp, 20.dp, 4.dp),
+                        )
+                    }
+                    items(
+                        count = account.profiles.size,
+                        key = { index -> "profile_${account.accountId}_${account.profiles[index].profileId}" },
+                        contentType = { "profile_row" },
+                    ) { index ->
+                        val profile = account.profiles[index]
+                        ProfileRow(
+                            profile,
+                            account.accountId == activeAccountId && profile.profileId == activeProfileId,
+                            managing,
+                            { onSelect(account, profile); onDismiss() },
+                            { onRemoveAccount(account) },
+                        )
+                    }
                 }
-                items(account.profiles.size) { index ->
-                    val profile = account.profiles[index]
-                    ProfileRow(profile, account.accountId == activeAccountId && profile.profileId == activeProfileId,
-                        managing, { onSelect(account, profile); onDismiss() }, { onRemoveAccount(account) })
+                item(key = "add_account", contentType = "action") {
+                    SelectorAction(Icons.Rounded.Add, stringResource(R.string.add_account), onAddAccount)
                 }
+                item(key = "manage_accounts", contentType = "action") {
+                    SelectorAction(Icons.Rounded.ManageAccounts, stringResource(R.string.manage_accounts)) { managing = !managing }
                 }
-                item { SelectorAction(Icons.Rounded.Add, stringResource(R.string.add_account), onAddAccount) }
-                item { SelectorAction(Icons.Rounded.ManageAccounts, stringResource(R.string.manage_accounts)) { managing = !managing } }
-                item { SelectorAction(Icons.Rounded.Settings, stringResource(R.string.settings), onOpenSettings) }
+                item(key = "settings", contentType = "action") {
+                    SelectorAction(Icons.Rounded.Settings, stringResource(R.string.settings), onOpenSettings)
+                }
             }
         }
     }

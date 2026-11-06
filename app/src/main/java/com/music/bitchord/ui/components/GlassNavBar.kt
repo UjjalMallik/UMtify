@@ -406,6 +406,21 @@ private fun GlassNowPlaying(
                     )
                 }
             }
+            if (!isInline) {
+                IconButton(
+                    onClick = {
+                        haptics.play(Haptic.SkipPrevious)
+                        onPrevious()
+                    },
+                    enabled = !controlsLocked,
+                    modifier = Modifier.size(glyphSlot),
+                ) {
+                    MiniPlayerPreviousGlyph(
+                        tint = contentColor.copy(alpha = if (controlsLocked) 0.3f else 1f),
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
+            }
             if (isLoading) {
                 Box(Modifier.size(glyphSlot), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(
@@ -434,7 +449,7 @@ private fun GlassNowPlaying(
             // tab pill and the Search circle, and the title is what has to
             // survive that, not a second transport button.
             if (!isInline) {
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(4.dp))
                 IconButton(
                     onClick = {
                         haptics.play(Haptic.SkipNext)

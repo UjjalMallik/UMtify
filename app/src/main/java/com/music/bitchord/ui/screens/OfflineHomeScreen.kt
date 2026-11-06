@@ -121,7 +121,7 @@ fun OfflineHomeScreen(
         modifier = modifier.fillMaxSize(),
         contentPadding = contentPadding,
     ) {
-        item(key = "offline-title") { OfflineTitle(title, onSearchClick) }
+        item(key = "offline-title", contentType = "header") { OfflineTitle(title, onSearchClick) }
         item(key = "offline-network-chip") {
             OfflineChip(
                 networkAvailable = networkAvailable,
@@ -345,7 +345,7 @@ private fun LazyListScope.songRows(
 private fun OfflineTitle(title: String, onSearchClick: (() -> Unit)? = null) {
     val style = MaterialTheme.typography.displayLarge
     val pillShape = RoundedCornerShape(percent = 50)
-    Column(Modifier.padding(horizontal = PAGE_GUTTER, vertical = 8.dp)) {
+    Column(Modifier.padding(horizontal = PAGE_GUTTER).padding(top = 2.dp, bottom = 8.dp)) {
         Row(
             modifier = Modifier
                 .padding(bottom = 14.dp)

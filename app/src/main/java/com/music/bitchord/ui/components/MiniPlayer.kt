@@ -77,7 +77,7 @@ import kotlin.math.sqrt
  * The transport buttons' touch target. Material's default 48dp is what a bar
  * this slim is really made of, so it sets the height on its own.
  */
-private val GLYPH_SLOT = 40.dp
+private val GLYPH_SLOT = 36.dp
 
 /**
  * The play and skip glyphs themselves.
@@ -85,27 +85,17 @@ private val GLYPH_SLOT = 40.dp
  * Deliberately grown inside [GLYPH_SLOT] rather than by growing the slot: the
  * slot is level with the 40dp artwork opposite it, and it is the taller of the
  * two that sets the row's height — so a bigger slot would make the whole bar
- * taller, which is not what a bigger glyph is being asked for. At 32 there is
- * still 4dp of clearance to the slot's edge on every side.
+ * taller, which is not what a bigger glyph is being asked for.
  */
-private val GLYPH_SIZE = 32.dp
+private val GLYPH_SIZE = 28.dp
 
 /** The spinner that stands in for the play glyph, kept in proportion to it. */
-private val SPINNER_SIZE = 22.dp
+private val SPINNER_SIZE = 20.dp
 
 /**
- * The gap between the two transport controls.
- *
- * Material asks for at least 8dp between adjacent touch targets, and these had
- * none: two [GLYPH_SLOT] boxes sharing an edge, so the boundary between "pause"
- * and "skip" was a line with nothing either side of it. What space there looked
- * to be was only the margin each glyph keeps inside its own slot, and a thumb
- * lands on a target's edge far more often than it lands on a glyph's.
- *
- * Taken from the title's width rather than the bar's height, so nothing above
- * or below it moves.
+ * The gap between transport controls.
  */
-private val TRANSPORT_GAP = 8.dp
+private val TRANSPORT_GAP = 4.dp
 
 /**
  * Vertical padding, which with the 40dp artwork sets the bar's height at 56dp
@@ -438,6 +428,20 @@ fun MiniPlayer(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            IconButton(
+                onClick = {
+                    haptics.play(Haptic.SkipPrevious)
+                    onPrevious()
+                },
+                enabled = !controlsLocked,
+                modifier = Modifier.size(GLYPH_SLOT),
+            ) {
+                MiniPlayerPreviousGlyph(
+                    tint = MaterialTheme.colorScheme.onBackground
+                        .copy(alpha = if (controlsLocked) 0.3f else 1f),
+                )
+            }
+            Spacer(Modifier.width(TRANSPORT_GAP))
             if (isLoading) {
                 Box(Modifier.size(GLYPH_SLOT), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(
@@ -483,6 +487,21 @@ fun MiniPlayer(
 }
 
 /**
+ * The full player's skip-backward glyph, at the mini player's scale.
+ */
+@Composable
+internal fun MiniPlayerPreviousGlyph(tint: Color) {
+    Icon(
+        painter = painterResource(SharedRes.drawable.ic_player_previous),
+        contentDescription = stringResource(R.string.widget_previous),
+        tint = tint,
+        modifier = Modifier
+            .size(NEXT_GLYPH_SIZE)
+            .graphicsLayer { scaleY = 0.85f },
+    )
+}
+
+/**
  * The full player's skip-forward glyph, at the mini player's scale.
  *
  * Sized against the play glyph beside it the way the full player sizes it
@@ -502,4 +521,4 @@ internal fun MiniPlayerNextGlyph(tint: Color) {
     )
 }
 
-private val NEXT_GLYPH_SIZE = 25.dp
+private val NEXT_GLYPH_SIZE = 22.dp

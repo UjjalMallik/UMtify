@@ -370,6 +370,13 @@ fun SearchScreen(
                                     is SearchResult.Browse -> "browse_${row.item.browseId}_$index"
                                 }
                             },
+                            contentType = { _, row ->
+                                when (row) {
+                                    is SearchResult.TopTrack -> "top_track"
+                                    is SearchResult.Track -> "track"
+                                    is SearchResult.Browse -> "browse"
+                                }
+                            },
                         ) { index, row ->
                             when (row) {
                                 is SearchResult.TopTrack -> Unit
@@ -469,7 +476,11 @@ private fun LazyListScope.librarySearchResults(
         } else {
             val tracks = results.data
             val isCurrentRow = playingRowMatcher(tracks, currentSong)
-            itemsIndexed(tracks, key = { index, song -> "${if (addons) "addon" else "library"}_${song.videoId}_$index" }) { index, song ->
+            itemsIndexed(
+                items = tracks,
+                key = { index, song -> "${if (addons) "addon" else "library"}_${song.videoId}_$index" },
+                contentType = { _, _ -> "track" },
+            ) { index, song ->
                 SongRow(
                     song = song,
                     onClick = { onSongClick(tracks, index) },
@@ -546,6 +557,7 @@ private fun LazyListScope.offlineSearchResults(
                 itemsIndexed(
                     items = tracks,
                     key = { index, song -> "offline_${group.label}_${song.videoId}_$index" },
+                    contentType = { _, _ -> "track" },
                 ) { index, song ->
                     SongRow(
                         song = song,
@@ -665,7 +677,11 @@ private fun LazyListScope.searchSuggestions(
     // Skip the echo of the typed text (element 0) — it's already visible in
     // the search field itself — and cap at N so the list stays compact above
     // the playable-media cards.
-    itemsIndexed(suggestions.drop(1).take(3), key = { _, term -> "suggest:$term" }) { _, term ->
+    itemsIndexed(
+        items = suggestions.drop(1).take(3),
+        key = { _, term -> "suggest:$term" },
+        contentType = { _, _ -> "suggestion" },
+    ) { _, term ->
         SuggestionRow(
             term = term,
             isQueryAction = false,
@@ -766,13 +782,23 @@ private fun LazyListScope.searchTypeaheadDropdown(
             color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
         )
     }
-    items(typeaheadResults, key = { result ->
-        when (result) {
-            is SearchResult.Track -> "ta:track:${result.song.videoId}"
-            is SearchResult.Browse -> "ta:browse:${result.item.browseId}"
-            is SearchResult.TopTrack -> "ta:top:${result.song.videoId}"
-        }
-    }) { result ->
+    items(
+        items = typeaheadResults,
+        key = { result ->
+            when (result) {
+                is SearchResult.Track -> "ta:track:${result.song.videoId}"
+                is SearchResult.Browse -> "ta:browse:${result.item.browseId}"
+                is SearchResult.TopTrack -> "ta:top:${result.song.videoId}"
+            }
+        },
+        contentType = { result ->
+            when (result) {
+                is SearchResult.Track -> "typeahead_track"
+                is SearchResult.Browse -> "typeahead_browse"
+                is SearchResult.TopTrack -> "typeahead_top"
+            }
+        },
+    ) { result ->
         when (result) {
             is SearchResult.Track -> TypeaheadSongRow(
                 song = result.song,
@@ -887,7 +913,11 @@ private fun LazyListScope.recentSearches(
             )
         }
     }
-    items(history, key = { "recent:${it.id}" }) { entity ->
+    items(
+        items = history,
+        key = { "recent:${it.id}" },
+        contentType = { "recent_entity" },
+    ) { entity ->
         RecentSearchEntityRow(
             entity = entity,
             isCurrent = entity.entityType == EntityType.TRACK && entity.id == currentSong?.videoId,
@@ -929,7 +959,11 @@ private fun LazyListScope.recentAddonSearches(
             )
         }
     }
-    items(history, key = { "addon-recent:$it" }) { term ->
+    items(
+        items = history,
+        key = { "addon-recent:$it" },
+        contentType = { "recent_addon" },
+    ) { term ->
         Row(
             modifier = Modifier
                 .fillMaxWidth()
