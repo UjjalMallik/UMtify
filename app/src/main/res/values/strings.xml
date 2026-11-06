@@ -1203,4 +1203,20 @@
     <string name="wear_os_code_hint">Pairing code</string>
     <string name="wear_os_done">Done</string>
     <string name="signed_by">Signed by %1$s</string>
+
+    <!-- Settings category cards: the title of the two groups that have no
+         single-word section name of their own, and the one line under each
+         card header that says what is inside before it is opened. -->
+    <string name="settings_group_player_lyrics">Player &amp; Lyrics</string>
+    <string name="settings_group_local_storage">Local Music &amp; Storage</string>
+    <string name="settings_group_audio_subtitle">Where sound comes from and how good it is</string>
+    <string name="settings_group_downloads_subtitle">What is kept on the device, and at what size</string>
+    <string name="settings_group_playback_subtitle">How a track is rendered, and how the next one starts</string>
+    <string name="settings_group_appearance_subtitle">Theme, type, motion and refresh rate</string>
+    <string name="settings_group_player_subtitle">The sleeve, the words and the buttons under the player</string>
+    <string name="settings_group_storage_subtitle">Files on this device and the space they use</string>
+    <string name="settings_group_data_subtitle">Listening stats and backups</string>
+    <string name="settings_group_misc_subtitle">Everything without a better home</string>
+    <string name="settings_group_expand">Expand %1$s</string>
+    <string name="settings_group_collapse">Collapse %1$s</string>
 </resources>

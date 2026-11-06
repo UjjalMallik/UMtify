@@ -8,7 +8,13 @@ import android.media.audiofx.AudioEffect
 import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
@@ -21,8 +27,10 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -70,7 +78,9 @@ import androidx.compose.material.icons.rounded.MusicOff
 import androidx.compose.material.icons.rounded.MotionPhotosOff
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Draw
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.SmartDisplay
@@ -112,6 +122,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -291,6 +302,19 @@ fun SettingsScreen(
     // Filters the rows below — see [SettingsSearch]. Blank shows everything,
     // exactly as if the field weren't there.
     var searchQuery by remember { mutableStateOf("") }
+
+    // Which category cards are open. All eight start open: a closed card is a
+    // pile of settings behind a tap, and the one failure this page has had is a
+    // setting nobody could find. Kept across a rotation so closing a card is a
+    // choice that lasts, not one the screen makes again on its own.
+    var audioOpen by rememberSaveable { mutableStateOf(true) }
+    var downloadsOpen by rememberSaveable { mutableStateOf(true) }
+    var playbackOpen by rememberSaveable { mutableStateOf(true) }
+    var appearanceOpen by rememberSaveable { mutableStateOf(true) }
+    var playerOpen by rememberSaveable { mutableStateOf(true) }
+    var storageOpen by rememberSaveable { mutableStateOf(true) }
+    var dataOpen by rememberSaveable { mutableStateOf(true) }
+    var miscOpen by rememberSaveable { mutableStateOf(true) }
     var picking by remember { mutableStateOf<QualityTarget?>(null) }
     var pickingDownloadQuality by remember { mutableStateOf(false) }
     var pickingAutomixPerformance by remember { mutableStateOf(false) }
@@ -434,60 +458,84 @@ fun SettingsScreen(
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 4.dp),
         )
 
-        SearchableSettingsGroup(search) {
-            val accountTitle = stringResource(R.string.account_integrations)
-            // What the row opens is the scrobbling screen, so the services it
-            // signs into are worth typing at this field even though none of
-            // them is named on the row itself.
-            row(accountTitle, "scrobbling", "listenbrainz") {
-                SettingsRow(
-                    icon = Icons.Rounded.Person,
-                    title = accountTitle,
-                    subtitle = account?.email?.takeIf { it.isNotBlank() }
-                        ?: stringResource(if (signedIn) R.string.signed_in else R.string.not_signed_in),
-                    onClick = onAccountScrobbling,
-                )
+        // The two ways of being connected — an account, and a party — side by
+        // side as cards rather than rows, because both are entry points to a
+        // screen of their own rather than settings to flip here. Offline is the
+        // third way of being connected, which is a switch rather than a place to
+        // go, so it gets its own full-width card underneath.
+        val accountTitle = stringResource(R.string.account_integrations)
+        val listenTogetherTitle = stringResource(R.string.listen_together)
+        val offlineModeTitle = stringResource(R.string.offline_mode)
+        // Asked in the same breath as the rows they replace, so a search that
+        // matches one of these still counts as a hit and still shows it.
+        val showAccountCard =
+            search.matches(accountTitle, "scrobbling", "listenbrainz", "sign in", "profile", "email")
+        val showListenCard =
+            search.matches(listenTogetherTitle, "jam", "party", "sync", "friends")
+        val showOfflineCard =
+            search.matches(offlineModeTitle, "offline", "downloaded", "local", "no internet")
+        if (showAccountCard || showListenCard) {
+            Spacer(Modifier.height(14.dp))
+            Row(
+                // IntrinsicSize.Max rather than a guessed height: the two cards
+                // are as tall as whichever of them has more to say, so their
+                // bottoms line up whatever the account's email or the party's
+                // code happens to be.
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(IntrinsicSize.Max)
+                    .padding(horizontal = GROUP_INSET),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (showAccountCard) {
+                    SettingsFeatureCard(
+                        icon = Icons.Rounded.Person,
+                        title = accountTitle,
+                        subtitle = account?.email?.takeIf { it.isNotBlank() }
+                            ?: stringResource(if (signedIn) R.string.signed_in else R.string.not_signed_in),
+                        onClick = onAccountScrobbling,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                    )
+                }
+                if (showListenCard) {
+                    SettingsFeatureCard(
+                        icon = Icons.Rounded.Groups,
+                        title = listenTogetherTitle,
+                        subtitle = party.code?.let {
+                            stringResource(R.string.listen_together_in_party, it)
+                        } ?: stringResource(R.string.listen_together_subtitle),
+                        badge = party.members.size.takeIf { party.inParty && it > 1 }?.toString(),
+                        onClick = onListenTogether,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                    )
+                }
             }
-            // Sits with the account rather than with Playback: a party is up to
-            // five signed-in people, and being signed in is the whole of what
-            // the row needs before it will do anything.
-            val listenTogetherTitle = stringResource(R.string.listen_together)
-            row(listenTogetherTitle, "jam", "party", "sync", "friends") {
-                SettingsRow(
-                    icon = Icons.Rounded.Groups,
-                    title = listenTogetherTitle,
-                    subtitle = party.code?.let {
-                        stringResource(R.string.listen_together_in_party, it)
-                    } ?: stringResource(R.string.listen_together_subtitle),
-                    badge = party.members.size.takeIf { party.inParty && it > 1 }?.toString(),
-                    onClick = onListenTogether,
-                )
-            }
-            // Offline is a way of *using* the app rather than a setting about
-            // the music in it, so it sits with the two other ways of being
-            // connected here: an account, a party, and then neither. A lost
-            // connection puts Home into this screen by itself — the switch is
-            // for asking for it while there is one, which is what somebody on
-            // a train with a metered hotspot wants.
-            val offlineModeTitle = stringResource(R.string.offline_mode)
-            row(offlineModeTitle, "offline", "downloaded", "local", "no internet") {
-                SettingsRow(
-                    icon = Icons.Rounded.CloudOff,
-                    title = offlineModeTitle,
-                    subtitle = stringResource(R.string.offline_mode_subtitle),
-                    trailing = {
-                        Switch(
-                            checked = offlineMode,
-                            onCheckedChange = AppSettings::setOfflineModeEnabled,
-                            colors = SwitchDefaults.colors(
-                                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                checkedBorderColor = MaterialTheme.colorScheme.primary,
-                            ),
-                        )
-                    },
-                    onClick = { AppSettings.setOfflineModeEnabled(!offlineMode) },
-                )
-            }
+        }
+        if (showOfflineCard) {
+            Spacer(Modifier.height(12.dp))
+            SettingsFeatureCard(
+                icon = Icons.Rounded.CloudOff,
+                title = offlineModeTitle,
+                subtitle = stringResource(R.string.offline_mode_subtitle),
+                trailing = {
+                    Switch(
+                        checked = offlineMode,
+                        onCheckedChange = AppSettings::setOfflineModeEnabled,
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                },
+                onClick = { AppSettings.setOfflineModeEnabled(!offlineMode) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = GROUP_INSET),
+            )
         }
 
         // The row that used to sit at the top of this group was called
@@ -496,7 +544,15 @@ fun SettingsScreen(
         // above lists that as the module's own row now. Lossless itself is no
         // longer a setting at all — see
         // [SourceResolver.requestForNow][com.music.bitchord.data.sources.SourceResolver.requestForNow].
-        SearchableSettingsGroup(search, header = stringResource(R.string.audio_quality)) {
+        SettingsCategoryCard(
+            search = search,
+            icon = Icons.Rounded.GraphicEq,
+            title = stringResource(R.string.audio_quality),
+            subtitle = stringResource(R.string.settings_group_audio_subtitle),
+            expanded = audioOpen,
+            onToggle = { audioOpen = !audioOpen },
+            forceExpanded = searchQuery.isNotBlank(),
+        ) {
             val sourceTitle = stringResource(R.string.source)
             val sourceSubtitle = stringResource(R.string.sources_subtitle)
             row(sourceTitle, sourceSubtitle, "addon", "lossless") {
@@ -572,7 +628,15 @@ fun SettingsScreen(
         // does this minute cost"; these answer "what am I keeping, and when may
         // it be fetched" — and those two questions only make sense read
         // together, which is what puts them side by side here.
-        SearchableSettingsGroup(search, header = stringResource(R.string.downloads)) {
+        SettingsCategoryCard(
+            search = search,
+            icon = Icons.Rounded.Download,
+            title = stringResource(R.string.downloads),
+            subtitle = stringResource(R.string.settings_group_downloads_subtitle),
+            expanded = downloadsOpen,
+            onToggle = { downloadsOpen = !downloadsOpen },
+            forceExpanded = searchQuery.isNotBlank(),
+        ) {
             val downloadQualityTitle = stringResource(R.string.download_quality)
             row(downloadQualityTitle, "offline", "lossless") {
                 SettingsRow(
@@ -606,7 +670,15 @@ fun SettingsScreen(
             }
         }
 
-        SearchableSettingsGroup(search, header = stringResource(R.string.playback)) {
+        SettingsCategoryCard(
+            search = search,
+            icon = Icons.Rounded.PlayArrow,
+            title = stringResource(R.string.playback),
+            subtitle = stringResource(R.string.settings_group_playback_subtitle),
+            expanded = playbackOpen,
+            onToggle = { playbackOpen = !playbackOpen },
+            forceExpanded = searchQuery.isNotBlank(),
+        ) {
             val preferMusicOnlyTitle = stringResource(R.string.prefer_music_only)
             row(preferMusicOnlyTitle, "video", "audio", "music video") {
                 SettingsRow(
@@ -813,7 +885,15 @@ fun SettingsScreen(
             }
         }
 
-        SearchableSettingsGroup(search, header = stringResource(R.string.appearance)) {
+        SettingsCategoryCard(
+            search = search,
+            icon = Icons.Rounded.Brightness4,
+            title = stringResource(R.string.appearance),
+            subtitle = stringResource(R.string.settings_group_appearance_subtitle),
+            expanded = appearanceOpen,
+            onToggle = { appearanceOpen = !appearanceOpen },
+            forceExpanded = searchQuery.isNotBlank(),
+        ) {
             val themeTitle = stringResource(R.string.theme)
             row(themeTitle, "dark mode", "light mode", "dynamic theme", "cover art") {
                 SettingsRow(icon = Icons.Rounded.Brightness4, title = themeTitle)
@@ -956,6 +1036,79 @@ fun SettingsScreen(
                     onClick = { AppSettings.setLiquidGlass(!liquidGlass) },
                 )
             }
+            // Here rather than in a Performance group of its own, because what
+            // it changes is how the app looks and moves: the same frames the two
+            // rows above either freeze or blur.
+            val highPerformanceModeTitle = stringResource(R.string.high_performance_mode)
+            row(highPerformanceModeTitle, "frame rate", "refresh rate", "hz", "battery", "smooth") {
+                SettingsRow(
+                    icon = BitChordIcons.Performance,
+                    title = highPerformanceModeTitle,
+                    subtitle = if (highPerformanceMode) {
+                        stringResource(R.string.high_performance_active, selectedPerformanceRefreshRate)
+                    } else {
+                        stringResource(R.string.high_performance_subtitle)
+                    },
+                    trailing = {
+                        Switch(
+                            checked = highPerformanceMode,
+                            onCheckedChange = { enabled ->
+                                if (enabled) {
+                                    showPerformanceWarning = true
+                                } else {
+                                    AppSettings.setHighPerformanceMode(false)
+                                }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = {
+                        if (highPerformanceMode) {
+                            AppSettings.setHighPerformanceMode(false)
+                        } else {
+                            showPerformanceWarning = true
+                        }
+                    },
+                )
+            }
+            if (highPerformanceMode) {
+                val refreshRateTitle = stringResource(R.string.refresh_rate)
+                row(refreshRateTitle, "hz", "frame rate") {
+                    SettingsRow(
+                        icon = BitChordIcons.FrameRate,
+                        title = refreshRateTitle,
+                    )
+                    SegmentedControl(
+                        options = supportedRefreshRates.map { "$it Hz" },
+                        selectedIndex = supportedRefreshRates.indexOf(selectedPerformanceRefreshRate),
+                        onSelect = { index ->
+                            AppSettings.setPerformanceRefreshRate(supportedRefreshRates[index])
+                        },
+                        modifier = Modifier.padding(
+                            start = TEXT_INSET,
+                            end = ROW_INSET,
+                            bottom = 14.dp,
+                        ),
+                    )
+                }
+            }
+        }
+
+        // The player's own page — the sleeve, the words over it, and the row of
+        // buttons under it. Apart from Appearance because these are choices
+        // about one screen, not about the app.
+        SettingsCategoryCard(
+            search = search,
+            icon = Icons.Rounded.Lyrics,
+            title = stringResource(R.string.settings_group_player_lyrics),
+            subtitle = stringResource(R.string.settings_group_player_subtitle),
+            expanded = playerOpen,
+            onToggle = { playerOpen = !playerOpen },
+            forceExpanded = searchQuery.isNotBlank(),
+        ) {
             // Left out where the player won't honour it: a window too wide for
             // the player to fill and too narrow to stand a page beside it keeps
             // the sleeve either way. A docked pane is a phone's width, so it does
@@ -1174,171 +1327,19 @@ fun SettingsScreen(
                         onClick = onTranslationLanguage,
                     )
                 }
-                val showToolbarTitle = stringResource(R.string.show_player_bottom_toolbar)
-                row(showToolbarTitle, "player", "toolbar", "action bar", "buttons", "bottom") {
-                    SettingsRow(
-                        icon = Icons.Rounded.Apps,
-                        title = showToolbarTitle,
-                        subtitle = stringResource(R.string.show_player_bottom_toolbar_subtitle),
-                        trailing = {
-                            Switch(
-                                checked = showPlayerBottomToolbar,
-                                onCheckedChange = AppSettings::setShowPlayerBottomToolbar,
-                                colors = SwitchDefaults.colors(
-                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
-                                ),
-                            )
-                        },
-                        onClick = {
-                            AppSettings.setShowPlayerBottomToolbar(!showPlayerBottomToolbar)
-                        },
-                    )
-                }
-                val showQueueButtonTitle = stringResource(R.string.show_queue_button)
-                row(showQueueButtonTitle, "player", "toolbar", "button", "queue") {
-                    SettingsRow(
-                        icon = Icons.Rounded.QueueMusic,
-                        title = showQueueButtonTitle,
-                        enabled = showPlayerBottomToolbar,
-                        trailing = {
-                            Switch(
-                                checked = showQueueButton,
-                                onCheckedChange = AppSettings::setShowQueueButton,
-                                enabled = showPlayerBottomToolbar,
-                                colors = SwitchDefaults.colors(
-                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
-                                ),
-                            )
-                        },
-                        onClick = { AppSettings.setShowQueueButton(!showQueueButton) },
-                    )
-                }
-                val showSleepTimerButtonTitle = stringResource(R.string.show_sleep_timer_button)
-                row(showSleepTimerButtonTitle, "player", "toolbar", "button", "sleep timer") {
-                    SettingsRow(
-                        icon = Icons.Rounded.Bedtime,
-                        title = showSleepTimerButtonTitle,
-                        enabled = showPlayerBottomToolbar,
-                        trailing = {
-                            Switch(
-                                checked = showSleepTimerButton,
-                                onCheckedChange = AppSettings::setShowSleepTimerButton,
-                                enabled = showPlayerBottomToolbar,
-                                colors = SwitchDefaults.colors(
-                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
-                                ),
-                            )
-                        },
-                        onClick = { AppSettings.setShowSleepTimerButton(!showSleepTimerButton) },
-                    )
-                }
-                val showShuffleButtonTitle = stringResource(R.string.show_shuffle_button)
-                row(showShuffleButtonTitle, "player", "toolbar", "button", "shuffle") {
-                    SettingsRow(
-                        icon = Icons.Rounded.Shuffle,
-                        title = showShuffleButtonTitle,
-                        enabled = showPlayerBottomToolbar,
-                        trailing = {
-                            Switch(
-                                checked = showShuffleButton,
-                                onCheckedChange = AppSettings::setShowShuffleButton,
-                                enabled = showPlayerBottomToolbar,
-                                colors = SwitchDefaults.colors(
-                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
-                                ),
-                            )
-                        },
-                        onClick = { AppSettings.setShowShuffleButton(!showShuffleButton) },
-                    )
-                }
-                val showLyricsButtonTitle = stringResource(R.string.show_lyrics_button)
-                row(showLyricsButtonTitle, "player", "toolbar", "button", "lyrics") {
-                    SettingsRow(
-                        icon = Icons.Rounded.Lyrics,
-                        title = showLyricsButtonTitle,
-                        enabled = showPlayerBottomToolbar,
-                        trailing = {
-                            Switch(
-                                checked = showLyricsButton,
-                                onCheckedChange = AppSettings::setShowLyricsButton,
-                                enabled = showPlayerBottomToolbar,
-                                colors = SwitchDefaults.colors(
-                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
-                                ),
-                            )
-                        },
-                        onClick = { AppSettings.setShowLyricsButton(!showLyricsButton) },
-                    )
-                }
-                val showRepeatButtonTitle = stringResource(R.string.show_repeat_button)
-                row(showRepeatButtonTitle, "player", "toolbar", "button", "repeat") {
-                    SettingsRow(
-                        icon = Icons.Rounded.Repeat,
-                        title = showRepeatButtonTitle,
-                        enabled = showPlayerBottomToolbar,
-                        trailing = {
-                            Switch(
-                                checked = showRepeatButton,
-                                onCheckedChange = AppSettings::setShowRepeatButton,
-                                enabled = showPlayerBottomToolbar,
-                                colors = SwitchDefaults.colors(
-                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
-                                ),
-                            )
-                        },
-                        onClick = { AppSettings.setShowRepeatButton(!showRepeatButton) },
-                    )
-                }
-                val showMoreButtonTitle = stringResource(R.string.show_more_button)
-                row(showMoreButtonTitle, "player", "toolbar", "button", "more options", "menu") {
-                    SettingsRow(
-                        icon = Icons.Rounded.MoreHoriz,
-                        title = showMoreButtonTitle,
-                        enabled = showPlayerBottomToolbar,
-                        trailing = {
-                            Switch(
-                                checked = showMoreButton,
-                                onCheckedChange = AppSettings::setShowMoreButton,
-                                enabled = showPlayerBottomToolbar,
-                                colors = SwitchDefaults.colors(
-                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
-                                ),
-                            )
-                        },
-                        onClick = { AppSettings.setShowMoreButton(!showMoreButton) },
-                    )
-                }
             }
-        }
-
-        SearchableSettingsGroup(search, header = stringResource(R.string.performance)) {
-            val highPerformanceModeTitle = stringResource(R.string.high_performance_mode)
-            row(highPerformanceModeTitle, "frame rate", "refresh rate", "hz", "battery", "smooth") {
+            // The action bar is the player's own, not a part of lyrics:
+            // these seven rows are here whether or not the words are singing.
+            val showToolbarTitle = stringResource(R.string.show_player_bottom_toolbar)
+            row(showToolbarTitle, "player", "toolbar", "action bar", "buttons", "bottom") {
                 SettingsRow(
-                    icon = BitChordIcons.Performance,
-                    title = highPerformanceModeTitle,
-                    subtitle = if (highPerformanceMode) {
-                        stringResource(R.string.high_performance_active, selectedPerformanceRefreshRate)
-                    } else {
-                        stringResource(R.string.high_performance_subtitle)
-                    },
+                    icon = Icons.Rounded.Apps,
+                    title = showToolbarTitle,
+                    subtitle = stringResource(R.string.show_player_bottom_toolbar_subtitle),
                     trailing = {
                         Switch(
-                            checked = highPerformanceMode,
-                            onCheckedChange = { enabled ->
-                                if (enabled) {
-                                    showPerformanceWarning = true
-                                } else {
-                                    AppSettings.setHighPerformanceMode(false)
-                                }
-                            },
+                            checked = showPlayerBottomToolbar,
+                            onCheckedChange = AppSettings::setShowPlayerBottomToolbar,
                             colors = SwitchDefaults.colors(
                                 checkedTrackColor = MaterialTheme.colorScheme.primary,
                                 checkedBorderColor = MaterialTheme.colorScheme.primary,
@@ -1346,38 +1347,141 @@ fun SettingsScreen(
                         )
                     },
                     onClick = {
-                        if (highPerformanceMode) {
-                            AppSettings.setHighPerformanceMode(false)
-                        } else {
-                            showPerformanceWarning = true
-                        }
+                        AppSettings.setShowPlayerBottomToolbar(!showPlayerBottomToolbar)
                     },
                 )
             }
-            if (highPerformanceMode) {
-                val refreshRateTitle = stringResource(R.string.refresh_rate)
-                row(refreshRateTitle, "hz", "frame rate") {
-                    SettingsRow(
-                        icon = BitChordIcons.FrameRate,
-                        title = refreshRateTitle,
-                    )
-                    SegmentedControl(
-                        options = supportedRefreshRates.map { "$it Hz" },
-                        selectedIndex = supportedRefreshRates.indexOf(selectedPerformanceRefreshRate),
-                        onSelect = { index ->
-                            AppSettings.setPerformanceRefreshRate(supportedRefreshRates[index])
-                        },
-                        modifier = Modifier.padding(
-                            start = TEXT_INSET,
-                            end = ROW_INSET,
-                            bottom = 14.dp,
-                        ),
-                    )
-                }
+            val showQueueButtonTitle = stringResource(R.string.show_queue_button)
+            row(showQueueButtonTitle, "player", "toolbar", "button", "queue") {
+                SettingsRow(
+                    icon = Icons.Rounded.QueueMusic,
+                    title = showQueueButtonTitle,
+                    enabled = showPlayerBottomToolbar,
+                    trailing = {
+                        Switch(
+                            checked = showQueueButton,
+                            onCheckedChange = AppSettings::setShowQueueButton,
+                            enabled = showPlayerBottomToolbar,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setShowQueueButton(!showQueueButton) },
+                )
+            }
+            val showSleepTimerButtonTitle = stringResource(R.string.show_sleep_timer_button)
+            row(showSleepTimerButtonTitle, "player", "toolbar", "button", "sleep timer") {
+                SettingsRow(
+                    icon = Icons.Rounded.Bedtime,
+                    title = showSleepTimerButtonTitle,
+                    enabled = showPlayerBottomToolbar,
+                    trailing = {
+                        Switch(
+                            checked = showSleepTimerButton,
+                            onCheckedChange = AppSettings::setShowSleepTimerButton,
+                            enabled = showPlayerBottomToolbar,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setShowSleepTimerButton(!showSleepTimerButton) },
+                )
+            }
+            val showShuffleButtonTitle = stringResource(R.string.show_shuffle_button)
+            row(showShuffleButtonTitle, "player", "toolbar", "button", "shuffle") {
+                SettingsRow(
+                    icon = Icons.Rounded.Shuffle,
+                    title = showShuffleButtonTitle,
+                    enabled = showPlayerBottomToolbar,
+                    trailing = {
+                        Switch(
+                            checked = showShuffleButton,
+                            onCheckedChange = AppSettings::setShowShuffleButton,
+                            enabled = showPlayerBottomToolbar,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setShowShuffleButton(!showShuffleButton) },
+                )
+            }
+            val showLyricsButtonTitle = stringResource(R.string.show_lyrics_button)
+            row(showLyricsButtonTitle, "player", "toolbar", "button", "lyrics") {
+                SettingsRow(
+                    icon = Icons.Rounded.Lyrics,
+                    title = showLyricsButtonTitle,
+                    enabled = showPlayerBottomToolbar,
+                    trailing = {
+                        Switch(
+                            checked = showLyricsButton,
+                            onCheckedChange = AppSettings::setShowLyricsButton,
+                            enabled = showPlayerBottomToolbar,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setShowLyricsButton(!showLyricsButton) },
+                )
+            }
+            val showRepeatButtonTitle = stringResource(R.string.show_repeat_button)
+            row(showRepeatButtonTitle, "player", "toolbar", "button", "repeat") {
+                SettingsRow(
+                    icon = Icons.Rounded.Repeat,
+                    title = showRepeatButtonTitle,
+                    enabled = showPlayerBottomToolbar,
+                    trailing = {
+                        Switch(
+                            checked = showRepeatButton,
+                            onCheckedChange = AppSettings::setShowRepeatButton,
+                            enabled = showPlayerBottomToolbar,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setShowRepeatButton(!showRepeatButton) },
+                )
+            }
+            val showMoreButtonTitle = stringResource(R.string.show_more_button)
+            row(showMoreButtonTitle, "player", "toolbar", "button", "more options", "menu") {
+                SettingsRow(
+                    icon = Icons.Rounded.MoreHoriz,
+                    title = showMoreButtonTitle,
+                    enabled = showPlayerBottomToolbar,
+                    trailing = {
+                        Switch(
+                            checked = showMoreButton,
+                            onCheckedChange = AppSettings::setShowMoreButton,
+                            enabled = showPlayerBottomToolbar,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setShowMoreButton(!showMoreButton) },
+                )
             }
         }
 
-        SearchableSettingsGroup(search, header = stringResource(R.string.local_music)) {
+        SettingsCategoryCard(
+            search = search,
+            icon = Icons.Rounded.Folder,
+            title = stringResource(R.string.settings_group_local_storage),
+            subtitle = stringResource(R.string.settings_group_storage_subtitle),
+            expanded = storageOpen,
+            onToggle = { storageOpen = !storageOpen },
+            forceExpanded = searchQuery.isNotBlank(),
+        ) {
             val localMusicFolderTitle = stringResource(R.string.local_music_folder)
             row(localMusicFolderTitle, "folder", "offline", "files") {
                 SettingsRow(
@@ -1418,15 +1522,14 @@ fun SettingsScreen(
                     onClick = { AppSettings.setFilterNonMusicAudio(!filterNonMusicAudio) },
                 )
             }
-        }
-
-        val cacheUnlimited = cacheLimitBytes == AppSettings.UNLIMITED_CACHE_LIMIT_BYTES
-        // The slider's last stop, one step past the largest fixed size, is
-        // "Unlimited" — see [AppSettings.setAudioCacheLimitBytes].
-        val cacheLimitMb = if (cacheUnlimited) CACHE_UNLIMITED_STOP_MB else (cacheLimitBytes / (1024 * 1024)).toInt()
-        val unlimitedLabel = stringResource(R.string.song_cache_unlimited)
-        val cacheLimitLabel = if (cacheUnlimited) unlimitedLabel else formatCacheSize(cacheLimitMb)
-        SearchableSettingsGroup(search, header = stringResource(R.string.storage)) {
+            // The same card, because a folder on the device and the space its
+            // cache may take are one question: what is here, locally.
+            val cacheUnlimited = cacheLimitBytes == AppSettings.UNLIMITED_CACHE_LIMIT_BYTES
+            // The slider's last stop, one step past the largest fixed size, is
+            // "Unlimited" — see [AppSettings.setAudioCacheLimitBytes].
+            val cacheLimitMb = if (cacheUnlimited) CACHE_UNLIMITED_STOP_MB else (cacheLimitBytes / (1024 * 1024)).toInt()
+            val unlimitedLabel = stringResource(R.string.song_cache_unlimited)
+            val cacheLimitLabel = if (cacheUnlimited) unlimitedLabel else formatCacheSize(cacheLimitMb)
             val showCacheFolderTitle = stringResource(R.string.show_cache_folder)
             row(showCacheFolderTitle, "cache", "cached songs", "library", "folder") {
                 SettingsRow(
@@ -1500,16 +1603,18 @@ fun SettingsScreen(
             }
         }
 
-        // Only in a build that carries the watch app — see app/build.gradle.kts.
-        if (remember { WatchInstaller.available(context) }) {
-            SearchableSettingsGroup(search) {
-                row(stringResource(R.string.wear_os_section), "watch", "wear os", "galaxy watch", "pixel watch", "install") {
-                    WearOsSettingsRow(onClick = onWearOs)
-                }
-            }
-        }
+        // The watch row used to sit here, between Storage and Your data; it has
+        // its own group below, with the other things that are not a category.
 
-        SearchableSettingsGroup(search, header = stringResource(R.string.your_data)) {
+        SettingsCategoryCard(
+            search = search,
+            icon = Icons.Rounded.BarChart,
+            title = stringResource(R.string.your_data),
+            subtitle = stringResource(R.string.settings_group_data_subtitle),
+            expanded = dataOpen,
+            onToggle = { dataOpen = !dataOpen },
+            forceExpanded = searchQuery.isNotBlank(),
+        ) {
             val replayTitle = stringResource(R.string.replay)
             row(replayTitle, "stats", "history", "wrapped") {
                 SettingsRow(
@@ -1541,7 +1646,15 @@ fun SettingsScreen(
 
         // No footer: it only restated the stop-on-close row's own subtitle,
         // which sits four rows above it and says the same thing in fewer words.
-        SearchableSettingsGroup(search, header = stringResource(R.string.miscellaneous)) {
+        SettingsCategoryCard(
+            search = search,
+            icon = Icons.Rounded.Tune,
+            title = stringResource(R.string.miscellaneous),
+            subtitle = stringResource(R.string.settings_group_misc_subtitle),
+            expanded = miscOpen,
+            onToggle = { miscOpen = !miscOpen },
+            forceExpanded = searchQuery.isNotBlank(),
+        ) {
             val playNextOnSwipeTitle = stringResource(R.string.play_next_on_swipe)
             row(playNextOnSwipeTitle, "swipe", "queue") {
                 SettingsRow(
@@ -1678,6 +1791,16 @@ fun SettingsScreen(
                     },
                     onClick = { AppSettings.setHideSongStatus(!hideSongStatus) },
                 )
+            }
+        }
+
+        // Not a category: one row that opens a screen of its own, and only in a
+        // build that carries the watch app — see app/build.gradle.kts.
+        if (remember { WatchInstaller.available(context) }) {
+            SearchableSettingsGroup(search, header = stringResource(R.string.wear_os_section)) {
+                row(stringResource(R.string.wear_os_section), "watch", "wear os", "galaxy watch", "pixel watch", "install") {
+                    WearOsSettingsRow(onClick = onWearOs)
+                }
             }
         }
 
@@ -2562,6 +2685,204 @@ private fun SearchableSettingsGroup(
                 index == 0 && !entry.divided -> Spacer(Modifier.height(10.dp))
             }
             entry.content()
+        }
+    }
+}
+
+/**
+ * One category as a card that opens in place: the header is the card's own
+ * first row, and the settings unfold underneath it on this page rather than on
+ * a second one.
+ *
+ * Nothing is moved off the screen, which is the whole reason this is an
+ * accordion and not a set of sub-screens — a category you have to navigate into
+ * is a category whose contents can be missed. [SettingsGroupScope] still does
+ * the filtering, so a search matches exactly the rows it always matched, and
+ * while a query is typed every card holding a match is open, because a hit
+ * inside a closed card is not a hit.
+ */
+@Composable
+private fun SettingsCategoryCard(
+    search: SettingsSearch,
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    /** Open this one whatever the user left it at, because a search is on. */
+    forceExpanded: Boolean,
+    content: @Composable SettingsGroupScope.() -> Unit,
+) {
+    val scope = SettingsGroupScope(search, title)
+    scope.content()
+    if (scope.entries.isEmpty()) return
+
+    val reduceAnimation by AppSettings.reduceAnimation.collectAsStateWithLifecycle()
+    val open = expanded || forceExpanded
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (open) 180f else 0f,
+        animationSpec = tween(220),
+        label = "settingsCategoryChevron",
+    )
+
+    Column(
+        modifier = Modifier
+            .padding(horizontal = GROUP_INSET)
+            .padding(top = 12.dp)
+            .fillMaxWidth()
+            .clip(GroupShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onToggle)
+                .padding(start = 16.dp, end = 16.dp, top = 15.dp, bottom = 15.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(
+                imageVector = Icons.Rounded.ExpandMore,
+                contentDescription = stringResource(
+                    if (open) R.string.settings_group_collapse else R.string.settings_group_expand,
+                    title,
+                ),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .size(24.dp)
+                    .rotate(chevronRotation),
+            )
+        }
+        AnimatedVisibility(
+            visible = open,
+            // Height is the only thing a closing card has to say; nothing about
+            // it needs to move while the setting is asking for less motion.
+            enter = if (reduceAnimation) {
+                fadeIn()
+            } else {
+                expandVertically(tween(240)) + fadeIn(tween(180))
+            },
+            exit = if (reduceAnimation) {
+                fadeOut()
+            } else {
+                shrinkVertically(tween(200)) + fadeOut(tween(140))
+            },
+        ) {
+            Column {
+                // The seam between the header and what it opens. The first row
+                // below is then divided from its neighbours by the same hairline
+                // the rows above the header never needed.
+                RowDivider()
+                scope.entries.forEachIndexed { index, entry ->
+                    if (index > 0 && entry.divided) RowDivider()
+                    // Same as [SearchableSettingsGroup]: an undivided row is a
+                    // continuation of the one above it, and alone at the top it
+                    // has nothing to continue, so it is given the room back.
+                    if (index == 0 && !entry.divided) Spacer(Modifier.height(10.dp))
+                    entry.content()
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The card at the head of the page: a place to go, or a mode the app can be
+ * in, shown as a block rather than a row because neither is a setting to nudge.
+ * [trailing] is for the one that is a switch and so has nowhere to go.
+ */
+@Composable
+private fun SettingsFeatureCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    badge: String? = null,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    Column(
+        modifier = modifier
+            .clip(GroupShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick)
+            .padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            if (trailing != null) {
+                // The switch is asked for directly, and consumes its own tap —
+                // so it flips once here rather than twice through the card.
+                Spacer(Modifier.weight(1f))
+                trailing()
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (badge != null) {
+            Spacer(Modifier.height(6.dp))
+            Badge(badge)
+        }
+        if (subtitle != null) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
