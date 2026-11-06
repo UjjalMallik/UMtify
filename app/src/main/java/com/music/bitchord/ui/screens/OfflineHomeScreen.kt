@@ -45,6 +45,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -358,10 +359,10 @@ private fun OfflineTitle(title: String, onSearchClick: (() -> Unit)? = null) {
             Image(
                 painter = painterResource(R.drawable.ic_umtify_wordmark),
                 contentDescription = null,
-                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground),
+                colorFilter = ColorFilter.tint(Color.White),
                 contentScale = ContentScale.FillHeight,
                 modifier = Modifier
-                    .height(32.dp)
+                    .height(34.dp)
                     .aspectRatio(WORDMARK_ASPECT),
             )
             if (onSearchClick != null) {
@@ -369,8 +370,8 @@ private fun OfflineTitle(title: String, onSearchClick: (() -> Unit)? = null) {
                 val searchBorder = remember {
                     Brush.verticalGradient(
                         listOf(
-                            Color.White.copy(alpha = 0.30f),
-                            Color.White.copy(alpha = 0.05f),
+                            Color.White.copy(alpha = 0.45f),
+                            Color.White.copy(alpha = 0.12f),
                         ),
                     )
                 }
@@ -378,11 +379,17 @@ private fun OfflineTitle(title: String, onSearchClick: (() -> Unit)? = null) {
                     modifier = Modifier
                         .weight(1f)
                         .height(48.dp)
-                        .shadow(2.dp, pillShape, clip = false)
+                        .shadow(
+                            elevation = 6.dp,
+                            shape = pillShape,
+                            clip = false,
+                            ambientColor = Color.Black.copy(alpha = 0.45f),
+                            spotColor = Color.White.copy(alpha = 0.20f),
+                        )
                         .clip(pillShape)
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f))
                         .border(
-                            width = 1.dp,
+                            width = 1.5.dp,
                             brush = searchBorder,
                             shape = pillShape,
                         )
@@ -393,14 +400,14 @@ private fun OfflineTitle(title: String, onSearchClick: (() -> Unit)? = null) {
                     Icon(
                         imageVector = Icons.Rounded.Search,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurface,
+                        tint = Color.White,
                         modifier = Modifier.size(20.dp),
                     )
                     Spacer(Modifier.width(10.dp))
                     Text(
                         text = "Search songs, artists...",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f),
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                        color = Color.White,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )

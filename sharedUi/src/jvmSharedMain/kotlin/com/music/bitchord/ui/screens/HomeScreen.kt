@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
@@ -533,7 +534,7 @@ private fun HomeTitle(
         ) {
             Box(
                 modifier = Modifier
-                    .height(32.dp)
+                    .height(34.dp)
                     .aspectRatio(WORDMARK_ASPECT),
                 contentAlignment = Alignment.CenterStart,
             ) {
@@ -544,8 +545,8 @@ private fun HomeTitle(
                 val searchBorder = remember {
                     Brush.verticalGradient(
                         listOf(
-                            Color.White.copy(alpha = 0.30f),
-                            Color.White.copy(alpha = 0.05f),
+                            Color.White.copy(alpha = 0.45f),
+                            Color.White.copy(alpha = 0.12f),
                         ),
                     )
                 }
@@ -553,11 +554,17 @@ private fun HomeTitle(
                     modifier = Modifier
                         .weight(1f)
                         .height(48.dp)
-                        .shadow(2.dp, pillShape, clip = false)
+                        .shadow(
+                            elevation = 6.dp,
+                            shape = pillShape,
+                            clip = false,
+                            ambientColor = Color.Black.copy(alpha = 0.45f),
+                            spotColor = Color.White.copy(alpha = 0.20f),
+                        )
                         .clip(pillShape)
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f))
                         .border(
-                            width = 1.dp,
+                            width = 1.5.dp,
                             brush = searchBorder,
                             shape = pillShape,
                         )
@@ -568,14 +575,14 @@ private fun HomeTitle(
                     Icon(
                         imageVector = Icons.Rounded.Search,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurface,
+                        tint = Color.White,
                         modifier = Modifier.size(20.dp),
                     )
                     Spacer(Modifier.width(10.dp))
                     Text(
                         text = "Search songs, artists...",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f),
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                        color = Color.White,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )

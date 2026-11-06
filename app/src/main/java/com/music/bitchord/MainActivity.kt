@@ -3266,7 +3266,7 @@ private fun BitChordApp(
                                             painter = painterResource(R.drawable.ic_umtify_wordmark),
                                             contentDescription = null,
                                             colorFilter = ColorFilter.tint(
-                                                MaterialTheme.colorScheme.onBackground,
+                                                Color.White,
                                             ),
                                             contentScale = ContentScale.FillHeight,
                                             modifier = Modifier.fillMaxSize(),
