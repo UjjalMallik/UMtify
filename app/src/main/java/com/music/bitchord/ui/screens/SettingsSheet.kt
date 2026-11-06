@@ -303,18 +303,16 @@ fun SettingsScreen(
     // exactly as if the field weren't there.
     var searchQuery by remember { mutableStateOf("") }
 
-    // Which category cards are open. All eight start open: a closed card is a
-    // pile of settings behind a tap, and the one failure this page has had is a
-    // setting nobody could find. Kept across a rotation so closing a card is a
-    // choice that lasts, not one the screen makes again on its own.
-    var audioOpen by rememberSaveable { mutableStateOf(true) }
-    var downloadsOpen by rememberSaveable { mutableStateOf(true) }
-    var playbackOpen by rememberSaveable { mutableStateOf(true) }
-    var appearanceOpen by rememberSaveable { mutableStateOf(true) }
-    var playerOpen by rememberSaveable { mutableStateOf(true) }
-    var storageOpen by rememberSaveable { mutableStateOf(true) }
-    var dataOpen by rememberSaveable { mutableStateOf(true) }
-    var miscOpen by rememberSaveable { mutableStateOf(true) }
+    // Which category cards are open. Default to collapsed (false) so settings
+    // are clean and compact on entrance, opening on explicit user selection.
+    var audioOpen by rememberSaveable { mutableStateOf(false) }
+    var downloadsOpen by rememberSaveable { mutableStateOf(false) }
+    var playbackOpen by rememberSaveable { mutableStateOf(false) }
+    var appearanceOpen by rememberSaveable { mutableStateOf(false) }
+    var playerOpen by rememberSaveable { mutableStateOf(false) }
+    var storageOpen by rememberSaveable { mutableStateOf(false) }
+    var dataOpen by rememberSaveable { mutableStateOf(false) }
+    var miscOpen by rememberSaveable { mutableStateOf(false) }
     var picking by remember { mutableStateOf<QualityTarget?>(null) }
     var pickingDownloadQuality by remember { mutableStateOf(false) }
     var pickingAutomixPerformance by remember { mutableStateOf(false) }

@@ -36,6 +36,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -364,15 +366,24 @@ private fun OfflineTitle(title: String, onSearchClick: (() -> Unit)? = null) {
             )
             if (onSearchClick != null) {
                 Spacer(Modifier.width(12.dp))
+                val searchBorder = remember {
+                    Brush.verticalGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.30f),
+                            Color.White.copy(alpha = 0.05f),
+                        ),
+                    )
+                }
                 Row(
                     modifier = Modifier
                         .weight(1f)
                         .height(48.dp)
+                        .shadow(2.dp, pillShape, clip = false)
                         .clip(pillShape)
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f))
                         .border(
                             width = 1.dp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                            brush = searchBorder,
                             shape = pillShape,
                         )
                         .clickable(onClick = onSearchClick)
@@ -382,14 +393,14 @@ private fun OfflineTitle(title: String, onSearchClick: (() -> Unit)? = null) {
                     Icon(
                         imageVector = Icons.Rounded.Search,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                        tint = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(20.dp),
                     )
                     Spacer(Modifier.width(10.dp))
                     Text(
                         text = "Search songs, artists...",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
