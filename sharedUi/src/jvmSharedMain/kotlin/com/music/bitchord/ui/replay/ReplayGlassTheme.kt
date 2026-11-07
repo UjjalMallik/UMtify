@@ -14,9 +14,9 @@ enum class ReplayGlassTheme(
 ) {
     AUTO(
         id = "AUTO",
-        displayName = "App Theme (Dynamic)",
-        stops = listOf(Color(0xFF6366F1), Color(0xFFA855F7), Color(0xFFEC4899)),
-        argbColors = listOf(0xFF6366F1.toInt(), 0xFFA855F7.toInt(), 0xFFEC4899.toInt()),
+        displayName = "App Theme",
+        stops = listOf(Color(0xFF0F172A), Color(0xFF3B82F6), Color(0xFF60A5FA)),
+        argbColors = listOf(0xFF0F172A.toInt(), 0xFF3B82F6.toInt(), 0xFF60A5FA.toInt()),
     ),
     COSMIC_AURORA(
         id = "COSMIC_AURORA",

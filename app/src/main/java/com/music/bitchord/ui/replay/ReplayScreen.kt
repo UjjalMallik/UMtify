@@ -64,6 +64,7 @@ import com.music.bitchord.ui.components.PAGE_GUTTER
 import com.music.bitchord.ui.components.UmifyWordmark
 import com.music.bitchord.ui.icons.BitChordIcons
 import com.music.bitchord.ui.player.MeshGradientBackground
+import com.music.bitchord.ui.player.MeshPalette
 import com.music.bitchord.ui.player.rememberArtworkColors
 import com.music.bitchord.ui.theme.AccentRed
 
@@ -115,7 +116,14 @@ fun ReplayScreen(
     val context = LocalContext.current
     val summary = state.summary
     val leadArtwork = summary?.songs?.firstOrNull()?.song?.thumbnailUrl
-    val palette = rememberArtworkColors(leadArtwork)
+    val savedThemeId by AppSettings.replayGlassTheme.collectAsStateWithLifecycle()
+    val activeTheme = remember(savedThemeId) { ReplayGlassTheme.fromId(savedThemeId) }
+    val themeMesh = rememberAppThemeMeshPalette()
+    val palette = if (activeTheme == ReplayGlassTheme.AUTO) {
+        themeMesh
+    } else {
+        remember(activeTheme) { MeshPalette(activeTheme.stops) }
+    }
     val topSongs = stringResource(R.string.top_songs)
     val topArtists = stringResource(R.string.top_artists)
     val topAlbums = stringResource(R.string.top_albums)
@@ -134,7 +142,11 @@ fun ReplayScreen(
     }
 
     Box(modifier.fillMaxSize()) {
-        MeshGradientBackground(palette = palette, trackKey = leadArtwork, animated = false)
+        MeshGradientBackground(
+            palette = palette,
+            trackKey = if (activeTheme == ReplayGlassTheme.AUTO) "replay_bg_${palette.colors.first().hashCode()}" else activeTheme.id,
+            animated = false,
+        )
         // The mesh is built to sit behind a player, where the only thing over it
         // is a handful of large controls. A page of ranked lists needs a good
         // deal more separation than that, so most of it is put back under ink.

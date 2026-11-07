@@ -113,8 +113,16 @@ suspend fun renderReplayPoster(
     }
 }
 
-private fun resolveDefaultThemeArgbColors(context: Context): List<Int> =
-    listOf(0xFF1E1035.toInt(), 0xFFFA2D48.toInt(), 0xFFFB7185.toInt())
+private fun resolveDefaultThemeArgbColors(context: Context): List<Int> {
+    val typedValue = android.util.TypedValue()
+    val theme = context.theme
+    val primary = if (theme.resolveAttribute(android.R.attr.colorPrimary, typedValue, true)) {
+        typedValue.data
+    } else {
+        0xFF3B82F6.toInt()
+    }
+    return listOf(0xFF0F172A.toInt(), primary, primary)
+}
 
 // ── One story card ──────────────────────────────────────────────────────────
 

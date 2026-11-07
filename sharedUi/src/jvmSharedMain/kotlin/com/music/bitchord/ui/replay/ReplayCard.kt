@@ -96,36 +96,28 @@ fun rememberAppThemeGlassColors(): List<Color> {
         val primary = colorScheme.primary
         val secondary = colorScheme.secondary
         val tertiary = colorScheme.tertiary
+        val container = colorScheme.primaryContainer
 
-        val hasChroma = (maxOf(primary.red, primary.green, primary.blue) - minOf(primary.red, primary.green, primary.blue)) >= 0.12f
-        val seed = if (hasChroma) primary else Color(0xFFFA2D48)
-
-        val c1 = seed
-        val c2 = if ((maxOf(secondary.red, secondary.green, secondary.blue) - minOf(secondary.red, secondary.green, secondary.blue)) >= 0.10f) {
-            secondary
-        } else {
-            seed.withHsl(hue = { (it + 35f) % 360f }, saturation = { (it * 0.9f).coerceIn(0.4f, 1f) }, lightness = { (it * 1.15f).coerceIn(0.3f, 0.75f) })
-        }
-        val c3 = if ((maxOf(tertiary.red, tertiary.green, tertiary.blue) - minOf(tertiary.red, tertiary.green, tertiary.blue)) >= 0.10f) {
-            tertiary
-        } else {
-            seed.withHsl(hue = { (it - 30f + 360f) % 360f }, saturation = { (it * 1.05f).coerceIn(0.4f, 1f) }, lightness = { (it * 0.85f).coerceIn(0.2f, 0.6f) })
-        }
+        val c1 = primary
+        val c2 = if (secondary != primary && secondary != Color.Unspecified) secondary else container
+        val c3 = if (tertiary != primary && tertiary != secondary && tertiary != Color.Unspecified) tertiary else colorScheme.surfaceVariant
         listOf(c1, c2, c3)
     }
 }
 
 @Composable
 fun rememberAppThemeMeshPalette(): MeshPalette {
-    val stops = rememberAppThemeGlassColors()
-    val surface = MaterialTheme.colorScheme.surfaceContainer
-    return remember(stops, surface) {
-        val c4 = if (surface != Color.Unspecified && surface.luminance() > 0.05f) {
-            surface
-        } else {
-            stops.first().withHsl(hue = { (it + 70f) % 360f }, lightness = { 0.15f })
-        }
-        MeshPalette(stops + c4)
+    val colorScheme = MaterialTheme.colorScheme
+    return remember(colorScheme) {
+        val primary = colorScheme.primary
+        val secondary = colorScheme.secondary
+        val tertiary = colorScheme.tertiary
+        val surface = colorScheme.surfaceContainerHigh
+        val c1 = primary
+        val c2 = if (secondary != primary && secondary != Color.Unspecified) secondary else colorScheme.primaryContainer
+        val c3 = if (tertiary != primary && tertiary != secondary && tertiary != Color.Unspecified) tertiary else colorScheme.tertiaryContainer
+        val c4 = if (surface != Color.Unspecified && surface != Color.Transparent) surface else colorScheme.surfaceVariant
+        MeshPalette(listOf(c1, c2, c3, c4))
     }
 }
 

@@ -62,6 +62,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Cached
+import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MoreVert
@@ -1175,8 +1176,39 @@ internal fun ShelfCard(
             .contextClick(onLongPress)
             .padding(8.dp),
     ) {
-        when (item.browseId) {
-            "local:downloads" -> {
+        when {
+            item.browseId in listOf("VLLM", "LM") || item.title.equals("Liked Music", ignoreCase = true) -> {
+                val primary = MaterialTheme.colorScheme.primary
+                val secondary = MaterialTheme.colorScheme.secondary
+                val tertiary = MaterialTheme.colorScheme.tertiary
+                val surface = MaterialTheme.colorScheme.surfaceContainerHigh
+                val palette = remember(primary, secondary, tertiary, surface) {
+                    MeshPalette(listOf(primary, secondary, tertiary, surface))
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(0.8.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    MeshGradientBackground(
+                        palette = palette,
+                        trackKey = "liked_music_${primary.hashCode()}",
+                        continuous = true,
+                        blurRadius = 24.dp,
+                    )
+                    Icon(
+                        imageVector = Icons.Rounded.Favorite,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(40.dp),
+                    )
+                    if (isCurrent && isPlaying) SearchPlayingBars(Modifier.align(Alignment.Center))
+                }
+            }
+            item.browseId == "local:downloads" -> {
                 val palette = remember { MeshPalette(listOf(Color(0xFF1E3C72), Color(0xFF2A5298))) }
                 Box(
                     modifier = Modifier
@@ -1199,22 +1231,22 @@ internal fun ShelfCard(
                     )
                 }
             }
-            "local:all" -> ServiceCard(
+            item.browseId == "local:all" -> ServiceCard(
                 colors = listOf(Color(0xFF134E5E), Color(0xFF71B280)),
                 trackKey = "local:all",
                 icon = Icons.Rounded.LibraryMusic,
             )
-            "local:cache" -> ServiceCard(
+            item.browseId == "local:cache" -> ServiceCard(
                 colors = listOf(Color(0xFF42275A), Color(0xFF734B6D)),
                 trackKey = "local:cache",
                 icon = Icons.Rounded.Cached,
             )
-            "local:webdav" -> ServiceCard(
+            item.browseId == "local:webdav" -> ServiceCard(
                 colors = listOf(Color(0xFF3A1C71), Color(0xFFD76D77)),
                 trackKey = "local:webdav",
                 icon = Icons.Rounded.Folder,
             )
-            "local:smb" -> ServiceCard(
+            item.browseId == "local:smb" -> ServiceCard(
                 colors = listOf(Color(0xFF0F2027), Color(0xFF2C5364)),
                 trackKey = "local:smb",
                 icon = Icons.Rounded.Storage,

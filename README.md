@@ -23,25 +23,15 @@ A lightweight, Android-only music streaming & local audio player — a personal 
 
 ---
 
-## 🚀 What's New / Recent Features
-
-- 🎨 **Premium "Liquid Glass" UI & Custom Dynamic Themes**
-  - Experience the reimagined Liquid Glass aesthetic featuring real-time refraction, ambient blur, and depth lenses across navigation and header components.
-  - Choose between Cover Art dynamic theming, six hand-crafted **Premium Presets** (*Crimson Velvet, Emerald Glass, Royal Amethyst, Ocean Sapphire, Sunset Amber, Cyber Magenta*), or create your own with the integrated **RGB/Hex Custom Color Picker**.
-  - Refined Material 3 dynamic background architecture ensures subtle, OLED-friendly ambient glow with pristine card contrast rather than harsh flat fills.
-- 📱 **Responsive Wide Search Bar & Bottom Navigation Profile Integration**
-  - Instant frosted search pill across Home and Offline modes with high-contrast glyphs, responsive tap actions, and seamless search transitions.
-  - Bottom navigation bar seamlessly incorporates your profile/account avatar with quick access to channel switching and settings.
-- 🌐 **Strict Auto-Offline Mode**
-  - App automatically detects network connectivity drops and activates Offline Mode immediately.
-  - Strictly prevents remote API requests when offline — only downloaded tracks, cached audio, and local storage media are displayed and searched.
-- 🎵 **Improved MiniPlayer with Previous Track Control**
-  - Seamless glassy MiniPlayer pill complete with Previous, Play/Pause, and Next transport buttons.
-  - Polished touch targets, fluid sheet drag gestures, and clean artifact-free edges.
-
----
-
 ## ✨ Key Customizations & Features
+
+| 🎨 **Adaptive Liquid Glass & Custom Themes** | 🔍 **Responsive Header & Quick Account Switcher** |
+| --- | --- |
+| Frosted Liquid Glass cards across Home, Settings, and dialogs, plus Material 3 Dynamic theming with Album Cover extraction, 6 curated presets, and a custom color picker. | Full-width frosted search bar aligned with the UMtify wordmark, paired with a bottom-bar profile avatar that launches a right-aligned Liquid Glass account card. |
+
+| 📊 **Interactive Replay & Multi-Palette Share Cards** | ⏯️ **Enhanced MiniPlayer & Collapsible Settings** |
+| --- | --- |
+| Live theme-adaptive Listening Experience cards and a Bento-style Replay image exporter with selectable multi-tone glass color palettes. | Floating glass MiniPlayer with full Previous / Play-Pause / Next controls, and organized Settings category groups collapsed by default. |
 
 | 🎨 **Crystal Glass Player UI** | 🌊 **Cover-Art Theme & Wave Ribbon** |
 | --- | --- |
@@ -65,7 +55,7 @@ A lightweight, Android-only music streaming & local audio player — a personal 
 
 | 🎧 **Universal Dolby Atmos & Spatial Audio** | 📶 **Smart Offline Mode & Auto Offline Home Feed** |
 | --- | --- |
-| Atmos and spatial playback unlocked on every device — no OEM whitelist, with a software decoder fallback and the app's own spatializer standing in for ordinary headphones. | A Settings toggle plus automatic network detection that swaps the home feed to an offline hub: Downloads, Local Music, Cached Songs and Recently Played Offline. |
+| Atmos and spatial playback unlocked on every device — no OEM whitelist, with a software decoder fallback and the app's own spatializer standing in for ordinary headphones. | Automatic network-loss switching and a Settings toggle that swaps into an offline hub with strict local-only search across Downloads, Local Music, and Cached Songs. |
 
 | 🚗 **Android Auto Support** | 🎨 **Custom 3D App Icon Switcher** |
 | --- | --- |
