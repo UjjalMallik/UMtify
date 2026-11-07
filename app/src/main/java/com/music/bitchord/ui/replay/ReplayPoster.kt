@@ -69,6 +69,7 @@ suspend fun renderReplayPoster(
      */
     page: ReplayStoryPage? = null,
     glassTheme: ReplayGlassTheme = ReplayGlassTheme.AUTO,
+    themeColors: List<Int>? = null,
 ): Bitmap = coroutineScope {
     // The artwork this needs is a dozen small fetches that are all in Coil's
     // disk cache already — the page they came from has been on screen. Started
@@ -90,9 +91,13 @@ suspend fun renderReplayPoster(
         val canvas = Canvas(bitmap)
         val type = Fonts(context)
 
-        // The same cover and the same turn of the colour wheel the card on
-        // screen was drawn with, so the picture is recognisably that card.
-        drawBackdrop(canvas, covers[lit], page?.let(::storyHue) ?: 0f, paletteColors = if (glassTheme == ReplayGlassTheme.AUTO) null else glassTheme.argbColors)
+        // Multi-tone glass backdrop: uses active theme ARGB colors when in AUTO mode
+        val effectivePaletteColors = if (glassTheme == ReplayGlassTheme.AUTO) {
+            themeColors ?: resolveDefaultThemeArgbColors(context)
+        } else {
+            glassTheme.argbColors
+        }
+        drawBackdrop(canvas, covers[lit], page?.let(::storyHue) ?: 0f, paletteColors = effectivePaletteColors)
         var y = drawHeader(canvas, context, type, summary, holder, memberSince)
         if (page == null) {
             y = drawTotals(canvas, context, type, summary, y)
@@ -107,6 +112,9 @@ suspend fun renderReplayPoster(
         bitmap
     }
 }
+
+private fun resolveDefaultThemeArgbColors(context: Context): List<Int> =
+    listOf(0xFF1E1035.toInt(), 0xFFFA2D48.toInt(), 0xFFFB7185.toInt())
 
 // ── One story card ──────────────────────────────────────────────────────────
 
@@ -403,6 +411,40 @@ private fun dimmed(color: Int): Int {
 
 // ── Bands ───────────────────────────────────────────────────────────────────
 
+private fun drawLiquidGlassCard(
+    canvas: Canvas,
+    bounds: RectF,
+    cornerRadius: Float = 32f,
+    fillAlpha: Int = 0x1E,
+    borderAlphaTop: Int = 0x50,
+    borderAlphaBottom: Int = 0x18,
+) {
+    val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = (fillAlpha shl 24) or 0x00FFFFFF
+        style = Paint.Style.FILL
+    }
+    canvas.drawRoundRect(bounds, cornerRadius, cornerRadius, fillPaint)
+
+    val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2.2f
+        shader = android.graphics.LinearGradient(
+            bounds.left,
+            bounds.top,
+            bounds.right,
+            bounds.bottom,
+            intArrayOf(
+                (borderAlphaTop shl 24) or 0x00FFFFFF,
+                (borderAlphaBottom shl 24) or 0x00FFFFFF,
+                (borderAlphaTop / 2 shl 24) or 0x00FFFFFF,
+            ),
+            floatArrayOf(0f, 0.7f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+    }
+    canvas.drawRoundRect(bounds, cornerRadius, cornerRadius, rimPaint)
+}
+
 private fun drawHeader(
     canvas: Canvas,
     context: Context,
@@ -417,17 +459,17 @@ private fun drawHeader(
     } else {
         "Replay · $label"
     }
-    canvas.drawText(title, MARGIN, 132f, type.heading(46f, 0xFFFFFFFF.toInt()))
+    canvas.drawText(title, MARGIN, 116f, type.heading(44f, 0xFFFFFFFF.toInt()))
     // The wordmark rather than the mark and the word beside it — the asset
     // spells the name, so drawing both would say it twice in the same corner.
-    drawWordmark(canvas, context, POSTER_W - MARGIN, 132f)
+    drawWordmark(canvas, context, POSTER_W - MARGIN, 116f)
 
     val credit = listOfNotNull(
         holder.ifBlank { context.getString(R.string.default_replay_holder) },
         memberSince?.let { context.getString(R.string.member_since_value, it) },
     ).joinToString(" · ")
-    canvas.drawText(credit.uppercase(Locale.ROOT), MARGIN, 182f, type.label(24f, 0x8CFFFFFF.toInt()))
-    return 300f
+    canvas.drawText(credit.uppercase(Locale.ROOT), MARGIN, 160f, type.label(22f, 0x8CFFFFFF.toInt()))
+    return 204f
 }
 
 private fun drawTotals(
@@ -437,48 +479,66 @@ private fun drawTotals(
     summary: ReplaySummary,
     top: Float,
 ): Float {
-    val glassFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x1FFFFFFF
+    val cardHeight = 252f
+    val cardBounds = RectF(MARGIN, top, POSTER_W - MARGIN, top + cardHeight)
+    drawLiquidGlassCard(canvas, cardBounds, cornerRadius = 32f)
+
+    // Glowing music/waveform accent badge in top-right
+    val badgeW = 150f
+    val badgeH = 38f
+    val badgeBounds = RectF(cardBounds.right - badgeW - 24f, top + 24f, cardBounds.right - 24f, top + 24f + badgeH)
+    val badgeFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x24FFFFFF
         style = Paint.Style.FILL
     }
-    val glassBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x38FFFFFF
+    val badgeBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x44FFFFFF
         style = Paint.Style.STROKE
-        strokeWidth = 2.5f
+        strokeWidth = 1.5f
     }
-    val cardBounds = RectF(MARGIN - 24f, top + 10f, POSTER_W - MARGIN + 24f, top + 265f)
-    canvas.drawRoundRect(cardBounds, 32f, 32f, glassFill)
-    canvas.drawRoundRect(cardBounds, 32f, 32f, glassBorder)
+    canvas.drawRoundRect(badgeBounds, 19f, 19f, badgeFill)
+    canvas.drawRoundRect(badgeBounds, 19f, 19f, badgeBorder)
+    val badgeText = type.label(17f, 0xEEFFFFFF.toInt(), tracking = 0.12f)
+    badgeText.textAlign = Paint.Align.CENTER
+    canvas.drawText("♫ REPLAY", badgeBounds.centerX(), badgeBounds.centerY() + 6f, badgeText)
 
+    // Section label
+    val locale = context.resources.configuration.locales[0]
     canvas.drawText(
-        formatMinutes(summary.totalMs),
-        MARGIN,
-        top + 120f,
-        type.heading(148f, Color.WHITE),
+        context.getString(R.string.minutes_listened).uppercase(locale),
+        MARGIN + 32f,
+        top + 50f,
+        type.label(22f, 0xB3FFFFFF.toInt(), tracking = 0.14f),
     )
+
+    // Large number with generous vertical space above & below
+    val numberText = formatMinutes(summary.totalMs)
+    val numberPaint = type.heading(118f, Color.WHITE)
     canvas.drawText(
-        context.getString(R.string.minutes_listened).uppercase(context.resources.configuration.locales[0]),
-        MARGIN,
-        top + 176f,
-        type.label(30f, 0xB3FFFFFF.toInt(), tracking = 0.14f),
+        numberText,
+        MARGIN + 32f,
+        top + 160f,
+        numberPaint,
     )
+
+    // Subtitle stats
+    val subStats = listOfNotNull(
+        context.replayCount(summary.totalPlays, R.plurals.replay_play_count),
+        context.replayCount(summary.distinctSongs, R.plurals.replay_song_count),
+        context.replayCount(summary.distinctArtists, R.plurals.replay_artist_count),
+    ).joinToString(" · ")
     canvas.drawText(
-        "${context.replayCount(summary.totalPlays, R.plurals.replay_play_count)} · " +
-            "${context.replayCount(summary.distinctSongs, R.plurals.replay_song_count)} · " +
-            context.replayCount(summary.distinctArtists, R.plurals.replay_artist_count),
-        MARGIN,
-        top + 232f,
-        type.body(30f, 0x99FFFFFF.toInt()),
+        subStats,
+        MARGIN + 32f,
+        top + 214f,
+        type.body(25f, 0x99FFFFFF.toInt()),
     )
-    return top + 320f
+
+    return top + cardHeight + 24f
 }
 
 /**
- * The two charts side by side.
- *
- * Songs on the left because that is what people go looking for first, and
- * artists on the right as circles — the one distinction that needs no heading,
- * since every music app on the device makes it.
+ * The two charts side by side as independent Liquid Glass Bento Cards.
  */
 private fun drawColumns(
     canvas: Canvas,
@@ -489,49 +549,46 @@ private fun drawColumns(
     covers: Map<String, Bitmap?>,
     top: Float,
 ): Float {
-    val columnWidth = (POSTER_W - MARGIN * 2 - COLUMN_GAP) / 2f
-    val right = MARGIN + columnWidth + COLUMN_GAP
+    val columnGap = 20f
+    val colWidth = (POSTER_W - MARGIN * 2 - columnGap) / 2f
+    val leftX = MARGIN
+    val rightX = MARGIN + colWidth + columnGap
+
+    val rows = maxOf(songs.size, artists.size).coerceAtMost(POSTER_ROWS)
+    val rowH = 92f
+    val cardH = 68f + rows * rowH + 20f
+
+    val leftBounds = RectF(leftX, top, leftX + colWidth, top + cardH)
+    val rightBounds = RectF(rightX, top, rightX + colWidth, top + cardH)
+
+    drawLiquidGlassCard(canvas, leftBounds, cornerRadius = 28f)
+    drawLiquidGlassCard(canvas, rightBounds, cornerRadius = 28f)
 
     val locale = context.resources.configuration.locales[0]
     canvas.drawText(
         context.getString(R.string.top_songs).uppercase(locale),
-        MARGIN,
-        top,
-        type.label(28f, 0xB3FFFFFF.toInt(), tracking = 0.16f),
+        leftX + 24f,
+        top + 46f,
+        type.label(22f, 0xEEFFFFFF.toInt(), tracking = 0.14f),
     )
     canvas.drawText(
         context.getString(R.string.top_artists).uppercase(locale),
-        right,
-        top,
-        type.label(28f, 0xB3FFFFFF.toInt(), tracking = 0.16f),
+        rightX + 24f,
+        top + 46f,
+        type.label(22f, 0xEEFFFFFF.toInt(), tracking = 0.14f),
     )
 
-    val rows = maxOf(songs.size, artists.size)
-    val colHeight = rows * ROW_HEIGHT + 74f
-    val glassFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x14FFFFFF
-        style = Paint.Style.FILL
-    }
-    val glassBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x2EFFFFFF
-        style = Paint.Style.STROKE
-        strokeWidth = 2.5f
-    }
-    val bounds = RectF(MARGIN - 24f, top - 32f, POSTER_W - MARGIN + 24f, top + colHeight - 20f)
-    canvas.drawRoundRect(bounds, 32f, 32f, glassFill)
-    canvas.drawRoundRect(bounds, 32f, 32f, glassBorder)
-
-    var y = top + 54f
+    var rowY = top + 76f
     repeat(rows) { index ->
         songs.getOrNull(index)?.let {
-            drawRow(canvas, context, type, it, covers, MARGIN, y, columnWidth, false)
+            drawRow(canvas, context, type, it, covers, leftX + 18f, rowY, colWidth - 36f, false)
         }
         artists.getOrNull(index)?.let {
-            drawRow(canvas, context, type, it, covers, right, y, columnWidth, true)
+            drawRow(canvas, context, type, it, covers, rightX + 18f, rowY, colWidth - 36f, true)
         }
-        y += ROW_HEIGHT
+        rowY += rowH
     }
-    return y + 40f
+    return top + cardH + 24f
 }
 
 private fun drawRow(
@@ -545,23 +602,43 @@ private fun drawRow(
     width: Float,
     circular: Boolean,
 ) {
+    val artSize = 64f
+    val badgeSize = 28f
+    val badgeBounds = RectF(x, y + (artSize - badgeSize) / 2f, x + badgeSize, y + (artSize + badgeSize) / 2f)
+
+    val isTopOne = row.rank == 1
+    val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = if (isTopOne) 0x3DFA2D48.toInt() else 0x22FFFFFF
+        style = Paint.Style.FILL
+    }
+    val badgeBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = if (isTopOne) 0x88FA2D48.toInt() else 0x33FFFFFF
+        style = Paint.Style.STROKE
+        strokeWidth = 1f
+    }
+    canvas.drawRoundRect(badgeBounds, 14f, 14f, badgePaint)
+    canvas.drawRoundRect(badgeBounds, 14f, 14f, badgeBorder)
+
+    val rankText = type.heading(18f, if (isTopOne) 0xFFFA4D68.toInt() else 0xDDFFFFFF.toInt())
+    rankText.textAlign = Paint.Align.CENTER
     canvas.drawText(
         row.rank.toString(),
-        x,
-        y + ART * 0.68f,
-        type.heading(34f, if (row.rank == 1) ACCENT else 0x73FFFFFF),
+        badgeBounds.centerX(),
+        badgeBounds.centerY() + 6f,
+        rankText,
     )
-    val artX = x + 44f
-    val art = row.artworkUrl?.let { covers[it] }
-    drawArtwork(canvas, art, row.title, artX, y, ART, circular)
 
-    val textX = artX + ART + 20f
+    val artX = x + badgeSize + 10f
+    val art = row.artworkUrl?.let { covers[it] }
+    drawArtwork(canvas, art, row.title, artX, y, artSize, circular)
+
+    val textX = artX + artSize + 14f
     val textWidth = width - (textX - x)
-    val title = type.body(30f, Color.WHITE, bold = true)
-    canvas.drawText(ellipsised(row.title, title, textWidth), textX, y + 36f, title)
-    val sub = type.body(25f, 0x99FFFFFF.toInt())
+    val title = type.body(24f, Color.WHITE, bold = true)
+    canvas.drawText(ellipsised(row.title, title, textWidth), textX, y + 26f, title)
+    val sub = type.body(19f, 0x99FFFFFF.toInt())
     val detail = listOfNotNull(row.subtitle, formatListening(context, row.ms)).joinToString(" · ")
-    canvas.drawText(ellipsised(detail, sub, textWidth), textX, y + 72f, sub)
+    canvas.drawText(ellipsised(detail, sub, textWidth), textX, y + 50f, sub)
 }
 
 private fun drawAlbums(
@@ -573,60 +650,101 @@ private fun drawAlbums(
     top: Float,
 ): Float {
     if (albums.isEmpty()) return top
+    val cardHeight = 310f
+    val cardBounds = RectF(MARGIN, top, POSTER_W - MARGIN, top + cardHeight)
+    drawLiquidGlassCard(canvas, cardBounds, cornerRadius = 32f)
+
+    val locale = context.resources.configuration.locales[0]
     canvas.drawText(
-        context.getString(R.string.top_albums).uppercase(context.resources.configuration.locales[0]),
-        MARGIN,
-        top,
-        type.label(28f, 0xB3FFFFFF.toInt(), tracking = 0.16f),
+        context.getString(R.string.top_albums).uppercase(locale),
+        MARGIN + 28f,
+        top + 46f,
+        type.label(22f, 0xEEFFFFFF.toInt(), tracking = 0.14f),
     )
-    val size = 200f
-    val gap = (POSTER_W - MARGIN * 2 - size * POSTER_ALBUMS) / (POSTER_ALBUMS - 1)
-    val y = top + 40f
-    albums.take(POSTER_ALBUMS).forEachIndexed { index, album ->
-        val x = MARGIN + index * (size + gap)
-        drawArtwork(canvas, album.artworkUrl?.let { covers[it] }, album.title, x, y, size, false)
-        val name = type.body(25f, Color.WHITE, bold = true)
-        canvas.drawText(ellipsised(album.title, name, size), x, y + size + 38f, name)
-        val sub = type.body(22f, 0x8CFFFFFF.toInt())
+
+    val items = albums.take(POSTER_ALBUMS)
+    val innerMargin = 28f
+    val availableW = POSTER_W - MARGIN * 2 - innerMargin * 2
+    val artSize = 158f
+    val gap = if (items.size > 1) (availableW - artSize * items.size) / (items.size - 1) else 0f
+    val artY = top + 68f
+
+    items.forEachIndexed { index, album ->
+        val x = MARGIN + innerMargin + index * (artSize + gap)
+        drawArtwork(canvas, album.artworkUrl?.let { covers[it] }, album.title, x, artY, artSize, false)
+
+        val artBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0x33FFFFFF
+            style = Paint.Style.STROKE
+            strokeWidth = 1.5f
+        }
+        canvas.drawRoundRect(RectF(x, artY, x + artSize, artY + artSize), 16f, 16f, artBorder)
+
+        val name = type.body(22f, Color.WHITE, bold = true)
+        canvas.drawText(ellipsised(album.title, name, artSize), x, artY + artSize + 30f, name)
+        val sub = type.body(19f, 0x8CFFFFFF.toInt())
         canvas.drawText(
-            ellipsised(album.subtitle ?: formatListening(context, album.ms), sub, size),
+            ellipsised(album.subtitle ?: formatListening(context, album.ms), sub, artSize),
             x,
-            y + size + 70f,
+            artY + artSize + 54f,
             sub,
         )
     }
-    return y + size + 130f
+    return top + cardHeight + 24f
 }
 
 private fun drawGenres(canvas: Canvas, context: Context, type: Fonts, summary: ReplaySummary, top: Float) {
     val genres = summary.genreRows(POSTER_GENRES)
     if (genres.isEmpty()) return
+    val locale = context.resources.configuration.locales[0]
     canvas.drawText(
-        context.getString(R.string.top_genres).uppercase(context.resources.configuration.locales[0]),
+        context.getString(R.string.top_genres).uppercase(locale),
         MARGIN,
-        top,
-        type.label(28f, 0xB3FFFFFF.toInt(), tracking = 0.16f),
+        top + 28f,
+        type.label(22f, 0xEEFFFFFF.toInt(), tracking = 0.14f),
     )
-    val paint = type.body(32f, Color.WHITE, bold = true)
-    val chip = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x26FFFFFF }
+    val paint = type.body(24f, Color.WHITE, bold = true)
+    val chipFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x22FFFFFF }
+    val chipBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x38FFFFFF
+        style = Paint.Style.STROKE
+        strokeWidth = 1.5f
+    }
     var x = MARGIN
-    val y = top + 44f
+    val y = top + 46f
     genres.forEach { genre ->
-        val width = paint.measureText(genre.title) + 44f
+        val width = paint.measureText(genre.title) + 40f
         if (x + width > POSTER_W - MARGIN) return
-        canvas.drawRoundRect(RectF(x, y, x + width, y + 62f), 31f, 31f, chip)
-        canvas.drawText(genre.title, x + 22f, y + 42f, paint)
+        val pillRect = RectF(x, y, x + width, y + 46f)
+        canvas.drawRoundRect(pillRect, 23f, 23f, chipFill)
+        canvas.drawRoundRect(pillRect, 23f, 23f, chipBorder)
+        canvas.drawText(genre.title, x + 20f, y + 31f, paint)
         x += width + 14f
     }
 }
 
 private fun drawFooter(canvas: Canvas, context: Context, type: Fonts) {
-    canvas.drawText(
-        context.getString(R.string.counted_on_device_with_bitchord),
-        MARGIN,
-        POSTER_H - 64f,
-        type.label(24f, 0x73FFFFFF, tracking = 0.08f),
-    )
+    val text = context.getString(R.string.counted_on_device_with_bitchord)
+    val font = type.label(21f, 0xEEFFFFFF.toInt(), tracking = 0.08f)
+    font.textAlign = Paint.Align.CENTER
+    val textWidth = font.measureText(text)
+    val pillW = textWidth + 56f
+    val pillH = 46f
+    val centerX = POSTER_W / 2f
+    val pillBounds = RectF(centerX - pillW / 2f, POSTER_H - 100f, centerX + pillW / 2f, POSTER_H - 100f + pillH)
+
+    val pillFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x1EFFFFFF
+        style = Paint.Style.FILL
+    }
+    val pillBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x3DFFFFFF
+        style = Paint.Style.STROKE
+        strokeWidth = 1.5f
+    }
+    canvas.drawRoundRect(pillBounds, 23f, 23f, pillFill)
+    canvas.drawRoundRect(pillBounds, 23f, 23f, pillBorder)
+    canvas.drawText(text, centerX, pillBounds.centerY() + 7f, font)
 }
 
 // ── Pieces ──────────────────────────────────────────────────────────────────

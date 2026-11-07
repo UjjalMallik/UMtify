@@ -20,6 +20,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.bitchord.data.settings.AppSettings
@@ -97,15 +98,22 @@ fun ReplayShareSheet(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val themeColors = rememberAppThemeGlassColors()
+    val themeArgb = remember(themeColors) { themeColors.map { it.toArgb() } }
     val savedThemeId by AppSettings.replayGlassTheme.collectAsStateWithLifecycle()
     var selectedTheme by remember(savedThemeId) {
         mutableStateOf(ReplayGlassTheme.fromId(savedThemeId))
     }
     var poster by remember { mutableStateOf<Bitmap?>(null) }
     var failed by remember { mutableStateOf(false) }
+    var isSaving by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
 
-    LaunchedEffect(summary, page, selectedTheme) {
+    LaunchedEffect(selectedTheme) {
+        saved = false
+    }
+
+    LaunchedEffect(summary, page, selectedTheme, themeArgb) {
         poster = null
         poster = runCatching {
             renderReplayPoster(
@@ -115,6 +123,7 @@ fun ReplayShareSheet(
                 memberSince = memberSince,
                 page = page,
                 glassTheme = selectedTheme,
+                themeColors = if (selectedTheme == ReplayGlassTheme.AUTO) themeArgb else null,
             )
         }.onFailure { failed = true }
         .getOrNull()
@@ -192,6 +201,7 @@ fun ReplayShareSheet(
         ) {
             items(ReplayGlassTheme.entries, key = { it.id }) { theme ->
                 val isSelected = theme == selectedTheme
+                val themeStops = theme.resolvedStops(themeColors)
                 val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
                 val chipBorder = if (isSelected) {
                     Brush.verticalGradient(
@@ -225,6 +235,7 @@ fun ReplayShareSheet(
                         )
                         .clickable {
                             selectedTheme = theme
+                            saved = false
                             AppSettings.setReplayGlassTheme(theme.id)
                         }
                         .padding(horizontal = 10.dp, vertical = 7.dp),
@@ -234,7 +245,7 @@ fun ReplayShareSheet(
                         modifier = Modifier
                             .size(16.dp)
                             .clip(CircleShape)
-                            .background(Brush.sweepGradient(theme.stops))
+                            .background(Brush.sweepGradient(themeStops))
                             .border(1.dp, Color.White.copy(alpha = 0.5f), CircleShape),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -281,13 +292,23 @@ fun ReplayShareSheet(
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             ShareAction(
                 label = if (saved) stringResource(R.string.saved) else stringResource(R.string.save),
-                icon = Icons.Rounded.Download,
+                icon = if (saved) Icons.Rounded.Check else Icons.Rounded.Download,
                 accent = false,
-                enabled = ready && !saved,
+                enabled = ready && !isSaving,
                 modifier = Modifier.weight(1f),
             ) {
                 val image = poster ?: return@ShareAction
-                scope.launch { saved = saveToGallery(context, image, summary.label) }
+                scope.launch {
+                    isSaving = true
+                    val ok = saveToGallery(
+                        context = context,
+                        bitmap = image,
+                        label = summary.label,
+                        paletteName = selectedTheme.displayName,
+                    )
+                    saved = ok
+                    isSaving = false
+                }
             }
             ShareAction(
                 label = stringResource(R.string.share),
@@ -418,9 +439,13 @@ internal suspend fun saveToGallery(
     context: Context,
     bitmap: Bitmap,
     label: String,
-    prefix: String = "umtify-replay",
+    paletteName: String = "",
+    prefix: String = "UMtify_Replay",
 ): Boolean = withContext(Dispatchers.IO) {
-    val name = "$prefix-${label.replace(' ', '-').lowercase(Locale.ROOT)}.png"
+    val cleanPalette = paletteName.filter { it.isLetterOrDigit() }.ifBlank { "Theme" }
+    val cleanLabel = label.replace(' ', '_').filter { it.isLetterOrDigit() || it == '_' }.ifBlank { "Summary" }
+    val timestamp = System.currentTimeMillis()
+    val name = "${prefix}_${cleanLabel}_${cleanPalette}_$timestamp.png"
     runCatching {
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, name)

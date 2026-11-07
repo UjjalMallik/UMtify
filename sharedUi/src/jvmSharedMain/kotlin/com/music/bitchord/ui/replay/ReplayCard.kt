@@ -41,6 +41,8 @@ import com.music.bitchord.sharedui.resources.*
 import org.jetbrains.compose.resources.stringResource
 import com.music.bitchord.ui.player.MeshGradientBackground
 import com.music.bitchord.ui.player.rememberArtworkColors
+import com.music.bitchord.ui.theme.withHsl
+import androidx.compose.ui.graphics.luminance
 import java.util.Locale
 
 /**
@@ -88,6 +90,46 @@ import java.util.Locale
  * screen.
  */
 @Composable
+fun rememberAppThemeGlassColors(): List<Color> {
+    val colorScheme = MaterialTheme.colorScheme
+    return remember(colorScheme) {
+        val primary = colorScheme.primary
+        val secondary = colorScheme.secondary
+        val tertiary = colorScheme.tertiary
+
+        val hasChroma = (maxOf(primary.red, primary.green, primary.blue) - minOf(primary.red, primary.green, primary.blue)) >= 0.12f
+        val seed = if (hasChroma) primary else Color(0xFFFA2D48)
+
+        val c1 = seed
+        val c2 = if ((maxOf(secondary.red, secondary.green, secondary.blue) - minOf(secondary.red, secondary.green, secondary.blue)) >= 0.10f) {
+            secondary
+        } else {
+            seed.withHsl(hue = { (it + 35f) % 360f }, saturation = { (it * 0.9f).coerceIn(0.4f, 1f) }, lightness = { (it * 1.15f).coerceIn(0.3f, 0.75f) })
+        }
+        val c3 = if ((maxOf(tertiary.red, tertiary.green, tertiary.blue) - minOf(tertiary.red, tertiary.green, tertiary.blue)) >= 0.10f) {
+            tertiary
+        } else {
+            seed.withHsl(hue = { (it - 30f + 360f) % 360f }, saturation = { (it * 1.05f).coerceIn(0.4f, 1f) }, lightness = { (it * 0.85f).coerceIn(0.2f, 0.6f) })
+        }
+        listOf(c1, c2, c3)
+    }
+}
+
+@Composable
+fun rememberAppThemeMeshPalette(): MeshPalette {
+    val stops = rememberAppThemeGlassColors()
+    val surface = MaterialTheme.colorScheme.surfaceContainer
+    return remember(stops, surface) {
+        val c4 = if (surface != Color.Unspecified && surface.luminance() > 0.05f) {
+            surface
+        } else {
+            stops.first().withHsl(hue = { (it + 70f) % 360f }, lightness = { 0.15f })
+        }
+        MeshPalette(stops + c4)
+    }
+}
+
+@Composable
 fun ReplayCreditCard(
     label: String,
     value: String,
@@ -107,12 +149,13 @@ fun ReplayCreditCard(
     modifier: Modifier = Modifier,
     glassTheme: ReplayGlassTheme = ReplayGlassTheme.AUTO,
 ) {
-    val autoPalette = rememberArtworkColors(artworkUrl)
+    val themePalette = rememberAppThemeMeshPalette()
     val activePalette = if (glassTheme == ReplayGlassTheme.AUTO) {
-        autoPalette
+        themePalette
     } else {
         remember(glassTheme) { MeshPalette(glassTheme.stops) }
     }
+    val themeAccent = activePalette.colors.first()
     Box(
         modifier = modifier
             .aspectRatio(CARD_RATIO)
@@ -123,7 +166,7 @@ fun ReplayCreditCard(
                 Brush.verticalGradient(
                     listOf(
                         Color.White.copy(alpha = 0.45f),
-                        glassTheme.stops.last().copy(alpha = 0.35f),
+                        themeAccent.copy(alpha = 0.35f),
                         Color.White.copy(alpha = 0.12f),
                     ),
                 ),
@@ -133,7 +176,7 @@ fun ReplayCreditCard(
     ) {
         MeshGradientBackground(
             palette = activePalette,
-            trackKey = if (glassTheme == ReplayGlassTheme.AUTO) (artworkUrl ?: label) else glassTheme.id,
+            trackKey = if (glassTheme == ReplayGlassTheme.AUTO) "app_theme_${themeAccent.hashCode()}" else glassTheme.id,
             blurRadius = 34.dp,
             animated = false,
         )

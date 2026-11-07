@@ -14,7 +14,7 @@ enum class ReplayGlassTheme(
 ) {
     AUTO(
         id = "AUTO",
-        displayName = "Auto (Cover)",
+        displayName = "App Theme (Dynamic)",
         stops = listOf(Color(0xFF6366F1), Color(0xFFA855F7), Color(0xFFEC4899)),
         argbColors = listOf(0xFF6366F1.toInt(), 0xFFA855F7.toInt(), 0xFFEC4899.toInt()),
     ),
@@ -59,4 +59,10 @@ enum class ReplayGlassTheme(
         fun fromId(id: String?): ReplayGlassTheme =
             entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: AUTO
     }
+
+    fun resolvedStops(themeColors: List<Color>?): List<Color> =
+        if (this == AUTO && !themeColors.isNullOrEmpty()) themeColors else stops
+
+    fun resolvedArgbColors(themeArgb: List<Int>?): List<Int> =
+        if (this == AUTO && !themeArgb.isNullOrEmpty()) themeArgb else argbColors
 }
