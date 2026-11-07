@@ -353,7 +353,7 @@ internal fun ReplayCardRow(
                 wordmark = { UmifyWordmark(height = 18.dp, color = Color.White.copy(alpha = 0.9f)) },
                 onClick = { onCardClick(card.page) },
                 modifier = Modifier.width(300.dp),
-                glassTheme = activeTheme,
+                glassTheme = ReplayGlassTheme.AUTO,
             )
         }
     }

@@ -94,14 +94,9 @@ fun rememberAppThemeGlassColors(): List<Color> {
     val colorScheme = MaterialTheme.colorScheme
     return remember(colorScheme) {
         val primary = colorScheme.primary
-        val secondary = colorScheme.secondary
-        val tertiary = colorScheme.tertiary
-        val container = colorScheme.primaryContainer
-
-        val c1 = primary
-        val c2 = if (secondary != primary && secondary != Color.Unspecified) secondary else container
-        val c3 = if (tertiary != primary && tertiary != secondary && tertiary != Color.Unspecified) tertiary else colorScheme.surfaceVariant
-        listOf(c1, c2, c3)
+        val secondary = colorScheme.secondaryContainer
+        val tertiary = colorScheme.primaryContainer
+        listOf(primary, secondary, tertiary)
     }
 }
 
@@ -110,14 +105,10 @@ fun rememberAppThemeMeshPalette(): MeshPalette {
     val colorScheme = MaterialTheme.colorScheme
     return remember(colorScheme) {
         val primary = colorScheme.primary
-        val secondary = colorScheme.secondary
-        val tertiary = colorScheme.tertiary
+        val secondary = colorScheme.secondaryContainer
+        val tertiary = colorScheme.primaryContainer
         val surface = colorScheme.surfaceContainerHigh
-        val c1 = primary
-        val c2 = if (secondary != primary && secondary != Color.Unspecified) secondary else colorScheme.primaryContainer
-        val c3 = if (tertiary != primary && tertiary != secondary && tertiary != Color.Unspecified) tertiary else colorScheme.tertiaryContainer
-        val c4 = if (surface != Color.Unspecified && surface != Color.Transparent) surface else colorScheme.surfaceVariant
-        MeshPalette(listOf(c1, c2, c3, c4))
+        MeshPalette(listOf(primary, secondary, tertiary, surface))
     }
 }
 
@@ -141,13 +132,31 @@ fun ReplayCreditCard(
     modifier: Modifier = Modifier,
     glassTheme: ReplayGlassTheme = ReplayGlassTheme.AUTO,
 ) {
-    val themePalette = rememberAppThemeMeshPalette()
-    val activePalette = if (glassTheme == ReplayGlassTheme.AUTO) {
-        themePalette
+    val colorScheme = MaterialTheme.colorScheme
+    val isDynamic = glassTheme == ReplayGlassTheme.AUTO
+    val primary = colorScheme.primary
+    val secondary = colorScheme.secondaryContainer
+    val container = colorScheme.primaryContainer
+
+    val cardGradient = if (isDynamic) {
+        Brush.linearGradient(
+            colors = listOf(
+                primary.copy(alpha = 0.92f),
+                secondary.copy(alpha = 0.85f),
+                container.copy(alpha = 0.95f),
+            ),
+            start = Offset.Zero,
+            end = Offset.Infinite,
+        )
     } else {
-        remember(glassTheme) { MeshPalette(glassTheme.stops) }
+        Brush.linearGradient(
+            colors = glassTheme.stops.map { it.copy(alpha = 0.90f) },
+            start = Offset.Zero,
+            end = Offset.Infinite,
+        )
     }
-    val themeAccent = activePalette.colors.first()
+    val themeAccent = if (isDynamic) primary else glassTheme.stops.first()
+
     Box(
         modifier = modifier
             .aspectRatio(CARD_RATIO)
@@ -159,18 +168,18 @@ fun ReplayCreditCard(
                     listOf(
                         Color.White.copy(alpha = 0.45f),
                         themeAccent.copy(alpha = 0.35f),
-                        Color.White.copy(alpha = 0.12f),
+                        Color.White.copy(alpha = 0.15f),
                     ),
                 ),
                 CardShape,
             )
             .clickable(onClick = onClick),
     ) {
-        MeshGradientBackground(
-            palette = activePalette,
-            trackKey = if (glassTheme == ReplayGlassTheme.AUTO) "app_theme_${themeAccent.hashCode()}" else glassTheme.id,
-            blurRadius = 34.dp,
-            animated = false,
+        // Liquid glass dynamic theme gradient background
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(cardGradient),
         )
         // Specular diagonal glass sheen overlay
         Box(
@@ -179,24 +188,22 @@ fun ReplayCreditCard(
                 .background(
                     Brush.linearGradient(
                         listOf(
-                            Color.White.copy(alpha = 0.16f),
+                            Color.White.copy(alpha = 0.20f),
                             Color.Transparent,
-                            Color.White.copy(alpha = 0.05f),
+                            Color.White.copy(alpha = 0.06f),
                         ),
                     ),
                 ),
         )
-        // Deepened towards the foot, where the embossed lines are: the mesh is
-        // built to be bright and those lines are pale, and without this the
-        // cardholder name lands on whichever blob happened to drift under it.
+        // Legibility gradient so embossed text has strong contrast
         Box(
             Modifier
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        0.0f to Color.Black.copy(alpha = 0.18f),
-                        0.55f to Color.Black.copy(alpha = 0.30f),
-                        1.0f to Color.Black.copy(alpha = 0.55f),
+                        0.0f to Color.Black.copy(alpha = 0.08f),
+                        0.55f to Color.Black.copy(alpha = 0.22f),
+                        1.0f to Color.Black.copy(alpha = 0.45f),
                     ),
                 ),
         )
