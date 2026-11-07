@@ -102,7 +102,7 @@ fun WearOsScreen(contentPadding: PaddingValues, modifier: Modifier = Modifier) {
             text = stringResource(if (installingNode != null) R.string.wear_os_install_title else R.string.wear_os_page_title),
             style = MaterialTheme.typography.displayLarge,
             color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
+            modifier = Modifier.padding(start = 72.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
         )
 
         val node = installingNode

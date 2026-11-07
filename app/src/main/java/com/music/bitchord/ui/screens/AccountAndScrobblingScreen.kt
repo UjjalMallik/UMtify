@@ -65,7 +65,7 @@ fun AccountAndScrobblingScreen(
             text = stringResource(R.string.account_integrations),
             style = MaterialTheme.typography.displayLarge,
             color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
+            modifier = Modifier.padding(start = 72.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
         )
 
         // One card: who is signed in, which profile is listening, and the way

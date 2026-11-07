@@ -136,6 +136,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
@@ -466,7 +467,7 @@ fun SettingsScreen(
             text = stringResource(R.string.settings),
             style = MaterialTheme.typography.displayLarge,
             color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
+            modifier = Modifier.padding(start = 72.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
         )
         SearchField(
             query = searchQuery,
@@ -474,6 +475,7 @@ fun SettingsScreen(
             onSubmit = {},
             placeholder = stringResource(R.string.settings_search_hint),
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 4.dp),
+            containerModifier = Modifier.liquidGlassCard(RoundedCornerShape(22.dp)),
         )
 
         // The two ways of being connected — an account, and a party — side by
@@ -2407,8 +2409,7 @@ internal fun AccountCard(
                 } else {
                     Modifier
                         .padding(horizontal = GROUP_INSET)
-                        .clip(GroupShape)
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .liquidGlassCard(GroupShape)
                 },
             )
             .then(
@@ -2710,7 +2711,51 @@ private fun DownloadQualitySheet(
 
 // ---- Building blocks --------------------------------------------------------
 
-internal val GroupShape = RoundedCornerShape(14.dp)
+internal val GroupShape = RoundedCornerShape(22.dp)
+
+@Composable
+internal fun Modifier.liquidGlassCard(
+    shape: Shape = GroupShape,
+    isLight: Boolean = MaterialTheme.colorScheme.background.luminance() > 0.5f,
+): Modifier {
+    val darkBorder = Brush.verticalGradient(
+        listOf(
+            Color.White.copy(alpha = 0.28f),
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+            Color.White.copy(alpha = 0.06f),
+        ),
+    )
+    val lightBorder = Brush.verticalGradient(
+        listOf(
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.30f),
+            Color.Black.copy(alpha = 0.12f),
+        ),
+    )
+    val darkSheen = Brush.linearGradient(
+        listOf(Color.White.copy(alpha = 0.10f), Color.White.copy(alpha = 0.02f)),
+    )
+    val darkBase = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.65f)
+    val lightBase = Color.White.copy(alpha = 0.85f)
+
+    return this
+        .shadow(
+            elevation = 6.dp,
+            shape = shape,
+            clip = false,
+            ambientColor = Color.Black.copy(alpha = if (isLight) 0.12f else 0.35f),
+            spotColor = Color.Black.copy(alpha = if (isLight) 0.08f else 0.25f),
+        )
+        .clip(shape)
+        .background(if (isLight) lightBase else darkBase)
+        .then(
+            if (isLight) {
+                Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.06f))
+            } else {
+                Modifier.background(darkSheen)
+            },
+        )
+        .border(1.2.dp, if (isLight) lightBorder else darkBorder, shape)
+}
 internal val GROUP_INSET = 16.dp
 internal val ROW_INSET = 16.dp
 internal val ICON_SIZE = 22.dp
@@ -2848,8 +2893,7 @@ private fun SettingsCategoryCard(
             .padding(horizontal = GROUP_INSET)
             .padding(top = 12.dp)
             .fillMaxWidth()
-            .clip(GroupShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+            .liquidGlassCard(GroupShape),
     ) {
         Row(
             modifier = Modifier
@@ -2862,7 +2906,8 @@ private fun SettingsCategoryCard(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.20f))
+                    .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.40f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -2878,7 +2923,7 @@ private fun SettingsCategoryCard(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onBackground,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -2918,10 +2963,11 @@ private fun SettingsCategoryCard(
             },
         ) {
             Column {
-                // The seam between the header and what it opens. The first row
-                // below is then divided from its neighbours by the same hairline
-                // the rows above the header never needed.
-                RowDivider()
+                // The seam between the header and what it opens. High-contrast glass divider.
+                HorizontalDivider(
+                    thickness = 0.8.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                )
                 scope.entries.forEachIndexed { index, entry ->
                     if (index > 0 && entry.divided) RowDivider()
                     // Same as [SearchableSettingsGroup]: an undivided row is a
@@ -2952,8 +2998,7 @@ private fun SettingsFeatureCard(
 ) {
     Column(
         modifier = modifier
-            .clip(GroupShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .liquidGlassCard(GroupShape)
             .clickable(onClick = onClick)
             .padding(16.dp),
     ) {
@@ -2962,7 +3007,8 @@ private fun SettingsFeatureCard(
                 modifier = Modifier
                     .size(36.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.20f))
+                    .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.40f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -2984,7 +3030,7 @@ private fun SettingsFeatureCard(
             text = title,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onBackground,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
@@ -3036,8 +3082,7 @@ internal fun SettingsGroup(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = GROUP_INSET)
-            .clip(GroupShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+            .liquidGlassCard(GroupShape),
     ) {
         content()
     }
@@ -3059,8 +3104,8 @@ internal fun SettingsGroup(
 internal fun RowDivider() {
     HorizontalDivider(
         modifier = Modifier.padding(start = TEXT_INSET),
-        thickness = 0.5.dp,
-        color = MaterialTheme.colorScheme.outline,
+        thickness = 0.8.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
     )
 }
 
@@ -3116,7 +3161,7 @@ internal fun SettingsRow(
                 Text(
                     text = title,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onBackground,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

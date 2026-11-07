@@ -53,6 +53,7 @@ fun SearchField(
     /** What the empty field says it is for — the one part that changes per screen. */
     placeholder: String = stringResource(Res.string.search_hint),
     modifier: Modifier = Modifier,
+    containerModifier: Modifier? = null,
 ) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -67,7 +68,12 @@ fun SearchField(
             .fillMaxWidth()
             // Fixed height prevents the row from growing when text is entered
             .height(46.dp)
-            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(11.dp))
+            .then(
+                containerModifier ?: Modifier.background(
+                    MaterialTheme.colorScheme.surfaceVariant,
+                    RoundedCornerShape(11.dp),
+                ),
+            )
             // Asymmetric: the magnifier is a button now and wants a real touch
             // target, so it's given the room by pulling the field's own start
             // padding in rather than by pushing the glyph and the text along.
