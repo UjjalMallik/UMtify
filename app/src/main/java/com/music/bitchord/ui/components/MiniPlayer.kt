@@ -39,7 +39,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
@@ -361,6 +363,11 @@ fun MiniPlayer(
     // a pill instead of a rounded rectangle. Same idiom as [FloatingBottomBar]
     // directly below it, so the two shapes are the same family.
     val shape = RoundedCornerShape(percent = 50)
+    val isLight = MaterialTheme.colorScheme.surface.luminance() > 0.5f || MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val containerColor = if (isLight) Color(0xFFF0F2F5).copy(alpha = 0.94f) else MaterialTheme.colorScheme.surface
+    val borderColor = if (isLight) Color.Black.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.10f)
+    val borderWidth = if (isLight) 1.dp else 0.5.dp
+    val controlTint = if (isLight) Color(0xFF121212) else MaterialTheme.colorScheme.onBackground
     Box(
         modifier = modifier
             .padding(horizontal = BAR_GUTTER)
@@ -378,10 +385,17 @@ fun MiniPlayer(
                 locked = controlsLocked,
                 onBlocked = onBlockedControl,
             )
+            .shadow(
+                elevation = if (isLight) 8.dp else 0.dp,
+                shape = shape,
+                clip = false,
+                ambientColor = Color.Black.copy(alpha = 0.15f),
+                spotColor = Color.Black.copy(alpha = 0.10f),
+            )
             .clip(shape)
             .then(
-                if (reduceDynamicBlur) {
-                    Modifier.background(MaterialTheme.colorScheme.surface)
+                if (reduceDynamicBlur || isLight) {
+                    Modifier.background(containerColor)
                 } else {
                     Modifier.optimizedHazeEffect(
                         state = hazeState,
@@ -389,7 +403,7 @@ fun MiniPlayer(
                     )
                 },
             )
-            .border(0.5.dp, Color.White.copy(alpha = 0.10f), shape)
+            .border(borderWidth, borderColor, shape)
             // Deliberately silent: the whole bar is the target, so it catches
             // stray taps meant for the page behind it, and the sheet rising is
             // its own confirmation. The glyphs on it still buzz.
@@ -419,12 +433,12 @@ fun MiniPlayer(
                 ExplicitSongTitle(
                     song = display,
                     style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onBackground,
+                    color = controlTint,
                 )
                 Text(
                     text = display.artist,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (isLight) Color(0xFF555555) else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -438,7 +452,7 @@ fun MiniPlayer(
                 modifier = Modifier.size(GLYPH_SLOT),
             ) {
                 MiniPlayerPreviousGlyph(
-                    tint = MaterialTheme.colorScheme.onBackground
+                    tint = controlTint
                         .copy(alpha = if (controlsLocked) 0.3f else 1f),
                 )
             }
@@ -446,7 +460,7 @@ fun MiniPlayer(
             if (isLoading) {
                 Box(Modifier.size(GLYPH_SLOT), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(
-                        color = MaterialTheme.colorScheme.onBackground,
+                        color = controlTint,
                         strokeWidth = 2.dp,
                         modifier = Modifier.size(SPINNER_SIZE),
                     )
@@ -462,7 +476,7 @@ fun MiniPlayer(
                     Icon(
                         imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                         contentDescription = stringResource(if (isPlaying) R.string.pause else R.string.play),
-                        tint = MaterialTheme.colorScheme.onBackground,
+                        tint = controlTint,
                         modifier = Modifier.size(GLYPH_SIZE),
                     )
                 }
@@ -479,7 +493,7 @@ fun MiniPlayer(
                 modifier = Modifier.size(GLYPH_SLOT),
             ) {
                 MiniPlayerNextGlyph(
-                    tint = MaterialTheme.colorScheme.onBackground
+                    tint = controlTint
                         .copy(alpha = if (controlsLocked) 0.3f else 1f),
                 )
             }

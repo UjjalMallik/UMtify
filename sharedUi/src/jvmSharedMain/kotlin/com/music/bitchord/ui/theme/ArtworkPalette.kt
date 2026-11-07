@@ -338,7 +338,7 @@ private val NEUTRAL_SEED = Seed(
  * and only the hue, and the artwork's own chroma through
  * [adaptedArtworkSaturation], come from the sleeve.
  */
-private fun dynamicDarkScheme(dominant: Color, accent: Color): ColorScheme {
+internal fun dynamicDarkScheme(dominant: Color, accent: Color): ColorScheme {
     fun Color.hasChroma() = chroma() >= TINT_MIN_CHROMA
     val base = when {
         dominant.hasChroma() -> dominant
@@ -721,7 +721,7 @@ internal fun adaptedArtworkSaturation(source: Float, minimum: Float, maximum: Fl
 /** Below this, boosting saturation makes quantisation noise visible as a tint. */
 private const val CHROMATIC_SATURATION_THRESHOLD = 0.12f
 
-private fun Color.withHsl(
+internal fun Color.withHsl(
     hue: (Float) -> Float = { it },
     saturation: (Float) -> Float = { it },
     lightness: (Float) -> Float = { it },

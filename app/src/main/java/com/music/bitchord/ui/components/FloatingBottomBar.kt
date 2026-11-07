@@ -44,7 +44,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -172,6 +174,10 @@ fun FloatingBottomBar(
     val pillShape = RoundedCornerShape(percent = 50)
     val circleShape = CircleShape
     val container = MaterialTheme.colorScheme.surface
+    val isLight = MaterialTheme.colorScheme.surface.luminance() > 0.5f || MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val barContainer = if (isLight) Color(0xFFF0F2F5).copy(alpha = 0.94f) else container
+    val barBorderColor = if (isLight) Color.Black.copy(alpha = 0.12f) else GLASS_EDGE_COLOR
+    val barBorderWidth = if (isLight) 1.dp else GLASS_EDGE_WIDTH
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
     val useGlass = LocalLiquidGlassEnabled.current && isGlassSupported()
     val reduceAnimation by AppSettings.reduceAnimation.collectAsStateWithLifecycle()
@@ -224,7 +230,9 @@ fun FloatingBottomBar(
 
     LaunchedEffect(selectedIndex) { dragOffset = 0f }
 
-    val glassModifier = if (reduceDynamicBlur) {
+    val glassModifier = if (isLight) {
+        Modifier.background(barContainer)
+    } else if (reduceDynamicBlur) {
         Modifier.background(container)
     } else if (useGlass) {
         Modifier.liquidGlass(shape = pillShape)
@@ -235,7 +243,9 @@ fun FloatingBottomBar(
         )
     }
 
-    val circleGlassModifier = if (reduceDynamicBlur) {
+    val circleGlassModifier = if (isLight) {
+        Modifier.background(barContainer)
+    } else if (reduceDynamicBlur) {
         Modifier.background(container)
     } else if (useGlass) {
         Modifier.liquidGlass(shape = circleShape)
@@ -258,9 +268,16 @@ fun FloatingBottomBar(
         Box(
             modifier = Modifier
                 .weight(1f)
+                .shadow(
+                    elevation = if (isLight) 8.dp else 0.dp,
+                    shape = pillShape,
+                    clip = false,
+                    ambientColor = Color.Black.copy(alpha = 0.15f),
+                    spotColor = Color.Black.copy(alpha = 0.10f),
+                )
                 .clip(pillShape)
                 .then(glassModifier)
-                .border(GLASS_EDGE_WIDTH, GLASS_EDGE_COLOR, pillShape)
+                .border(barBorderWidth, barBorderColor, pillShape)
                 .padding(horizontal = PILL_INSET, vertical = PILL_INSET),
         ) {
             if (tabWidthPx > 0f && selectedIndex in pillTabs.indices) {
@@ -279,7 +296,10 @@ fun FloatingBottomBar(
                             scaleY = 1f - lag * STRETCH * SQUASH
                         }
                         .clip(pillShape)
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+                        .background(
+                            if (isLight) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                        ),
                 )
             }
 
@@ -330,14 +350,14 @@ fun FloatingBottomBar(
                 // color instead and picks pure black or white, same as the tint
                 // Echo's floating nav bar uses for its own liquid glass.
                 val glassTint = glassContentColor()
-                val adaptiveTint = if (useGlass) glassTint else null
+                val adaptiveTint = if (isLight) Color(0xFF121212) else if (useGlass) glassTint else null
                 pillTabs.forEachIndexed { index, tab ->
                     BottomBarItem(
                         tab = tab,
                         selected = index == selectedIndex,
                         glassSpec = glassSpec,
                         selectedTint = adaptiveTint,
-                        unselectedTint = adaptiveTint?.copy(alpha = 0.65f),
+                        unselectedTint = if (isLight) Color(0xFF555555) else adaptiveTint?.copy(alpha = 0.65f),
                         onClick = { onTabSelected(index) },
                         modifier = Modifier.weight(1f),
                     )
@@ -351,9 +371,16 @@ fun FloatingBottomBar(
         Box(
             modifier = Modifier
                 .size(circleSize)
+                .shadow(
+                    elevation = if (isLight) 8.dp else 0.dp,
+                    shape = circleShape,
+                    clip = false,
+                    ambientColor = Color.Black.copy(alpha = 0.15f),
+                    spotColor = Color.Black.copy(alpha = 0.10f),
+                )
                 .clip(circleShape)
                 .then(circleGlassModifier)
-                .border(GLASS_EDGE_WIDTH, GLASS_EDGE_COLOR, circleShape)
+                .border(barBorderWidth, barBorderColor, circleShape)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -379,14 +406,14 @@ fun FloatingBottomBar(
                     modifier = Modifier
                         .size(26.dp)
                         .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f))
+                        .background(if (isLight) Color.Black.copy(alpha = 0.08f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f))
                         .thumbnailBorder(CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Person,
                         contentDescription = stringResource(R.string.settings),
-                        tint = MaterialTheme.colorScheme.onSurface,
+                        tint = if (isLight) Color(0xFF121212) else MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(17.dp),
                     )
                 }

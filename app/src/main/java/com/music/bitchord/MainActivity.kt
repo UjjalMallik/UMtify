@@ -321,6 +321,9 @@ import com.music.bitchord.ui.theme.BitChordTheme
 import com.music.bitchord.ui.theme.appTypography
 import com.music.bitchord.ui.theme.customFontFamily
 import com.music.bitchord.ui.theme.rememberCoverColorScheme
+import com.music.bitchord.ui.theme.rememberColorSeedScheme
+import com.music.bitchord.ui.theme.resolveVariantColor
+import androidx.compose.ui.graphics.luminance
 import com.music.bitchord.ui.theme.rememberArtworkPalette
 import com.music.bitchord.data.canvas.AppleArtistArtRepository
 import com.music.bitchord.data.canvas.keyColors
@@ -382,8 +385,14 @@ class MainActivity : AppCompatActivity() {
             // not only the player screen that already reads its tones.
             val controller = rememberMediaController()
             val player = rememberPlayerState(controller)
+            val dynamicVariant by AppSettings.dynamicThemeVariant.collectAsStateWithLifecycle()
+            val variantColor = remember(dynamicVariant) { resolveVariantColor(dynamicVariant) }
             val dynamicScheme = if (theme == ThemeMode.DYNAMIC) {
-                rememberCoverColorScheme(player.song)
+                if (variantColor != null) {
+                    rememberColorSeedScheme(variantColor)
+                } else {
+                    rememberCoverColorScheme(player.song)
+                }
             } else {
                 null
             }
@@ -3262,11 +3271,12 @@ private fun BitChordApp(
                                     isPlaying = player.isPlaying,
                                     title = stringResource(R.string.listen_now),
                                     wordmark = {
+                                        val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
                                         Image(
                                             painter = painterResource(R.drawable.ic_umtify_wordmark),
                                             contentDescription = null,
                                             colorFilter = ColorFilter.tint(
-                                                Color.White,
+                                                if (isLight) Color(0xFF121212) else Color.White,
                                             ),
                                             contentScale = ContentScale.FillHeight,
                                             modifier = Modifier.fillMaxSize(),
@@ -3373,7 +3383,18 @@ private fun BitChordApp(
                                         artworkUrl = song.thumbnailUrl,
                                         entityType = EntityType.TRACK,
                                     ))
-                                    playRadio(song, QueueSource(searchLabel, PlaybackSourceType.SEARCH))
+                                    if (showOfflineHome || AppSettings.isOffline) {
+                                        playFrom(
+                                            songs,
+                                            index,
+                                            QueueSource(
+                                                context.getString(R.string.offline_mode_on),
+                                                PlaybackSourceType.SEARCH,
+                                            ),
+                                        )
+                                    } else {
+                                        playRadio(song, QueueSource(searchLabel, PlaybackSourceType.SEARCH))
+                                    }
                                 }
                             },
                             onSongLongPress = openSongMenu,
@@ -3386,7 +3407,18 @@ private fun BitChordApp(
                                     artworkUrl = song.thumbnailUrl,
                                     entityType = EntityType.TRACK,
                                 ))
-                                playRadio(song, QueueSource(searchLabel, PlaybackSourceType.SEARCH))
+                                if (showOfflineHome || AppSettings.isOffline) {
+                                    playFrom(
+                                        listOf(song),
+                                        0,
+                                        QueueSource(
+                                            context.getString(R.string.offline_mode_on),
+                                            PlaybackSourceType.SEARCH,
+                                        ),
+                                    )
+                                } else {
+                                    playRadio(song, QueueSource(searchLabel, PlaybackSourceType.SEARCH))
+                                }
                             },
                             onTopResultPlaylist = { song ->
                                 viewModel.recordEntity(SearchHistoryEntity(
@@ -3450,15 +3482,27 @@ private fun BitChordApp(
                                 when (entity.entityType) {
                                     EntityType.TRACK -> {
                                         // Play the track by its video id
-                                        playRadio(
-                                            com.music.bitchord.data.model.Song(
-                                                videoId = entity.id,
-                                                title = entity.title,
-                                                artist = entity.subtitle,
-                                                thumbnailUrl = entity.artworkUrl,
-                                            ),
-                                            QueueSource(entity.title, PlaybackSourceType.SEARCH),
+                                        val song = com.music.bitchord.data.model.Song(
+                                            videoId = entity.id,
+                                            title = entity.title,
+                                            artist = entity.subtitle,
+                                            thumbnailUrl = entity.artworkUrl,
                                         )
+                                        if (showOfflineHome || AppSettings.isOffline) {
+                                            playFrom(
+                                                listOf(song),
+                                                0,
+                                                QueueSource(
+                                                    context.getString(R.string.offline_mode_on),
+                                                    PlaybackSourceType.SEARCH,
+                                                ),
+                                            )
+                                        } else {
+                                            playRadio(
+                                                song,
+                                                QueueSource(entity.title, PlaybackSourceType.SEARCH),
+                                            )
+                                        }
                                     }
                                     EntityType.ALBUM, EntityType.ARTIST, EntityType.PLAYLIST -> {
                                         viewModel.openDetail(
@@ -3477,6 +3521,7 @@ private fun BitChordApp(
                             topPadding = topBarContentPadding(),
                             // The field is in the top bar; see the bar's accessory.
                             showField = false,
+                            isOffline = showOfflineHome || AppSettings.isOffline,
                             // The settings page's own two-state selector, so the
                             // app has one look for "pick one of these".
                             sourceSwitcher = {

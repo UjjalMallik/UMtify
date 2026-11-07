@@ -40,6 +40,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -356,10 +357,11 @@ private fun OfflineTitle(title: String, onSearchClick: (() -> Unit)? = null) {
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
             Image(
                 painter = painterResource(R.drawable.ic_umtify_wordmark),
                 contentDescription = null,
-                colorFilter = ColorFilter.tint(Color.White),
+                colorFilter = ColorFilter.tint(if (isLight) Color(0xFF121212) else Color.White),
                 contentScale = ContentScale.FillHeight,
                 modifier = Modifier
                     .height(36.dp)
@@ -367,13 +369,22 @@ private fun OfflineTitle(title: String, onSearchClick: (() -> Unit)? = null) {
             )
             if (onSearchClick != null) {
                 Spacer(Modifier.width(12.dp))
-                val searchBorder = remember {
-                    Brush.verticalGradient(
-                        listOf(
-                            Color.White.copy(alpha = 0.45f),
-                            Color.White.copy(alpha = 0.12f),
-                        ),
-                    )
+                val searchBorder = remember(isLight) {
+                    if (isLight) {
+                        Brush.verticalGradient(
+                            listOf(
+                                Color.Black.copy(alpha = 0.18f),
+                                Color.Black.copy(alpha = 0.10f),
+                            ),
+                        )
+                    } else {
+                        Brush.verticalGradient(
+                            listOf(
+                                Color.White.copy(alpha = 0.45f),
+                                Color.White.copy(alpha = 0.12f),
+                            ),
+                        )
+                    }
                 }
                 Row(
                     modifier = Modifier
@@ -383,11 +394,11 @@ private fun OfflineTitle(title: String, onSearchClick: (() -> Unit)? = null) {
                             elevation = 4.dp,
                             shape = pillShape,
                             clip = false,
-                            ambientColor = Color.Black.copy(alpha = 0.45f),
-                            spotColor = Color.White.copy(alpha = 0.20f),
+                            ambientColor = if (isLight) Color.Black.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.45f),
+                            spotColor = if (isLight) Color.Black.copy(alpha = 0.05f) else Color.White.copy(alpha = 0.20f),
                         )
                         .clip(pillShape)
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f))
+                        .background(if (isLight) Color.Black.copy(alpha = 0.06f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f))
                         .border(
                             width = 1.5.dp,
                             brush = searchBorder,
@@ -400,14 +411,14 @@ private fun OfflineTitle(title: String, onSearchClick: (() -> Unit)? = null) {
                     Icon(
                         imageVector = Icons.Rounded.Search,
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = if (isLight) Color(0xFF1E1E1E) else Color.White,
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
                         text = "Search songs, artists...",
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                        color = Color.White,
+                        color = if (isLight) Color(0xFF1E1E1E) else Color.White,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )

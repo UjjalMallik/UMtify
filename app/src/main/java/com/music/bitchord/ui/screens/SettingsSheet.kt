@@ -40,6 +40,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.ScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.automirrored.rounded.Notes
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.Animation
@@ -123,7 +125,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
+import com.music.bitchord.ui.theme.DYNAMIC_VARIANT_COVER_ART
+import com.music.bitchord.ui.theme.PremiumDynamicThemeVariants
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -243,6 +251,9 @@ fun SettingsScreen(
     val lyricsSources by AppSettings.lyricsSources.collectAsStateWithLifecycle()
     val translationLanguage by AppSettings.translationLanguage.collectAsStateWithLifecycle()
     val theme by AppSettings.themeMode.collectAsStateWithLifecycle()
+    val dynamicThemeVariant by AppSettings.dynamicThemeVariant.collectAsStateWithLifecycle()
+    val customDynamicColors by AppSettings.customDynamicColors.collectAsStateWithLifecycle()
+    var showCustomColorPicker by remember { mutableStateOf(false) }
     val fontScale by AppSettings.fontScale.collectAsStateWithLifecycle()
     val displayScale by AppSettings.displayScale.collectAsStateWithLifecycle()
     val sessionId by AppSettings.audioSessionId.collectAsStateWithLifecycle()
@@ -901,6 +912,20 @@ fun SettingsScreen(
                     onSelect = { AppSettings.setThemeMode(ThemeMode.entries[it]) },
                     modifier = Modifier.padding(start = ROW_INSET, end = ROW_INSET, bottom = 14.dp),
                 )
+                AnimatedVisibility(
+                    visible = theme == ThemeMode.DYNAMIC,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut(),
+                ) {
+                    DynamicThemeVariantSelector(
+                        selectedVariant = dynamicThemeVariant,
+                        customColors = customDynamicColors,
+                        onSelectVariant = AppSettings::setDynamicThemeVariant,
+                        onAddCustomColor = { showCustomColorPicker = true },
+                        onRemoveCustomColor = AppSettings::removeCustomDynamicColor,
+                        modifier = Modifier.padding(start = ROW_INSET, end = ROW_INSET, bottom = 14.dp),
+                    )
+                }
             }
             val customFontTitle = stringResource(R.string.custom_font)
             row(customFontTitle, "font", "typeface", "ttf", "otf") {
@@ -2132,6 +2157,16 @@ fun SettingsScreen(
         )
     }
 
+    if (showCustomColorPicker) {
+        CustomColorPickerDialog(
+            onDismiss = { showCustomColorPicker = false },
+            onColorAdded = { colorArgb ->
+                AppSettings.addCustomDynamicColor(colorArgb)
+                AppSettings.setDynamicThemeVariant("CUSTOM_$colorArgb")
+            },
+        )
+    }
+
 }
 
 /** "3 months of listening" — the unit a backup is actually measured in. */
@@ -3268,4 +3303,348 @@ internal fun SegmentedControl(
             }
         }
     }
+}
+
+@Composable
+private fun DynamicThemeVariantSelector(
+    selectedVariant: String,
+    customColors: List<Int>,
+    onSelectVariant: (String) -> Unit,
+    onAddCustomColor: () -> Unit,
+    onRemoveCustomColor: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scrollState = rememberScrollState()
+    val pillShape = RoundedCornerShape(percent = 50)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .horizontalScroll(scrollState),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 1. Cover Art Option (Default)
+        val isCoverArtSelected = selectedVariant == DYNAMIC_VARIANT_COVER_ART
+        val rainbowBorder = remember {
+            Brush.sweepGradient(
+                listOf(
+                    Color(0xFFE11D48),
+                    Color(0xFFF59E0B),
+                    Color(0xFF10B981),
+                    Color(0xFF0EA5E9),
+                    Color(0xFF8B5CF6),
+                    Color(0xFFEC4899),
+                    Color(0xFFE11D48),
+                ),
+            )
+        }
+        Row(
+            modifier = Modifier
+                .height(40.dp)
+                .clip(pillShape)
+                .background(
+                    if (isCoverArtSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                )
+                .border(
+                    width = if (isCoverArtSelected) 2.dp else 1.dp,
+                    brush = if (isCoverArtSelected) rainbowBorder else Brush.linearGradient(
+                        listOf(Color.White.copy(alpha = 0.15f), Color.White.copy(alpha = 0.05f)),
+                    ),
+                    shape = pillShape,
+                )
+                .clickable { onSelectVariant(DYNAMIC_VARIANT_COVER_ART) }
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Album,
+                contentDescription = null,
+                tint = if (isCoverArtSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+            Text(
+                text = "Album Cover",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = if (isCoverArtSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (isCoverArtSelected) {
+                Icon(
+                    imageVector = Icons.Rounded.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+
+        // 2. Built-in Premium Preset Variants
+        PremiumDynamicThemeVariants.forEach { preset ->
+            val isSelected = selectedVariant == preset.id
+            ThemeVariantCircleSwatch(
+                color = preset.color,
+                label = preset.name,
+                isSelected = isSelected,
+                onClick = { onSelectVariant(preset.id) },
+            )
+        }
+
+        // 3. User Custom Colors
+        customColors.forEach { colorArgb ->
+            val customId = "CUSTOM_$colorArgb"
+            val isSelected = selectedVariant == customId
+            ThemeVariantCircleSwatch(
+                color = Color(colorArgb),
+                label = "Custom",
+                isSelected = isSelected,
+                onClick = { onSelectVariant(customId) },
+                onDelete = { onRemoveCustomColor(colorArgb) },
+            )
+        }
+
+        // 4. + Add Custom Chip
+        Row(
+            modifier = Modifier
+                .height(40.dp)
+                .clip(pillShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
+                    shape = pillShape,
+                )
+                .clickable(onClick = onAddCustomColor)
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Add,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp),
+            )
+            Text(
+                text = "Custom",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ThemeVariantCircleSwatch(
+    color: Color,
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onDelete: (() -> Unit)? = null,
+) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .shadow(
+                elevation = if (isSelected) 4.dp else 1.dp,
+                shape = CircleShape,
+                clip = false,
+                ambientColor = color.copy(alpha = 0.35f),
+                spotColor = color.copy(alpha = 0.50f),
+            )
+            .clip(CircleShape)
+            .background(color)
+            .border(
+                width = if (isSelected) 2.5.dp else 1.dp,
+                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.25f),
+                shape = CircleShape,
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (isSelected) {
+            Icon(
+                imageVector = Icons.Rounded.Check,
+                contentDescription = label,
+                tint = if (color.luminance() > 0.5f) Color.Black else Color.White,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CustomColorPickerDialog(
+    onDismiss: () -> Unit,
+    onColorAdded: (Int) -> Unit,
+) {
+    var red by remember { mutableFloatStateOf(160f) }
+    var green by remember { mutableFloatStateOf(80f) }
+    var blue by remember { mutableFloatStateOf(240f) }
+    var hexText by remember {
+        mutableStateOf(
+            String.format(Locale.ROOT, "%02X%02X%02X", 160, 80, 240),
+        )
+    }
+
+    fun updateFromRgb(r: Float, g: Float, b: Float) {
+        red = r
+        green = g
+        blue = b
+        hexText = String.format(Locale.ROOT, "%02X%02X%02X", r.roundToInt(), g.roundToInt(), b.roundToInt())
+    }
+
+    val previewColor = remember(red, green, blue) {
+        Color(red.roundToInt(), green.roundToInt(), blue.roundToInt())
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Add Custom Adaptive Color",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                // Color Preview Box
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .shadow(4.dp, CircleShape)
+                            .clip(CircleShape)
+                            .background(previewColor)
+                            .border(2.dp, Color.White.copy(alpha = 0.5f), CircleShape),
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Color Hex Preview",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = "#$hexText",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+
+                // Sliders for R, G, B
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = "Red",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                            color = Color(0xFFEF4444),
+                        )
+                        Text(
+                            text = "${red.roundToInt()}",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    Slider(
+                        value = red,
+                        onValueChange = { updateFromRgb(it, green, blue) },
+                        valueRange = 0f..255f,
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = "Green",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                            color = Color(0xFF10B981),
+                        )
+                        Text(
+                            text = "${green.roundToInt()}",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    Slider(
+                        value = green,
+                        onValueChange = { updateFromRgb(red, it, blue) },
+                        valueRange = 0f..255f,
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = "Blue",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                            color = Color(0xFF3B82F6),
+                        )
+                        Text(
+                            text = "${blue.roundToInt()}",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    Slider(
+                        value = blue,
+                        onValueChange = { updateFromRgb(red, green, it) },
+                        valueRange = 0f..255f,
+                    )
+                }
+
+                // Hex text input field
+                OutlinedTextField(
+                    value = hexText,
+                    onValueChange = { input ->
+                        val clean = input.removePrefix("#").take(6).uppercase(Locale.ROOT)
+                        hexText = clean
+                        if (clean.length == 6) {
+                            runCatching {
+                                val r = clean.substring(0, 2).toInt(16)
+                                val g = clean.substring(2, 4).toInt(16)
+                                val b = clean.substring(4, 6).toInt(16)
+                                red = r.toFloat()
+                                green = g.toFloat()
+                                blue = b.toFloat()
+                            }
+                        }
+                    },
+                    label = { Text("Hex Code") },
+                    prefix = { Text("#") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onColorAdded(previewColor.toArgb())
+                    onDismiss()
+                },
+            ) {
+                Text("Add Color", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
 }

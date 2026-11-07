@@ -237,6 +237,7 @@ object AppSettings {
      * lost connection is enough on its own and the switch only ever adds.
      */
     val offlineModeEnabled = MutableStateFlow(false)
+    val isOfflineMode: StateFlow<Boolean> get() = offlineModeEnabled
 
     /**
      * Whether the app should keep off the network right now — asked for with
@@ -386,6 +387,8 @@ object AppSettings {
 
     val playbackSpeed = MutableStateFlow(1.0f)
     val themeMode = MutableStateFlow(ThemeMode.DYNAMIC)
+    val dynamicThemeVariant = MutableStateFlow("COVER_ART")
+    val customDynamicColors = MutableStateFlow<List<Int>>(emptyList())
 
     /** Keep playing similar music once the queue runs out. */
     val autoplay = MutableStateFlow(true)
@@ -916,6 +919,8 @@ object AppSettings {
         themeMode.value = runCatching {
             ThemeMode.valueOf(prefs.getString(KEY_THEME, null) ?: "DYNAMIC")
         }.getOrDefault(ThemeMode.DYNAMIC)
+        dynamicThemeVariant.value = prefs.getString(KEY_DYNAMIC_THEME_VARIANT, "COVER_ART") ?: "COVER_ART"
+        customDynamicColors.value = readCustomDynamicColors()
         autoplay.value = prefs.getBoolean(KEY_AUTOPLAY, true)
         shuffleEnabled.value = prefs.getBoolean(KEY_SHUFFLE_ENABLED, false)
         repeatMode.value = prefs.getInt(KEY_REPEAT_MODE, Player.REPEAT_MODE_OFF)
@@ -1117,9 +1122,17 @@ object AppSettings {
         val refresh: (NetworkCapabilities?) -> Unit = { capabilities ->
             val caps = capabilities
                 ?: runCatching { manager.getNetworkCapabilities(manager.activeNetwork) }.getOrNull()
-            internetAvailable.value = caps != null &&
+            val available = caps != null &&
                 caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
                 caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+
+            internetAvailable.value = available
+            if (!available) {
+                setOfflineModeEnabled(true)
+            }
+
+
+
             meteredConnection.value = runCatching {
                 if (manager.activeNetwork == null) null else manager.isActiveNetworkMetered
             }.getOrNull()
@@ -1129,8 +1142,16 @@ object AppSettings {
             manager.registerDefaultNetworkCallback(
                 object : ConnectivityManager.NetworkCallback() {
                     override fun onAvailable(network: Network) = refresh(null)
-                    override fun onLost(network: Network) = refresh(null)
-                    override fun onUnavailable() = refresh(null)
+                    override fun onLost(network: Network) {
+                        internetAvailable.value = false
+                        setOfflineModeEnabled(true)
+                        refresh(null)
+                    }
+                    override fun onUnavailable() {
+                        internetAvailable.value = false
+                        setOfflineModeEnabled(true)
+                        refresh(null)
+                    }
                     override fun onCapabilitiesChanged(
                         network: Network,
                         capabilities: NetworkCapabilities,
@@ -1297,6 +1318,40 @@ object AppSettings {
     fun setThemeMode(value: ThemeMode) {
         themeMode.value = value
         prefs.edit().putString(KEY_THEME, value.name).apply()
+    }
+
+    fun setDynamicThemeVariant(variant: String) {
+        dynamicThemeVariant.value = variant
+        prefs.edit().putString(KEY_DYNAMIC_THEME_VARIANT, variant).apply()
+    }
+
+    fun addCustomDynamicColor(colorArgb: Int) {
+        val current = customDynamicColors.value.toMutableList()
+        if (!current.contains(colorArgb)) {
+            current.add(colorArgb)
+            customDynamicColors.value = current
+            writeCustomDynamicColors(current)
+        }
+    }
+
+    fun removeCustomDynamicColor(colorArgb: Int) {
+        val current = customDynamicColors.value.toMutableList()
+        if (current.remove(colorArgb)) {
+            customDynamicColors.value = current
+            writeCustomDynamicColors(current)
+            if (dynamicThemeVariant.value == "CUSTOM_$colorArgb") {
+                setDynamicThemeVariant("COVER_ART")
+            }
+        }
+    }
+
+    private fun readCustomDynamicColors(): List<Int> {
+        val raw = prefs.getString(KEY_CUSTOM_DYNAMIC_COLORS, null) ?: return emptyList()
+        return raw.split(",").mapNotNull { it.trim().toIntOrNull() }
+    }
+
+    private fun writeCustomDynamicColors(colors: List<Int>) {
+        prefs.edit().putString(KEY_CUSTOM_DYNAMIC_COLORS, colors.joinToString(",")).apply()
     }
 
     fun setReduceAnimation(value: Boolean) {
@@ -1641,6 +1696,8 @@ object AppSettings {
         offlineModeEnabled.value = value
         prefs.edit().putBoolean(KEY_OFFLINE_MODE, value).apply()
     }
+
+    fun setIsOfflineMode(value: Boolean) = setOfflineModeEnabled(value)
 
     fun setSpotifySpdcToken(value: String) {
         spotifySpdcToken.value = value
@@ -2105,6 +2162,8 @@ object AppSettings {
     private const val KEY_EQ_BANDS = "equalizer_bands"
     private const val KEY_SPEED = "playback_speed"
     private const val KEY_THEME = "theme_mode"
+    private const val KEY_DYNAMIC_THEME_VARIANT = "dynamic_theme_variant"
+    private const val KEY_CUSTOM_DYNAMIC_COLORS = "custom_dynamic_colors"
     private const val KEY_AUTOPLAY = "autoplay"
     private const val KEY_SHUFFLE_ENABLED = "shuffle_enabled"
     private const val KEY_REPEAT_MODE = "repeat_mode"

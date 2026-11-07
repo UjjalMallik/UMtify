@@ -166,6 +166,8 @@ fun SearchScreen(
     offlineHint: String = "",
     /** A device file plays as the running order of its own group. */
     onOfflineSongClick: (List<Song>, Int) -> Unit = onLibrarySongClick,
+    /** Whether the app is currently in Offline Mode. */
+    isOffline: Boolean = false,
     /**
      * The YouTube / Library switcher, full width at the head of the page. Up
      * only while the field is empty: once something is typed the page is
@@ -234,7 +236,7 @@ fun SearchScreen(
                     modifier = Modifier.padding(start = PAGE_GUTTER, end = PAGE_GUTTER, bottom = 4.dp),
                 )
             }
-            if (sourceSwitcher != null) {
+            if (sourceSwitcher != null && !isOffline) {
                 AnimatedVisibility(
                     visible = query.isEmpty(),
                     enter = fadeIn() + expandVertically(),
@@ -249,7 +251,7 @@ fun SearchScreen(
             // they stay up for an empty or failed search too, or picking a filter
             // that finds nothing would take away the control needed to leave it.
             // They are YouTube's categories, so the Library source has none.
-            if (results != null && !suggesting && !searchingLibrary && !searchingAddons) {
+            if (results != null && !suggesting && !searchingLibrary && !searchingAddons && !isOffline) {
                 SearchFilterTabs(filter = filter, onFilterChange = onFilterChange)
             }
         }
@@ -260,6 +262,20 @@ fun SearchScreen(
             contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
         ) {
             when {
+                isOffline && query.isBlank() -> {
+                    if (history.isEmpty()) {
+                        item { MessageState(stringResource(Res.string.search_empty)) }
+                    } else {
+                        recentSearches(
+                            history = history,
+                            currentSong = currentSong,
+                            isPlaying = isPlaying,
+                            onClick = onHistoryClick,
+                            onRemove = onHistoryRemove,
+                            onClear = onHistoryClear,
+                        )
+                    }
+                }
                 // Completions come first: a field mid-edit is being typed in, and
                 // whatever page sits under it belongs to the query before this
                 // edit began. [suggesting] is false on the Library and Addons
@@ -288,15 +304,21 @@ fun SearchScreen(
                         )
                     }
                 }
-                offlineResults != null -> offlineSearchResults(
-                    state = offlineResults,
-                    hint = offlineHint,
-                    currentSong = currentSong,
-                    isPlaying = isPlaying,
-                    onSongClick = onOfflineSongClick,
-                    onSongLongPress = onSongLongPress,
-                    onSongSwipe = onSongSwipe,
-                )
+                isOffline || offlineResults != null -> {
+                    if (offlineResults != null) {
+                        offlineSearchResults(
+                            state = offlineResults,
+                            hint = offlineHint,
+                            currentSong = currentSong,
+                            isPlaying = isPlaying,
+                            onSongClick = onOfflineSongClick,
+                            onSongLongPress = onSongLongPress,
+                            onSongSwipe = onSongSwipe,
+                        )
+                    } else {
+                        songListSkeleton(keyPrefix = "skeleton:search:offline")
+                    }
+                }
                 searchingLibrary || searchingAddons -> librarySearchResults(
                     query = query.trim(),
                     results = if (searchingAddons) addonResults else libraryResults,

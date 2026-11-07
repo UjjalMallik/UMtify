@@ -135,6 +135,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _offlineHome = MutableStateFlow<OfflineHome?>(null)
     val offlineHome: StateFlow<OfflineHome?> = _offlineHome.asStateFlow()
+    val isOfflineMode: StateFlow<Boolean> get() = AppSettings.offlineModeEnabled
 
     /**
      * Offline Mode's answer to a search: the device's own tracks, in the three
@@ -149,11 +150,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun readOfflineHome(): OfflineHome = withContext(Dispatchers.IO) {
         val context = getApplication<Application>()
         val downloads = runCatching { Downloads.getDownloadedSongs(context) }.getOrDefault(emptyList())
+            .filter { it.videoId.isNotBlank() }
         val cached = runCatching { AudioCache.cachedSongs().map { it.song } }.getOrDefault(emptyList())
+            .filter { it.videoId.isNotBlank() }
         // Unpermitted is not the same as empty, but offline the page has no
         // way to ask for it politely; the folder still can when opened.
         val local = if (LocalMediaRepository.hasStoragePermission(context)) {
             runCatching { LocalMediaRepository.getLocalMusic(context) }.getOrDefault(emptyList())
+                .filter { it.videoId.isNotBlank() }
         } else {
             emptyList()
         }
@@ -1588,9 +1592,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
                 .distinctUntilChanged()
                 .drop(1)
-                .collect {
+                .collect { isOffline ->
                     val hadOfflineResults = _offlineSearch.value != null
                     _offlineSearch.value = null
+                    if (isOffline) {
+                        _results.value = null
+                        _addonResults.value = null
+                        _suggestions.value = emptyList()
+                        _typeaheadResults.value = emptyList()
+                        loadOfflineHome()
+                    }
                     when {
                         (hadOfflineResults || searchSubmitted) && _query.value.isNotBlank() ->
                             runSearch(anonymous = true)
@@ -1598,12 +1609,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
         }
-        loadHome()
-        loadExplore()
-        if (_signedIn.value) {
-            loadLibrary()
-            loadAccount()
-            loadPlaylists()
+        if (AppSettings.isOffline) {
+            loadOfflineHome()
+        } else {
+            loadHome()
+            loadExplore()
+            if (_signedIn.value) {
+                loadLibrary()
+                loadAccount()
+                loadPlaylists()
+            }
         }
         viewModelScope.launch {
             // drop(1): the current value is just the count so far, not a play.
@@ -1715,6 +1730,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun refresh(feed: Feed) {
         if (feed in _refreshing.value) return
+        if (AppSettings.isOffline) {
+            if (feed == Feed.HOME) {
+                loadOfflineHome()
+            }
+            return
+        }
         if (feed == Feed.LIBRARY && !_signedIn.value) return
         val identity = listenerKey()
         _refreshing.value = _refreshing.value + feed
@@ -1729,11 +1750,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun loadExplore() {
+        if (AppSettings.isOffline) {
+            _explore.value = UiState.Error(text(R.string.offline_mode))
+            return
+        }
         _explore.value = UiState.Loading
         viewModelScope.launch { fetchExplore() }
     }
 
     private suspend fun fetchExplore() {
+        if (AppSettings.isOffline) {
+            _explore.value = UiState.Error(text(R.string.offline_mode))
+            return
+        }
         val state = YtMusicRepository.moodAndGenres().fold(
             onSuccess = { sections ->
                 if (sections.isEmpty()) {
@@ -1804,6 +1833,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun loadHome() {
+        if (AppSettings.isOffline) {
+            loadOfflineHome()
+            return
+        }
         val identity = listenerKey()
         val generation = homeLoadGeneration.incrementAndGet()
         _home.value = UiState.Loading
@@ -1934,6 +1967,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun loadLibrary() {
+        if (AppSettings.isOffline) return
         if (!_signedIn.value) return
         val identity = listenerKey()
         _library.value = UiState.Loading
@@ -2097,6 +2131,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         searchSubmitted = true
         _suggestions.value = emptyList()
         _typeaheadResults.value = emptyList()
+        if (AppSettings.isOffline) {
+            _results.value = null
+            _addonResults.value = null
+        }
         // Picking a suggestion or history item is deliberate, but it must NOT
         // pollute the user's YTMusic server-side search history — only an
         // explicit keyboard submission should do that.  Use the anonymous
@@ -2127,6 +2165,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         // Reset the submission gate so typeahead pipelines fire again.
         searchSubmitted = false
+        if (AppSettings.isOffline) {
+            _results.value = null
+            _addonResults.value = null
+            suggestRequests.tryEmit(newValue)
+            return
+        }
         // The Library source answers from the device on every keystroke (see
         // [libraryResults]); YouTube's completions have nothing to add to it.
         if (_searchSource.value != SearchSource.YOUTUBE) return
@@ -2141,7 +2185,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun submitSearch() {
         val q = _query.value.trim()
-        if (q.isEmpty() || _searchSource.value == SearchSource.LIBRARY) return
+        if (q.isEmpty()) return
+        if (AppSettings.isOffline) {
+            searchSubmitted = true
+            _suggestions.value = emptyList()
+            _typeaheadResults.value = emptyList()
+            _results.value = null
+            _addonResults.value = null
+            runSearch(anonymous = true)
+            return
+        }
+        if (_searchSource.value == SearchSource.LIBRARY) return
         searchSubmitted = true
         _suggestions.value = emptyList()
         _typeaheadResults.value = emptyList()
@@ -2291,6 +2345,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _searchScrollReset.value += 1
         searchSession = null
         _searchLoadingMore.value = false
+        if (AppSettings.isOffline) {
+            _results.value = null
+            _addonResults.value = null
+            publishOfflineSearch(query, id)
+            return
+        }
         searchRequests.tryEmit(SearchRequest(query, _filter.value, id, anonymous))
     }
 
@@ -2805,6 +2865,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val local = localPageState(browseId)
             val state = when {
                 local != null -> local
+                AppSettings.isOffline -> {
+                    if (onDevice.isNotEmpty()) UiState.Success(onDevice)
+                    else UiState.Error(text(R.string.offline_mode))
+                }
                 resolved == BrowseType.ARTIST -> {
                     YtMusicRepository.artistPage(browseId).fold(
                         onSuccess = { page ->
