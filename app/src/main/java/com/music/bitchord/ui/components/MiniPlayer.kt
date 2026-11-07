@@ -365,8 +365,6 @@ fun MiniPlayer(
     val shape = RoundedCornerShape(percent = 50)
     val isLight = MaterialTheme.colorScheme.surface.luminance() > 0.5f || MaterialTheme.colorScheme.background.luminance() > 0.5f
     val containerColor = if (isLight) Color(0xFFF0F2F5).copy(alpha = 0.94f) else MaterialTheme.colorScheme.surface
-    val borderColor = if (isLight) Color.Black.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.10f)
-    val borderWidth = if (isLight) 1.dp else 0.5.dp
     val controlTint = if (isLight) Color(0xFF121212) else MaterialTheme.colorScheme.onBackground
     Box(
         modifier = modifier
@@ -403,7 +401,6 @@ fun MiniPlayer(
                     )
                 },
             )
-            .border(borderWidth, borderColor, shape)
             // Deliberately silent: the whole bar is the target, so it catches
             // stray taps meant for the page behind it, and the sheet rising is
             // its own confirmation. The glyphs on it still buzz.

@@ -387,20 +387,20 @@ class MainActivity : AppCompatActivity() {
             val player = rememberPlayerState(controller)
             val dynamicVariant by AppSettings.dynamicThemeVariant.collectAsStateWithLifecycle()
             val variantColor = remember(dynamicVariant) { resolveVariantColor(dynamicVariant) }
-            val dynamicScheme = if (theme == ThemeMode.DYNAMIC) {
-                if (variantColor != null) {
-                    rememberColorSeedScheme(variantColor)
-                } else {
-                    rememberCoverColorScheme(player.song)
-                }
-            } else {
-                null
-            }
             val darkTheme = when (theme) {
                 ThemeMode.SYSTEM -> isSystemInDarkTheme()
                 ThemeMode.LIGHT -> false
                 ThemeMode.DARK -> true
-                ThemeMode.DYNAMIC -> true
+                ThemeMode.DYNAMIC -> isSystemInDarkTheme()
+            }
+            val dynamicScheme = if (theme == ThemeMode.DYNAMIC) {
+                if (variantColor != null) {
+                    rememberColorSeedScheme(variantColor, darkTheme)
+                } else {
+                    rememberCoverColorScheme(player.song, darkTheme = darkTheme)
+                }
+            } else {
+                null
             }
             // Keyed on the stored name: a pick or a reset swaps the face under
             // every screen at once, since they all sit under this theme. The

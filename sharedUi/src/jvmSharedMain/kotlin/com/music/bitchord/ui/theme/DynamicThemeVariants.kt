@@ -55,8 +55,12 @@ fun colorSeedMeshPalette(seed: Color): MeshPalette {
 }
 
 @Composable
-fun rememberColorSeedScheme(seedColor: Color): ColorScheme {
-    return remember(seedColor) {
-        dynamicDarkScheme(dominant = seedColor, accent = seedColor)
+fun rememberColorSeedScheme(seedColor: Color, darkTheme: Boolean = true): ColorScheme {
+    return remember(seedColor, darkTheme) {
+        if (darkTheme) {
+            dynamicDarkScheme(dominant = seedColor, accent = seedColor)
+        } else {
+            dynamicLightScheme(dominant = seedColor, accent = seedColor)
+        }
     }
 }

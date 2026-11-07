@@ -7,6 +7,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
@@ -277,7 +278,8 @@ private const val TONE_FADE_MS = 360
 fun rememberCoverColorScheme(
     song: Song?,
     artPx: Int = CARD_ART_PX,
-): ColorScheme = rememberArtworkColorScheme(rememberRemoteArtworkUrl(song), artPx)
+    darkTheme: Boolean = true,
+): ColorScheme = rememberArtworkColorScheme(rememberRemoteArtworkUrl(song), artPx, darkTheme)
 
 /**
  * A dark Material 3 scheme derived from the artwork at [imageUrl].
@@ -295,6 +297,7 @@ fun rememberCoverColorScheme(
 fun rememberArtworkColorScheme(
     imageUrl: String?,
     artPx: Int = CARD_ART_PX,
+    darkTheme: Boolean = true,
 ): ColorScheme {
     val reduceAnimation by PlayerPlatform.host.settings.reduceAnimation.collectAsStateWithLifecycle()
     val seed = rememberArtworkSeed(imageUrl, artPx)
@@ -311,7 +314,9 @@ fun rememberArtworkColorScheme(
     val accent = animateColorAsState(shown.vibrant, spec, label = "themeAccent").value
     // Rebuilt from the animated seeds rather than animating 36 roles, so the
     // whole scheme moves together and keeps every tonal relationship.
-    return remember(base, accent) { dynamicDarkScheme(base, accent) }
+    return remember(base, accent, darkTheme) {
+        if (darkTheme) dynamicDarkScheme(base, accent) else dynamicLightScheme(base, accent)
+    }
 }
 
 /** Long enough to read as the record changing colour, short enough not to lag. */
@@ -370,29 +375,87 @@ internal fun dynamicDarkScheme(dominant: Color, accent: Color): ColorScheme {
         onTertiary = tertiarySource.tone(0.36f, 0.64f, 0.18f),
         tertiaryContainer = tertiarySource.tone(0.28f, 0.54f, 0.27f),
         onTertiaryContainer = tertiarySource.tone(0.24f, 0.50f, 0.90f),
-        background = base.tone(0.22f, 0.52f, 0.055f),
-        onBackground = base.tone(0.14f, 0.38f, 0.94f),
-        surface = base.tone(0.22f, 0.50f, 0.07f),
-        onSurface = base.tone(0.14f, 0.36f, 0.93f),
-        surfaceVariant = base.tone(0.18f, 0.42f, 0.18f),
-        onSurfaceVariant = base.tone(0.16f, 0.40f, 0.78f),
+        background = base.tone(0.06f, 0.12f, 0.05f),
+        onBackground = base.tone(0.04f, 0.08f, 0.94f),
+        surface = base.tone(0.08f, 0.16f, 0.075f),
+        onSurface = base.tone(0.04f, 0.08f, 0.93f),
+        surfaceVariant = base.tone(0.10f, 0.18f, 0.13f),
+        onSurfaceVariant = base.tone(0.06f, 0.14f, 0.78f),
         surfaceTint = primary,
-        inverseSurface = base.tone(0.14f, 0.36f, 0.90f),
-        inverseOnSurface = base.tone(0.18f, 0.44f, 0.12f),
+        inverseSurface = base.tone(0.04f, 0.08f, 0.90f),
+        inverseOnSurface = base.tone(0.04f, 0.08f, 0.12f),
         error = Color(0xFFFFB4AB),
         onError = Color(0xFF690005),
         errorContainer = Color(0xFF93000A),
         onErrorContainer = Color(0xFFFFDAD6),
-        outline = base.tone(0.14f, 0.32f, 0.36f),
-        outlineVariant = base.tone(0.14f, 0.30f, 0.25f),
+        outline = base.tone(0.08f, 0.18f, 0.45f),
+        outlineVariant = base.tone(0.06f, 0.14f, 0.22f),
         scrim = Color.Black,
-        surfaceBright = base.tone(0.20f, 0.46f, 0.19f),
-        surfaceDim = base.tone(0.22f, 0.52f, 0.055f),
-        surfaceContainer = base.tone(0.22f, 0.50f, 0.10f),
-        surfaceContainerHigh = base.tone(0.22f, 0.48f, 0.13f),
-        surfaceContainerHighest = base.tone(0.20f, 0.46f, 0.16f),
-        surfaceContainerLow = base.tone(0.22f, 0.50f, 0.085f),
-        surfaceContainerLowest = base.tone(0.24f, 0.52f, 0.04f),
+        surfaceBright = base.tone(0.08f, 0.18f, 0.19f),
+        surfaceDim = base.tone(0.06f, 0.12f, 0.05f),
+        surfaceContainer = base.tone(0.08f, 0.16f, 0.085f),
+        surfaceContainerHigh = base.tone(0.09f, 0.17f, 0.11f),
+        surfaceContainerHighest = base.tone(0.10f, 0.18f, 0.14f),
+        surfaceContainerLow = base.tone(0.07f, 0.14f, 0.065f),
+        surfaceContainerLowest = base.tone(0.05f, 0.10f, 0.035f),
+    )
+}
+
+internal fun dynamicLightScheme(dominant: Color, accent: Color): ColorScheme {
+    fun Color.hasChroma() = chroma() >= TINT_MIN_CHROMA
+    val base = when {
+        dominant.hasChroma() -> dominant
+        accent.hasChroma() -> accent
+        else -> NEUTRAL_SEED.dominant
+    }
+    val highlight = if (accent.hasChroma()) accent else base
+    val tertiarySource = highlight.withHsl(hue = { it + TERTIARY_HUE_SHIFT })
+
+    fun Color.tone(minimum: Float, maximum: Float, lightness: Float) = withHsl(
+        saturation = { adaptedArtworkSaturation(it, minimum, maximum) },
+        lightness = { lightness },
+    )
+
+    val primary = highlight.tone(0.65f, 0.95f, 0.40f)
+    val secondary = base.tone(0.35f, 0.65f, 0.45f)
+    val tertiary = tertiarySource.tone(0.35f, 0.65f, 0.45f)
+    return lightColorScheme(
+        primary = primary,
+        onPrimary = Color.White,
+        primaryContainer = highlight.tone(0.30f, 0.60f, 0.90f),
+        onPrimaryContainer = highlight.tone(0.60f, 0.90f, 0.15f),
+        inversePrimary = highlight.tone(0.50f, 0.85f, 0.75f),
+        secondary = secondary,
+        onSecondary = Color.White,
+        secondaryContainer = base.tone(0.25f, 0.50f, 0.90f),
+        onSecondaryContainer = base.tone(0.30f, 0.60f, 0.15f),
+        tertiary = tertiary,
+        onTertiary = Color.White,
+        tertiaryContainer = tertiarySource.tone(0.25f, 0.50f, 0.90f),
+        onTertiaryContainer = tertiarySource.tone(0.30f, 0.60f, 0.15f),
+        background = base.tone(0.04f, 0.08f, 0.985f),
+        onBackground = base.tone(0.04f, 0.08f, 0.10f),
+        surface = base.tone(0.06f, 0.12f, 0.965f),
+        onSurface = base.tone(0.04f, 0.08f, 0.12f),
+        surfaceVariant = base.tone(0.08f, 0.16f, 0.91f),
+        onSurfaceVariant = base.tone(0.06f, 0.12f, 0.30f),
+        surfaceTint = primary,
+        inverseSurface = base.tone(0.04f, 0.08f, 0.15f),
+        inverseOnSurface = base.tone(0.04f, 0.08f, 0.95f),
+        error = Color(0xFFBA1A1A),
+        onError = Color.White,
+        errorContainer = Color(0xFFFFDAD6),
+        onErrorContainer = Color(0xFF410002),
+        outline = base.tone(0.08f, 0.16f, 0.55f),
+        outlineVariant = base.tone(0.06f, 0.14f, 0.82f),
+        scrim = Color.Black,
+        surfaceBright = Color.White,
+        surfaceDim = base.tone(0.06f, 0.10f, 0.93f),
+        surfaceContainer = base.tone(0.06f, 0.12f, 0.95f),
+        surfaceContainerHigh = base.tone(0.07f, 0.14f, 0.92f),
+        surfaceContainerHighest = base.tone(0.08f, 0.16f, 0.89f),
+        surfaceContainerLow = base.tone(0.05f, 0.10f, 0.97f),
+        surfaceContainerLowest = Color.White,
     )
 }
 

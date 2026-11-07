@@ -23,6 +23,24 @@ A lightweight, Android-only music streaming & local audio player — a personal 
 
 ---
 
+## 🚀 What's New / Recent Features
+
+- 🎨 **Premium "Liquid Glass" UI & Custom Dynamic Themes**
+  - Experience the reimagined Liquid Glass aesthetic featuring real-time refraction, ambient blur, and depth lenses across navigation and header components.
+  - Choose between Cover Art dynamic theming, six hand-crafted **Premium Presets** (*Crimson Velvet, Emerald Glass, Royal Amethyst, Ocean Sapphire, Sunset Amber, Cyber Magenta*), or create your own with the integrated **RGB/Hex Custom Color Picker**.
+  - Refined Material 3 dynamic background architecture ensures subtle, OLED-friendly ambient glow with pristine card contrast rather than harsh flat fills.
+- 📱 **Responsive Wide Search Bar & Bottom Navigation Profile Integration**
+  - Instant frosted search pill across Home and Offline modes with high-contrast glyphs, responsive tap actions, and seamless search transitions.
+  - Bottom navigation bar seamlessly incorporates your profile/account avatar with quick access to channel switching and settings.
+- 🌐 **Strict Auto-Offline Mode**
+  - App automatically detects network connectivity drops and activates Offline Mode immediately.
+  - Strictly prevents remote API requests when offline — only downloaded tracks, cached audio, and local storage media are displayed and searched.
+- 🎵 **Improved MiniPlayer with Previous Track Control**
+  - Seamless glassy MiniPlayer pill complete with Previous, Play/Pause, and Next transport buttons.
+  - Polished touch targets, fluid sheet drag gestures, and clean artifact-free edges.
+
+---
+
 ## ✨ Key Customizations & Features
 
 | 🎨 **Crystal Glass Player UI** | 🌊 **Cover-Art Theme & Wave Ribbon** |
