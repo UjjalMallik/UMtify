@@ -1,5 +1,7 @@
 package com.music.bitchord
 
+import androidx.compose.material3.surfaceColorAtElevation
+
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -426,7 +428,7 @@ class MainActivity : AppCompatActivity() {
                 // and text came through it untouched. The window's background is
                 // the floor the pages have always been drawn against, so it is
                 // laid down here too and the recording is opaque like the screen.
-                val windowBackground = MaterialTheme.colorScheme.background
+                val windowBackground = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
                 val paintBackdrop: ContentDrawScope.() -> Unit = remember(windowBackground) {
                     {
                         drawRect(windowBackground)
@@ -2664,7 +2666,7 @@ private fun BitChordApp(
     Box(
         Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
+            .background(MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)),
     ) {
         // A pushed album/artist/playlist page replaces the tab content but
         // leaves the tab bar and mini player in place.
@@ -2751,7 +2753,7 @@ private fun BitChordApp(
         // a row, and the player is the right. Off a tablet the row has the
         // one child it always had and changes nothing.
         Row(Modifier.fillMaxSize()) {
-            Box(Modifier.weight(1f).fillMaxHeight()) {
+            Box(Modifier.weight(1f).fillMaxHeight().background(MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp))) {
                 AnimatedContent(
                     targetState = when {
                         showSpotify && detail == null -> "spotify"
@@ -3761,7 +3763,7 @@ private fun BitChordApp(
                 val chromePageColor = if (isDetailVisible) {
                     detailPalette.background
                 } else {
-                    MaterialTheme.colorScheme.background
+                    MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
                 }
                 // This is the bottom floor itself turned upside down, not a
                 // separately maintained approximation. Both edges therefore

@@ -1,5 +1,7 @@
 package com.music.bitchord.ui.screens
 
+import androidx.compose.material3.surfaceColorAtElevation
+
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -121,9 +123,12 @@ fun OfflineHomeScreen(
     val albumsLabel = stringResource(R.string.albums)
     val nothingLabel = stringResource(R.string.offline_nothing_yet)
 
+    val offlineHomeBg = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
     LazyColumn(
         state = listState,
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .background(offlineHomeBg),
         contentPadding = contentPadding,
     ) {
         item(key = "offline-title", contentType = "header") { OfflineTitle(title, onSearchClick) }

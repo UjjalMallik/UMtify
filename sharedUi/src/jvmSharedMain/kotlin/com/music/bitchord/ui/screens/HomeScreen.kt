@@ -1,5 +1,7 @@
 package com.music.bitchord.ui.screens
 
+import androidx.compose.material3.surfaceColorAtElevation
+
 import com.music.bitchord.ui.components.contextClick
 import com.music.bitchord.ui.AppUi
 import com.music.bitchord.sharedui.resources.*
@@ -156,15 +158,20 @@ fun HomeScreen(
 ) {
     val recentsViewType by AppUi.host.homeRecentsViewType.collectAsStateWithLifecycle()
 
+    val homeBg = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
     PullToRefresh(
         refreshing = refreshing,
         onRefresh = onRefresh,
         state = pullState,
-        modifier = modifier,
+        modifier = modifier
+            .fillMaxSize()
+            .background(homeBg),
     ) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .background(homeBg),
             contentPadding = contentPadding,
         ) {
             if (title != null) {
