@@ -1,6 +1,9 @@
 package com.music.bitchord.ui.replay
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.runtime.remember
+import com.music.bitchord.ui.player.MeshPalette
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -101,20 +104,51 @@ fun ReplayCreditCard(
     wordmark: @Composable () -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    glassTheme: ReplayGlassTheme = ReplayGlassTheme.AUTO,
 ) {
-    val palette = rememberArtworkColors(artworkUrl)
+    val autoPalette = rememberArtworkColors(artworkUrl)
+    val activePalette = if (glassTheme == ReplayGlassTheme.AUTO) {
+        autoPalette
+    } else {
+        remember(glassTheme) { MeshPalette(glassTheme.stops) }
+    }
     Box(
         modifier = modifier
             .aspectRatio(CARD_RATIO)
             .shadow(16.dp, CardShape, clip = false)
             .clip(CardShape)
+            .border(
+                1.2.dp,
+                Brush.verticalGradient(
+                    listOf(
+                        Color.White.copy(alpha = 0.45f),
+                        glassTheme.stops.last().copy(alpha = 0.35f),
+                        Color.White.copy(alpha = 0.12f),
+                    ),
+                ),
+                CardShape,
+            )
             .clickable(onClick = onClick),
     ) {
         MeshGradientBackground(
-            palette = palette,
-            trackKey = artworkUrl ?: label,
+            palette = activePalette,
+            trackKey = if (glassTheme == ReplayGlassTheme.AUTO) (artworkUrl ?: label) else glassTheme.id,
             blurRadius = 34.dp,
             animated = false,
+        )
+        // Specular diagonal glass sheen overlay
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.16f),
+                            Color.Transparent,
+                            Color.White.copy(alpha = 0.05f),
+                        ),
+                    ),
+                ),
         )
         // Deepened towards the foot, where the embossed lines are: the mesh is
         // built to be bright and those lines are pale, and without this the
@@ -137,14 +171,22 @@ fun ReplayCreditCard(
             // The mark is the word, so it has to stay small — the label beside it
             // is the longer of the two, and a card that wraps its own heading is
             // worse than one with a modest logo.
-            Row(verticalAlignment = Alignment.Top) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.White.copy(alpha = 0.08f))
+                    .border(0.8.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
                     text = stringResource(Res.string.your_listening_experience).uppercase(Locale.getDefault()),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.W700,
                     letterSpacing = 1.4.sp,
                     lineHeight = 13.sp,
-                    color = Color.White.copy(alpha = 0.72f),
+                    color = Color.White.copy(alpha = 0.85f),
                     modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.width(10.dp))

@@ -280,17 +280,58 @@ private fun LazyListScope.shelfCards(
             state = rememberLazyListState(),
         ) {
             itemsIndexed(groups, key = { position, group -> "$position-${group.browseId}" }) { _, group ->
+                val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+                val cardShape = RoundedCornerShape(18.dp)
+                val cardBorder = if (isLight) {
+                    Brush.verticalGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+                            Color.Black.copy(alpha = 0.10f),
+                        ),
+                    )
+                } else {
+                    Brush.verticalGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.22f),
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        ),
+                    )
+                }
+                val cardSheen = Brush.linearGradient(
+                    listOf(Color.White.copy(alpha = 0.08f), Color.White.copy(alpha = 0.02f)),
+                )
+                val cardBase = if (isLight) {
+                    Color.White.copy(alpha = 0.80f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.50f)
+                }
                 Column(
                     modifier = Modifier
                         .width(SHELF_CARD_WIDTH)
-                        .clickable { onOpenGroup(group) },
+                        .shadow(
+                            elevation = 4.dp,
+                            shape = cardShape,
+                            ambientColor = Color.Black.copy(alpha = if (isLight) 0.08f else 0.25f),
+                        )
+                        .clip(cardShape)
+                        .background(cardBase)
+                        .then(
+                            if (isLight) {
+                                Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.04f))
+                            } else {
+                                Modifier.background(cardSheen)
+                            },
+                        )
+                        .border(1.dp, cardBorder, cardShape)
+                        .clickable { onOpenGroup(group) }
+                        .padding(8.dp),
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .thumbnailBorder(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(14.dp))
+                            .border(0.8.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant),
                     ) {
                         AsyncImage(
@@ -300,11 +341,11 @@ private fun LazyListScope.shelfCards(
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(8.dp))
                     Text(
                         text = group.title,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onBackground,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -622,13 +663,58 @@ private fun SongCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier.width(SHELF_CARD_WIDTH),
 ) {
-    Column(modifier = modifier.clickable(onClick = onClick)) {
+    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val cardShape = RoundedCornerShape(18.dp)
+    val cardBorder = if (isLight) {
+        Brush.verticalGradient(
+            listOf(
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+                Color.Black.copy(alpha = 0.10f),
+            ),
+        )
+    } else {
+        Brush.verticalGradient(
+            listOf(
+                Color.White.copy(alpha = 0.22f),
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+            ),
+        )
+    }
+    val cardSheen = Brush.linearGradient(
+        listOf(Color.White.copy(alpha = 0.08f), Color.White.copy(alpha = 0.02f)),
+    )
+    val cardBase = if (isLight) {
+        Color.White.copy(alpha = 0.80f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.50f)
+    }
+
+    Column(
+        modifier = modifier
+            .shadow(
+                elevation = 4.dp,
+                shape = cardShape,
+                ambientColor = Color.Black.copy(alpha = if (isLight) 0.08f else 0.25f),
+            )
+            .clip(cardShape)
+            .background(cardBase)
+            .then(
+                if (isLight) {
+                    Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.04f))
+                } else {
+                    Modifier.background(cardSheen)
+                },
+            )
+            .border(1.dp, cardBorder, cardShape)
+            .clickable(onClick = onClick)
+            .padding(8.dp),
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .clip(RoundedCornerShape(12.dp))
-                .thumbnailBorder(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(14.dp))
+                .border(0.8.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         ) {
             AsyncImage(
@@ -639,11 +725,11 @@ private fun SongCard(
             )
             if (isCurrent && isPlaying) SearchPlayingBars(Modifier.align(Alignment.Center))
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
             text = song.title,
             style = MaterialTheme.typography.bodyMedium,
-            color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
+            color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

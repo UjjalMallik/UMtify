@@ -68,6 +68,7 @@ suspend fun renderReplayPoster(
      * lives.
      */
     page: ReplayStoryPage? = null,
+    glassTheme: ReplayGlassTheme = ReplayGlassTheme.AUTO,
 ): Bitmap = coroutineScope {
     // The artwork this needs is a dozen small fetches that are all in Coil's
     // disk cache already — the page they came from has been on screen. Started
@@ -91,7 +92,7 @@ suspend fun renderReplayPoster(
 
         // The same cover and the same turn of the colour wheel the card on
         // screen was drawn with, so the picture is recognisably that card.
-        drawBackdrop(canvas, covers[lit], page?.let(::storyHue) ?: 0f)
+        drawBackdrop(canvas, covers[lit], page?.let(::storyHue) ?: 0f, paletteColors = if (glassTheme == ReplayGlassTheme.AUTO) null else glassTheme.argbColors)
         var y = drawHeader(canvas, context, type, summary, holder, memberSince)
         if (page == null) {
             y = drawTotals(canvas, context, type, summary, y)
@@ -299,8 +300,9 @@ internal fun drawBackdrop(
     lead: Bitmap?,
     hue: Float,
     height: Float = POSTER_H.toFloat(),
+    paletteColors: List<Int>? = null,
 ) {
-    val colors = paletteOf(lead).map { rotated(it, hue) }
+    val colors = paletteColors ?: paletteOf(lead).map { rotated(it, hue) }
     canvas.drawColor(dimmed(colors.first()))
 
     val anchors = listOf(
@@ -309,9 +311,9 @@ internal fun drawBackdrop(
         0.76f to 0.66f,
         0.18f to 0.78f,
     )
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     colors.forEachIndexed { index, color ->
-        val (fx, fy) = anchors[index]
+        val (fx, fy) = anchors[index % anchors.size]
         val cx = POSTER_W * fx
         val cy = height * fy
         val radius = POSTER_W * 0.95f
@@ -320,7 +322,7 @@ internal fun drawBackdrop(
             cy,
             radius,
             intArrayOf(
-                ColorUtils.setAlphaComponent(color, 210),
+                ColorUtils.setAlphaComponent(color, 215),
                 ColorUtils.setAlphaComponent(color, 0),
             ),
             floatArrayOf(0f, 1f),
@@ -330,13 +332,26 @@ internal fun drawBackdrop(
     }
     paint.shader = null
 
+    // Specular diagonal aurora overlay for liquid glass depth
+    paint.shader = android.graphics.LinearGradient(
+        0f,
+        0f,
+        POSTER_W.toFloat(),
+        height,
+        intArrayOf(0x28FFFFFF, 0x00FFFFFF, 0x14FFFFFF),
+        floatArrayOf(0f, 0.5f, 1f),
+        Shader.TileMode.CLAMP,
+    )
+    canvas.drawRect(0f, 0f, POSTER_W.toFloat(), height, paint)
+    paint.shader = null
+
     // Ink, weighted to the foot where the smaller type is.
     paint.shader = android.graphics.LinearGradient(
         0f,
         0f,
         0f,
         height,
-        intArrayOf(0x8C000000.toInt(), 0x59000000, 0xCC000000.toInt()),
+        intArrayOf(0x73000000.toInt(), 0x40000000, 0xB3000000.toInt()),
         floatArrayOf(0f, 0.42f, 1f),
         Shader.TileMode.CLAMP,
     )
@@ -422,6 +437,19 @@ private fun drawTotals(
     summary: ReplaySummary,
     top: Float,
 ): Float {
+    val glassFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x1FFFFFFF
+        style = Paint.Style.FILL
+    }
+    val glassBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x38FFFFFF
+        style = Paint.Style.STROKE
+        strokeWidth = 2.5f
+    }
+    val cardBounds = RectF(MARGIN - 24f, top + 10f, POSTER_W - MARGIN + 24f, top + 265f)
+    canvas.drawRoundRect(cardBounds, 32f, 32f, glassFill)
+    canvas.drawRoundRect(cardBounds, 32f, 32f, glassBorder)
+
     canvas.drawText(
         formatMinutes(summary.totalMs),
         MARGIN,
@@ -479,6 +507,20 @@ private fun drawColumns(
     )
 
     val rows = maxOf(songs.size, artists.size)
+    val colHeight = rows * ROW_HEIGHT + 74f
+    val glassFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x14FFFFFF
+        style = Paint.Style.FILL
+    }
+    val glassBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x2EFFFFFF
+        style = Paint.Style.STROKE
+        strokeWidth = 2.5f
+    }
+    val bounds = RectF(MARGIN - 24f, top - 32f, POSTER_W - MARGIN + 24f, top + colHeight - 20f)
+    canvas.drawRoundRect(bounds, 32f, 32f, glassFill)
+    canvas.drawRoundRect(bounds, 32f, 32f, glassBorder)
+
     var y = top + 54f
     repeat(rows) { index ->
         songs.getOrNull(index)?.let {
@@ -604,8 +646,8 @@ internal fun drawArtwork(
     circular: Boolean,
 ) {
     val bounds = RectF(x, y, x + size, y + size)
-    val radius = if (circular) size / 2f else size * 0.10f
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    val radius = if (circular) size / 2f else size * 0.12f
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     if (bitmap != null) {
         val scale = size / minOf(bitmap.width, bitmap.height).toFloat()
         val matrix = Matrix().apply {
@@ -618,6 +660,12 @@ internal fun drawArtwork(
         paint.shader = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
             .apply { setLocalMatrix(matrix) }
         canvas.drawRoundRect(bounds, radius, radius, paint)
+        val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 2f
+            color = 0x33FFFFFF
+        }
+        canvas.drawRoundRect(bounds, radius, radius, rimPaint)
         paint.shader = null
     } else {
         val hue = (fallback.hashCode().toFloat() % 360f + 360f) % 360f
@@ -746,7 +794,7 @@ internal class Fonts(context: Context) {
 
 internal suspend fun loadBitmap(context: Context, url: String): Bitmap? = runCatching {
     val request = ImageRequest.Builder(context)
-        .data(url.artworkAt(CARD_ART_PX))
+        .data(url.artworkAt(400))
         // Palette needs pixel access, and a hardware bitmap cannot be drawn
         // into a software canvas at all — which is the whole of this file.
         .allowHardware(false)

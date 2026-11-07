@@ -33,6 +33,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.music.bitchord.data.settings.AppSettings
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -317,6 +320,8 @@ internal fun ReplayCardRow(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(horizontal = PAGE_GUTTER + 4.dp),
 ) {
+    val savedThemeId by AppSettings.replayGlassTheme.collectAsStateWithLifecycle()
+    val activeTheme = remember(savedThemeId) { ReplayGlassTheme.fromId(savedThemeId) }
     val rowState = rememberLazyListState()
     LazyRow(
         modifier = modifier,
@@ -333,12 +338,10 @@ internal fun ReplayCardRow(
                 artworkUrl = card.artworkUrl,
                 holder = holder,
                 memberSince = memberSince,
-                // The card's foot is dark scrim and its heading is pale, so the
-                // mark is pale too; the row supplies it because the card itself
-                // lives in sharedUi and cannot see the app's own assets.
                 wordmark = { UmifyWordmark(height = 18.dp, color = Color.White.copy(alpha = 0.9f)) },
                 onClick = { onCardClick(card.page) },
                 modifier = Modifier.width(300.dp),
+                glassTheme = activeTheme,
             )
         }
     }

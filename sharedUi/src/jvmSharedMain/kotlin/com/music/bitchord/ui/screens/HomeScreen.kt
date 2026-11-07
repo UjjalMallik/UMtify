@@ -338,7 +338,10 @@ private fun RecentShelf(
                         key = { position, _ -> "recent-column-$position" },
                         contentType = { _, _ -> "recent_column" },
                     ) { _, column ->
-                        Column(Modifier.width(columnWidth)) {
+                        Column(
+                            modifier = Modifier.width(columnWidth),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
                             column.forEach { item ->
                                 RecentTrackRow(
                                     item = item,
@@ -472,23 +475,64 @@ fun CompactTrackRow(
     isCurrent: Boolean = false,
     isPlaying: Boolean = false,
 ) {
+    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val cardShape = RoundedCornerShape(16.dp)
+    val cardBorder = if (isLight) {
+        Brush.verticalGradient(
+            listOf(
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+                Color.Black.copy(alpha = 0.10f),
+            ),
+        )
+    } else {
+        Brush.verticalGradient(
+            listOf(
+                Color.White.copy(alpha = 0.20f),
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+            ),
+        )
+    }
+    val cardSheen = Brush.linearGradient(
+        listOf(Color.White.copy(alpha = 0.08f), Color.White.copy(alpha = 0.02f)),
+    )
+    val cardBase = if (isLight) {
+        Color.White.copy(alpha = 0.80f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.50f)
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .shadow(
+                elevation = 2.dp,
+                shape = cardShape,
+                ambientColor = Color.Black.copy(alpha = if (isLight) 0.08f else 0.20f),
+            )
+            .clip(cardShape)
+            .background(cardBase)
+            .then(
+                if (isLight) {
+                    Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.04f))
+                } else {
+                    Modifier.background(cardSheen)
+                },
+            )
+            .border(1.dp, cardBorder, cardShape)
             .longPressMenuClickable(onClick = onClick, onLongClick = onLongPress)
             .contextClick(onLongPress)
-            .padding(vertical = 4.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(48.dp)) {
+        Box(Modifier.size(46.dp)) {
             AsyncImage(
                 model = thumbnailUrl.artworkAt(ROW_ART_PX),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(7.dp))
-                    .thumbnailBorder(RoundedCornerShape(7.dp))
+                    .size(46.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .border(0.8.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant),
             )
             if (isCurrent && isPlaying) SearchPlayingBars(Modifier.align(Alignment.Center))
@@ -498,7 +542,7 @@ fun CompactTrackRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,
-                color = if (isCurrent) PlayingAccent else MaterialTheme.colorScheme.onBackground,
+                color = if (isCurrent) PlayingAccent else MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -1084,10 +1128,52 @@ internal fun ShelfCard(
     isCurrent: Boolean = false,
     isPlaying: Boolean = false,
 ) {
+    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val cardShape = RoundedCornerShape(18.dp)
+    val cardBorder = if (isLight) {
+        Brush.verticalGradient(
+            listOf(
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+                Color.Black.copy(alpha = 0.10f),
+            ),
+        )
+    } else {
+        Brush.verticalGradient(
+            listOf(
+                Color.White.copy(alpha = 0.22f),
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+            ),
+        )
+    }
+    val cardSheen = Brush.linearGradient(
+        listOf(Color.White.copy(alpha = 0.08f), Color.White.copy(alpha = 0.02f)),
+    )
+    val cardBase = if (isLight) {
+        Color.White.copy(alpha = 0.80f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.50f)
+    }
+
     Column(
         modifier = modifier
+            .shadow(
+                elevation = 4.dp,
+                shape = cardShape,
+                ambientColor = Color.Black.copy(alpha = if (isLight) 0.08f else 0.25f),
+            )
+            .clip(cardShape)
+            .background(cardBase)
+            .then(
+                if (isLight) {
+                    Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.04f))
+                } else {
+                    Modifier.background(cardSheen)
+                },
+            )
+            .border(1.dp, cardBorder, cardShape)
             .longPressMenuClickable(onClick = onClick, onLongClick = onLongPress)
-            .contextClick(onLongPress),
+            .contextClick(onLongPress)
+            .padding(8.dp),
     ) {
         when (item.browseId) {
             "local:downloads" -> {
@@ -1138,8 +1224,8 @@ internal fun ShelfCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(1f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .thumbnailBorder(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(0.8.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                 ) {
                     AsyncImage(

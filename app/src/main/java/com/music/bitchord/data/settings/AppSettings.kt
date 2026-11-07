@@ -390,6 +390,7 @@ object AppSettings {
     val themeMode = MutableStateFlow(ThemeMode.DYNAMIC)
     val dynamicThemeVariant = MutableStateFlow("COVER_ART")
     val customDynamicColors = MutableStateFlow<List<Int>>(emptyList())
+    val replayGlassTheme = MutableStateFlow("AUTO")
 
     /** Keep playing similar music once the queue runs out. */
     val autoplay = MutableStateFlow(true)
@@ -922,6 +923,7 @@ object AppSettings {
         }.getOrDefault(ThemeMode.DYNAMIC)
         dynamicThemeVariant.value = prefs.getString(KEY_DYNAMIC_THEME_VARIANT, "COVER_ART") ?: "COVER_ART"
         customDynamicColors.value = readCustomDynamicColors()
+        replayGlassTheme.value = prefs.getString(KEY_REPLAY_GLASS_THEME, "AUTO") ?: "AUTO"
         autoplay.value = prefs.getBoolean(KEY_AUTOPLAY, true)
         shuffleEnabled.value = prefs.getBoolean(KEY_SHUFFLE_ENABLED, false)
         repeatMode.value = prefs.getInt(KEY_REPEAT_MODE, Player.REPEAT_MODE_OFF)
@@ -1324,6 +1326,11 @@ object AppSettings {
     fun setDynamicThemeVariant(variant: String) {
         dynamicThemeVariant.value = variant
         prefs.edit().putString(KEY_DYNAMIC_THEME_VARIANT, variant).apply()
+    }
+
+    fun setReplayGlassTheme(themeId: String) {
+        replayGlassTheme.value = themeId
+        prefs.edit().putString(KEY_REPLAY_GLASS_THEME, themeId).apply()
     }
 
     fun addCustomDynamicColor(colorArgb: Int) {
@@ -2165,6 +2172,7 @@ object AppSettings {
     private const val KEY_THEME = "theme_mode"
     private const val KEY_DYNAMIC_THEME_VARIANT = "dynamic_theme_variant"
     private const val KEY_CUSTOM_DYNAMIC_COLORS = "custom_dynamic_colors"
+    private const val KEY_REPLAY_GLASS_THEME = "replay_glass_theme"
     private const val KEY_AUTOPLAY = "autoplay"
     private const val KEY_SHUFFLE_ENABLED = "shuffle_enabled"
     private const val KEY_REPEAT_MODE = "repeat_mode"

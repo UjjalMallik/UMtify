@@ -13,6 +13,16 @@ import android.provider.MediaStore
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.music.bitchord.data.settings.AppSettings
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -86,14 +96,27 @@ fun ReplayShareSheet(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val savedThemeId by AppSettings.replayGlassTheme.collectAsStateWithLifecycle()
+    var selectedTheme by remember(savedThemeId) {
+        mutableStateOf(ReplayGlassTheme.fromId(savedThemeId))
+    }
     var poster by remember { mutableStateOf<Bitmap?>(null) }
     var failed by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
 
-    LaunchedEffect(summary, page) {
-        poster = runCatching { renderReplayPoster(context, summary, holder, memberSince, page) }
-            .onFailure { failed = true }
-            .getOrNull()
+    LaunchedEffect(summary, page, selectedTheme) {
+        poster = null
+        poster = runCatching {
+            renderReplayPoster(
+                context = context,
+                summary = summary,
+                holder = holder,
+                memberSince = memberSince,
+                page = page,
+                glassTheme = selectedTheme,
+            )
+        }.onFailure { failed = true }
+        .getOrNull()
     }
 
     Column(
@@ -151,7 +174,94 @@ fun ReplayShareSheet(
             }
         }
 
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(14.dp))
+
+        // Dynamic Palette Swatch Row
+        Text(
+            text = "GLASS PALETTE",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            letterSpacing = 1.2.sp,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(ReplayGlassTheme.entries, key = { it.id }) { theme ->
+                val isSelected = theme == selectedTheme
+                val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+                val chipBorder = if (isSelected) {
+                    Brush.verticalGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                        ),
+                    )
+                } else {
+                    Brush.verticalGradient(
+                        listOf(
+                            if (isLight) Color.Black.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.18f),
+                            if (isLight) Color.Black.copy(alpha = 0.04f) else Color.White.copy(alpha = 0.06f),
+                        ),
+                    )
+                }
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            if (isSelected) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                            } else {
+                                if (isLight) Color.Black.copy(alpha = 0.04f) else Color.White.copy(alpha = 0.08f)
+                            },
+                        )
+                        .border(
+                            width = if (isSelected) 1.5.dp else 1.dp,
+                            brush = chipBorder,
+                            shape = RoundedCornerShape(20.dp),
+                        )
+                        .clickable {
+                            selectedTheme = theme
+                            AppSettings.setReplayGlassTheme(theme.id)
+                        }
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clip(CircleShape)
+                            .background(Brush.sweepGradient(theme.stops))
+                            .border(1.dp, Color.White.copy(alpha = 0.5f), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (isSelected) {
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(10.dp),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = theme.displayName,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSelected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(18.dp))
 
         // Two buttons, not a row of app icons.
         //
