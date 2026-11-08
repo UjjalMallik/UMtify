@@ -174,10 +174,17 @@ fun ThinSlider(
         Canvas(
             Modifier
                 .fillMaxWidth()
-                .height(height),
+                .height(activeHeight),
         ) {
-            val radius = CornerRadius(size.height / 2f)
-            drawRoundRect(color = inactiveColor, cornerRadius = radius)
+            val trackThickness = height.toPx()
+            val top = (size.height - trackThickness) / 2f
+            val radius = CornerRadius(trackThickness / 2f)
+            drawRoundRect(
+                color = inactiveColor,
+                topLeft = Offset(0f, top),
+                size = Size(size.width, trackThickness),
+                cornerRadius = radius,
+            )
             // Between the two track colours, and drawn *under* the played fill:
             // once the playhead reaches the window the transition is no longer
             // upcoming, and the ordinary progress colour taking it over is what
@@ -188,8 +195,8 @@ fun ThinSlider(
                 if (to > from) {
                     drawRoundRect(
                         color = markerColor,
-                        topLeft = Offset(from, 0f),
-                        size = Size(to - from, size.height),
+                        topLeft = Offset(from, top),
+                        size = Size(to - from, trackThickness),
                         cornerRadius = radius,
                     )
                 }
@@ -212,9 +219,10 @@ fun ThinSlider(
                 val alpha = if (dragging) activeColor.alpha else mixPulse?.alpha(activeColor.alpha) ?: activeColor.alpha
                 drawRoundRect(
                     color = activeColor.copy(alpha = alpha),
+                    topLeft = Offset(0f, top),
                     size = Size(
-                        filled.coerceAtLeast(size.height * fillFactor).coerceAtMost(size.width),
-                        size.height,
+                        filled.coerceAtLeast(trackThickness * fillFactor).coerceAtMost(size.width),
+                        trackThickness,
                     ),
                     cornerRadius = radius,
                 )

@@ -1,7 +1,11 @@
 package com.music.bitchord.ui.player
 
 import com.music.bitchord.wear.WearBridge
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import androidx.core.content.ContextCompat
 import android.database.ContentObserver
 import android.media.AudioFormat
 import android.media.AudioManager
@@ -318,17 +322,30 @@ private class CastAwareVolume(
  */
 private class MusicStreamVolume(private val context: Context) : SystemVolume {
     private val manager = context.getSystemService(AudioManager::class.java)
+    private var lastIntVol: Int = manager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: -1
     private val _level = MutableStateFlow(read())
     override val level: StateFlow<Float> = _level.asStateFlow()
 
     init {
-        context.contentResolver.registerContentObserver(
-            Settings.System.CONTENT_URI,
-            true,
-            object : ContentObserver(Handler(Looper.getMainLooper())) {
-                override fun onChange(selfChange: Boolean) = refresh()
-            },
-        )
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context?, intent: Intent?) {
+                refresh()
+            }
+        }
+        val filter = IntentFilter("android.media.VOLUME_CHANGED_ACTION")
+        try {
+            ContextCompat.registerReceiver(
+                context,
+                receiver,
+                filter,
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+        } catch (_: Exception) {
+            try {
+                @Suppress("DEPRECATION")
+                context.registerReceiver(receiver, filter)
+            } catch (_: Exception) {}
+        }
     }
 
     private fun max(): Int = manager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC)?.coerceAtLeast(1) ?: 15
@@ -337,10 +354,18 @@ private class MusicStreamVolume(private val context: Context) : SystemVolume {
         (manager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0).toFloat() / max()
 
     override fun set(level: Float) {
-        manager?.setStreamVolume(AudioManager.STREAM_MUSIC, (level * max()).roundToInt(), 0)
+        val target = (level * max()).roundToInt()
+        if (target != lastIntVol) {
+            lastIntVol = target
+            manager?.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
+        }
     }
 
     override fun refresh() {
-        _level.value = read()
+        val current = manager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: return
+        if (current != lastIntVol) {
+            lastIntVol = current
+            _level.value = current.toFloat() / max()
+        }
     }
 }

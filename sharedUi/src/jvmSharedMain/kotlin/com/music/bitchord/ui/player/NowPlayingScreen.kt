@@ -1222,7 +1222,6 @@ fun NowPlayingScreen(
         label = "artScale",
     )
 
-    val volume = rememberPlayerVolume()
     // Present when you arrive, out of the way once you are actually reading.
     //
     // The panel opens with the player under it so the scrubber and transport
@@ -1234,8 +1233,8 @@ fun NowPlayingScreen(
     // Never while a finger is on the scrubber or the volume bar: those are the
     // two controls that are *being used* while nothing else on screen moves,
     // and timing out underneath them would take the thing away mid-gesture.
-    LaunchedEffect(lyricsOpen, lyricsControlsOpen, scrub.scrubbing, volume.dragging) {
-        if (lyricsOpen && lyricsControlsOpen && !scrub.scrubbing && !volume.dragging) {
+    LaunchedEffect(lyricsOpen, lyricsControlsOpen, scrub.scrubbing) {
+        if (lyricsOpen && lyricsControlsOpen && !scrub.scrubbing) {
             delay(LYRICS_CONTROLS_IDLE_MS)
             lyricsControlsOpen = false
         }
@@ -1403,13 +1402,12 @@ fun NowPlayingScreen(
         spotifyCanvasAutoHide,
         isPlaying,
         scrub.scrubbing,
-        volume.dragging,
         lyricsOpen,
         queueOpen,
         mixing,
     ) {
         if (!spotifyCanvasPresentation || !spotifyCanvasControlsOpen ||
-            !spotifyCanvasAutoHide || !isPlaying || scrub.scrubbing || volume.dragging ||
+            !spotifyCanvasAutoHide || !isPlaying || scrub.scrubbing ||
             lyricsOpen || queueOpen || mixing
         ) return@LaunchedEffect
         delay(SPOTIFY_CANVAS_CONTROLS_IDLE_MS)
@@ -1578,8 +1576,6 @@ fun NowPlayingScreen(
         haptics.play(Haptic.Select)
         scrub.release(onSeekFraction)
     }
-    val onVolumeChange: (Float) -> Unit = volume::drag
-    val onVolumeChangeFinished: () -> Unit = volume::release
 
     // The row both layouts end on: playback modes, queue, sleep timer and the
     // track menu, with the output and party line just beneath them. Hidden
@@ -2058,17 +2054,7 @@ fun NowPlayingScreen(
                                     compact = compact,
                                 )
                             },
-                            volume = if (hideVolumeBar) {
-                                null
-                            } else {
-                                {
-                                    VolumeRow(
-                                        value = { volume.level.value },
-                                        onValueChange = onVolumeChange,
-                                        onValueChangeFinished = onVolumeChangeFinished,
-                                    )
-                                }
-                            },
+                            volume = if (hideVolumeBar) null else { { PlayerVolumeBar() } },
                         )
                     },
                     lyricsPane = {
@@ -3917,11 +3903,7 @@ fun NowPlayingScreen(
                             ),
                         )
 
-                        VolumeRow(
-                            value = { volume.level.value },
-                            onValueChange = onVolumeChange,
-                            onValueChangeFinished = onVolumeChangeFinished,
-                        )
+                        PlayerVolumeBar()
 
                         // The volume slider already has 13dp below its drawn track.
                         // Balance that invisible inset with the caption gap below the icons.

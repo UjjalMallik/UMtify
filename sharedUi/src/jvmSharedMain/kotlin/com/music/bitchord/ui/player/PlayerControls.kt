@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.draw.alpha
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -75,6 +76,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -1202,9 +1204,13 @@ internal fun VolumeRow(
     value: () -> Float,
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .graphicsLayer(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
@@ -1228,6 +1234,47 @@ internal fun VolumeRow(
             contentDescription = null,
             tint = LocalPlayerTint.current.copy(alpha = 0.5f),
             modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+/** State-isolated Player Volume Bar: eliminates screen shaking and recomposition loops. */
+@Composable
+internal fun PlayerVolumeBar(
+    modifier: Modifier = Modifier,
+) {
+    val system = PlayerPlatform.host.volume
+    val systemVolume by system.level.collectAsStateWithLifecycle()
+    val volumeLevel = remember { Animatable(systemVolume) }
+    var isDragging by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(systemVolume) {
+        if (!isDragging) {
+            volumeLevel.animateTo(
+                targetValue = systemVolume,
+                animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+            )
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .graphicsLayer(),
+        contentAlignment = Alignment.Center,
+    ) {
+        VolumeRow(
+            value = { volumeLevel.value },
+            onValueChange = { newLevel ->
+                isDragging = true
+                scope.launch { volumeLevel.snapTo(newLevel) }
+                system.set(newLevel)
+            },
+            onValueChangeFinished = {
+                isDragging = false
+            },
         )
     }
 }
