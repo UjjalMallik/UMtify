@@ -14,6 +14,7 @@ import com.music.bitchord.data.model.LibraryState
 import com.music.bitchord.data.model.LikeStatus
 import com.music.bitchord.data.model.MoodGenre
 import com.music.bitchord.data.model.MoodGenreSection
+import com.music.bitchord.data.model.SearchFilter
 import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.ShelfItem
 import com.music.bitchord.data.model.Song
@@ -52,28 +53,23 @@ object InnertubeParser {
      */
     fun parseSearch(response: JsonObject): List<SearchResult> = parseSearchPage(response).rows
 
-    fun parseSearchPage(response: JsonObject, includeVideos: Boolean = false): SearchPage {
-        // The "All" tab spreads results across several shelf types (card shelf
-        // for the top result, then one shelf per category). Its promoted top
-        // result lives on the card itself, not in a responsive row, so read it
-        // first before walking the ordinary result rows.
-        val topResults: List<SearchResult> = if (includeVideos) emptyList() else {
+    fun parseSearchPage(
+        response: JsonObject,
+        filter: SearchFilter = SearchFilter.ALL,
+    ): SearchPage {
+        val topResults: List<SearchResult> = if (filter == SearchFilter.VIDEOS) emptyList() else {
             collectRenderers(response, "musicCardShelfRenderer")
                 .mapNotNull { card ->
-                    parseCardShelfSong(card)?.let(SearchResult::TopTrack)
+                    parseCardShelfSong(card)?.takeIf { isAllowedListeningContent(it) }?.let(SearchResult::TopTrack)
                         ?: parseCardShelfBrowse(card)?.let(SearchResult::Browse)
                 }
         }
-        val rows = collectRenderers(response, "musicResponsiveListItemRenderer")
 
-        // The rows tucked inside an artist's promoted card, paired with the
-        // credit that card bills them to — see [cardShelfCredit]. Matched by
-        // identity below, because these are the same renderer objects the walk
-        // above already found; a card row is just a row that also sits here.
-        val cardCredits: List<Pair<JsonObject, Credits>> = if (includeVideos) emptyList() else {
+        val cardCredits: List<Pair<JsonObject, Credits>> = if (filter == SearchFilter.VIDEOS) emptyList() else {
             collectRenderers(response, "musicCardShelfRenderer").flatMap { card ->
                 val credit = cardShelfCredit(card) ?: return@flatMap emptyList()
-                collectRenderers(card, "musicResponsiveListItemRenderer").map { it to credit }
+                collectRenderers(card, "musicResponsiveListItemRenderer").map { it to credit } +
+                    collectRenderers(card, "musicMultiRowListItemRenderer").map { it to credit }
             }
         }
 
@@ -82,9 +78,7 @@ object InnertubeParser {
             topResults.forEach { result ->
                 when (result) {
                     is SearchResult.TopTrack -> {
-                        // The mixed All page stays music-only; music-video uploads
-                        // belong exclusively to the dedicated Videos tab.
-                        if (!result.song.isVideo && seen.add("v:${result.song.videoId}")) add(result)
+                        if (seen.add("v:${result.song.videoId}")) add(result)
                     }
                     is SearchResult.Browse -> {
                         if (seen.add("b:${result.item.browseId}")) add(result)
@@ -92,27 +86,67 @@ object InnertubeParser {
                     is SearchResult.Track -> Unit
                 }
             }
-            rows.forEach { renderer ->
-            // Browse rows are tested first: an album row also carries a
-            // "play album" videoId in its overlay, so checking for a track
-            // first would misread every album as a single song.
-                val browse = parseBrowseItem(renderer)
-                if (browse != null) {
-                    if (seen.add("b:${browse.browseId}")) add(SearchResult.Browse(browse))
-                } else {
-                    val fallback = cardCredits.firstOrNull { it.first === renderer }?.second
-                    parseResponsiveListItem(renderer, fallback ?: Credits())?.let { song ->
-                        // The mixed All page stays music-only; the dedicated Videos
-                        // filter is the one place music-video uploads belong.
-                        if (song.isVideo == includeVideos && seen.add("v:${song.videoId}")) {
-                            add(SearchResult.Track(song))
+
+            fun processRow(renderer: JsonObject, isMultiRow: Boolean) {
+                if (!isMultiRow) {
+                    val browse = parseBrowseItem(renderer)
+                    if (browse != null) {
+                        val keepBrowse = when (filter) {
+                            SearchFilter.SONGS, SearchFilter.VIDEOS -> false
+                            SearchFilter.PODCASTS -> browse.type == BrowseType.PLAYLIST || browse.browseId.startsWith("MPSP") || browse.browseId.startsWith("VL") || browse.browseId.startsWith("PL")
+                            SearchFilter.ALBUMS -> browse.type == BrowseType.ALBUM
+                            SearchFilter.ARTISTS -> browse.type == BrowseType.ARTIST
+                            SearchFilter.PLAYLISTS -> browse.type == BrowseType.PLAYLIST
+                            SearchFilter.ALL -> true
                         }
+                        if (keepBrowse && seen.add("b:${browse.browseId}")) {
+                            add(SearchResult.Browse(browse))
+                        }
+                        return
                     }
                 }
+
+                val fallback = cardCredits.firstOrNull { it.first === renderer }?.second ?: Credits()
+                val song = if (isMultiRow) {
+                    parseMultiRowListItem(renderer, fallback)
+                } else {
+                    parseResponsiveListItem(renderer, fallback)
+                } ?: return
+
+                val allowed = when (filter) {
+                    SearchFilter.ALL -> !song.isVideo || isAllowedListeningContent(song)
+                    SearchFilter.SONGS -> !song.isVideo || (song.isVideo && isAllowedListeningContent(song))
+                    SearchFilter.VIDEOS -> song.isVideo && isAllowedListeningContent(song)
+                    SearchFilter.PODCASTS -> isPodcastOrEpisode(song, renderer)
+                    SearchFilter.ALBUMS, SearchFilter.ARTISTS, SearchFilter.PLAYLISTS -> false
+                }
+                if (allowed && seen.add("v:${song.videoId}")) {
+                    add(SearchResult.Track(song))
+                }
             }
+
+            fun walkSearch(node: JsonElement) {
+                when (node) {
+                    is JsonObject -> {
+                        (node["musicResponsiveListItemRenderer"] as? JsonObject)?.let {
+                            processRow(it, false)
+                        }
+                        (node["musicMultiRowListItemRenderer"] as? JsonObject)?.let {
+                            processRow(it, true)
+                        }
+                        node.values.forEach(::walkSearch)
+                    }
+                    is JsonArray -> node.forEach(::walkSearch)
+                    else -> Unit
+                }
+            }
+            walkSearch(response)
         }
         return SearchPage(parsed, continuationToken(response))
     }
+
+    fun parseSearchPage(response: JsonObject, includeVideos: Boolean): SearchPage =
+        parseSearchPage(response, if (includeVideos) SearchFilter.VIDEOS else SearchFilter.ALL)
 
     /**
      * The typeahead queries out of a `music/get_search_suggestions` response.
@@ -173,7 +207,16 @@ object InnertubeParser {
         // Music Videos" — would have every row dropped by
         // parseResponsiveListItem anyway, so skip the dead-end card rather
         // than link to an empty page.
-        if (VIDEO_WORD.containsMatchIn(title) || VIDEO_WORD.containsMatchIn(subtitle)) return null
+        val isPodcast = "PODCAST" in pageType || browseId.startsWith("MPSP")
+        val type = when {
+            "ALBUM" in pageType -> BrowseType.ALBUM
+            "ARTIST" in pageType -> BrowseType.ARTIST
+            "PLAYLIST" in pageType || isPodcast -> BrowseType.PLAYLIST
+            else -> BrowseType.OTHER
+        }
+        if (type != BrowseType.PLAYLIST && !isPodcast && (VIDEO_WORD.containsMatchIn(title) || VIDEO_WORD.containsMatchIn(subtitle))) {
+            return null
+        }
 
         return BrowseItem(
             browseId = browseId,
@@ -181,12 +224,7 @@ object InnertubeParser {
             subtitle = subtitle,
             thumbnailUrl = renderer.o("thumbnail").o("musicThumbnailRenderer")
                 .o("thumbnail").a("thumbnails").best(),
-            type = when {
-                "ALBUM" in pageType -> BrowseType.ALBUM
-                "ARTIST" in pageType -> BrowseType.ARTIST
-                "PLAYLIST" in pageType -> BrowseType.PLAYLIST
-                else -> BrowseType.OTHER
-            },
+            type = type,
         )
     }
 
@@ -486,6 +524,10 @@ object InnertubeParser {
                         parseResponsiveListItem(renderer as? JsonObject, pageCredit)
                             ?.let { out[it.videoId] = it }
                     }
+                    node["musicMultiRowListItemRenderer"]?.let { renderer ->
+                        parseMultiRowListItem(renderer as? JsonObject, pageCredit)
+                            ?.let { out[it.videoId] = it }
+                    }
                     node.values.forEach(::walk)
                 }
                 is JsonArray -> node.forEach(::walk)
@@ -499,58 +541,56 @@ object InnertubeParser {
     /** A playlist page's own tracks, the ones YouTube suggests adding, and the token for the rest. */
     data class PlaylistShelfPage(val songs: List<Song>, val suggested: List<Song>, val continuation: String?)
 
-    /**
-     * A playlist page's own track list, scoped rather than walked — plus
-     * whatever YouTube offers alongside it to round the playlist out.
-     *
-     * A playlist the account owns can carry a "Suggestions" shelf below the
-     * list actually built by hand — even a two-song playlist's own shelf
-     * comes back with a continuation token that, followed, serves it rather
-     * than running dry. That continuation is not another
-     * `musicPlaylistShelfContinuation` page, though: it lands as a plain
-     * `sectionListContinuation` carrying a `musicShelfRenderer` titled
-     * "Suggestions", structurally unrelated to the shelf the real tracks
-     * came from. Scoping only to the playlist shelf itself — as an earlier
-     * version of this function did — reads that continuation as belonging
-     * to nothing and drops it, suggestions included. So the scope here is
-     * the whole secondary column (or, for a continuation response, the
-     * whole `continuationContents`), and what tells a suggested row from a
-     * real one is `playlistItemData` — present on every row either way, but
-     * only a row actually in the playlist carries a `playlistSetVideoId`
-     * inside it, the id "remove from playlist" needs. [collectSongsDeep]
-     * has no notion of any of this, so a plain walk reads suggestions as
-     * songs the user added. Returns null off a page with nothing
-     * playlist-shaped in scope (an album, say), so callers fall back to the
-     * generic walk.
-     */
     fun parsePlaylistShelf(root: JsonElement): PlaylistShelfPage? {
         val scope: JsonElement = root.o("continuationContents")
             ?: root.o("contents").o("twoColumnBrowseResultsRenderer").o("secondaryContents")
-            ?: return null
+            ?: root.o("contents").o("twoColumnBrowseResultsRenderer").o("tabs")
+            ?: root.o("contents").o("singleColumnBrowseResultsRenderer")
+            ?: root.o("contents").o("sectionListRenderer")
+            ?: root.o("contents")
+            ?: root
         val playlistScope = scope.o("musicPlaylistShelfContinuation")
             ?: collectRenderers(scope, "musicPlaylistShelfRenderer").firstOrNull()
+            ?: collectRenderers(scope, "musicShelfRenderer").firstOrNull {
+                val t = it.o("title").runs()
+                t != "Suggestions" && !t.contains("you might also like", ignoreCase = true)
+            }
         val suggestionShelves = collectRenderers(scope, "musicShelfRenderer")
             .filter { it.o("title").runs() == "Suggestions" }
         if (playlistScope == null && suggestionShelves.isEmpty()) return null
 
         val pageCredit = pageCredit(root)
         val songs = playlistScope?.let { playlist ->
-            collectRenderers(playlist, "musicResponsiveListItemRenderer")
-                .mapNotNull { parseResponsiveListItem(it, pageCredit) }
-                .distinctBy { it.videoId }
+            collectSongsFromContainer(playlist, pageCredit).distinctBy { it.videoId }
         }.orEmpty()
         val knownSongs = songs.mapTo(HashSet()) { it.videoId }
         val suggested = suggestionShelves
-            .flatMap { collectRenderers(it, "musicResponsiveListItemRenderer") }
-            .mapNotNull { parseResponsiveListItem(it, pageCredit) }
+            .flatMap { collectSongsFromContainer(it, pageCredit) }
             .filterNot { it.videoId in knownSongs }
             .distinctBy { it.videoId }
-        // The "Suggestions" shelf's own continuation reloads it with a fresh
-        // batch rather than paging it (see its "Refresh" button, wired to a
-        // `reloadContinuationData` token). Only the playlist shelf's own
-        // continuation means more real tracks.
-        val token = playlistScope?.let { continuationToken(it) }
+        val token = playlistScope?.let { continuationToken(it) } ?: continuationToken(scope)
         return PlaylistShelfPage(songs, suggested, token)
+    }
+
+    private fun collectSongsFromContainer(container: JsonElement, pageCredit: Credits): List<Song> {
+        val songs = mutableListOf<Song>()
+        fun walk(node: JsonElement) {
+            when (node) {
+                is JsonObject -> {
+                    node["musicResponsiveListItemRenderer"]?.let {
+                        parseResponsiveListItem(it as? JsonObject, pageCredit)?.let(songs::add)
+                    }
+                    node["musicMultiRowListItemRenderer"]?.let {
+                        parseMultiRowListItem(it as? JsonObject, pageCredit)?.let(songs::add)
+                    }
+                    node.values.forEach(::walk)
+                }
+                is JsonArray -> node.forEach(::walk)
+                else -> Unit
+            }
+        }
+        walk(container)
+        return songs
     }
 
     /** One page of saved library cards, plus the token for the next page. */
@@ -626,6 +666,13 @@ object InnertubeParser {
                 .o("musicItemThumbnailOverlayRenderer").o("content")
                 .o("musicPlayButtonRenderer").o("playNavigationEndpoint")
                 .o("watchEndpoint").s("videoId")
+            ?: renderer.o("navigationEndpoint").o("watchEndpoint").s("videoId")
+            ?: renderer.o("onTap").o("watchEndpoint").s("videoId")
+            ?: renderer.o("menu").o("menuRenderer").a("items")?.firstNotNullOfOrNull { item ->
+                item.o("menuNavigationItemRenderer").o("navigationEndpoint").o("watchEndpoint").s("videoId")
+                    ?: item.o("menuServiceItemRenderer").o("serviceEndpoint").o("queueAddEndpoint").o("queueTarget").s("videoId")
+            }
+            ?: renderer.o("doubleTapCommand").o("watchEndpoint").s("videoId")
             ?: return null
 
         val columns = renderer.a("flexColumns").orEmpty()
@@ -636,32 +683,18 @@ object InnertubeParser {
         val subtitleRuns = columns.getOrNull(1)
             .o("musicResponsiveListItemFlexColumnRenderer").o("text").a("runs").orEmpty()
         val subtitle = subtitleRuns.joinToString("") { it.s("text").orEmpty() }
-        val parts = subtitle.split(" • ").filter { it.isNotBlank() }
-        // A search row states its runtime in the subtitle; an album's own rows
-        // do not — the release is billed once in the header and the per-track
-        // duration sits in a `fixedColumns` entry off to the right instead.
-        // Nothing here read that column, so every track parsed off an album page
-        // came back with a null duration, and two things downstream quietly got
-        // worse for it: [LyricsTag.forTrack] fell back to matching on title and
-        // artist alone against providers that key on runtime, and
-        // [TrackMatcher] lost the one check that separates the album cut from
-        // the extended mix sitting beside it in a source's search results.
-        val duration = parts.lastOrNull()?.takeIf { it.matches(DURATION) }
+        val parts = subtitle.split(" • ", " · ").map(String::trim).filter { it.isNotBlank() }
+        val duration = parts.lastOrNull()?.takeIf { it.matches(DURATION) || it.matches(DURATION_WORDS) }
             ?: renderer.a("fixedColumns").orEmpty().firstNotNullOfOrNull { column ->
                 column.o("musicResponsiveListItemFixedColumnRenderer")
-                    .o("text").runs().takeIf { it.matches(DURATION) }
+                    .o("text").runs().takeIf { it.matches(DURATION) || it.matches(DURATION_WORDS) }
             }
-        // On the "All" tab the first segment is the row type ("Song", "Video"),
-        // not the artist — skip those so the subtitle reads like a credit.
         val rowType = parts.firstOrNull { it.lowercase(Locale.ROOT) in TYPE_WORDS }?.lowercase(Locale.ROOT)
-        // A track row on an album lists its play count where a search row
-        // lists the artist, so a segment that reads as a tally is no credit.
         val artist = parts.firstOrNull {
-            !it.matches(DURATION) && it.lowercase(Locale.ROOT) !in TYPE_WORDS && !it.matches(TALLY)
+            !it.matches(DURATION) && !it.matches(DURATION_WORDS) &&
+                it.lowercase(Locale.ROOT) !in TYPE_WORDS && !it.matches(TALLY) && !it.matches(DATE_OR_TIME_AGO)
         }
 
-        // The artist/album names in the subtitle carry browse endpoints; pull
-        // them out so the long-press menu can open those pages.
         val credits = creditsOf(
             columns.flatMap {
                 it.o("musicResponsiveListItemFlexColumnRenderer").o("text").a("runs").orEmpty()
@@ -672,13 +705,12 @@ object InnertubeParser {
         val thumbnails = renderer.o("thumbnail").o("musicThumbnailRenderer")
             .o("thumbnail").a("thumbnails")
 
+        val musicVideoType = renderer.o("navigationEndpoint").o("watchEndpoint").o("watchEndpointMusicSupportedConfigs").o("watchEndpointMusicConfig").s("musicVideoType")
+            ?: renderer.o("overlay").o("musicItemThumbnailOverlayRenderer").o("content").o("musicPlayButtonRenderer").o("playNavigationEndpoint").o("watchEndpoint").o("watchEndpointMusicSupportedConfigs").o("watchEndpointMusicConfig").s("musicVideoType")
+
         return Song(
             videoId = videoId,
             title = title,
-            // Preserve the whole artist segment even when only some of its
-            // names link to artist pages. The "All" tab can list only
-            // "Song • 4:30" instead, and an album's own rows can carry no
-            // credit at all, so retain the linked and page-level fallbacks.
             artist = creditedArtists
                 ?: credits.artistName?.takeIf { it.isNotBlank() }
                 ?: artist
@@ -690,16 +722,163 @@ object InnertubeParser {
             artists = completeArtistCredits(artist.orEmpty(), credits.artists.ifEmpty { fallback.artists }),
             albumId = credits.albumId ?: fallback.albumId,
             albumName = credits.albumName ?: fallback.albumName,
-            // Only playlist rows carry one; on an album or a search hit this
-            // is simply absent, which is what makes "remove from playlist"
-            // offer itself exactly where it means something.
             setVideoId = renderer.o("playlistItemData").s("playlistSetVideoId"),
-            // The row type word is the clean signal when present ("All" tab);
-            // otherwise a music-video upload gives itself away with widescreen
-            // art where a catalogue track has square album cover art.
-            isVideo = rowType == "video" || thumbnails.isNotSquare(),
+            isVideo = rowType == "video" || rowType == "episode" ||
+                musicVideoType in setOf("MUSIC_VIDEO_TYPE_OMV", "MUSIC_VIDEO_TYPE_UGC", "MUSIC_VIDEO_TYPE_PODCAST_EPISODE") ||
+                thumbnails.isNotSquare(),
             isExplicit = renderer.hasExplicitBadge(),
         )
+    }
+
+    private fun parseMultiRowListItem(
+        renderer: JsonObject?,
+        fallback: Credits = Credits(),
+    ): Song? {
+        if (renderer == null) return null
+        val videoId = renderer.o("onTap").o("watchEndpoint").s("videoId")
+            ?: renderer.o("navigationEndpoint").o("watchEndpoint").s("videoId")
+            ?: renderer.o("overlay")
+                .o("musicItemThumbnailOverlayRenderer").o("content")
+                .o("musicPlayButtonRenderer").o("playNavigationEndpoint")
+                .o("watchEndpoint").s("videoId")
+            ?: renderer.o("playlistItemData").s("videoId")
+            ?: renderer.o("menu").o("menuRenderer").a("items")?.firstNotNullOfOrNull { item ->
+                item.o("menuNavigationItemRenderer").o("navigationEndpoint").o("watchEndpoint").s("videoId")
+                    ?: item.o("menuServiceItemRenderer").o("serviceEndpoint").o("queueAddEndpoint").o("queueTarget").s("videoId")
+            }
+            ?: renderer.findString("videoId")
+            ?: return null
+
+        val title = renderer.o("title").runs()
+        if (title.isBlank()) return null
+
+        val subtitleRuns = renderer.o("subtitle").a("runs").orEmpty()
+        val secondSubtitleRuns = renderer.o("secondSubtitle").a("runs").orEmpty()
+        val allRuns = subtitleRuns + secondSubtitleRuns
+        val subtitle = allRuns.joinToString("") { it.s("text").orEmpty() }
+        val parts = subtitle.split(" • ", " · ").map(String::trim).filter { it.isNotBlank() }
+
+        val duration = parts.lastOrNull { it.matches(DURATION) || it.matches(DURATION_WORDS) }
+            ?: renderer.a("fixedColumns").orEmpty().firstNotNullOfOrNull { column ->
+                column.o("musicResponsiveListItemFixedColumnRenderer")
+                    .o("text").runs().takeIf { it.matches(DURATION) || it.matches(DURATION_WORDS) }
+            }
+
+        val credits = creditsOf(allRuns)
+        val creditedArtists = artistNamesFromRuns(subtitleRuns)
+        val artist = parts.firstOrNull {
+            !it.matches(DURATION) &&
+                !it.matches(DURATION_WORDS) &&
+                it.lowercase(Locale.ROOT) !in TYPE_WORDS &&
+                !it.matches(TALLY) &&
+                !it.matches(DATE_OR_TIME_AGO)
+        }
+
+        val thumbnails = renderer.o("thumbnail").o("musicThumbnailRenderer")
+            .o("thumbnail").a("thumbnails")
+            ?: renderer.o("thumbnailRenderer").o("musicThumbnailRenderer")
+                .o("thumbnail").a("thumbnails")
+            ?: renderer.o("thumbnail").a("thumbnails")
+
+        return Song(
+            videoId = videoId,
+            title = title,
+            artist = creditedArtists
+                ?: credits.artistName?.takeIf { it.isNotBlank() }
+                ?: artist
+                ?: fallback.artistName
+                ?: "Podcast",
+            thumbnailUrl = thumbnails.best(),
+            durationText = duration,
+            artistId = credits.artistId ?: fallback.artistId,
+            artists = completeArtistCredits(artist.orEmpty(), credits.artists.ifEmpty { fallback.artists }),
+            albumId = credits.albumId ?: fallback.albumId,
+            albumName = credits.albumName ?: fallback.albumName,
+            setVideoId = renderer.o("playlistItemData").s("playlistSetVideoId"),
+            isVideo = true,
+            isExplicit = renderer.hasExplicitBadge(),
+        )
+    }
+
+    private val ALLOWED_LISTENING_KEYWORDS = listOf(
+        "music", "song", "cover", "remix", "lofi", "unplugged", "instrumental",
+        "ost", "bgm", "jukebox", "podcast", "episode", "ep", "fm", "radio",
+        "story", "stories", "golpo", "গল্প", "কাহিনী", "শ্রুতি নাটক", "audiobook",
+        "audio story", "sunday suspense", "bhoot", "তিলাওয়াত", "নাশিদ", "গজল",
+        "কীর্তন", "আবৃত্তি", "recitation", "live", "acoustic", "concert", "track",
+        "audio", "soundtrack", "album", "single", "ghazal", "nasheed", "qawwali",
+        "kirtan", "surah", "quran", "reciter", "waz", "mahfil", "drama", "natok",
+    )
+
+    private val BLOCKED_JUNK_KEYWORDS = listOf(
+        "gameplay", "walkthrough", "lets play", "let's play",
+        "gaming", "fortnite", "minecraft", "gta 5", "pubg", "unboxing",
+        "tutorial", "how to code", "programming", "recipe", "cooking", "vlog",
+        "prank", "diy",
+    )
+
+    private val ALLOWED_VIDEO_TYPES = setOf(
+        "MUSIC_VIDEO_TYPE_ATV",
+        "MUSIC_VIDEO_TYPE_OMV",
+        "MUSIC_VIDEO_TYPE_PODCAST_EPISODE",
+    )
+
+    fun parseDurationSeconds(duration: String?): Int? {
+        if (duration.isNullOrBlank()) return null
+        val parts = duration.trim().split(':')
+        if (parts.size == 2) {
+            val min = parts[0].toIntOrNull() ?: return null
+            val sec = parts[1].toIntOrNull() ?: return null
+            return min * 60 + sec
+        } else if (parts.size == 3) {
+            val hr = parts[0].toIntOrNull() ?: return null
+            val min = parts[1].toIntOrNull() ?: return null
+            val sec = parts[2].toIntOrNull() ?: return null
+            return hr * 3600 + min * 60 + sec
+        }
+        return null
+    }
+
+    fun isAllowedListeningContent(song: Song, musicVideoType: String? = null): Boolean {
+        if (song.videoId.isBlank()) return false
+        if (!song.isVideo) return true
+        if (musicVideoType in ALLOWED_VIDEO_TYPES) return true
+
+        val text = "${song.title} ${song.artist}".lowercase(Locale.ROOT)
+
+        val durSec = parseDurationSeconds(song.durationText)
+        if (durSec != null && durSec < 60) {
+            if (text.contains("shorts") || text.contains("#shorts") || durSec < 45) {
+                return false
+            }
+        }
+        if (text.contains("#shorts")) return false
+
+        if (BLOCKED_JUNK_KEYWORDS.any { text.contains(it) }) {
+            val strongListening = listOf("ost", "soundtrack", "theme song", "music", "song", "audio").any { text.contains(it) }
+            if (!strongListening) return false
+        }
+
+        if (ALLOWED_LISTENING_KEYWORDS.any { text.contains(it) }) return true
+
+        if (durSec != null && durSec >= 180) return true
+        if (song.durationText?.contains("hr", ignoreCase = true) == true ||
+            song.durationText?.contains("min", ignoreCase = true) == true) return true
+
+        return true
+    }
+
+    private fun isPodcastOrEpisode(song: Song, renderer: JsonObject?): Boolean {
+        if (song.videoId.isBlank()) return false
+        val musicVideoType = renderer?.o("navigationEndpoint")?.o("watchEndpoint")
+            ?.o("watchEndpointMusicSupportedConfigs")?.o("watchEndpointMusicConfig")?.s("musicVideoType")
+            ?: renderer?.o("overlay")?.o("musicItemThumbnailOverlayRenderer")?.o("content")
+                ?.o("musicPlayButtonRenderer")?.o("playNavigationEndpoint")?.o("watchEndpoint")
+                ?.o("watchEndpointMusicSupportedConfigs")?.o("watchEndpointMusicConfig")?.s("musicVideoType")
+        if (musicVideoType == "MUSIC_VIDEO_TYPE_PODCAST_EPISODE") return true
+        val text = "${song.title} ${song.artist}".lowercase(Locale.ROOT)
+        if (text.contains("podcast") || text.contains("episode") || text.contains("ep.")) return true
+        return isAllowedListeningContent(song, musicVideoType)
     }
 
     /**
@@ -784,7 +963,16 @@ object InnertubeParser {
         val title = renderer.o("title").runs()
         if (title.isBlank()) return null
         val subtitle = renderer.o("subtitle").runs()
-        if (VIDEO_WORD.containsMatchIn(title) || VIDEO_WORD.containsMatchIn(subtitle)) return null
+        val isPodcast = "PODCAST" in pageType || browseId.startsWith("MPSP")
+        val type = when {
+            "ALBUM" in pageType -> BrowseType.ALBUM
+            "ARTIST" in pageType -> BrowseType.ARTIST
+            "PLAYLIST" in pageType || isPodcast -> BrowseType.PLAYLIST
+            else -> BrowseType.OTHER
+        }
+        if (type != BrowseType.PLAYLIST && !isPodcast && (VIDEO_WORD.containsMatchIn(title) || VIDEO_WORD.containsMatchIn(subtitle))) {
+            return null
+        }
 
         return BrowseItem(
             browseId = browseId,
@@ -792,12 +980,7 @@ object InnertubeParser {
             subtitle = subtitle,
             thumbnailUrl = renderer.o("thumbnail").o("musicThumbnailRenderer")
                 .o("thumbnail").a("thumbnails").best(),
-            type = when {
-                "ALBUM" in pageType -> BrowseType.ALBUM
-                "ARTIST" in pageType -> BrowseType.ARTIST
-                "PLAYLIST" in pageType -> BrowseType.PLAYLIST
-                else -> BrowseType.OTHER
-            },
+            type = type,
         )
     }
 
@@ -1443,7 +1626,9 @@ object InnertubeParser {
             }
         }
 
-    private val DURATION = Regex("""\d+:\d{2}""")
+    private val DURATION = Regex("""(?:\d+:)?\d+:\d{2}""")
+    private val DURATION_WORDS = Regex("""^(\d+\s*(?:hr|hours?|min|mins?|minutes?|sec|seconds?)\s*)+$""", RegexOption.IGNORE_CASE)
+    private val DATE_OR_TIME_AGO = Regex("""(?:ago|yesterday|today|\d{4})""", RegexOption.IGNORE_CASE)
     private val YEAR = Regex("""\d{4}""")
     /**
      * A counted quantity rather than a name — "12.4M plays", "13 songs",
@@ -1461,6 +1646,9 @@ object InnertubeParser {
     private val HEADER_RENDERERS = listOf(
         "musicResponsiveHeaderRenderer",
         "musicDetailHeaderRenderer",
+        "musicVisualHeaderRenderer",
+        "musicImmersiveHeaderRenderer",
+        "musicHeaderRenderer",
     )
     /** Header lines that name the artist, in either header shape. */
     private val HEADER_CREDIT_LINES = listOf("straplineTextOne", "subtitle")

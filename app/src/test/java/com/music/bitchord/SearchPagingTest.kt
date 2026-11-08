@@ -667,4 +667,73 @@ class SearchPagingTest {
 
         assertEquals(listOf("PLROAD"), playlists.map { it.playlistId })
     }
-}
+
+    @Test
+    fun `podcast episode in musicMultiRowListItemRenderer is parsed with show title and duration`() {
+        val json = """
+        {
+          "contents": [{
+            "musicMultiRowListItemRenderer": {
+              "title": { "runs": [{ "text": "Episode 123 - The Future of AI" }] },
+              "subtitle": { "runs": [
+                { "text": "2 Cents Podcast" }, { "text": " • " },
+                { "text": "Jan 2026" }, { "text": " • " },
+                { "text": "1:15:30" }
+              ] },
+              "onTap": { "watchEndpoint": { "videoId": "podcast_ep_123" } },
+              "thumbnail": { "musicThumbnailRenderer": {
+                "thumbnail": { "thumbnails": [{ "url": "https://example.test/ep.jpg" }] }
+              } }
+            }
+          }]
+        }
+        """.trimIndent()
+
+        val songs = InnertubeParser.collectSongsDeep(Json.parseToJsonElement(json))
+        assertEquals(1, songs.size)
+        val ep = songs.single()
+        assertEquals("podcast_ep_123", ep.videoId)
+        assertEquals("Episode 123 - The Future of AI", ep.title)
+        assertEquals("2 Cents Podcast", ep.artist)
+        assertEquals("1:15:30", ep.durationText)
+        assertTrue(ep.isVideo)
+    }
+
+    @Test
+    fun `parsePlaylistShelf parses podcast episodes inside musicShelfRenderer`() {
+        val json = """
+        {
+          "contents": {
+            "singleColumnBrowseResultsRenderer": {
+              "tabs": [{
+                "tabRenderer": {
+                  "content": {
+                    "sectionListRenderer": {
+                      "contents": [{
+                        "musicShelfRenderer": {
+                          "title": { "runs": [{ "text": "Episodes" }] },
+                          "contents": [{
+                            "musicMultiRowListItemRenderer": {
+                              "title": { "runs": [{ "text": "Every Episode of 2 Cents Podcast - Ep 1" }] },
+                              "subtitle": { "runs": [{ "text": "2 Cents Podcast • 45:10" }] },
+                              "onTap": { "watchEndpoint": { "videoId": "ep_1_vid" } }
+                            }
+                          }]
+                        }
+                      }]
+                    }
+                  }
+                }
+              }]
+            }
+          }
+        }
+        """.trimIndent()
+
+        val page = InnertubeParser.parsePlaylistShelf(Json.parseToJsonElement(json))
+        org.junit.Assert.assertNotNull(page)
+        assertEquals(1, page?.songs?.size)
+        assertEquals("ep_1_vid", page?.songs?.single()?.videoId)
+        assertEquals("Every Episode of 2 Cents Podcast - Ep 1", page?.songs?.single()?.title)
+    }
+    }

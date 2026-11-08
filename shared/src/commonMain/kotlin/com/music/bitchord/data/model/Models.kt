@@ -396,7 +396,8 @@ enum class SearchFilter(val label: String, val params: String?) {
     /** YouTube Music's mixed search page: songs, artists, albums and playlists. */
     ALL("All", null),
     SONGS("Songs", "EgWKAQIIAWoKEAkQChAFEAMQBA=="),
-    VIDEOS("Videos", "EgWKAQIQAWoKEAkQChAFEAMQBA=="),
+    VIDEOS("Videos / Audio", "EgWKAQIQAWoKEAkQChAFEAMQBA=="),
+    PODCASTS("Podcasts", "EgWKAQIrAWoKEAkQChAFEAMQBA=="),
     ALBUMS("Albums", "EgWKAQIYAWoKEAkQChAFEAMQBA=="),
     ARTISTS("Artists", "EgWKAQIgAWoKEAkQChAFEAMQBA=="),
     PLAYLISTS("Playlists", "EgWKAQIoAWoKEAkQChAFEAMQBA=="),

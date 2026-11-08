@@ -297,7 +297,7 @@ object YtMusicRepository {
         call("search:${filter.name}") {
             InnertubeParser.parseSearchPage(
                 Innertube.search(query, filter.params, anonymous),
-                includeVideos = filter == SearchFilter.VIDEOS,
+                filter = filter,
             ).let { page ->
                 SearchPage(page.rows.distinctBy { it.identityKey() }, page.continuation)
             }
@@ -307,7 +307,7 @@ object YtMusicRepository {
     suspend fun searchContinuation(token: String, filter: SearchFilter): Result<SearchPage> = call("search:continuation") {
         InnertubeParser.parseSearchPage(
             Innertube.searchContinuation(token),
-            includeVideos = filter == SearchFilter.VIDEOS,
+            filter = filter,
         ).let { page ->
             SearchPage(page.rows.distinctBy { it.identityKey() }, page.continuation)
         }
