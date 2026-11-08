@@ -26,3 +26,10 @@ expect fun HideStatusBar(hidden: Boolean)
  */
 @Composable
 expect fun stableStatusBarInsets(): WindowInsets
+
+/**
+ * The navigation bar's insets ignoring visibility changes to prevent layout
+ * jumping or shifting when insets fluctuate.
+ */
+@Composable
+expect fun stableNavigationBarInsets(): WindowInsets

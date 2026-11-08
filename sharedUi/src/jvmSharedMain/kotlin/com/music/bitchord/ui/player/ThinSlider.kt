@@ -102,7 +102,7 @@ fun ThinSlider(
     markerColor: Color = Color.White.copy(alpha = 0.5f),
 ) {
     var dragging by remember { mutableStateOf(false) }
-    val height by animateDpAsState(
+    val height = animateDpAsState(
         targetValue = if (dragging) activeHeight else idleHeight,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
@@ -132,7 +132,7 @@ fun ThinSlider(
     // beat; a version swap's crossfade follows the audio engine and fades when it finishes.
     // An Automix blend has its own treatment — the beat pulse — and keeps the fill.
     val sheenVisible = shownLoading || (mixing && mixPulse?.active != true)
-    val fillFactor by animateFloatAsState(
+    val fillFactor = animateFloatAsState(
         targetValue = if (sheenVisible) 0f else 1f,
         animationSpec = tween(durationMillis = MORPH_MS, easing = FastOutSlowInEasing),
         label = "fillFactor",
@@ -176,7 +176,7 @@ fun ThinSlider(
                 .fillMaxWidth()
                 .height(activeHeight),
         ) {
-            val trackThickness = height.toPx()
+            val trackThickness = height.value.toPx()
             val top = (size.height - trackThickness) / 2f
             val radius = CornerRadius(trackThickness / 2f)
             drawRoundRect(
@@ -214,14 +214,15 @@ fun ThinSlider(
             // capsule's minimum width rides the same factor, so the nub at
             // zero progress retires with the fill instead of sitting as a
             // dot under the sheen.
-            val filled = size.width * fraction * fillFactor
+            val currentFillFactor = fillFactor.value
+            val filled = size.width * fraction * currentFillFactor
             if (filled > 0f) {
                 val alpha = if (dragging) activeColor.alpha else mixPulse?.alpha(activeColor.alpha) ?: activeColor.alpha
                 drawRoundRect(
                     color = activeColor.copy(alpha = alpha),
                     topLeft = Offset(0f, top),
                     size = Size(
-                        filled.coerceAtLeast(trackThickness * fillFactor).coerceAtMost(size.width),
+                        filled.coerceAtLeast(trackThickness * currentFillFactor).coerceAtMost(size.width),
                         trackThickness,
                     ),
                     cornerRadius = radius,
@@ -245,7 +246,7 @@ fun ThinSlider(
                 ),
             exit = fadeOut(tween(durationMillis = MORPH_MS, easing = FastOutSlowInEasing)),
         ) {
-            MixSheen(height = height, color = activeColor)
+            MixSheen(height = height.value, color = activeColor)
         }
     }
 }
@@ -412,7 +413,7 @@ private const val LOADING_MIN_MS = 600L
 @Composable
 private fun MixSheen(height: Dp, color: Color) {
     val transition = rememberInfiniteTransition(label = "mixSheen")
-    val phase by transition.animateFloat(
+    val phaseState = transition.animateFloat(
         initialValue = -SHEEN_BAND_FRACTION,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -429,6 +430,7 @@ private fun MixSheen(height: Dp, color: Color) {
             .fillMaxWidth()
             .height(height),
     ) {
+        val phase = phaseState.value
         val band = size.width * SHEEN_BAND_FRACTION
         val x = phase * size.width
         drawRoundRect(

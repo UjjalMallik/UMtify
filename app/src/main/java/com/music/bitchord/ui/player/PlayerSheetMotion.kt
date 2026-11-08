@@ -147,7 +147,8 @@ class PlayerSheetMotion(
             sampleSheet(sheetAt)
             return 0
         }
-        return target.toInt() - sheetAt.toInt()
+        val diff = target.toInt() - sheetAt.toInt()
+        return if (abs(diff) <= 1) 0 else diff
     }
 
     private fun sampleSheet(at: Float) {
@@ -305,7 +306,11 @@ class PlayerSheetMotion(
             // Critically damped never bounces from rest, but thrown hard
             // enough at its target it can pass it once: never past open or
             // past the bar.
-            held = value.coerceIn(0f, travel)
+            val clamped = value.coerceIn(0f, travel)
+            held = if (clamped <= SLIDE_SETTLED_PX && to == 0f) 0f else clamped
+        }
+        if (to == 0f) {
+            held = 0f
         }
     }
 

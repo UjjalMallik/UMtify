@@ -97,14 +97,14 @@ internal fun WavySeekBar(
     val semanticProgress = progressPercent / 100f
     // The wave is a property of playback, not of the handle: it flows while the
     // music does, and a finger on the bar doesn't stop it. Only pause does.
-    val amplitude by animateDpAsState(
+    val amplitude = animateDpAsState(
         targetValue = if (isPlaying) WAVE_AMPLITUDE else 0.dp,
         animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
         label = "waveAmplitude",
     )
-    val phase = if (isPlaying) {
-        val transition = rememberInfiniteTransition(label = "seekWave")
-        val flowing by transition.animateFloat(
+    val seekWaveTransition = rememberInfiniteTransition(label = "seekWave")
+    val seekWaveFlowing = if (isPlaying) {
+        seekWaveTransition.animateFloat(
             initialValue = 0f,
             targetValue = (2 * PI).toFloat(),
             animationSpec = infiniteRepeatable(
@@ -113,14 +113,13 @@ internal fun WavySeekBar(
             ),
             label = "seekWavePhase",
         )
-        flowing
     } else {
-        0f
+        null
     }
     // -1 means no sheen at all, so an idle bar pays for no gradient.
-    val sheen = if (loading) {
-        val transition = rememberInfiniteTransition(label = "seekLoading")
-        val travelling by transition.animateFloat(
+    val seekLoadingTransition = rememberInfiniteTransition(label = "seekLoading")
+    val seekLoadingSheen = if (loading) {
+        seekLoadingTransition.animateFloat(
             initialValue = -0.4f,
             targetValue = 1.4f,
             animationSpec = infiniteRepeatable(
@@ -129,9 +128,8 @@ internal fun WavySeekBar(
             ),
             label = "seekSheen",
         )
-        travelling
     } else {
-        -1f
+        null
     }
 
     Box(
@@ -176,6 +174,8 @@ internal fun WavySeekBar(
                 .fillMaxWidth()
                 .height(SEEK_TRACK_AREA),
         ) {
+            val phase = if (isPlaying) (seekWaveFlowing?.value ?: 0f) else 0f
+            val sheen = if (loading) (seekLoadingSheen?.value ?: -1f) else -1f
             val inset = THUMB_RADIUS.toPx() + 1.dp.toPx()
             val trackLeft = inset
             val trackRight = size.width - inset
@@ -221,7 +221,7 @@ internal fun WavySeekBar(
             }
 
             if (playedWidth > 0.5f) {
-                val ripple = amplitude.toPx()
+                val ripple = amplitude.value.toPx()
                 if (ripple < 0.5f) {
                     drawRoundRect(
                         color = playedColor,

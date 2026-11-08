@@ -149,6 +149,7 @@ import com.music.bitchord.ui.components.DefaultCoverTile
 import com.music.bitchord.ui.theme.HideStatusBar
 import com.music.bitchord.ui.theme.StatusBarIcons
 import com.music.bitchord.ui.theme.stableStatusBarInsets
+import com.music.bitchord.ui.theme.stableNavigationBarInsets
 import com.music.bitchord.ui.theme.rememberArtworkTopBandLuminance
 import com.music.bitchord.ui.theme.topBandScrimAlpha
 import com.music.bitchord.ui.LyricsProviderState
@@ -2413,7 +2414,7 @@ fun NowPlayingScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .windowInsetsPadding(stableStatusBarInsets())
-                        .navigationBarsPadding()
+                        .windowInsetsPadding(stableNavigationBarInsets())
                         // Observe unclaimed taps across the whole Canvas. Buttons and
                         // the compact metadata row consume their own taps first; empty
                         // video above or below them toggles the lower deck either way.
@@ -2616,11 +2617,8 @@ fun NowPlayingScreen(
                     // Height the artwork block below turns out not to need, spent by the
                     // controls at the foot of the screen. Filled in from inside the box,
                     // where the sleeve's real size is known; see [lastControlSpread].
-                    var controlSpread by remember { mutableStateOf(lastControlSpread) }
-                    // The reverse of [controlSpread]: gap dp handed *back* from the
-                    // controls when the window is too short for a full-width sleeve.
-                    // Zero on every screen that has room to spare.
-                    var controlTighten by remember { mutableStateOf(lastControlTighten) }
+                    val controlSpread = 0.dp
+                    val controlTighten = 0.dp
                     BoxWithConstraints(
                         modifier = Modifier
                             .weight(1f)
@@ -2718,56 +2716,7 @@ fun NowPlayingScreen(
                         // weighted box much taller. That newly empty space is not control slack:
                         // recording it here inflated both transport gaps when a queue swipe
                         // brought the deck back. Only measure while the deck is actually present.
-                        val controlDeckIsMeasured = !spotifyCanvasPresentation || playerDeckSettledOpen
-                        // The panels asked about first, so a collapse on its way in
-                        // — whose sleeve leaves rest on its first frame — isn't
-                        // listened for here at all.
-                        if (!lyricsOpen && !queueOpen && !queueDragging && collapseAtRest && controlDeckIsMeasured) {
-                            val target = with(density) {
-                                val half = slack
-                                    .coerceAtMost(CONTROL_GAP_SPREAD_MAX * 2)
-                                    .toPx()
-                                    .div(2f)
-                                    .roundToInt()
-                                (half * 2).toDp()
-                            }
-                            // Stepped towards [target] rather than jumped there in one
-                            // grant, so a late cancellation (see above) decays instead of
-                            // standing: still one pass to settle when the cancellation
-                            // does land on time, and a fast-converging approach rather
-                            // than a full-amplitude swing on the passes where it doesn't.
-                            val granted = target
-                            if (granted != controlSpread) {
-                                SideEffect {
-                                    controlSpread = granted
-                                    lastControlSpread = granted
-                                }
-                            }
-                        }
-                        // The other side of the same measurement: a window too short
-                        // for the card's ceiling. [shortage] is what the gaps still
-                        // owe before the sleeve reaches [artCeiling], taken off the
-                        // empty gaps and the spacing-only padding below rather than
-                        // off the artwork.
-                        //
-                        // Exactly one of [slack] and [shortage] can be non-zero — they
-                        // are the two signs of the same difference — so the spread and
-                        // the tighten never trade the same dp back and forth, and the
-                        // player settles on whichever side of "just fits" it is on.
-                        if (!lyricsOpen && !queueOpen && !queueDragging && collapseAtRest && controlDeckIsMeasured) {
-                            val shortage = (artCeiling -
-                                (roomy - ART_TITLE_GAP - HEADER_HEIGHT - statsSlot))
-                                .coerceIn(0.dp, CONTROL_GAP_TIGHTEN_MAX)
-                            // Stepped like the spread above, so a late cancellation
-                            // decays instead of standing at full amplitude.
-                            val pulled = shortage
-                            if (pulled != controlTighten) {
-                                SideEffect {
-                                    controlTighten = pulled
-                                    lastControlTighten = pulled
-                                }
-                            }
-                        }
+                        // Layout geometry is frozen for zero jitter on 120Hz LTPO panels.
                         // Artwork and the title row travel together as one block, so
                         // the pair sits centred while the queue is closed — in whatever
                         // the controls couldn't take, which on all but the tallest
@@ -3778,42 +3727,41 @@ fun NowPlayingScreen(
                     // accompanied by a dedicated lyrics button in the bottom row. Its
                     // one-line slot remains, invisibly, so opening lyrics cannot grow
                     // the half-player merely to make room for the source label.
-                    if (!lyricsOpen && syncedLyricsEnabled) {
-                        CurrentLyricStrip(
-                            lines = lyricsTranslation.displayedLyrics,
-                            trackKey = song.videoId,
-                            playhead = lyricsPlayhead,
-                            isPlaying = isPlaying && position.advancing,
-                            durationMs = durationMs,
-                            lyricsUnavailable = lyricsUnavailable,
-                            loadingText = lyricsLoadingText,
-                            // Still visible over the queue, so still a valid way in:
-                            // opens the same full lyrics panel it always has, closing
-                            // the queue behind it the same way the "Up next" glyph
-                            // closes lyrics behind the queue.
-                            onClick = openLyrics,
-                        )
-                    }
-                    if (!lyricsOpen && !syncedLyricsEnabled) {
-                        Text(
-                            text = "\u00A0",
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .offset(y = 6.dp)
-                                .padding(vertical = 4.dp),
-                        )
-                    }
-                    if (lyricsOpen) {
-                        LyricsStatusWithChange(
-                            status = lyricsTranslation.status,
-                            onStatusClick = { showLyricsProviders = true },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .offset(y = 6.dp)
-                                .padding(vertical = 4.dp),
-                        )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(34.dp),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        if (!lyricsOpen && syncedLyricsEnabled) {
+                            CurrentLyricStrip(
+                                lines = lyricsTranslation.displayedLyrics,
+                                trackKey = song.videoId,
+                                playhead = lyricsPlayhead,
+                                isPlaying = isPlaying && position.advancing,
+                                durationMs = durationMs,
+                                lyricsUnavailable = lyricsUnavailable,
+                                loadingText = lyricsLoadingText,
+                                onClick = openLyrics,
+                            )
+                        } else if (!lyricsOpen && !syncedLyricsEnabled) {
+                            Text(
+                                text = "\u00A0",
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                            )
+                        } else if (lyricsOpen) {
+                            LyricsStatusWithChange(
+                                status = lyricsTranslation.status,
+                                onStatusClick = { showLyricsProviders = true },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                            )
+                        }
                     }
                     val transitionWindow by PlayerSettings.smartTransitionWindow.collectAsStateWithLifecycle()
                     PlayerScrubber(
@@ -3851,9 +3799,7 @@ fun NowPlayingScreen(
                     // sleeve on a phone whose controls would otherwise squeeze it.
                     Spacer(
                         Modifier.height(
-                            ((if (densePortrait) 4.dp else 8.dp) + controlSpread / 2 -
-                                controlTighten / 6)
-                                .coerceAtLeast(0.dp),
+                            if (densePortrait) 4.dp else 8.dp,
                         ),
                     )
 
@@ -3869,16 +3815,9 @@ fun NowPlayingScreen(
                         compact = densePortrait,
                     )
 
-                    // The ribbon sits in its own 44dp band with the same 12dp
-                    // of air above and below, so it reads as centred in the
-                    // space the transport leaves rather than pinned to the
-                    // pill. The tall screen's share of the spread joins the
-                    // gap beneath it, where it lifts the volume row off the
-                    // ribbon instead of hollowing out one side.
                     Spacer(
                         Modifier.height(
-                            ((if (densePortrait) 8.dp else 12.dp) - controlTighten / 6)
-                                .coerceAtLeast(0.dp),
+                            if (densePortrait) 8.dp else 12.dp,
                         ),
                     )
 
@@ -3887,34 +3826,21 @@ fun NowPlayingScreen(
                     if (!hideVolumeBar) {
                         Spacer(
                             Modifier.height(
-                                ((if (densePortrait) 8.dp else 12.dp) + controlSpread / 2 -
-                                    controlTighten / 6)
-                                    .coerceAtLeast(0.dp),
+                                if (densePortrait) 8.dp else 12.dp,
                             ),
                         )
 
                         PlayerVolumeBar()
 
-                        // The volume slider already has 13dp below its drawn track.
-                        // Balance that invisible inset with the caption gap below the icons.
                         Spacer(
                             Modifier.height(
-                                ((if (densePortrait) 4.dp else 6.dp) - controlTighten / 6)
-                                    .coerceAtLeast(0.dp),
+                                if (densePortrait) 4.dp else 6.dp,
                             ),
                         )
                     } else {
-                        // No slot and no leftover footprint: the ribbon closes onto the
-                        // action row instead of leaving the volume row's height standing
-                        // empty beneath it. The two gaps the row would have had are one
-                        // here, and it keeps exactly the shares they carried between
-                        // them — the ribbon's half of the spread and both sixths of the
-                        // tighten — so the measurement above still cancels.
                         Spacer(
                             Modifier.height(
-                                ((if (densePortrait) 8.dp else 10.dp) + controlSpread / 2 -
-                                    controlTighten / 3)
-                                    .coerceAtLeast(if (densePortrait) 6.dp else 8.dp),
+                                if (densePortrait) 8.dp else 10.dp,
                             ),
                         )
                     }
@@ -3922,8 +3848,7 @@ fun NowPlayingScreen(
                     playerActions()
                     Spacer(
                         Modifier.height(
-                            ((if (densePortrait) 10.dp else 18.dp) - controlTighten / 6)
-                                .coerceAtLeast(0.dp),
+                            if (densePortrait) 10.dp else 18.dp,
                         ),
                     )
                     }

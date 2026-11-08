@@ -5,6 +5,7 @@ import android.os.Build
 import android.view.WindowManager
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBarsIgnoringVisibility
 import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -43,12 +44,6 @@ actual fun HideStatusBar(hidden: Boolean) {
         if (!hidden) return@DisposableEffect onDispose {}
         val controller = WindowCompat.getInsetsController(window, view)
         val behavior = controller.systemBarsBehavior
-        // Before Android 15 a window left on the default cutout mode is only
-        // let into the cutout while the status bar is there to cover it: hide
-        // the bar and the whole window is pushed down below the camera, a black
-        // band where the artwork was. 15+ lays every window out edge to edge
-        // regardless, and the default there already reaches further than
-        // short edges would, so it is left alone.
         val intoCutout = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
             Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM &&
             window.attributes.layoutInDisplayCutoutMode ==
@@ -75,6 +70,10 @@ actual fun HideStatusBar(hidden: Boolean) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 actual fun stableStatusBarInsets(): WindowInsets = WindowInsets.statusBarsIgnoringVisibility
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+actual fun stableNavigationBarInsets(): WindowInsets = WindowInsets.navigationBarsIgnoringVisibility
 
 // Walks up the Compose view hierarchy to find a DialogWindowProvider (e.g. modal player) before falling back to Activity context.
 fun findWindow(view: android.view.View): android.view.Window? {

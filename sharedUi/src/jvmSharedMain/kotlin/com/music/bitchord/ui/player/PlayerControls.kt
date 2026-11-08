@@ -256,8 +256,12 @@ internal fun PlayerScrubber(
                 ElapsedTime(shown, durationMs)
                 Text(
                     text = formatTime(durationMs),
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontFeatureSettings = "tnum",
+                    ),
+                    modifier = Modifier.widthIn(min = 42.dp),
                     color = LocalPlayerTint.current.copy(alpha = 0.55f),
+                    textAlign = TextAlign.End,
                 )
             }
             // Pinned to the box's own centre rather than squeezed into the gap
@@ -297,8 +301,12 @@ private fun ElapsedTime(shown: () -> Float, durationMs: Long) {
     }
     Text(
         text = elapsed,
-        style = MaterialTheme.typography.labelMedium,
+        style = MaterialTheme.typography.labelMedium.copy(
+            fontFeatureSettings = "tnum",
+        ),
+        modifier = Modifier.widthIn(min = 42.dp),
         color = LocalPlayerTint.current.copy(alpha = 0.55f),
+        textAlign = TextAlign.Start,
     )
 }
 
@@ -765,7 +773,7 @@ internal fun TransportRow(
     onNext: () -> Unit,
     compact: Boolean = false,
 ) {
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    BoxWithConstraints(Modifier.fillMaxWidth().height(if (compact) 44.dp else 64.dp)) {
         val disc = if (compact) 44.dp else 64.dp
         val gap = if (compact) 8.dp else 14.dp
         // The pill takes what the two discs leave it, up to a measure where a
@@ -1209,8 +1217,7 @@ internal fun VolumeRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(36.dp)
-            .graphicsLayer(),
+            .height(36.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
@@ -1261,8 +1268,7 @@ internal fun PlayerVolumeBar(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(36.dp)
-            .graphicsLayer(),
+            .height(36.dp),
         contentAlignment = Alignment.Center,
     ) {
         VolumeRow(
@@ -1338,7 +1344,7 @@ internal fun PlayerActionBar(
     visibility: PlayerActionVisibility = PlayerActionVisibility(),
     modifier: Modifier = Modifier,
 ) {
-    BoxWithConstraints(modifier.fillMaxWidth()) {
+    BoxWithConstraints(modifier.fillMaxWidth().height(42.dp)) {
         val gap = 6.dp
         // Measured first so every key below can size its own glyph.
         val keyWidth = ((maxWidth - gap * (visibility.shownCount - 1)) /

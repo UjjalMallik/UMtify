@@ -14,3 +14,6 @@ actual fun HideStatusBar(hidden: Boolean) = Unit
 
 @Composable
 actual fun stableStatusBarInsets(): WindowInsets = WindowInsets.statusBars
+
+@Composable
+actual fun stableNavigationBarInsets(): WindowInsets = WindowInsets(0, 0, 0, 0)
