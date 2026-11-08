@@ -1250,7 +1250,7 @@ internal fun PlayerVolumeBar(
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(systemVolume) {
-        if (!isDragging) {
+        if (!isDragging && kotlin.math.abs(volumeLevel.value - systemVolume) > 0.01f) {
             volumeLevel.animateTo(
                 targetValue = systemVolume,
                 animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),

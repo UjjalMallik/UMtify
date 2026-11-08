@@ -2736,12 +2736,7 @@ fun NowPlayingScreen(
                             // standing: still one pass to settle when the cancellation
                             // does land on time, and a fast-converging approach rather
                             // than a full-amplitude swing on the passes where it doesn't.
-                            val granted = with(density) {
-                                val steppedPx = (controlSpread.toPx() +
-                                    (target.toPx() - controlSpread.toPx()) * 0.4f)
-                                    .roundToInt()
-                                steppedPx.toDp()
-                            }
+                            val granted = target
                             if (granted != controlSpread) {
                                 SideEffect {
                                     controlSpread = granted
@@ -2765,12 +2760,7 @@ fun NowPlayingScreen(
                                 .coerceIn(0.dp, CONTROL_GAP_TIGHTEN_MAX)
                             // Stepped like the spread above, so a late cancellation
                             // decays instead of standing at full amplitude.
-                            val pulled = with(density) {
-                                val steppedPx = (controlTighten.toPx() +
-                                    (shortage.toPx() - controlTighten.toPx()) * 0.5f)
-                                    .roundToInt()
-                                steppedPx.toDp()
-                            }
+                            val pulled = shortage
                             if (pulled != controlTighten) {
                                 SideEffect {
                                     controlTighten = pulled

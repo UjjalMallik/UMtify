@@ -1,5 +1,7 @@
 package com.music.bitchord.data.model
 
+import kotlinx.serialization.Serializable
+
 /** Tier of an item in the playback queue. */
 enum class QueueTier {
     /** Explicitly queued by user ("Play Next", "Add to Queue", or preserved user queue). */
@@ -404,6 +406,7 @@ enum class SearchFilter(val label: String, val params: String?) {
 }
 
 /** A card in a home-feed carousel: either a track (videoId) or an album/playlist (browseId). */
+@Serializable
 data class ShelfItem(
     val title: String,
     val subtitle: String,
@@ -449,6 +452,7 @@ data class AccountChannel(
     val key: String get() = pageId ?: dataSyncId ?: name
 }
 
+@Serializable
 data class HomeShelf(
     val title: String,
     val items: List<ShelfItem>,

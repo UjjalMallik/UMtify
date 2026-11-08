@@ -11,6 +11,7 @@ import com.music.bitchord.auth.YouTubeProfile
 import com.music.bitchord.auth.profileId
 import com.music.bitchord.auth.sessionId
 import com.music.bitchord.auth.adjacentProfile
+import com.music.bitchord.data.HomeCache
 import com.music.bitchord.data.LocalGroup
 import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.LikeState
@@ -130,7 +131,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _signedIn = SignedIn.state(app)
     val signedIn: StateFlow<Boolean> = _signedIn.asStateFlow()
 
-    private val _home = MutableStateFlow<UiState<List<HomeShelf>>>(UiState.Loading)
+    private val _home = MutableStateFlow<UiState<List<HomeShelf>>>(
+        HomeCache.load(app)?.takeIf { it.isNotEmpty() }?.let { UiState.Success(it) } ?: UiState.Loading
+    )
     val home: StateFlow<UiState<List<HomeShelf>>> = _home.asStateFlow()
 
     private val _offlineHome = MutableStateFlow<OfflineHome?>(null)
@@ -1848,11 +1851,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         val identity = listenerKey()
         val generation = homeLoadGeneration.incrementAndGet()
-        _home.value = UiState.Loading
+        if (_home.value !is UiState.Success) {
+            _home.value = UiState.Loading
+        }
         homeContinuation = null
         homeSeenTitles.clear()
         _homeLoadingMore.value = false
-        _homeRecentlyPlayedLoading.value = _signedIn.value
+        _homeRecentlyPlayedLoading.value = _signedIn.value && (_home.value !is UiState.Success)
         // The core feed plus one browse per supplement. Recently played is left
         // out: it has its own skeleton at the head of the page rather than the
         // one at the tail.
@@ -1864,7 +1869,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         .onSuccess { feed ->
                             if (!isCurrentHomeLoad(identity, generation)) return@onSuccess
                             homeContinuation = feed.continuation
-                            publishHomeShelves(feed.shelves)
+                            homeSeenTitles.clear()
+                            val shelves = feed.shelves.withoutRepeatsOf(emptyList())
+                                .filter { homeSeenTitles.add(it.title.lowercase(Locale.ROOT)) }
+                            if (shelves.isNotEmpty()) {
+                                _home.value = UiState.Success(shelves)
+                                viewModelScope.launch(Dispatchers.IO) {
+                                    HomeCache.save(getApplication(), shelves)
+                                }
+                            }
                         }
                         .onFailure { failure ->
                             if (isCurrentHomeLoad(identity, generation) && _home.value !is UiState.Success) {
@@ -1917,22 +1930,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun publishHomeShelves(shelves: List<HomeShelf>, prepend: Boolean = false) {
         val existing = (_home.value as? UiState.Success)?.data.orEmpty()
-        if (prepend) {
-            // YouTube's core home can also contain a stale "Recently played"
-            // shelf. The dedicated history endpoint wins and replaces it.
+        val updated = if (prepend) {
             val replacing = shelves.map { it.title.lowercase(Locale.ROOT) }.toSet()
             homeSeenTitles.addAll(replacing)
-            _home.value = UiState.Success(shelves + existing.filterNot {
-                it.title.lowercase(Locale.ROOT) in replacing
-            })
-            return
+            shelves + existing.filterNot { it.title.lowercase(Locale.ROOT) in replacing }
+        } else {
+            val added = shelves.withoutRepeatsOf(existing).filter { homeSeenTitles.add(it.title.lowercase(Locale.ROOT)) }
+            if (added.isEmpty()) return
+            existing + added
         }
-        val added = shelves.withoutRepeatsOf(existing)
-            .filter { homeSeenTitles.add(it.title.lowercase(Locale.ROOT)) }
-        if (added.isNotEmpty()) _home.value = UiState.Success(existing + added)
+        _home.value = UiState.Success(updated)
+        viewModelScope.launch(Dispatchers.IO) {
+            HomeCache.save(getApplication(), updated)
+        }
     }
-
-    /** Refreshes the core feed without blanking the current Play page first. */
     private suspend fun refreshHome(identity: String?) = coroutineScope {
         val recent = if (_signedIn.value) async { YtMusicRepository.homeRecentlyPlayed() } else null
         YtMusicRepository.home().onSuccess { feed ->

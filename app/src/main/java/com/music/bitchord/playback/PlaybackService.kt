@@ -7395,8 +7395,11 @@ class PlaybackService : MediaLibraryService() {
      * this guard exists to prevent.
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
-        super.onTaskRemoved(rootIntent)
-        if (isPlayingAnywhere()) return
+        if (isPlayingAnywhere()) {
+            // Keep playback service running in the foreground so playback and
+            // system notifications (including OriginOS Atomic Island) continue seamlessly.
+            return
+        }
         if (AppSettings.stopOnTaskRemoved.value) {
             // A receiver left playing with nothing on the phone to drive it
             // would run out its few queued tracks and stop on its own anyway;
@@ -7406,7 +7409,9 @@ class PlaybackService : MediaLibraryService() {
             // playing on its own out of a service that is on its way out.
             eachPlayer { it.stop() }
             stopSelf()
+            return
         }
+        super.onTaskRemoved(rootIntent)
     }
 
     /**
