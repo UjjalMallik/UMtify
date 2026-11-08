@@ -24,6 +24,7 @@ import coil3.compose.LocalPlatformContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImagePainter
 import coil3.request.ImageRequest
+import coil3.request.crossfade
 import com.music.bitchord.data.canvas.CanvasArtwork
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.artworkAt
@@ -147,6 +148,7 @@ internal class PlayerArtwork(
         ImageRequest.Builder(context)
             .data(url)
             .size(artPx)
+            .crossfade(false)
             // What makes a retry a new request as far as Coil's model comparison
             // is concerned. Only from the second go onwards, so the ordinary
             // request stays byte-identical across recompositions — and, in the
@@ -165,7 +167,10 @@ internal class PlayerArtwork(
         // would cancel that effect's wait every time the painter passed back
         // through Loading.
         if (state is AsyncImagePainter.State.Success) failed = false
-        if (state is AsyncImagePainter.State.Error) failed = true
+        if (state is AsyncImagePainter.State.Error) {
+            failed = true
+            url?.let { com.music.bitchord.ui.components.FailedArtworkCache.markFailed(it) }
+        }
     }
 
     internal fun retry() {
@@ -183,7 +188,7 @@ internal fun rememberPlayerArtwork(remoteArt: String?, artPx: Int = ART_PX): Pla
         // A track with no artwork at all fails immediately and would fail
         // identically three more times: there is no request to make, so there is
         // nothing a second go could do differently.
-        if (artUrl == null || !art.failed || art.attempt >= ART_RETRIES) return@LaunchedEffect
+        if (artUrl == null || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(artUrl) || !art.failed || art.attempt >= ART_RETRIES) return@LaunchedEffect
         delay(ART_RETRY_DELAY_MS)
         art.retry()
     }

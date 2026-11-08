@@ -8,6 +8,7 @@ import coil3.intercept.Interceptor
 import coil3.request.ImageResult
 import coil3.request.error
 import coil3.request.fallback
+import coil3.request.crossfade
 import com.music.bitchord.sharedui.R
 import java.io.ByteArrayOutputStream
 
@@ -96,6 +97,7 @@ class DefaultCoverFallback : Interceptor {
         if (chosenByCaller) return chain.proceed()
         return chain.withRequest(
             request.newBuilder()
+                .crossfade(false)
                 .error(DefaultCoverArt.RES_ID)
                 .fallback(DefaultCoverArt.RES_ID)
                 .build(),

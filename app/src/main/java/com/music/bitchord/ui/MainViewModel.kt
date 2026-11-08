@@ -1601,6 +1601,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         _suggestions.value = emptyList()
                         _typeaheadResults.value = emptyList()
                         loadOfflineHome()
+                    } else {
+                        com.music.bitchord.data.Http.evictIdleConnections()
+                        loadHome()
+                        loadExplore()
+                        if (_signedIn.value) {
+                            loadLibrary()
+                            loadAccount()
+                            loadPlaylists()
+                        }
                     }
                     when {
                         (hadOfflineResults || searchSubmitted) && _query.value.isNotBlank() ->

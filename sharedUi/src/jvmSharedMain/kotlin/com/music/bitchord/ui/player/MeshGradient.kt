@@ -20,7 +20,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -163,7 +165,17 @@ fun MeshGradientBackground(
     // that is the far side of the window and nobody ever saw it, which is how it
     // went unnoticed; in a pane beside a page it was a hand's width of gradient
     // laid over the feed.
-    Canvas(
+    val anchors = remember {
+        listOf(
+            Offset(0.20f, 0.25f),
+            Offset(0.80f, 0.20f),
+            Offset(0.75f, 0.80f),
+            Offset(0.25f, 0.75f),
+        )
+    }
+    val speeds = remember { listOf(1f, -0.7f, 0.85f, -1.15f) }
+
+    Box(
         modifier = modifier
             .fillMaxSize()
             .clipToBounds()
@@ -172,45 +184,40 @@ fun MeshGradientBackground(
                 scaleY = 1.3f
             }
             .background(baseColor)
-            .blur(blurRadius),
-    ) {
-        val anchors = listOf(
-            Offset(0.20f, 0.25f),
-            Offset(0.80f, 0.20f),
-            Offset(0.75f, 0.80f),
-            Offset(0.25f, 0.75f),
-        )
-        val speeds = listOf(1f, -0.7f, 0.85f, -1.15f)
-        val drift = phase.value
-
-        animatedColors.forEachIndexed { index, color ->
-            val anchor = anchors[index]
-            val center = Offset(
-                x = (anchor.x + 0.16f * cos(drift * speeds[index] + index * 1.7f)) * size.width,
-                y = (anchor.y + 0.16f * sin(drift * speeds[index] * 0.9f + index * 2.3f)) * size.height,
-            )
-            val radius = size.maxDimension * 0.62f
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(color.copy(alpha = 0.85f), color.copy(alpha = 0f)),
-                    center = center,
-                    radius = radius,
-                ),
-                radius = radius,
-                center = center,
-            )
-        }
-
-        // Gentle scrim so white text stays legible over bright art.
-        drawRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(
-                    Color.Black.copy(alpha = 0.10f),
-                    Color.Black.copy(alpha = 0.38f),
-                ),
-            ),
-        )
-    }
+            .blur(blurRadius)
+            .drawWithCache {
+                val drift = phase.value
+                val radius = size.maxDimension * 0.62f
+                val circles = animatedColors.mapIndexed { index, color ->
+                    val anchor = anchors[index]
+                    val center = Offset(
+                        x = (anchor.x + 0.16f * cos(drift * speeds[index] + index * 1.7f)) * size.width,
+                        y = (anchor.y + 0.16f * sin(drift * speeds[index] * 0.9f + index * 2.3f)) * size.height,
+                    )
+                    center to Brush.radialGradient(
+                        colors = listOf(color.copy(alpha = 0.85f), color.copy(alpha = 0f)),
+                        center = center,
+                        radius = radius,
+                    )
+                }
+                val scrimBrush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color.Black.copy(alpha = 0.10f),
+                        Color.Black.copy(alpha = 0.38f),
+                    ),
+                )
+                onDrawBehind {
+                    circles.forEach { (center, brush) ->
+                        drawCircle(
+                            brush = brush,
+                            radius = radius,
+                            center = center,
+                        )
+                    }
+                    drawRect(brush = scrimBrush)
+                }
+            },
+    )
 }
 
 /**

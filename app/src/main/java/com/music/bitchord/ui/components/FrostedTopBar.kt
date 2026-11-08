@@ -374,15 +374,6 @@ private fun ArtworkPageActions(
     Row(
         modifier = modifier
             .then(artworkPageSurface(shape = CircleShape, hazeState = hazeState))
-            // Keep the right edge fixed while a new action opens room to its
-            // left. The surface itself therefore grows instead of jumping to
-            // its new width in a single frame.
-            .animateContentSize(
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow,
-                ),
-            )
             // One 48dp profile target with no inset is a true 48x48 circle.
             // Once another action exists, restore the navbar's PILL_INSET at
             // both edges. This is layout padding inside the surface, not an

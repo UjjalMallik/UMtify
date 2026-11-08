@@ -3082,7 +3082,7 @@ fun NowPlayingScreen(
                                     clip = true
                                     // The mask below erases part of what this layer
                                     // drew, which it can only do in a buffer of its own.
-                                    compositingStrategy = if (sleeveShown() > 0f) {
+                                    compositingStrategy = if (sleeveShown() > 0f && sleeveShown() < 1f) {
                                         CompositingStrategy.Offscreen
                                     } else {
                                         CompositingStrategy.Auto
@@ -3198,7 +3198,7 @@ fun NowPlayingScreen(
                                 // the sleeve flashed over the real artwork on
                                 // every one of them; it shows now only when the
                                 // URL was never there, or the retries used it up.
-                                val artIsGone = art.url == null ||
+                                val artIsGone = art.url.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url) ||
                                     (art.failed && art.attempt >= ART_RETRIES)
                                 if (artIsGone && !canvasRendered) {
                                     DefaultCoverTile(
@@ -3211,7 +3211,8 @@ fun NowPlayingScreen(
                                     )
                                 }
                             }
-                            AsyncImage(
+                            if (!art.url.isNullOrBlank() && !com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url)) {
+                                AsyncImage(
                                 // Decode at the sleeve's *expanded* size, always.
                                 // Coil otherwise sizes the decode to however large
                                 // this is when the request goes out — and changing
@@ -3251,7 +3252,8 @@ fun NowPlayingScreen(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .drawWithContent { if (art.loaded || !canvasRendered) drawContent() },
-                            )
+                                )
+                            }
 
                             // Where the clip plays when it can't have the banner:
                             // inside the same clip as the still art, taking the

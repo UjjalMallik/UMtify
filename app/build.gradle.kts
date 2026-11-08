@@ -140,6 +140,10 @@ android {
         create("dev") {
             dimension = "env"
         }
+        create("originos") {
+            dimension = "env"
+            applicationId = "com.tencent.qqmusic"
+        }
         create("prod") {
             dimension = "env"
         }

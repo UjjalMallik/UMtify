@@ -139,4 +139,10 @@ object Http {
         .addInterceptor(webDavInterceptor)
         .apply { if (USAGE_LOGGING_ENABLED) addNetworkInterceptor(usageInterceptor) }
         .build()
+
+    fun evictIdleConnections() {
+        try {
+            client.connectionPool.evictAll()
+        } catch (_: Throwable) {}
+    }
 }

@@ -101,43 +101,53 @@ jobs:
             publish="true"
             artifact="UMtify-v${name}-arm64-v8a"
             apk="UMtify-v${name}-arm64-v8a.apk"
+            artifact_originos="UMtify-Vivo-Iqoo-OriginOS-v${name}-arm64v8a"
+            apk_originos="UMtify-Vivo-Iqoo-OriginOS-arm64v8a.apk"
           elif [ "$REF_TYPE" = "tag" ]; then
             name="${GITHUB_REF_NAME#v}"
             publish="true"
             artifact="UMtify-v${name}-arm64-v8a"
             apk="UMtify-v${name}-arm64-v8a.apk"
+            artifact_originos="UMtify-Vivo-Iqoo-OriginOS-v${name}-arm64v8a"
+            apk_originos="UMtify-Vivo-Iqoo-OriginOS-arm64v8a.apk"
           else
             name="1.0"
             publish="false"
             artifact="UMtify-arm64-v8a"
             apk="UMtify-arm64-v8a.apk"
+            artifact_originos="UMtify-Vivo-Iqoo-OriginOS-arm64v8a"
+            apk_originos="UMtify-Vivo-Iqoo-OriginOS-arm64v8a.apk"
           fi
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
           echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
           echo "apk=$apk" >> "$GITHUB_OUTPUT"
+          echo "artifact_originos=$artifact_originos" >> "$GITHUB_OUTPUT"
+          echo "apk_originos=$apk_originos" >> "$GITHUB_OUTPUT"
 
-      # The same task on every event, signed by the same committed keystore, so
-      # an artifact and a release are builds of the same code with the same
-      # signature. Only the visible version name differs.
-      - name: Build production release APK
+      # The same tasks on every event, signed by the same committed keystore, so
+      # artifacts and releases are builds of the same code with the same
+      # signature. Builds both standard UMtify APK and Vivo/iQOO OriginOS APK.
+      - name: Build dual release APKs (Standard + Vivo/iQOO OriginOS)
         env:
           VERSION_NAME: ${{ steps.version.outputs.name }}
-        run: ./gradlew assembleProdRelease -PversionName="$VERSION_NAME"
+        run: ./gradlew assembleProdRelease assembleOriginosRelease -PversionName="$VERSION_NAME"
 
-      - name: Name the release APK
+      - name: Name the release APKs
         env:
           APK_NAME: ${{ steps.version.outputs.apk }}
+          APK_ORIGINOS_NAME: ${{ steps.version.outputs.apk_originos }}
         run: |
           mkdir -p release
           cp app/build/outputs/apk/prod/release/app-prod-arm64-v8a-release.apk \
             "release/$APK_NAME"
+          cp app/build/outputs/apk/originos/release/app-originos-arm64-v8a-release.apk \
+            "release/$APK_ORIGINOS_NAME"
 
-      # Every run leaves its APK here, so a commit can be installed and tested
-      # without a release existing for it. A snapshot carries no version in its
-      # name, because it has none.
-      - name: Upload APK artifact
+      # Every run leaves its APKs here, so a commit can be installed and tested
+      # without a release existing for it.
+      - name: Upload Standard APK artifact
         uses: actions/upload-artifact@v5
         with:
           name: ${{ steps.version.outputs.artifact }}
@@ -145,10 +155,15 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # Manual run, or a v* tag push — nothing else. The runner's pre-installed
-      # gh CLI does the publishing, so no third-party action runs in this step.
-      # Empty release notes fall back to the notes GitHub generates from the
-      # commits.
+      - name: Upload Vivo/iQOO OriginOS APK artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ steps.version.outputs.artifact_originos }}
+          path: release/${{ steps.version.outputs.apk_originos }}
+          if-no-files-found: error
+          retention-days: 14
+
+      # Manual run, or a v* tag push — nothing else. Attaches BOTH APKs to the GitHub Release.
       - name: Publish GitHub Release
         if: steps.version.outputs.publish == 'true'
         env:
@@ -156,22 +171,23 @@ jobs:
           TAG: v${{ steps.version.outputs.name }}
           TITLE: UMtify v${{ steps.version.outputs.name }} (Build ${{ steps.version.outputs.code }})
           APK: release/${{ steps.version.outputs.apk }}
+          APK_ORIGINOS: release/${{ steps.version.outputs.apk_originos }}
           NOTES: ${{ inputs.release_notes }}
         run: |
-          # A re-run of a version that is already published replaces its APK
+          # A re-run of a version that is already published replaces its APKs
           # instead of failing on the duplicate tag.
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$APK" --clobber
+            gh release upload "$TAG" "$APK" "$APK_ORIGINOS" --clobber
             exit 0
           fi
           if [ -n "$NOTES" ]; then
-            gh release create "$TAG" "$APK" \
+            gh release create "$TAG" "$APK" "$APK_ORIGINOS" \
               --target "$GITHUB_SHA" \
               --title "$TITLE" \
               --notes "$NOTES" \
               --latest
           else
-            gh release create "$TAG" "$APK" \
+            gh release create "$TAG" "$APK" "$APK_ORIGINOS" \
               --target "$GITHUB_SHA" \
               --title "$TITLE" \
               --generate-notes \

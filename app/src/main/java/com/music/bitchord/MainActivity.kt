@@ -361,6 +361,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
         // Before the composition, so a cold launch from a widget's artwork has
         // the request already standing by the time BitChordApp first reads it.
         PlayerDeepLink.consume(intent)
@@ -849,7 +850,20 @@ private fun BitChordApp(
     // Read on the way in rather than once: a download that finished while the
     // listener was on another tab is on this page the moment they come back.
     LaunchedEffect(showOfflineHome, selectedTab) {
-        if (showOfflineHome && selectedTab == TAB_HOME) viewModel.loadOfflineHome()
+        if (showOfflineHome && selectedTab == TAB_HOME) {
+            viewModel.loadOfflineHome()
+        } else if (!showOfflineHome && selectedTab == TAB_HOME) {
+            if (viewModel.home.value !is UiState.Success) {
+                viewModel.loadHome()
+            }
+        }
+    }
+    LaunchedEffect(offlineModeEnabled) {
+        if (!offlineModeEnabled && !AppSettings.isOffline) {
+            if (viewModel.home.value !is UiState.Success) {
+                viewModel.loadHome()
+            }
+        }
     }
 
     val query by viewModel.query.collectAsStateWithLifecycle()

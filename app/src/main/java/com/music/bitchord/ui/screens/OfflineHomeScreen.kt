@@ -52,6 +52,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.request.crossfade
 import com.music.bitchord.R
 import com.music.bitchord.data.LocalGroup
 import com.music.bitchord.data.model.CARD_ART_PX
@@ -334,12 +335,32 @@ private fun LazyListScope.shelfCards(
                             .border(0.8.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant),
                     ) {
-                        AsyncImage(
-                            model = group.thumbnailUrl.artworkAt(CARD_ART_PX),
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                        )
+                        val isBrokenOrBlank = group.thumbnailUrl.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(group.thumbnailUrl)
+                        if (isBrokenOrBlank) {
+                            com.music.bitchord.ui.components.DefaultCoverTile(
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        } else {
+                            val context = coil3.compose.LocalPlatformContext.current
+                            val imageRequest = remember(group.thumbnailUrl) {
+                                coil3.request.ImageRequest.Builder(context)
+                                    .data(group.thumbnailUrl.artworkAt(CARD_ART_PX))
+                                    .crossfade(false)
+                                    .build()
+                            }
+                            AsyncImage(
+                                model = imageRequest,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                onState = { state ->
+                                    if (state is coil3.compose.AsyncImagePainter.State.Error) {
+                                        com.music.bitchord.ui.components.FailedArtworkCache.markFailed(group.thumbnailUrl)
+                                    }
+                                },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
                     }
                     Spacer(Modifier.height(8.dp))
                     Text(
@@ -717,12 +738,32 @@ private fun SongCard(
                 .border(0.8.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         ) {
-            AsyncImage(
-                model = song.thumbnailUrl.artworkAt(CARD_ART_PX),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
+            val isBrokenOrBlank = song.thumbnailUrl.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(song.thumbnailUrl)
+            if (isBrokenOrBlank) {
+                com.music.bitchord.ui.components.DefaultCoverTile(
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                val context = coil3.compose.LocalPlatformContext.current
+                val imageRequest = remember(song.thumbnailUrl) {
+                    coil3.request.ImageRequest.Builder(context)
+                        .data(song.thumbnailUrl.artworkAt(CARD_ART_PX))
+                        .crossfade(false)
+                        .build()
+                }
+                AsyncImage(
+                    model = imageRequest,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    onState = { state ->
+                        if (state is coil3.compose.AsyncImagePainter.State.Error) {
+                            com.music.bitchord.ui.components.FailedArtworkCache.markFailed(song.thumbnailUrl)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
             if (isCurrent && isPlaying) SearchPlayingBars(Modifier.align(Alignment.Center))
         }
         Spacer(Modifier.height(8.dp))

@@ -75,6 +75,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Velocity
 import coil3.compose.AsyncImage
+import coil3.request.crossfade
 import com.music.bitchord.ui.components.thumbnailBorder
 import com.music.bitchord.ui.icons.BitChordIcons
 import com.music.bitchord.data.model.QueueTier
@@ -801,17 +802,39 @@ private fun InlineQueueRow(
             )
             Spacer(Modifier.width(4.dp))
         }
-        AsyncImage(
-            // A 44dp row tile: ask the source for a thumbnail-sized copy rather
-            // than decoding the full artwork this list would then throw away.
-            model = rememberRemoteArtworkUrl(song)?.artworkAt(ROW_ART_PX),
-            contentDescription = null,
-            modifier = Modifier
-                .size(44.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .thumbnailBorder(RoundedCornerShape(6.dp))
-                .background(Color.White.copy(alpha = 0.08f)),
-        )
+        val remoteArt = rememberRemoteArtworkUrl(song)
+        val isBrokenOrBlank = remoteArt.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(remoteArt)
+        if (isBrokenOrBlank) {
+            com.music.bitchord.ui.components.DefaultCoverTile(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .thumbnailBorder(RoundedCornerShape(6.dp)),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            )
+        } else {
+            val context = coil3.compose.LocalPlatformContext.current
+            val imageRequest = remember(remoteArt) {
+                coil3.request.ImageRequest.Builder(context)
+                    .data(remoteArt.artworkAt(ROW_ART_PX))
+                    .crossfade(false)
+                    .build()
+            }
+            AsyncImage(
+                model = imageRequest,
+                contentDescription = null,
+                onState = { state ->
+                    if (state is coil3.compose.AsyncImagePainter.State.Error) {
+                        com.music.bitchord.ui.components.FailedArtworkCache.markFailed(remoteArt)
+                    }
+                },
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .thumbnailBorder(RoundedCornerShape(6.dp))
+                    .background(Color.White.copy(alpha = 0.08f)),
+            )
+        }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             ExplicitSongTitle(

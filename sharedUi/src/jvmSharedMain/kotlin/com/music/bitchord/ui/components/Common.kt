@@ -92,6 +92,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.request.crossfade
+import androidx.compose.ui.layout.ContentScale
 import com.music.bitchord.data.model.ROW_ART_PX
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.isMatchPending
@@ -546,15 +548,39 @@ private fun SongRowContent(
             }
         } else {
             Box(Modifier.size(52.dp)) {
-                AsyncImage(
-                    model = com.music.bitchord.ui.player.rememberRemoteArtworkUrl(song)?.artworkAt(ROW_ART_PX),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .matchParentSize()
-                        .clip(RoundedCornerShape(8.dp))
-                        .thumbnailBorder(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                )
+                val remoteArt = com.music.bitchord.ui.player.rememberRemoteArtworkUrl(song)
+                val isBrokenOrBlank = remoteArt.isNullOrBlank() || FailedArtworkCache.isFailed(remoteArt)
+                if (isBrokenOrBlank) {
+                    DefaultCoverTile(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .clip(RoundedCornerShape(8.dp))
+                            .thumbnailBorder(RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Crop,
+                    )
+                } else {
+                    val context = coil3.compose.LocalPlatformContext.current
+                    val imageRequest = remember(remoteArt) {
+                        coil3.request.ImageRequest.Builder(context)
+                            .data(remoteArt.artworkAt(ROW_ART_PX))
+                            .crossfade(false)
+                            .build()
+                    }
+                    AsyncImage(
+                        model = imageRequest,
+                        contentDescription = null,
+                        onState = { state ->
+                            if (state is coil3.compose.AsyncImagePainter.State.Error) {
+                                FailedArtworkCache.markFailed(remoteArt)
+                            }
+                        },
+                        modifier = Modifier
+                            .matchParentSize()
+                            .clip(RoundedCornerShape(8.dp))
+                            .thumbnailBorder(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                    )
+                }
                 if (searchPlayingStyle && isCurrent && isPlaying) {
                     SearchPlayingBars(Modifier.align(Alignment.Center))
                 }

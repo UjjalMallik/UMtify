@@ -1701,8 +1701,12 @@ object AppSettings {
     }
 
     fun setOfflineModeEnabled(value: Boolean) {
+        val changed = offlineModeEnabled.value != value
         offlineModeEnabled.value = value
         prefs.edit().putBoolean(KEY_OFFLINE_MODE, value).apply()
+        if (changed && !value) {
+            com.music.bitchord.data.Http.evictIdleConnections()
+        }
     }
 
     fun setIsOfflineMode(value: Boolean) = setOfflineModeEnabled(value)
