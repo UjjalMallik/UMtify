@@ -63,6 +63,7 @@ import com.music.bitchord.ui.OfflineHome
 import com.music.bitchord.ui.components.MessageState
 import com.music.bitchord.ui.components.PAGE_GUTTER
 import com.music.bitchord.ui.components.SHELF_CARD_WIDTH
+import com.music.bitchord.ui.components.liquidGlassCard
 import com.music.bitchord.ui.components.SearchPlayingBars
 import com.music.bitchord.ui.components.ShelfRow
 import com.music.bitchord.ui.components.SongRow
@@ -309,21 +310,7 @@ private fun LazyListScope.shelfCards(
                 Column(
                     modifier = Modifier
                         .width(SHELF_CARD_WIDTH)
-                        .shadow(
-                            elevation = 4.dp,
-                            shape = cardShape,
-                            ambientColor = Color.Black.copy(alpha = if (isLight) 0.08f else 0.25f),
-                        )
-                        .clip(cardShape)
-                        .background(cardBase)
-                        .then(
-                            if (isLight) {
-                                Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.04f))
-                            } else {
-                                Modifier.background(cardSheen)
-                            },
-                        )
-                        .border(1.dp, cardBorder, cardShape)
+                        .liquidGlassCard(shape = cardShape, isLight = isLight)
                         .clickable { onOpenGroup(group) }
                         .padding(8.dp),
                 ) {
@@ -332,7 +319,7 @@ private fun LazyListScope.shelfCards(
                             .fillMaxWidth()
                             .aspectRatio(1f)
                             .clip(RoundedCornerShape(14.dp))
-                            .border(0.8.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
+                            .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant),
                     ) {
                         val isBrokenOrBlank = group.thumbnailUrl.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(group.thumbnailUrl)
@@ -457,20 +444,7 @@ private fun OfflineTitle(title: String, onSearchClick: (() -> Unit)? = null) {
                     modifier = Modifier
                         .weight(1f)
                         .height(36.dp)
-                        .shadow(
-                            elevation = 4.dp,
-                            shape = pillShape,
-                            clip = false,
-                            ambientColor = if (isLight) Color.Black.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.45f),
-                            spotColor = if (isLight) Color.Black.copy(alpha = 0.05f) else Color.White.copy(alpha = 0.20f),
-                        )
-                        .clip(pillShape)
-                        .background(if (isLight) Color.Black.copy(alpha = 0.06f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f))
-                        .border(
-                            width = 1.5.dp,
-                            brush = searchBorder,
-                            shape = pillShape,
-                        )
+                        .liquidGlassCard(shape = pillShape, isLight = isLight)
                         .clickable(onClick = onSearchClick)
                         .padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -712,21 +686,7 @@ private fun SongCard(
 
     Column(
         modifier = modifier
-            .shadow(
-                elevation = 4.dp,
-                shape = cardShape,
-                ambientColor = Color.Black.copy(alpha = if (isLight) 0.08f else 0.25f),
-            )
-            .clip(cardShape)
-            .background(cardBase)
-            .then(
-                if (isLight) {
-                    Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.04f))
-                } else {
-                    Modifier.background(cardSheen)
-                },
-            )
-            .border(1.dp, cardBorder, cardShape)
+            .liquidGlassCard(shape = cardShape, isLight = isLight)
             .clickable(onClick = onClick)
             .padding(8.dp),
     ) {
@@ -735,7 +695,7 @@ private fun SongCard(
                 .fillMaxWidth()
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(14.dp))
-                .border(0.8.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
+                .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         ) {
             val isBrokenOrBlank = song.thumbnailUrl.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(song.thumbnailUrl)

@@ -1,5 +1,7 @@
 package com.music.bitchord.ui.components
 
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.luminance
 import com.music.bitchord.ui.LocalPullToRefreshEnabled
 import com.music.bitchord.ui.AppUiHost
 import com.music.bitchord.ui.AppUi
@@ -103,7 +105,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import com.music.bitchord.data.model.artworkAt
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.composed
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.foundation.border
 
 /**
@@ -192,23 +193,9 @@ const val HERO_CARD_RATIO = 0.92f
 fun heroCardWidth(available: Dp): Dp = minOf(available * HERO_CARD_FRACTION, HERO_CARD_MAX_WIDTH)
 
 /** Share of the row a page of tracks takes, so the next page peeks in past it. */
-private const val TRACK_COLUMN_FRACTION = 0.88f
-
-/**
- * How wide a sideways-paging column of track rows is ever allowed to get.
- *
- * Same trap [HERO_CARD_MAX_WIDTH] answers, and worse for a list: a track row is
- * artwork, a title and a subtitle, none of which have any use for more room. At
- * 88% of a tablet the row's contents stay their own size and the space all lands
- * between the title and the overflow button, so four songs eat the width of the
- * screen and read as a page half-filled rather than a shelf.
- *
- * 400dp clears what the widest phone asks for (0.88 of 448dp is 394dp), so every
- * phone keeps the width the fraction gives it and only a tablet is held back —
- * to a column near a phone's own width, which is the size these rows were drawn
- * at, with the next page showing beside it.
- */
-private val TRACK_COLUMN_MAX_WIDTH = 400.dp
+private const val TRACK_COLUMN_FRACTION = 0.72f
+private val TRACK_COLUMN_MAX_WIDTH = 260.dp
+private val TRACK_COLUMN_MIN_WIDTH = 245.dp
 
 /**
  * How wide a column of track rows should be in a row [available] wide — shared
@@ -216,7 +203,50 @@ private val TRACK_COLUMN_MAX_WIDTH = 400.dp
  * them, which have to agree to the pixel or the page jumps when the data lands.
  */
 fun trackColumnWidth(available: Dp): Dp =
-    minOf(available * TRACK_COLUMN_FRACTION, TRACK_COLUMN_MAX_WIDTH)
+    (available * TRACK_COLUMN_FRACTION).coerceIn(TRACK_COLUMN_MIN_WIDTH, TRACK_COLUMN_MAX_WIDTH)
+
+/**
+ * Clean Liquid Glass modifier for translucent cards without hardware shadow projection artifacts.
+ */
+@Composable
+fun Modifier.liquidGlassCard(
+    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(18.dp),
+    isLight: Boolean = MaterialTheme.colorScheme.background.luminance() > 0.5f,
+): Modifier {
+    val darkSurface = Brush.linearGradient(
+        colors = listOf(
+            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f),
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+            MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.35f),
+        ),
+    )
+    val lightSurface = Brush.linearGradient(
+        colors = listOf(
+            Color.White.copy(alpha = 0.88f),
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.06f),
+            Color.White.copy(alpha = 0.72f),
+        ),
+    )
+    val darkBorder = Brush.verticalGradient(
+        listOf(
+            Color.White.copy(alpha = 0.24f),
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+            Color.White.copy(alpha = 0.05f),
+        ),
+    )
+    val lightBorder = Brush.verticalGradient(
+        listOf(
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
+            Color.Black.copy(alpha = 0.10f),
+            Color.White.copy(alpha = 0.35f),
+        ),
+    )
+
+    return this
+        .clip(shape)
+        .background(if (isLight) lightSurface else darkSurface)
+        .border(1.dp, if (isLight) lightBorder else darkBorder, shape)
+}
 
 /** How many cards sit across a library grid row, and how wide each lands. */
 data class LibraryGridSpec(val columns: Int, val cardWidth: Dp)

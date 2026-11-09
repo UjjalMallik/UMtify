@@ -377,10 +377,10 @@ fun LazyListScope.detailSkeleton(isArtist: Boolean) {
 @Composable
 private fun CompactSongRowSkeleton(index: Int) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ShimmerBox(Modifier.size(48.dp), RoundedCornerShape(7.dp))
+        ShimmerBox(Modifier.size(44.dp), RoundedCornerShape(10.dp))
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             SkeletonLine(fraction = TitleWidths[index % TitleWidths.size], height = 14.dp)

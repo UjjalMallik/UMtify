@@ -1,5 +1,10 @@
 package com.music.bitchord.ui.screens
 
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.luminance
+import com.music.bitchord.ui.components.liquidGlassCard
 import com.music.bitchord.sharedui.resources.*
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
@@ -240,38 +245,61 @@ data class LibraryLink(val item: ShelfItem, val icon: ImageVector, val logo: Dra
  */
 @Composable
 private fun LibraryLinkList(links: List<LibraryLink>, onClick: (ShelfItem) -> Unit) {
-    Column(Modifier.padding(top = 4.dp, bottom = 22.dp)) {
-        links.forEachIndexed { index, link ->
+    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val pillShape = RoundedCornerShape(18.dp)
+    val primary = MaterialTheme.colorScheme.primary
+    val secondary = MaterialTheme.colorScheme.secondary
+
+    Column(
+        modifier = Modifier
+            .padding(horizontal = PAGE_GUTTER)
+            .padding(top = 6.dp, bottom = 22.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        links.forEach { link ->
+            val badgeColor = when {
+                link.logo != null -> Color(0xFF1DB954).copy(alpha = if (isLight) 0.12f else 0.18f)
+                link.item.browseId == "local:downloads" -> primary.copy(alpha = if (isLight) 0.12f else 0.18f)
+                else -> secondary.copy(alpha = if (isLight) 0.12f else 0.18f)
+            }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 54.dp)
+                    .heightIn(min = 58.dp)
+                    .liquidGlassCard(shape = pillShape, isLight = isLight)
                     .clickable { onClick(link.item) }
-                    .padding(horizontal = PAGE_GUTTER),
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
             ) {
-                if (link.logo != null) {
-                    // A mark, not a glyph: white on dark, black on light, with
-                    // its cut-outs left clear.
-                    Icon(
-                        painter = painterResource(link.logo),
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier.size(LINK_ICON_SIZE),
-                    )
-                } else {
-                    Icon(
-                        imageVector = link.icon,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(LINK_ICON_SIZE),
-                    )
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(badgeColor)
+                        .border(0.8.dp, Color.White.copy(alpha = if (isLight) 0.15f else 0.22f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (link.logo != null) {
+                        Icon(
+                            painter = painterResource(link.logo),
+                            contentDescription = null,
+                            tint = if (isLight) Color(0xFF1DB954) else Color(0xFF1ED760),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    } else {
+                        Icon(
+                            imageVector = link.icon,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
-                Spacer(Modifier.width(LINK_ICON_GAP))
+                Spacer(Modifier.width(14.dp))
                 Text(
                     text = link.item.title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onBackground,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
@@ -279,15 +307,8 @@ private fun LibraryLinkList(links: List<LibraryLink>, onClick: (ShelfItem) -> Un
                 Icon(
                     imageVector = BitChordIcons.ChevronRight,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .6f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                     modifier = Modifier.size(20.dp),
-                )
-            }
-            if (index < links.lastIndex) {
-                HorizontalDivider(
-                    modifier = Modifier.padding(start = PAGE_GUTTER + LINK_ICON_SIZE + LINK_ICON_GAP),
-                    thickness = 0.5.dp,
-                    color = MaterialTheme.colorScheme.outline,
                 )
             }
         }

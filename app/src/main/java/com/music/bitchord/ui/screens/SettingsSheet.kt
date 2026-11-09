@@ -2738,13 +2738,6 @@ internal fun Modifier.liquidGlassCard(
     val lightBase = Color.White.copy(alpha = 0.85f)
 
     return this
-        .shadow(
-            elevation = 6.dp,
-            shape = shape,
-            clip = false,
-            ambientColor = Color.Black.copy(alpha = if (isLight) 0.12f else 0.35f),
-            spotColor = Color.Black.copy(alpha = if (isLight) 0.08f else 0.25f),
-        )
         .clip(shape)
         .background(if (isLight) lightBase else darkBase)
         .then(

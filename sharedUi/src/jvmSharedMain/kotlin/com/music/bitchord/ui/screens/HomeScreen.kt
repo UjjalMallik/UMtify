@@ -96,6 +96,7 @@ import com.music.bitchord.ui.components.recentlyPlayedSkeleton
 import com.music.bitchord.ui.components.heroCardWidth
 import com.music.bitchord.ui.components.thumbnailBorder
 import com.music.bitchord.ui.components.trackColumnWidth
+import com.music.bitchord.ui.components.liquidGlassCard
 import com.music.bitchord.ui.player.MeshGradientBackground
 import com.music.bitchord.ui.player.MeshPalette
 
@@ -193,7 +194,7 @@ fun HomeScreen(
                         // shelf placeholders rather than another hero card.
                         feedSkeleton(firstIsHero = false)
                     } else {
-                        feedSkeleton(firstIsHero = leadHero)
+                        feedSkeleton(firstIsHero = false)
                     }
                 }
                 is UiState.Error -> item(key = "home-error") {
@@ -212,7 +213,7 @@ fun HomeScreen(
                         onItemLongPress = onItemLongPress,
                         currentSong = currentSong,
                         isPlaying = isPlaying,
-                        firstIsHero = leadHero && !recentlyPlayedLoading,
+                        firstIsHero = false,
                         recentsViewType = recentsViewType,
                         onRecentsViewTypeToggle = {
                             AppUi.host.setHomeRecentsViewType(
@@ -278,7 +279,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedShelves(
     shelves.forEachIndexed { index, shelf ->
         item(key = shelf.title + index, contentType = "shelf") {
             val openItem: (ShelfItem) -> Unit = { item -> onItemClick(item, shelf.title) }
-            if (index == 0 && shelf.title.equals(RECENTS_TITLE, ignoreCase = true)) {
+            if (shelf.title.equals(RECENTS_TITLE, ignoreCase = true)) {
                 RecentShelf(
                     shelf = shelf,
                     onItemClick = openItem,
@@ -287,14 +288,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedShelves(
                     isPlaying = isPlaying,
                     viewType = recentsViewType,
                     onViewTypeToggle = onRecentsViewTypeToggle,
-                )
-            } else if (index == 0 && firstIsHero) {
-                HeroShelf(
-                    shelf = shelf,
-                    onItemClick = openItem,
-                    onItemLongPress = onItemLongPress,
-                    currentSong = currentSong,
-                    isPlaying = isPlaying,
                 )
             } else {
                 Shelf(
@@ -478,62 +471,25 @@ fun CompactTrackRow(
     isPlaying: Boolean = false,
 ) {
     val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
-    val cardShape = RoundedCornerShape(16.dp)
-    val cardBorder = if (isLight) {
-        Brush.verticalGradient(
-            listOf(
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
-                Color.Black.copy(alpha = 0.10f),
-            ),
-        )
-    } else {
-        Brush.verticalGradient(
-            listOf(
-                Color.White.copy(alpha = 0.20f),
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-            ),
-        )
-    }
-    val cardSheen = Brush.linearGradient(
-        listOf(Color.White.copy(alpha = 0.08f), Color.White.copy(alpha = 0.02f)),
-    )
-    val cardBase = if (isLight) {
-        Color.White.copy(alpha = 0.80f)
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.50f)
-    }
+    val cardShape = RoundedCornerShape(14.dp)
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(
-                elevation = 2.dp,
-                shape = cardShape,
-                ambientColor = Color.Black.copy(alpha = if (isLight) 0.08f else 0.20f),
-            )
-            .clip(cardShape)
-            .background(cardBase)
-            .then(
-                if (isLight) {
-                    Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.04f))
-                } else {
-                    Modifier.background(cardSheen)
-                },
-            )
-            .border(1.dp, cardBorder, cardShape)
+            .liquidGlassCard(shape = cardShape, isLight = isLight)
             .longPressMenuClickable(onClick = onClick, onLongClick = onLongPress)
             .contextClick(onLongPress)
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(46.dp)) {
+        Box(Modifier.size(44.dp)) {
             val isBrokenOrBlank = thumbnailUrl.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(thumbnailUrl)
             if (isBrokenOrBlank) {
                 com.music.bitchord.ui.components.DefaultCoverTile(
                     modifier = Modifier
-                        .size(46.dp)
+                        .size(44.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .border(0.8.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(10.dp)),
+                        .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp)),
                     contentScale = ContentScale.Crop,
                 )
             } else {
@@ -554,9 +510,9 @@ fun CompactTrackRow(
                         }
                     },
                     modifier = Modifier
-                        .size(46.dp)
+                        .size(44.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .border(0.8.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                        .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                 )
             }
@@ -641,20 +597,7 @@ private fun HomeTitle(
                     modifier = Modifier
                         .weight(1f)
                         .height(36.dp)
-                        .shadow(
-                            elevation = 4.dp,
-                            shape = pillShape,
-                            clip = false,
-                            ambientColor = if (isLight) Color.Black.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.45f),
-                            spotColor = if (isLight) Color.Black.copy(alpha = 0.05f) else Color.White.copy(alpha = 0.20f),
-                        )
-                        .clip(pillShape)
-                        .background(if (isLight) Color.Black.copy(alpha = 0.06f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f))
-                        .border(
-                            width = 1.5.dp,
-                            brush = searchBorder,
-                            shape = pillShape,
-                        )
+                        .liquidGlassCard(shape = pillShape, isLight = isLight)
                         .clickable(onClick = onSearchClick)
                         .padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1084,15 +1027,22 @@ internal fun NewShelfCard(
     /** A full-colour mark drawn in place of [icon], for a card that stands for a brand. */
     logo: DrawableResource? = null,
 ) {
+    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val cardShape = RoundedCornerShape(18.dp)
+
     Column(
-        modifier = modifier.clickable(onClick = onClick),
+        modifier = modifier
+            .liquidGlassCard(shape = cardShape, isLight = isLight)
+            .clickable(onClick = onClick)
+            .padding(8.dp),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .clip(RoundedCornerShape(14.dp))
+                .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
+                .background(if (isLight) Color.Black.copy(alpha = 0.04f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
             contentAlignment = Alignment.Center,
         ) {
             if (logo != null) {
@@ -1101,8 +1051,8 @@ internal fun NewShelfCard(
                 Icon(
                     painter = painterResource(logo),
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.size(44.dp),
+                    tint = if (isLight) Color(0xFF1DB954) else Color(0xFF1ED760),
+                    modifier = Modifier.size(40.dp),
                 )
             } else {
                 Icon(
@@ -1113,11 +1063,11 @@ internal fun NewShelfCard(
                 )
             }
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
             text = label,
             style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onBackground,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -1201,21 +1151,7 @@ internal fun ShelfCard(
 
     Column(
         modifier = modifier
-            .shadow(
-                elevation = 4.dp,
-                shape = cardShape,
-                ambientColor = Color.Black.copy(alpha = if (isLight) 0.08f else 0.25f),
-            )
-            .clip(cardShape)
-            .background(cardBase)
-            .then(
-                if (isLight) {
-                    Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.04f))
-                } else {
-                    Modifier.background(cardSheen)
-                },
-            )
-            .border(1.dp, cardBorder, cardShape)
+            .liquidGlassCard(shape = cardShape, isLight = isLight)
             .longPressMenuClickable(onClick = onClick, onLongClick = onLongPress)
             .contextClick(onLongPress)
             .padding(8.dp),
@@ -1234,7 +1170,7 @@ internal fun ShelfCard(
                         .fillMaxWidth()
                         .aspectRatio(1f)
                         .clip(RoundedCornerShape(14.dp))
-                        .border(0.8.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(14.dp)),
+                        .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
                     MeshGradientBackground(
@@ -1301,7 +1237,7 @@ internal fun ShelfCard(
                         .fillMaxWidth()
                         .aspectRatio(1f)
                         .clip(RoundedCornerShape(14.dp))
-                        .border(0.8.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
+                        .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                 ) {
                     val isBrokenOrBlank = item.thumbnailUrl.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(item.thumbnailUrl)

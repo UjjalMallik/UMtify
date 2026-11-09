@@ -1873,9 +1873,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             val shelves = feed.shelves.withoutRepeatsOf(emptyList())
                                 .filter { homeSeenTitles.add(it.title.lowercase(Locale.ROOT)) }
                             if (shelves.isNotEmpty()) {
-                                _home.value = UiState.Success(shelves)
+                                val existingRecents = (_home.value as? UiState.Success)?.data?.firstOrNull { it.title.equals("Recents", ignoreCase = true) }
+                                val shelvesWithRecents = if (existingRecents != null) {
+                                    listOf(existingRecents) + shelves.filterNot { it.title.equals("Recents", ignoreCase = true) }
+                                } else {
+                                    shelves
+                                }
+                                _home.value = UiState.Success(shelvesWithRecents)
                                 viewModelScope.launch(Dispatchers.IO) {
-                                    HomeCache.save(getApplication(), shelves)
+                                    HomeCache.save(getApplication(), shelvesWithRecents)
                                 }
                             }
                         }
@@ -1952,7 +1958,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             homeSeenTitles.clear()
             val shelves = feed.shelves.withoutRepeatsOf(emptyList())
                 .filter { homeSeenTitles.add(it.title.lowercase(Locale.ROOT)) }
-            if (shelves.isNotEmpty()) _home.value = UiState.Success(shelves)
+            if (shelves.isNotEmpty()) {
+                val existingRecents = (_home.value as? UiState.Success)?.data?.firstOrNull { it.title.equals("Recents", ignoreCase = true) }
+                val shelvesWithRecents = if (existingRecents != null) {
+                    listOf(existingRecents) + shelves.filterNot { it.title.equals("Recents", ignoreCase = true) }
+                } else {
+                    shelves
+                }
+                _home.value = UiState.Success(shelvesWithRecents)
+            }
         }
         recent?.await()?.onSuccess { shelf ->
             if (identity == listenerKey()) shelf?.let { publishHomeShelves(listOf(it), prepend = true) }
