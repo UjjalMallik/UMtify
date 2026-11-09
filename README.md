@@ -82,7 +82,7 @@ Every release builds **two optimized arm64-v8a APK editions** sharing the exact 
 
 | Edition | Package ID | Target Devices | Highlights |
 | :--- | :--- | :--- | :--- |
-| **🌐 Standard Edition** | `com.music.bitchord` | OnePlus, Samsung, Xiaomi, Pixel, Motorola, etc. | Clean package ID, global Android compatibility, Android Auto support |
+| **🌐 Standard Edition** | `com.music.umtify` | OnePlus, Samsung, Xiaomi, Pixel, Motorola, etc. | Clean package ID, global Android compatibility, Android Auto support |
 | **🏝️ OriginOS Edition** | `com.tencent.qqmusic` | **Exclusive for Vivo & iQOO (OriginOS)** | Unlocks native **OriginOS Atomic Island** camera punch-hole capsule & lockscreen widgets |
 
 <div align="center">
@@ -117,9 +117,9 @@ Generated APKs are located at:
 
 <div align="center">
 
-## 💬 Support & Community
+## 💬 Support
 
-Have questions, feedback, bug reports, or feature ideas? Join our community or chat directly on Telegram:
+Have questions, feedback, bug reports, or feature ideas? Directly text me on Telegram:
 
 [![Telegram Channel](https://img.shields.io/badge/Telegram-@ujjalmallik-229ED9?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/ujjalmallik)
 
