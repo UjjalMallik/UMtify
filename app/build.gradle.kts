@@ -1,6 +1,9 @@
 import java.util.Properties
 import java.security.MessageDigest
 import java.io.FileInputStream
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
+import java.util.zip.ZipEntry
 
 plugins {
     id("com.android.application")
@@ -281,16 +284,29 @@ val newPipeExtractorRaw: Configuration by configurations.creating {
 dependencies {
     newPipeExtractorRaw("com.github.TeamNewPipe:NewPipeExtractor:v0.26.3")
 }
-val newPipeExtractorStripped = tasks.register<org.gradle.api.tasks.bundling.Jar>(
-    "stripNewPipeExtractorUtils"
-) {
-    archiveFileName.set("NewPipeExtractor-v0.26.3-noutils.jar")
-    destinationDirectory.set(layout.buildDirectory.dir("stripped-libs"))
-    from(provider { newPipeExtractorRaw.map { zipTree(it) } }) {
-        // The class itself, plus any nested or synthetic siblings the upstream
-        // compiler emitted alongside it, so nothing from the jar's Utils survives.
-        exclude("org/schabi/newpipe/extractor/utils/Utils.class")
-        exclude("org/schabi/newpipe/extractor/utils/Utils\$*.class")
+val strippedNewPipeJar = layout.buildDirectory.file("stripped-libs/NewPipeExtractor-v0.26.3-noutils.jar")
+val newPipeExtractorStripped = tasks.register("stripNewPipeExtractorUtils") {
+    val inputConfig = configurations.named("newPipeExtractorRaw")
+    inputs.files(inputConfig)
+    outputs.file(strippedNewPipeJar)
+    doLast {
+        val dest = strippedNewPipeJar.get().asFile
+        dest.parentFile.mkdirs()
+        val rawJar = inputConfig.get().singleFile
+        ZipInputStream(rawJar.inputStream().buffered()).use { zis ->
+            ZipOutputStream(dest.outputStream().buffered()).use { zos ->
+                var entry = zis.nextEntry
+                while (entry != null) {
+                    val name = entry.name
+                    if (!name.startsWith("org/schabi/newpipe/extractor/utils/Utils")) {
+                        zos.putNextEntry(ZipEntry(name))
+                        zis.copyTo(zos)
+                        zos.closeEntry()
+                    }
+                    entry = zis.nextEntry
+                }
+            }
+        }
     }
 }
 

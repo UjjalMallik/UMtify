@@ -1,4 +1,13 @@
 pluginManagement {
+    buildscript {
+        repositories {
+            google()
+            mavenCentral()
+        }
+        dependencies {
+            classpath("com.android.tools:r8:8.13.25")
+        }
+    }
     repositories {
         google()
         // Maven Central itself rate-limits GitHub Actions runner IPs with HTTP

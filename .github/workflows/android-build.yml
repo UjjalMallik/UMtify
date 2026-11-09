@@ -72,6 +72,8 @@ jobs:
       # runs, so a red dependency host costs one retry, not a full re-download.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
@@ -132,7 +134,7 @@ jobs:
       - name: Build dual release APKs (Standard + Vivo/iQOO OriginOS)
         env:
           VERSION_NAME: ${{ steps.version.outputs.name }}
-        run: ./gradlew assembleProdRelease assembleOriginosRelease -PversionName="$VERSION_NAME"
+        run: ./gradlew assembleProdRelease assembleOriginosRelease -PversionName="$VERSION_NAME" --build-cache --parallel --max-workers=4
 
       - name: Name the release APKs
         env:
