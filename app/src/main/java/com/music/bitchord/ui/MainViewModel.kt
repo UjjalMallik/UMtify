@@ -1,5 +1,10 @@
 package com.music.bitchord.ui
 
+import kotlinx.coroutines.Deferred
+import com.music.bitchord.data.sources.builtin.InternetArchiveProvider
+import com.music.bitchord.data.sources.builtin.JamendoProvider
+import com.music.bitchord.data.sources.builtin.MusopenProvider
+import com.music.bitchord.data.sources.builtin.SubsonicProvider
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -2257,24 +2262,65 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         val addons = SourceRegistry.active().filterIsInstance<AddonSource>()
-        if (addons.isEmpty()) {
+        val hasBuiltIn = AppSettings.hasAnyBuiltInLossless()
+        if (addons.isEmpty() && !hasBuiltIn) {
             _addonResults.value = UiState.Error(text(R.string.search_addons_none))
             return
         }
         _addonResults.value = UiState.Loading
         addonSearchJob = viewModelScope.launch {
-            val perAddon = coroutineScope {
-                addons.map { addon ->
+            val perSource = coroutineScope {
+                val addonJobs = addons.map { addon ->
                     async {
                         withTimeoutOrNull(ADDON_SEARCH_TIMEOUT_MS) {
                             runCatching { addon.search(q, limit = ADDON_SEARCH_LIMIT) }.getOrDefault(emptyList())
                         } ?: emptyList()
                     }
-                }.map { it.await() }
+                }
+
+                val subsonicJob: Deferred<List<Song>>? = if (SubsonicProvider.isEnabled) {
+                    async {
+                        withTimeoutOrNull(ADDON_SEARCH_TIMEOUT_MS) {
+                            runCatching { SubsonicProvider.searchTracks(q, limit = ADDON_SEARCH_LIMIT) }.getOrDefault(emptyList())
+                        } ?: emptyList()
+                    }
+                } else null
+
+                val archiveJob: Deferred<List<Song>>? = if (InternetArchiveProvider.isEnabled) {
+                    async {
+                        withTimeoutOrNull(ADDON_SEARCH_TIMEOUT_MS) {
+                            runCatching { InternetArchiveProvider.searchTracks(q, limit = ADDON_SEARCH_LIMIT) }.getOrDefault(emptyList())
+                        } ?: emptyList()
+                    }
+                } else null
+
+                val jamendoJob: Deferred<List<Song>>? = if (JamendoProvider.isEnabled) {
+                    async {
+                        withTimeoutOrNull(ADDON_SEARCH_TIMEOUT_MS) {
+                            runCatching { JamendoProvider.searchTracks(q, limit = ADDON_SEARCH_LIMIT) }.getOrDefault(emptyList())
+                        } ?: emptyList()
+                    }
+                } else null
+
+                val musopenJob: Deferred<List<Song>>? = if (MusopenProvider.isEnabled) {
+                    async {
+                        withTimeoutOrNull(ADDON_SEARCH_TIMEOUT_MS) {
+                            runCatching { MusopenProvider.searchTracks(q, limit = ADDON_SEARCH_LIMIT) }.getOrDefault(emptyList())
+                        } ?: emptyList()
+                    }
+                } else null
+
+                buildList {
+                    addAll(addonJobs.map { it.await() })
+                    subsonicJob?.await()?.let { add(it) }
+                    archiveJob?.await()?.let { add(it) }
+                    jamendoJob?.await()?.let { add(it) }
+                    musopenJob?.await()?.let { add(it) }
+                }
             }
             val merged = buildList {
-                val longest = perAddon.maxOfOrNull { it.size } ?: 0
-                for (i in 0 until longest) perAddon.forEach { rows -> rows.getOrNull(i)?.let(::add) }
+                val longest = perSource.maxOfOrNull { it.size } ?: 0
+                for (i in 0 until longest) perSource.forEach { rows -> rows.getOrNull(i)?.let(::add) }
             }
             _addonResults.value = UiState.Success(merged)
         }

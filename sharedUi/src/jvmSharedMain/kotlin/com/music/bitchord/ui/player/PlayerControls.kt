@@ -2327,7 +2327,11 @@ private fun ShimmerText(
 @Composable
 private fun NerdStats.Snapshot.describe(): String? {
     val parts = buildList {
-        codecLabel(mimeType)?.let(::add)
+        val codec = when {
+            isDolbyAtmos -> "E-AC-3 Atmos"
+            else -> codecLabel(mimeType) ?: claimed?.codec?.uppercase(Locale.ROOT)
+        }
+        codec?.let(::add)
         bitDepth?.let { add(stringResource(Res.string.bit_depth, it)) }
         sampleRateHz?.let { add(NerdStats.megahertzLabel(it) ?: "%.1f kHz".format(Locale.ROOT, it / 1000f)) }
         bitrateKbps?.let { add("$it kbps") }
@@ -2340,15 +2344,9 @@ private fun NerdStats.Snapshot.describe(): String? {
                 },
             )
         }
-        // Where the bytes came from is deliberately absent. It is the segment
-        // that pushed this line past the pill's width, and a source name is a
-        // thing you look up rather than a figure you watch: the audio pipeline
-        // sheet still says it, and the snapshot still carries it.
-        //
-        // The quality Settings was asked for is no longer appended either: it
-        // restates a switch the listener already knows about. That figure is
-        // still published on the snapshot, so a future read of it has not lost
-        // anything.
+        sourceName?.takeIf { it.isNotBlank() && it != "YouTube" && it != "Local" }?.let { name ->
+            add(if (name.startsWith("via ", ignoreCase = true)) name else "via $name")
+        }
     }
     return parts.joinToString(" · ").takeIf { it.isNotEmpty() }
 }
@@ -2362,6 +2360,8 @@ private fun codecLabel(mimeType: String?): String? = when {
     mimeType.endsWith("mpeg") -> "MP3"
     mimeType.endsWith("flac") -> "FLAC"
     mimeType.endsWith("alac") -> "ALAC"
+    mimeType.endsWith("wav") || mimeType == "audio/x-wav" || mimeType == "audio/wav" -> "WAV"
+    mimeType.endsWith("eac3-joc") || mimeType.endsWith("eac3") -> "E-AC-3 Atmos"
     else -> mimeType.substringAfter('/').uppercase(Locale.ROOT)
 }
 

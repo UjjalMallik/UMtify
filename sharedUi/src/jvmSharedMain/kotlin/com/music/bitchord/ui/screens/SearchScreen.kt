@@ -1,5 +1,7 @@
 package com.music.bitchord.ui.screens
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.Surface
 import com.music.bitchord.ui.components.contextClick
 import androidx.compose.ui.unit.Dp
 import com.music.bitchord.sharedui.resources.*
@@ -475,6 +477,11 @@ private fun LazyListScope.librarySearchResults(
     onSongLongPress: (Song) -> Unit,
     onSongSwipe: (Song) -> Unit,
 ) {
+    if (addons) {
+        item(key = "lossless_sources_shelf") {
+            LosslessSourcesShelf()
+        }
+    }
     when (results) {
         null -> if (addons && query.isEmpty() && addonHistory.isNotEmpty()) {
             recentAddonSearches(addonHistory, onAddonHistoryClick, onAddonHistoryRemove, onAddonHistoryClear)
@@ -521,6 +528,79 @@ private fun LazyListScope.librarySearchResults(
                         color = MaterialTheme.colorScheme.outline,
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LosslessSourcesShelf(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp, bottom = 8.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = PAGE_GUTTER, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Lossless Sources",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "• Parallel bit-exact resolution",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = PAGE_GUTTER, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            LosslessProviderChip(name = "Subsonic", badge = "Atmos / FLAC")
+            LosslessProviderChip(name = "Archive.org", badge = "FLAC")
+            LosslessProviderChip(name = "Jamendo", badge = "Indie FLAC")
+            LosslessProviderChip(name = "Musopen", badge = "Classical FLAC")
+            LosslessProviderChip(name = "Add-ons", badge = "Hi-Res")
+        }
+    }
+}
+
+@Composable
+private fun LosslessProviderChip(name: String, badge: String) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.65f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = name,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+            ) {
+                Text(
+                    text = badge,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                )
             }
         }
     }

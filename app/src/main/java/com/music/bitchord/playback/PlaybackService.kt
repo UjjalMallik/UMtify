@@ -1398,7 +1398,8 @@ class PlaybackService : MediaLibraryService() {
                 val sourceName = if (directYouTube) {
                     "YouTube"
                 } else {
-                    stream.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
+                    stream.sourceName
+                        ?: stream.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
                         ?: configId?.let { SourceRegistry.config(it)?.displayName }
                         ?: "Source"
                 }
@@ -1475,7 +1476,8 @@ class PlaybackService : MediaLibraryService() {
                 // the lossy stream still coming out of the speaker. The real
                 // open, moments later, records it.
                 val proving = QualityUpgrade.isAuditioning(videoId)
-                val sourceName = upgraded.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
+                val sourceName = upgraded.sourceName
+                    ?: upgraded.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
                     ?: "Upgrade"
                 if (!proving) {
                     NerdStats.onSourceStream(videoId, upgraded.format, sourceName)
@@ -1528,7 +1530,8 @@ class PlaybackService : MediaLibraryService() {
                 // Only when the format states something. A plain YouTube choice
                 // is remembered with an empty one, and writing that over a
                 // claim some other path made would be worse than saying nothing.
-                val sourceName = serving.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
+                val sourceName = serving.sourceName
+                    ?: serving.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
                     ?: if (StreamChoice.isSubstitute(videoId)) "Module" else "YouTube"
                 if (serving.format != StreamFormat()) {
                     NerdStats.onSourceStream(videoId, serving.format, sourceName)
@@ -1601,7 +1604,8 @@ class PlaybackService : MediaLibraryService() {
             }
             when (won) {
                 is Resolved.Module -> {
-                    val sourceName = won.stream.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
+                    val sourceName = won.stream.sourceName
+                        ?: won.stream.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
                         ?: "Module"
                     NerdStats.onSourceStream(videoId, won.stream.format, sourceName)
                     NerdStats.recordSource(videoId, sourceName)
@@ -5616,9 +5620,23 @@ class PlaybackService : MediaLibraryService() {
 
         // 4. Stream substitution (e.g. YouTube substituted by addon)
         StreamChoice.of(id)?.let { serving ->
-            val name = serving.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
+            val name = serving.sourceName
+                ?: serving.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
                 ?: if (StreamChoice.isSubstitute(id)) "Module" else null
             if (!name.isNullOrBlank()) return name
+        }
+
+        // Direct stream URL detection for built-in lossless providers
+        val uriStr = uri?.toString() ?: id
+        if (uriStr.contains("archive.org")) {
+            return if (uriStr.contains("musopen")) "Musopen" else "Archive.org"
+        }
+        if (uriStr.contains("jamendo.com")) {
+            return "Jamendo"
+        }
+        val subUrl = AppSettings.subsonicServerUrl.value.trim().trimEnd('/')
+        if (subUrl.isNotBlank() && uriStr.contains(subUrl)) {
+            return "Subsonic"
         }
 
         // 5. Virtual bitchord://source?s=... playback URI

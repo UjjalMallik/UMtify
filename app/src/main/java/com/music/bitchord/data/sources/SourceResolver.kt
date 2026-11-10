@@ -7,11 +7,17 @@ import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.AudioQuality
 import com.music.bitchord.data.settings.DownloadQuality
+import com.music.bitchord.data.sources.builtin.InternetArchiveProvider
+import com.music.bitchord.data.sources.builtin.JamendoProvider
+import com.music.bitchord.data.sources.builtin.MusopenProvider
+import com.music.bitchord.data.sources.builtin.SubsonicProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Turns a queued track into an openable stream, using whichever source can
@@ -253,21 +259,88 @@ object SourceResolver {
         // explicitly converts the current item in the player. A module match
         // is another recording and can be a wrong song altogether.
         if (target.title.isBlank() || target.isVideo) return null
+
         val active = SourceRegistry.activeForPlayback()
-        val youtube = active.firstOrNull { it.kind == SourceKind.YOUTUBE } ?: return null
+        val youtube = active.firstOrNull { it.kind == SourceKind.YOUTUBE }
         val request = requestForNow()
-        val (source, stream) = bestAcross(rankedAbove(youtube.configId, active), target, request)
-            ?: return null
-        // Says what was found, not what the caller will do with it. This
-        // line used to read "substituted" unconditionally, including for
-        // streams the caller went on to refuse — which made a log of a
-        // track that played on YouTube look like a track that hadn't.
-        TrackLog.d(
-            TAG,
-            "substituted: '${target.title}' served by ${source.displayName} over YouTube" +
-                " at ${stream.format.summary}" + if (stream.belowRequest) " (below request)" else "",
-        )
-        return stream
+
+        // Fast parallel resolution with 2.5s timeout:
+        // Priority: Subsonic -> Custom Add-ons -> Internet Archive / Jamendo / Musopen -> YouTube fallback
+        val resolved = withTimeoutOrNull(2500L) {
+            coroutineScope {
+                val subsonicDeferred = if (SubsonicProvider.isEnabled) {
+                    async(Dispatchers.IO) {
+                        runCatching {
+                            SubsonicProvider.resolveStream(target.title, target.artist, target.durationSec)
+                        }.getOrNull()
+                    }
+                } else null
+
+                val addonsDeferred = if (youtube != null) {
+                    val ranked = rankedAbove(youtube.configId, active)
+                    if (ranked.isNotEmpty()) {
+                        async(Dispatchers.IO) {
+                            runCatching {
+                                bestAcross(ranked, target, request)
+                            }.getOrNull()
+                        }
+                    } else null
+                } else null
+
+                val archiveDeferred = if (InternetArchiveProvider.isEnabled) {
+                    async(Dispatchers.IO) {
+                        runCatching {
+                            InternetArchiveProvider.resolveStream(target.title, target.artist, target.durationSec)
+                        }.getOrNull()
+                    }
+                } else null
+
+                val jamendoDeferred = if (JamendoProvider.isEnabled) {
+                    async(Dispatchers.IO) {
+                        runCatching {
+                            JamendoProvider.resolveStream(target.title, target.artist, target.durationSec)
+                        }.getOrNull()
+                    }
+                } else null
+
+                val musopenDeferred = if (MusopenProvider.isEnabled) {
+                    async(Dispatchers.IO) {
+                        runCatching {
+                            MusopenProvider.resolveStream(target.title, target.artist, target.durationSec)
+                        }.getOrNull()
+                    }
+                } else null
+
+                // 1. Subsonic
+                subsonicDeferred?.await()?.let { return@coroutineScope it }
+
+                // 2. Custom Add-ons
+                addonsDeferred?.await()?.let { (source, stream) ->
+                    TrackLog.d(
+                        TAG,
+                        "substituted: '${target.title}' served by ${source.displayName} over YouTube" +
+                            " at ${stream.format.summary}" + if (stream.belowRequest) " (below request)" else "",
+                    )
+                    return@coroutineScope stream.copy(sourceName = source.displayName)
+                }
+
+                // 3. Internet Archive / Jamendo / Musopen
+                archiveDeferred?.await()?.let { return@coroutineScope it }
+                jamendoDeferred?.await()?.let { return@coroutineScope it }
+                musopenDeferred?.await()?.let { return@coroutineScope it }
+
+                null
+            }
+        }
+
+        if (resolved != null) {
+            TrackLog.d(
+                TAG,
+                "substituted: '${target.title}' served by ${resolved.sourceName ?: "Lossless Provider"} over YouTube" +
+                    " at ${resolved.format.summary}" + if (resolved.belowRequest) " (below request)" else "",
+            )
+        }
+        return resolved
     }
 
     /**
@@ -734,7 +807,8 @@ object SourceResolver {
      * a YouTube id before anyone has asked a source for it.
      */
     fun canSubstituteForYouTube(): Boolean =
-        SourceRegistry.activeForPlayback().indexOfFirst { it.kind == SourceKind.YOUTUBE } > 0
+        AppSettings.hasAnyBuiltInLossless() ||
+            SourceRegistry.activeForPlayback().indexOfFirst { it.kind == SourceKind.YOUTUBE } > 0
 
     /**
      * The sources ranked above [configId], in order.

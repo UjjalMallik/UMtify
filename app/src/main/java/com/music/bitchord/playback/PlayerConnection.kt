@@ -673,7 +673,8 @@ fun Song.toMediaItem(): MediaItem {
     val offlineUri = localUri?.takeUnless(Downloads::isMissingLocalFile)
         ?: Downloads.verifiedSavedUri(videoId)
     val uriString = offlineUri ?: when {
-        videoId.startsWith("content://") || videoId.startsWith("file://") -> videoId
+        videoId.startsWith("content://") || videoId.startsWith("file://") ||
+            videoId.startsWith("http://") || videoId.startsWith("https://") -> videoId
         // Title, artist and runtime ride along in the URI because they are what
         // a cross-source match is made on, and the resolver runs on ExoPlayer's
         // loader thread with nothing but a DataSpec in hand — see
