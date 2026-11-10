@@ -5,6 +5,7 @@ import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.SearchFilter
 import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.settings.AppSettings
 
 /**
  * YouTube Music, wrapped so it can be ordered alongside everything else.
@@ -50,12 +51,14 @@ class YouTubeSource(
         limit: Int,
         waitForAll: Boolean,
         request: StreamRequest?,
-    ): List<Song> =
-        YtMusicRepository.search(query, SearchFilter.SONGS)
+    ): List<Song> {
+        if (!AppSettings.enableYouTubeMusic.value || !config.enabled) return emptyList()
+        return YtMusicRepository.search(query, SearchFilter.SONGS)
             .getOrDefault(emptyList())
             .filterIsInstance<SearchResult.Track>()
             .map { it.song }
             .take(limit)
+    }
 
     /**
      * [request] is not honoured here, and cannot be.
@@ -68,6 +71,7 @@ class YouTubeSource(
      * where the format list is actually in hand.
      */
     override suspend fun stream(trackId: String, request: StreamRequest): SourceStream? {
+        if (!AppSettings.enableYouTubeMusic.value || !config.enabled) return null
         val url = StreamResolver.resolve(trackId)
         return SourceStream(url = url, format = StreamFormat(codec = "opus"))
     }

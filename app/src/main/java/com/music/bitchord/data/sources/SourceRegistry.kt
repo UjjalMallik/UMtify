@@ -37,7 +37,11 @@ data class SourceConfig(
     val label: String = "",
     val baseUrl: String = "",
     /** JioSaavn is opt-in because catalogue matches can select the wrong recording. */
-    val enabled: Boolean = kind != SourceKind.JIOSAAVN,
+    val enabled: Boolean = when (kind) {
+        SourceKind.JIOSAAVN -> false
+        SourceKind.YOUTUBE -> AppSettings.enableYouTubeMusic.value
+        else -> true
+    },
     /**
      * The addon's `allowDownloads`, as its manifest last said. Stored rather
      * than asked each time so the answer is there without a request — see
@@ -150,7 +154,7 @@ object SourceRegistry {
             .filterNot { it.kind == SourceKind.MODULE }
             .map { config ->
                 when {
-                    config.kind == SourceKind.YOUTUBE && !config.enabled -> config.copy(enabled = true)
+                    config.kind == SourceKind.YOUTUBE -> config.copy(enabled = AppSettings.enableYouTubeMusic.value)
                     config.kind == SourceKind.JIOSAAVN && forceJioSaavnOff -> config.copy(enabled = false)
                     else -> config
                 }
@@ -176,7 +180,7 @@ object SourceRegistry {
     }
 
     /**
-     * The enabled sources, module first and YouTube last, however they're stored.
+     * The enabled sources, in configured priority order.
      *
      * The user's standing choice and nothing else. Both playback and downloads
      * start here, so disabling JioSaavn or an addon excludes it from both. A
@@ -185,11 +189,7 @@ object SourceRegistry {
      */
     fun active(): List<MusicSource> =
         enabledConfigs(configs.value)
-            // Not in the walk at all while it would be refused anyway: an addon
-            // that asked for a lossless output costs nothing — not even a timed
-            // out search — while there isn't one. See [SourceConfig.checkValidLossless].
             .filterNot { it.awaitsLosslessOutput }
-            .sortedBy { it.kind.rank }
             .mapNotNull { instances[it.id] }
 
     /**
@@ -304,36 +304,27 @@ object SourceRegistry {
      * see [SourcesScreen][com.music.bitchord.ui.screens.SourcesScreen].
      */
     fun setEnabled(configId: String, enabled: Boolean) {
-        if (!enabled && config(configId)?.kind == SourceKind.YOUTUBE) return
+        val target = config(configId)
+        if (target?.kind == SourceKind.YOUTUBE) {
+            AppSettings.setEnableYouTubeMusic(enabled)
+        }
         publish(configs.value.map { if (it.id == configId) it.copy(enabled = enabled) else it })
     }
 
     /**
-     * Puts the addons in [orderedIds], which is the order they will be asked in.
-     *
-     * The stored list *is* the priority order and needs no rank field to carry
-     * it: [active] sorts by [SourceKind.ordinal] and Kotlin's sort is stable,
-     * so two sources of the same kind keep the order they are held in here.
-     * Writing a rank alongside would be a second source of truth for a fact the
-     * list already states, and the two would drift the first time one was
-     * written without the other.
-     *
-     * Ids that name nothing are dropped and addons the caller forgot to mention
-     * are appended, so a list that has moved on since the drag started — an
-     * addon removed on another screen, say — reorders what it can rather than
-     * deleting the rest. Everything that is not an addon keeps its place, since
-     * its rank is decided by its kind and is not the user's to set.
+     * Puts the sources in [orderedIds], which is the order they will be asked in.
      */
-    fun reorderAddons(orderedIds: List<String>) {
-        val addons = configs.value.filter { it.kind.isUserAdded }
-        if (addons.size < 2) return
-        val byId = addons.associateBy { it.id }
+    fun reorder(orderedIds: List<String>) {
+        if (configs.value.size < 2) return
+        val byId = configs.value.associateBy { it.id }
         val moved = orderedIds.mapNotNull(byId::get)
-        val missed = addons.filterNot { config -> moved.any { it.id == config.id } }
+        val missed = configs.value.filterNot { config -> moved.any { it.id == config.id } }
         val reordered = moved + missed
-        if (reordered.map { it.id } == addons.map { it.id }) return
-        publish(reordered + configs.value.filterNot { it.kind.isUserAdded })
+        if (reordered.map { it.id } == configs.value.map { it.id }) return
+        publish(reordered)
     }
+
+    fun reorderAddons(orderedIds: List<String>) = reorder(orderedIds)
 
     private fun publish(next: List<SourceConfig>, persist: Boolean = true) {
         configs.value = next
@@ -453,9 +444,11 @@ object SourceRegistry {
 
     private fun build(config: SourceConfig): MusicSource = when (config.kind) {
         SourceKind.ADDON -> AddonSource(config)
-        // Same protocol, same implementation — the kinds differ only in rank.
         SourceKind.CUSTOM_MODULE -> ModuleSource(config)
         SourceKind.MODULE -> ModuleSource(config)
+        SourceKind.INTERNET_ARCHIVE -> InternetArchiveSource(config)
+        SourceKind.JAMENDO -> JamendoSource(config)
+        SourceKind.SOUNDCLOUD -> SoundCloudSource(config)
         SourceKind.JIOSAAVN -> JioSaavnSource(config)
         SourceKind.YOUTUBE -> YouTubeSource(config)
     }
@@ -501,7 +494,13 @@ object SourceRegistry {
             .build()
             .toString()
 
-    private val BUILT_IN_KINDS = listOf(SourceKind.JIOSAAVN, SourceKind.YOUTUBE)
+    private val BUILT_IN_KINDS = listOf(
+        SourceKind.INTERNET_ARCHIVE,
+        SourceKind.JAMENDO,
+        SourceKind.SOUNDCLOUD,
+        SourceKind.JIOSAAVN,
+        SourceKind.YOUTUBE,
+    )
 
     private const val KEY_SOURCES = "sources"
     /** One-shot migration: existing users must explicitly opt in again. */

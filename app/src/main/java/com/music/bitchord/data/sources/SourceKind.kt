@@ -127,6 +127,36 @@ enum class SourceKind(
         rank = 1,
     ),
 
+    INTERNET_ARCHIVE(
+        label = "Internet Archive",
+        detail = "Live concerts and public audio archives with lossless FLAC streams.",
+        labels = listOf("FLAC", "Lossless", "Archive"),
+        needsServer = false,
+        canServeLossless = true,
+        worthPrefetching = false,
+        rank = 2,
+    ),
+
+    JAMENDO(
+        label = "Jamendo",
+        detail = "Independent and Creative Commons music catalog with lossless FLAC streams.",
+        labels = listOf("FLAC", "Lossless", "Indie"),
+        needsServer = false,
+        canServeLossless = true,
+        worthPrefetching = false,
+        rank = 3,
+    ),
+
+    SOUNDCLOUD(
+        label = "SoundCloud",
+        detail = "SoundCloud direct stream integration up to 256kbps AAC/MP3.",
+        labels = listOf("High Quality", "256kbps"),
+        needsServer = false,
+        canServeLossless = false,
+        worthPrefetching = true,
+        rank = 4,
+    ),
+
     JIOSAAVN(
         label = "JioSaavn",
         detail = "Optional JioSaavn streams up to 320kbps AAC/MP4. Catalogue matching can select the wrong song.",
@@ -134,7 +164,7 @@ enum class SourceKind(
         needsServer = false,
         canServeLossless = false,
         worthPrefetching = true,
-        rank = 2,
+        rank = 5,
     ),
 
     /**
@@ -150,7 +180,7 @@ enum class SourceKind(
         labels = listOf("Lossy", "Full catalogue", "Radio"),
         needsServer = false,
         canServeLossless = false,
-        rank = 3,
+        rank = 6,
     ),
     ;
 

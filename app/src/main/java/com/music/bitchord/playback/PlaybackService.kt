@@ -3,6 +3,10 @@ package com.music.bitchord.playback
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
+import android.os.PowerManager
+import androidx.media3.session.MediaNotification
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioFormat
@@ -297,6 +301,22 @@ private fun Song.canStartStation(): Boolean =
 class PlaybackService : MediaLibraryService() {
 
     private var mediaSession: MediaLibrarySession? = null
+    private var playbackWakeLock: PowerManager.WakeLock? = null
+    private var currentNotification: android.app.Notification? = null
+    private val NOTIFICATION_ID = 1001
+
+    private fun updateWakeLock() {
+        val playing = isPlayingAnywhere()
+        if (playing) {
+            if (playbackWakeLock?.isHeld != true) {
+                runCatching { playbackWakeLock?.acquire(24 * 60 * 60 * 1000L) }
+            }
+        } else {
+            if (playbackWakeLock?.isHeld == true) {
+                runCatching { playbackWakeLock?.release() }
+            }
+        }
+    }
     private val searchResults = ConcurrentHashMap<String, List<Song>>()
     private val searchBrowseResults = ConcurrentHashMap<String, List<BrowseItem>>()
     private val songCache = ConcurrentHashMap<String, Song>()
@@ -865,6 +885,7 @@ class PlaybackService : MediaLibraryService() {
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            updateWakeLock()
             // The player this fired on, which is by definition the one the
             // session is currently pointed at.
             val exoPlayer = player ?: return
@@ -1306,13 +1327,43 @@ class PlaybackService : MediaLibraryService() {
         localBitrateCache.clear()
         QualityUpgrade.forgetLastSession()
 
-        setMediaNotificationProvider(
-            DefaultMediaNotificationProvider.Builder(this)
-                .setChannelId(CHANNEL_ID)
-                .setChannelName(R.string.playback_channel_name)
-                .build()
-                .apply { setSmallIcon(R.drawable.ic_notification_logo) },
-        )
+        val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        playbackWakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BitChord:PlaybackWakeLock")?.apply {
+            setReferenceCounted(false)
+        }
+
+        val defaultNotificationProvider = DefaultMediaNotificationProvider.Builder(this)
+            .setChannelId(CHANNEL_ID)
+            .setChannelName(R.string.playback_channel_name)
+            .build()
+            .apply { setSmallIcon(R.drawable.ic_notification_logo) }
+
+        setMediaNotificationProvider(object : MediaNotification.Provider {
+            override fun createNotification(
+                mediaSession: MediaSession,
+                customLayout: ImmutableList<CommandButton>,
+                actionFactory: MediaNotification.ActionFactory,
+                onNotificationChangedCallback: MediaNotification.Provider.Callback,
+            ): MediaNotification {
+                val mediaNotification = defaultNotificationProvider.createNotification(
+                    mediaSession,
+                    customLayout,
+                    actionFactory,
+                    onNotificationChangedCallback,
+                )
+                currentNotification = mediaNotification.notification
+                return mediaNotification
+            }
+
+            override fun handleCustomCommand(
+                session: MediaSession,
+                action: String,
+                extras: Bundle,
+            ): Boolean = defaultNotificationProvider.handleCustomCommand(session, action, extras)
+
+            override fun getNotificationChannelInfo(): MediaNotification.Provider.NotificationChannelInfo =
+                defaultNotificationProvider.notificationChannelInfo
+        })
 
         // Both the player screen and notification route their Shuffle command
         // here. Observe its state so either surface's icon follows the queue
@@ -5626,17 +5677,16 @@ class PlaybackService : MediaLibraryService() {
             if (!name.isNullOrBlank()) return name
         }
 
-        // Direct stream URL detection for built-in lossless providers
+        // Direct stream URL detection for built-in native providers
         val uriStr = uri?.toString() ?: id
         if (uriStr.contains("archive.org")) {
-            return if (uriStr.contains("musopen")) "Musopen" else "Archive.org"
+            return "Archive.org"
         }
         if (uriStr.contains("jamendo.com")) {
             return "Jamendo"
         }
-        val subUrl = AppSettings.subsonicServerUrl.value.trim().trimEnd('/')
-        if (subUrl.isNotBlank() && uriStr.contains(subUrl)) {
-            return "Subsonic"
+        if (uriStr.contains("soundcloud.com") || uriStr.contains("sndcdn.com")) {
+            return "SoundCloud"
         }
 
         // 5. Virtual bitchord://source?s=... playback URI
@@ -7400,6 +7450,11 @@ class PlaybackService : MediaLibraryService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
         mediaSession
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        super.onStartCommand(intent, flags, startId)
+        return START_STICKY
+    }
+
     /**
      * Called by Android when the user swipes this app's task away from the
      * recent apps screen.
@@ -7416,6 +7471,16 @@ class PlaybackService : MediaLibraryService() {
         if (isPlayingAnywhere()) {
             // Keep playback service running in the foreground so playback and
             // system notifications (including OriginOS Atomic Island) continue seamlessly.
+            runCatching {
+                currentNotification?.let { notif ->
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        startForeground(NOTIFICATION_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+                    } else {
+                        startForeground(NOTIFICATION_ID, notif)
+                    }
+                }
+            }
+            updateWakeLock()
             return
         }
         if (AppSettings.stopOnTaskRemoved.value) {
@@ -7440,6 +7505,10 @@ class PlaybackService : MediaLibraryService() {
         player?.isPlaying == true || spare?.isPlaying == true || castPlayback.isPlaying
 
     override fun onDestroy() {
+        if (playbackWakeLock?.isHeld == true) {
+            runCatching { playbackWakeLock?.release() }
+        }
+        playbackWakeLock = null
         artworkBytesJob?.cancel()
         currentArtworkBytesJob?.cancel()
         WearBridge.attachStreams(null)

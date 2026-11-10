@@ -52,7 +52,7 @@ data class SourceStream(
      * reproduces the stream already playing.
      */
     val sourceConfigId: String? = null,
-    /** Authoritative source/provider display name (e.g. "Subsonic", "Archive.org", "Jamendo", "Musopen"). */
+    /** Authoritative source/provider display name (e.g. "Archive.org", "Jamendo", "SoundCloud"). */
     val sourceName: String? = null,
 )
 

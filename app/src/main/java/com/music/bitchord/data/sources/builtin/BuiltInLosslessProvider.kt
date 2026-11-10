@@ -7,7 +7,7 @@ import com.music.bitchord.data.sources.SourceStream
  * Unified contract for built-in lossless / Hi-Res audio providers.
  */
 interface BuiltInLosslessProvider {
-    /** Human-readable provider label (e.g. "Subsonic", "Archive.org", "Jamendo", "Musopen"). */
+    /** Human-readable provider label (e.g. "Archive.org", "Jamendo"). */
     val name: String
 
     /** Whether this provider is enabled by user preference and ready for queries. */

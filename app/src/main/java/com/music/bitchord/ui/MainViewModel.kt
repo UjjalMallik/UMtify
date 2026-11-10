@@ -3,8 +3,7 @@ package com.music.bitchord.ui
 import kotlinx.coroutines.Deferred
 import com.music.bitchord.data.sources.builtin.InternetArchiveProvider
 import com.music.bitchord.data.sources.builtin.JamendoProvider
-import com.music.bitchord.data.sources.builtin.MusopenProvider
-import com.music.bitchord.data.sources.builtin.SubsonicProvider
+import com.music.bitchord.data.sources.builtin.SoundCloudProvider
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -2278,14 +2277,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
 
-                val subsonicJob: Deferred<List<Song>>? = if (SubsonicProvider.isEnabled) {
-                    async {
-                        withTimeoutOrNull(ADDON_SEARCH_TIMEOUT_MS) {
-                            runCatching { SubsonicProvider.searchTracks(q, limit = ADDON_SEARCH_LIMIT) }.getOrDefault(emptyList())
-                        } ?: emptyList()
-                    }
-                } else null
-
                 val archiveJob: Deferred<List<Song>>? = if (InternetArchiveProvider.isEnabled) {
                     async {
                         withTimeoutOrNull(ADDON_SEARCH_TIMEOUT_MS) {
@@ -2302,20 +2293,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 } else null
 
-                val musopenJob: Deferred<List<Song>>? = if (MusopenProvider.isEnabled) {
+                val soundcloudJob: Deferred<List<Song>>? = if (SoundCloudProvider.isEnabled) {
                     async {
                         withTimeoutOrNull(ADDON_SEARCH_TIMEOUT_MS) {
-                            runCatching { MusopenProvider.searchTracks(q, limit = ADDON_SEARCH_LIMIT) }.getOrDefault(emptyList())
+                            runCatching { SoundCloudProvider.searchTracks(q, limit = ADDON_SEARCH_LIMIT) }.getOrDefault(emptyList())
                         } ?: emptyList()
                     }
                 } else null
 
                 buildList {
                     addAll(addonJobs.map { it.await() })
-                    subsonicJob?.await()?.let { add(it) }
                     archiveJob?.await()?.let { add(it) }
                     jamendoJob?.await()?.let { add(it) }
-                    musopenJob?.await()?.let { add(it) }
+                    soundcloudJob?.await()?.let { add(it) }
                 }
             }
             val merged = buildList {
@@ -2490,6 +2480,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // see [SourceResolver.substituteForYouTube] — which upgrades
                 // the ones it holds without any of them having to be a
                 // separate row to pick between.
+                if (!AppSettings.enableYouTubeMusic.value) {
+                    _results.value = UiState.Error("YouTube Music is disabled in Sources.")
+                    return@collectLatest
+                }
                 val result = YtMusicRepository.searchPage(request.query, request.filter, request.anonymous)
                 // A search that has been superseded shouldn't land on screen,
                 // whether it succeeded or failed.
@@ -2509,7 +2503,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun loadMoreSearchResults() {
         // Offline Mode answers a query in one read of the disk; there is no
         // further page to ask for, and nothing to ask with.
-        if (AppSettings.isOffline) return
+        if (AppSettings.isOffline || !AppSettings.enableYouTubeMusic.value) return
         val session = searchSession ?: return
         val token = session.continuation ?: return
         if (_searchLoadingMore.value) return
@@ -2564,6 +2558,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // titles and artists; only the round trip is gone.
                 val fetched = if (AppSettings.isOffline) {
                     localSuggestions(input)
+                } else if (!AppSettings.enableYouTubeMusic.value) {
+                    emptyList()
                 } else {
                     YtMusicRepository.searchSuggestions(input).getOrNull() ?: return@collectLatest
                 }
@@ -2584,7 +2580,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         suggestRequests
             .debounce(TYPEAHEAD_MEDIA_DEBOUNCE_MS)
             .collectLatest { input ->
-                if (input.isBlank()) {
+                if (input.isBlank() || !AppSettings.enableYouTubeMusic.value) {
                     _typeaheadResults.value = emptyList()
                     return@collectLatest
                 }

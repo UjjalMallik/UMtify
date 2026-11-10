@@ -225,10 +225,6 @@ fun SourcesScreen(
             // what order the sources are tried in, and restarting the count
             // under a second heading would break the one thing this screen is
             // for.
-            val addons = configs.filter { it.kind.isUserAdded }
-            val fixed = configs.filterNot { it.kind.isUserAdded }
-                .sortedBy { it.kind.rank }
-
             val row: @Composable (Int, SourceConfig, (@Composable () -> Unit)?) -> Unit =
                 { position, config, handle ->
                     SourceRow(
@@ -248,36 +244,22 @@ fun SourcesScreen(
                         // delete. JioSaavn and YouTube have no address to
                         // change, so a tap on them would open an empty editor.
                         onClick = if (config.kind.needsServer) ({ onEditSource(config) }) else null,
-                        // YouTube gets no switch at all — see
-                        // [SourceRegistry.setEnabled] for why one would be a lie.
-                        onToggle = if (config.kind == SourceKind.YOUTUBE) {
-                            null
-                        } else {
-                            ({ enabled ->
-                                if (config.kind == SourceKind.JIOSAAVN && enabled && !config.enabled) {
-                                    onConfirmJioSaavn()
-                                } else {
-                                    SourceRegistry.setEnabled(config.id, enabled)
-                                }
-                            })
+                        onToggle = { enabled ->
+                            if (config.kind == SourceKind.JIOSAAVN && enabled && !config.enabled) {
+                                onConfirmJioSaavn()
+                            } else {
+                                SourceRegistry.setEnabled(config.id, enabled)
+                            }
                         },
                         handle = handle,
                     )
                 }
 
-            ReorderableAddons(
-                addons = addons,
-                onReorder = { SourceRegistry.reorderAddons(it.map(SourceConfig::id)) },
+            ReorderableSources(
+                sources = configs,
+                onReorder = { SourceRegistry.reorder(it.map(SourceConfig::id)) },
                 row = row,
             )
-
-            // No leading divider when addons came first: each of those wrappers
-            // ends with one, which is what makes them all the same height for
-            // the drag to measure against.
-            fixed.forEachIndexed { index, config ->
-                if (index > 0) RowDivider()
-                row(addons.size + index + 1, config, null)
-            }
 
             // The one shut-out an addon can't tell apart from "not lossless":
             // headphones on LDAC, LHDC or SSC UHQ whose codec Android won't name without
@@ -470,21 +452,21 @@ private fun RemoteLibrarySection(
  * grip that cannot move anything is a control that lies.
  */
 @Composable
-private fun ReorderableAddons(
-    addons: List<SourceConfig>,
+private fun ReorderableSources(
+    sources: List<SourceConfig>,
     onReorder: (List<SourceConfig>) -> Unit,
     row: @Composable (Int, SourceConfig, (@Composable () -> Unit)?) -> Unit,
 ) {
-    if (addons.isEmpty()) return
-    if (addons.size == 1) {
-        row(1, addons.first(), null)
+    if (sources.isEmpty()) return
+    if (sources.size == 1) {
+        row(1, sources.first(), null)
         // The same trailing rule the reorderable rows below emit, so the row
         // that follows this block is separated whichever branch drew it.
         RowDivider()
         return
     }
 
-    var liveOrder by remember(addons) { mutableStateOf(addons) }
+    var liveOrder by remember(sources) { mutableStateOf(sources) }
     var dragged by remember { mutableStateOf<String?>(null) }
 
     /** Distance the finger has covered since this gesture began, in pixels. */
@@ -558,7 +540,7 @@ private fun ReorderableAddons(
                                         // running off the list and having to be
                                         // dragged all the way back.
                                         totalDrag = (totalDrag + delta.y).coerceIn(
-                                            -startIndex * pitch,
+                                             -startIndex * pitch,
                                             (liveOrder.lastIndex - startIndex) * pitch,
                                         )
 
@@ -590,7 +572,7 @@ private fun ReorderableAddons(
                                     onDragCancel = {
                                         dragged = null
                                         totalDrag = 0f
-                                        liveOrder = addons
+                                        liveOrder = sources
                                     },
                                 )
                             },
@@ -790,10 +772,11 @@ private fun SourceRow(
         Spacer(Modifier.width(6.dp))
         Icon(
             imageVector = when (config.kind) {
-                SourceKind.ADDON -> Icons.Rounded.Extension
-                SourceKind.CUSTOM_MODULE -> Icons.Rounded.Extension
-                SourceKind.MODULE -> Icons.Rounded.Extension
-                SourceKind.JIOSAAVN -> Icons.Rounded.GraphicEq // or some other icon
+                SourceKind.ADDON, SourceKind.CUSTOM_MODULE, SourceKind.MODULE -> Icons.Rounded.Extension
+                SourceKind.INTERNET_ARCHIVE -> Icons.Rounded.Cloud
+                SourceKind.JAMENDO -> Icons.Rounded.GraphicEq
+                SourceKind.SOUNDCLOUD -> Icons.Rounded.GraphicEq
+                SourceKind.JIOSAAVN -> Icons.Rounded.GraphicEq
                 SourceKind.YOUTUBE -> Icons.Rounded.PlayCircle
             },
             contentDescription = null,

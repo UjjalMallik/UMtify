@@ -559,21 +559,17 @@ object AppSettings {
     val signatureApiEnabled = MutableStateFlow(false)
     val signatureApiUrl = MutableStateFlow("")
 
-    /** Built-in Lossless audio providers: Subsonic, Internet Archive, Jamendo, Musopen. All default to false. */
-    val enableInternetArchiveLossless = MutableStateFlow(false)
-    val enableSubsonicLossless = MutableStateFlow(false)
-    val enableJamendoLossless = MutableStateFlow(false)
-    val enableMusopenLossless = MutableStateFlow(false)
-    val subsonicServerUrl = MutableStateFlow("")
-    val subsonicUsername = MutableStateFlow("")
-    val subsonicPassword = MutableStateFlow("")
+    /** Persistent toggle for YouTube Music source. Defaults to true. */
+    val enableYouTubeMusic = MutableStateFlow(true)
+
+    /** Built-in Lossless audio providers: Internet Archive, Jamendo. */
+    val enableInternetArchiveLossless = MutableStateFlow(true)
+    val enableJamendoLossless = MutableStateFlow(true)
     val jamendoClientId = MutableStateFlow("")
 
     fun hasAnyBuiltInLossless(): Boolean =
         enableInternetArchiveLossless.value ||
-        (enableSubsonicLossless.value && subsonicServerUrl.value.isNotBlank()) ||
-        enableJamendoLossless.value ||
-        enableMusopenLossless.value
+        enableJamendoLossless.value
 
     /**
      * Blows the player's cover art out to a full-bleed banner running off the
@@ -985,13 +981,9 @@ object AppSettings {
         prioritizeSpotifyCanvas.value = prefs.getBoolean(KEY_PRIORITIZE_SPOTIFY_CANVAS, false)
         signatureApiEnabled.value = prefs.getBoolean(KEY_SIGNATURE_API_ENABLED, false)
         signatureApiUrl.value = normalizeSignatureApiUrl(prefs.getString(KEY_SIGNATURE_API_URL, "").orEmpty())
-        enableInternetArchiveLossless.value = prefs.getBoolean(KEY_ENABLE_INTERNET_ARCHIVE_LOSSLESS, false)
-        enableSubsonicLossless.value = prefs.getBoolean(KEY_ENABLE_SUBSONIC_LOSSLESS, false)
-        enableJamendoLossless.value = prefs.getBoolean(KEY_ENABLE_JAMENDO_LOSSLESS, false)
-        enableMusopenLossless.value = prefs.getBoolean(KEY_ENABLE_MUSOPEN_LOSSLESS, false)
-        subsonicServerUrl.value = prefs.getString(KEY_SUBSONIC_SERVER_URL, "") ?: ""
-        subsonicUsername.value = prefs.getString(KEY_SUBSONIC_USERNAME, "") ?: ""
-        subsonicPassword.value = prefs.getString(KEY_SUBSONIC_PASSWORD, "") ?: ""
+        enableYouTubeMusic.value = prefs.getBoolean(KEY_ENABLE_YOUTUBE_MUSIC, true)
+        enableInternetArchiveLossless.value = prefs.getBoolean(KEY_ENABLE_INTERNET_ARCHIVE_LOSSLESS, true)
+        enableJamendoLossless.value = prefs.getBoolean(KEY_ENABLE_JAMENDO_LOSSLESS, true)
         jamendoClientId.value = prefs.getString(KEY_JAMENDO_CLIENT_ID, "") ?: ""
         fullBleedArtwork.value = prefs.getBoolean(KEY_FULL_BLEED_ARTWORK, true)
         legacyMeshGradient.value = prefs.getBoolean(KEY_LEGACY_MESH_GRADIENT, false)
@@ -1689,41 +1681,19 @@ object AppSettings {
         prefs.edit().putString(KEY_SIGNATURE_API_URL, normalized).apply()
     }
 
+    fun setEnableYouTubeMusic(value: Boolean) {
+        enableYouTubeMusic.value = value
+        prefs.edit().putBoolean(KEY_ENABLE_YOUTUBE_MUSIC, value).apply()
+    }
+
     fun setEnableInternetArchiveLossless(value: Boolean) {
         enableInternetArchiveLossless.value = value
         prefs.edit().putBoolean(KEY_ENABLE_INTERNET_ARCHIVE_LOSSLESS, value).apply()
     }
 
-    fun setEnableSubsonicLossless(value: Boolean) {
-        enableSubsonicLossless.value = value
-        prefs.edit().putBoolean(KEY_ENABLE_SUBSONIC_LOSSLESS, value).apply()
-    }
-
     fun setEnableJamendoLossless(value: Boolean) {
         enableJamendoLossless.value = value
         prefs.edit().putBoolean(KEY_ENABLE_JAMENDO_LOSSLESS, value).apply()
-    }
-
-    fun setEnableMusopenLossless(value: Boolean) {
-        enableMusopenLossless.value = value
-        prefs.edit().putBoolean(KEY_ENABLE_MUSOPEN_LOSSLESS, value).apply()
-    }
-
-    fun setSubsonicServerUrl(value: String) {
-        val trimmed = value.trim()
-        subsonicServerUrl.value = trimmed
-        prefs.edit().putString(KEY_SUBSONIC_SERVER_URL, trimmed).apply()
-    }
-
-    fun setSubsonicUsername(value: String) {
-        val trimmed = value.trim()
-        subsonicUsername.value = trimmed
-        prefs.edit().putString(KEY_SUBSONIC_USERNAME, trimmed).apply()
-    }
-
-    fun setSubsonicPassword(value: String) {
-        subsonicPassword.value = value
-        prefs.edit().putString(KEY_SUBSONIC_PASSWORD, value).apply()
     }
 
     fun setJamendoClientId(value: String) {
@@ -2333,13 +2303,9 @@ object AppSettings {
     private const val KEY_DISCORD_INFO_DISMISSED = "discord_info_dismissed"
     private const val KEY_LAST_VERSION_CODE = "last_version_code"
 
+    private const val KEY_ENABLE_YOUTUBE_MUSIC = "enable_youtube_music"
     private const val KEY_ENABLE_INTERNET_ARCHIVE_LOSSLESS = "enable_internet_archive_lossless"
-    private const val KEY_ENABLE_SUBSONIC_LOSSLESS = "enable_subsonic_lossless"
     private const val KEY_ENABLE_JAMENDO_LOSSLESS = "enable_jamendo_lossless"
-    private const val KEY_ENABLE_MUSOPEN_LOSSLESS = "enable_musopen_lossless"
-    private const val KEY_SUBSONIC_SERVER_URL = "subsonic_server_url"
-    private const val KEY_SUBSONIC_USERNAME = "subsonic_username"
-    private const val KEY_SUBSONIC_PASSWORD = "subsonic_password"
     private const val KEY_JAMENDO_CLIENT_ID = "jamendo_client_id"
 }
 

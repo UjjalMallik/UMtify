@@ -565,10 +565,9 @@ private fun LosslessSourcesShelf(modifier: Modifier = Modifier) {
                 .padding(horizontal = PAGE_GUTTER, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            LosslessProviderChip(name = "Subsonic", badge = "Atmos / FLAC")
             LosslessProviderChip(name = "Archive.org", badge = "FLAC")
             LosslessProviderChip(name = "Jamendo", badge = "Indie FLAC")
-            LosslessProviderChip(name = "Musopen", badge = "Classical FLAC")
+            LosslessProviderChip(name = "SoundCloud", badge = "HQ Stream")
             LosslessProviderChip(name = "Add-ons", badge = "Hi-Res")
         }
     }
