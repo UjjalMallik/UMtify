@@ -64,7 +64,9 @@ import androidx.compose.material.icons.rounded.Cached
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DeleteSweep
+import com.music.bitchord.ui.components.longPressMenuClickable
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FileUpload
@@ -3560,6 +3562,41 @@ private fun DynamicThemeVariantSelector(
                 color = MaterialTheme.colorScheme.onSurface,
             )
         }
+
+        // 5. Remove Selected Custom Color Chip
+        val selectedCustomArgb = if (selectedVariant.startsWith("CUSTOM_")) {
+            selectedVariant.removePrefix("CUSTOM_").toIntOrNull()
+        } else null
+
+        if (selectedCustomArgb != null) {
+            Row(
+                modifier = Modifier
+                    .height(40.dp)
+                    .clip(pillShape)
+                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f))
+                    .border(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.40f),
+                        shape = pillShape,
+                    )
+                    .clickable { onRemoveCustomColor(selectedCustomArgb) }
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Delete,
+                    contentDescription = "Remove custom color",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    text = "Remove",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
     }
 }
 
@@ -3571,6 +3608,7 @@ private fun ThemeVariantCircleSwatch(
     onClick: () -> Unit,
     onDelete: (() -> Unit)? = null,
 ) {
+    val haptics = LocalHapticFeedback.current
     Box(
         modifier = Modifier
             .size(40.dp)
@@ -3588,7 +3626,19 @@ private fun ThemeVariantCircleSwatch(
                 color = if (isSelected) Color.White else Color.White.copy(alpha = 0.25f),
                 shape = CircleShape,
             )
-            .clickable(onClick = onClick),
+            .then(
+                if (onDelete != null) {
+                    Modifier.longPressMenuClickable(
+                        onClick = onClick,
+                        onLongClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onDelete()
+                        },
+                    )
+                } else {
+                    Modifier.clickable(onClick = onClick)
+                }
+            ),
         contentAlignment = Alignment.Center,
     ) {
         if (isSelected) {

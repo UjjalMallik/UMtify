@@ -1,5 +1,6 @@
 package com.music.bitchord.playback
 
+import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -970,6 +971,7 @@ class PlaybackService : MediaLibraryService() {
          * on the audio, which is what the media notification shows too.
          */
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            updateWakeLock()
             // Something started the phone's own player while a receiver is the
             // speaker — an internal path, since the session player's door
             // already sends a listener's play to the receiver. The phone goes
@@ -1080,6 +1082,7 @@ class PlaybackService : MediaLibraryService() {
         // Nothing follows the last track, so there is no transition to
         // pause on — the queue simply runs out and the timer is spent.
         override fun onPlaybackStateChanged(state: Int) {
+            updateWakeLock()
             // The player this fired on, which is by definition the one the
             // session is currently pointed at.
             val exoPlayer = player ?: return
@@ -7474,16 +7477,45 @@ class PlaybackService : MediaLibraryService() {
             // system notifications (including OriginOS Atomic Island) continue seamlessly.
             // DO NOT call super.onTaskRemoved(rootIntent) because Media3's default MediaSessionService
             // implementation calls pauseAllPlayersAndStopSelf()!
-            runCatching {
-                currentNotification?.let { notif ->
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        startForeground(NOTIFICATION_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            val isPlayingOrReady = player?.isPlaying == true || player?.playWhenReady == true || (player?.mediaItemCount ?: 0) > 0
+            if (isPlayingOrReady) {
+                runCatching {
+                    currentNotification?.let { notif ->
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            startForeground(NOTIFICATION_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+                        } else {
+                            startForeground(NOTIFICATION_ID, notif)
+                        }
+                    }
+                }
+                updateWakeLock()
+                // Fast restart fallback via AlarmManager in case aggressive task clear (e.g. OriginOS) kills process
+                runCatching {
+                    val restartIntent = Intent(applicationContext, PlaybackService::class.java).apply {
+                        action = "com.music.bitchord.action.KEEP_ALIVE"
+                    }
+                    val pendingIntent = PendingIntent.getService(
+                        applicationContext,
+                        1002,
+                        restartIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                    )
+                    val alarmManager = getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        alarmManager?.setExactAndAllowWhileIdle(
+                            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                            SystemClock.elapsedRealtime() + 150L,
+                            pendingIntent,
+                        )
                     } else {
-                        startForeground(NOTIFICATION_ID, notif)
+                        alarmManager?.setExact(
+                            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                            SystemClock.elapsedRealtime() + 150L,
+                            pendingIntent,
+                        )
                     }
                 }
             }
-            updateWakeLock()
             return
         }
         if (AppSettings.stopOnTaskRemoved.value) {

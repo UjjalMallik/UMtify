@@ -99,6 +99,9 @@ object ListeningRecorder {
      */
     @Synchronized
     fun onStopped() {
+        if (playedThisTrack in 1..14_999L && currentId != null) {
+            com.music.bitchord.playback.smart.RecommendationEngine.recordSkip(currentId!!)
+        }
         currentId = null
         playedThisTrack = 0L
         playCounted = false

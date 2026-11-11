@@ -583,8 +583,6 @@ object AppSettings {
      */
     val fullBleedArtwork = MutableStateFlow(true)
 
-    val batteryOptPrompted = MutableStateFlow(false)
-
     /**
      * Puts v1.5's backdrop back on the player: four quantised blobs drifting
      * behind the whole screen, rather than the artwork's own colours hung off
@@ -987,7 +985,6 @@ object AppSettings {
         enableInternetArchiveLossless.value = prefs.getBoolean(KEY_ENABLE_INTERNET_ARCHIVE_LOSSLESS, false)
         enableJamendoLossless.value = prefs.getBoolean(KEY_ENABLE_JAMENDO_LOSSLESS, false)
         jamendoClientId.value = prefs.getString(KEY_JAMENDO_CLIENT_ID, "") ?: ""
-        batteryOptPrompted.value = prefs.getBoolean(KEY_BATTERY_OPT_PROMPTED, false)
         fullBleedArtwork.value = prefs.getBoolean(KEY_FULL_BLEED_ARTWORK, true)
         legacyMeshGradient.value = prefs.getBoolean(KEY_LEGACY_MESH_GRADIENT, false)
         lastPlayerScreen.value = runCatching {
@@ -1706,11 +1703,6 @@ object AppSettings {
         prefs.edit().putString(KEY_JAMENDO_CLIENT_ID, trimmed).apply()
     }
 
-    fun setBatteryOptPrompted(value: Boolean) {
-        batteryOptPrompted.value = value
-        prefs.edit().putBoolean(KEY_BATTERY_OPT_PROMPTED, value).apply()
-    }
-
     fun setFullBleedArtwork(value: Boolean) {
         fullBleedArtwork.value = value
         prefs.edit().putBoolean(KEY_FULL_BLEED_ARTWORK, value).apply()
@@ -2316,7 +2308,6 @@ object AppSettings {
     private const val KEY_ENABLE_INTERNET_ARCHIVE_LOSSLESS = "enable_internet_archive_lossless"
     private const val KEY_ENABLE_JAMENDO_LOSSLESS = "enable_jamendo_lossless"
     private const val KEY_JAMENDO_CLIENT_ID = "jamendo_client_id"
-    private const val KEY_BATTERY_OPT_PROMPTED = "battery_opt_prompted"
 }
 
 

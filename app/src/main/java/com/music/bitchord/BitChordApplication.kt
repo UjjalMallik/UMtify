@@ -175,6 +175,15 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
         backgroundInit.join()
     }
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= TRIM_MEMORY_UI_HIDDEN) {
+            runCatching {
+                SingletonImageLoader.get(this).memoryCache?.clear()
+            }
+        }
+    }
+
     /**
      * Coil's own transport, separate from [Http][com.music.bitchord.data.Http]'s
      * playback-tuned client.

@@ -386,28 +386,6 @@ class MainActivity : AppCompatActivity() {
             LaunchedEffect(highPerformance, performanceRefreshRate, composeView) {
                 applyPerformanceMode(highPerformance, performanceRefreshRate, composeView)
             }
-            val batteryContext = LocalContext.current
-            val batteryOptPrompted by AppSettings.batteryOptPrompted.collectAsStateWithLifecycle()
-            LaunchedEffect(batteryOptPrompted) {
-                if (!batteryOptPrompted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    val pm = batteryContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
-                    val isIgnoring = pm?.isIgnoringBatteryOptimizations(batteryContext.packageName) == true
-                    val isVivoOrIqoo = Build.MANUFACTURER.contains("vivo", ignoreCase = true) ||
-                        Build.BRAND.contains("vivo", ignoreCase = true) ||
-                        Build.BRAND.contains("iqoo", ignoreCase = true) ||
-                        batteryContext.packageName == "com.tencent.qqmusic" ||
-                        BuildConfig.FLAVOR == "originos"
-                    if (isVivoOrIqoo && !isIgnoring) {
-                        AppSettings.setBatteryOptPrompted(true)
-                        runCatching {
-                            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                data = Uri.parse("package:${batteryContext.packageName}")
-                            }
-                            batteryContext.startActivity(intent)
-                        }
-                    }
-                }
-            }
             // Hoisted above the theme because the dynamic palette is built from
             // the current track: the whole app changes colour with the cover,
             // not only the player screen that already reads its tones.

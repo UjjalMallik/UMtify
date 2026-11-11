@@ -1,6 +1,7 @@
 package com.music.bitchord.playback
 
 import android.content.ComponentName
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.compose.runtime.Composable
@@ -81,6 +82,13 @@ fun rememberMediaController(): MediaController? {
     var controller by remember { mutableStateOf<MediaController?>(null) }
 
     DisposableEffect(context) {
+        val appContext = context.applicationContext
+        // Ensure PlaybackService is explicitly started so swiping UI from Recents
+        // does not cause Android to destroy the service upon unbinding.
+        runCatching {
+            val serviceIntent = Intent(appContext, PlaybackService::class.java)
+            appContext.startService(serviceIntent)
+        }
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
         val future = MediaController.Builder(context, token).buildAsync()
         future.addListener(

@@ -33,6 +33,7 @@ import com.music.bitchord.data.lyrics.LyricsSource
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.innertube.Innertube
 import com.music.bitchord.data.innertube.PlaybackTracker
+import com.music.bitchord.playback.smart.RecommendationEngine
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.auth.CapturedSession
 import com.music.bitchord.auth.WebSessionMode
@@ -1910,6 +1911,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         .onFailure {
                             if (isCurrentHomeLoad(identity, generation)) _homeRecentlyPlayedLoading.value = false
                         }
+                }
+            }
+            launch {
+                RecommendationEngine.generatePersonalizedShelf()?.let { shelf ->
+                    if (isCurrentHomeLoad(identity, generation)) {
+                        publishHomeShelves(listOf(shelf), prepend = true)
+                    }
                 }
             }
             YtMusicRepository.HOME_SUPPLEMENT_BROWSE_IDS.forEach { browseId ->

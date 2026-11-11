@@ -9,6 +9,7 @@ import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.sources.SourceRegistry
 import com.music.bitchord.data.sources.TrackMatcher
 import com.music.bitchord.playback.QueueCoordinator.asQueueEntry
+import com.music.bitchord.playback.smart.RecommendationEngine
 import kotlinx.coroutines.CancellationException
 
 /** Most AutoPlay-suggested tracks kept queued ahead of the current one at once. */
@@ -100,18 +101,4 @@ suspend fun loadAutoplayTracks(
     existing: List<Song>,
     seedSong: Song,
     limit: Int = MAX_QUEUED_AUTOPLAY,
-): Result<List<Song>> {
-    val seed = youtubeSeedFor(seedSong) ?: return Result.success(emptyList())
-    val related = YtMusicRepository.radio(seed).getOrElse { return Result.failure(it) }
-    val extra = QueueBuilder.extend(existing, related, limit)
-    if (extra.isEmpty()) return Result.success(emptyList())
-
-    return Result.success(extra.map {
-        it.copy(
-            radioName = seedSong.radioName,
-            playbackSource = seedSong.playbackSource,
-            playbackSourceType = seedSong.playbackSourceType,
-            playbackSourceId = seedSong.playbackSourceId,
-        ).asQueueEntry(QueueTier.AUTOPLAY)
-    })
-}
+): Result<List<Song>> = RecommendationEngine.loadAutoplayTracks(existing, seedSong, limit)
