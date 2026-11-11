@@ -303,6 +303,12 @@
             </intent-filter>
         </service>
 
+        <service
+            android:name=".playback.KeepAliveService"
+            android:exported="false"
+            android:process=":keepalive"
+            android:stopWithTask="false" />
+
         <receiver
             android:name=".playback.PlaybackKeepAliveReceiver"
             android:exported="false">

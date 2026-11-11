@@ -20,9 +20,19 @@ object HomeCache {
     }
 
     private const val FILE_NAME = "umtify_cached_home_feed.json"
+    private const val CACHE_MAX_AGE_MS = 30 * 60 * 1000L // 30 minutes
 
     @Volatile
     private var inMemory: List<HomeShelf>? = null
+
+    fun isCacheFresh(context: Context): Boolean {
+        return runCatching {
+            val file = File(context.filesDir, FILE_NAME)
+            if (!file.exists()) return false
+            val age = System.currentTimeMillis() - file.lastModified()
+            age in 0..CACHE_MAX_AGE_MS
+        }.getOrDefault(false)
+    }
 
     fun load(context: Context): List<HomeShelf>? {
         inMemory?.let { return it }

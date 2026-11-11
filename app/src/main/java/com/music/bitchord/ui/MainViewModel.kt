@@ -1849,13 +1849,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (_detailStack.value.isNotEmpty()) _detailStack.value = emptyList()
     }
 
-    fun loadHome() {
+    fun loadHome(forceRefresh: Boolean = false) {
         if (AppSettings.isOffline) {
             loadOfflineHome()
             return
         }
         val identity = listenerKey()
         val generation = homeLoadGeneration.incrementAndGet()
+        val hasFreshCache = !forceRefresh &&
+            HomeCache.isCacheFresh(getApplication()) &&
+            (_home.value as? UiState.Success)?.data?.isNotEmpty() == true
+
         if (_home.value !is UiState.Success) {
             _home.value = UiState.Loading
         }
@@ -1884,9 +1888,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                                 } else {
                                     shelves
                                 }
-                                _home.value = UiState.Success(shelvesWithRecents)
-                                viewModelScope.launch(Dispatchers.IO) {
-                                    HomeCache.save(getApplication(), shelvesWithRecents)
+
+                                if (hasFreshCache) {
+                                    // Cache is valid (<30 min) on startup: silently update disk cache for next launch
+                                    // without replacing visible songs on screen so the feed never jumps!
+                                    viewModelScope.launch(Dispatchers.IO) {
+                                        HomeCache.save(getApplication(), shelvesWithRecents)
+                                    }
+                                } else {
+                                    _home.value = UiState.Success(shelvesWithRecents)
+                                    viewModelScope.launch(Dispatchers.IO) {
+                                        HomeCache.save(getApplication(), shelvesWithRecents)
+                                    }
                                 }
                             }
                         }
@@ -1913,18 +1926,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         }
                 }
             }
-            launch {
-                RecommendationEngine.generatePersonalizedShelf()?.let { shelf ->
-                    if (isCurrentHomeLoad(identity, generation)) {
-                        publishHomeShelves(listOf(shelf), prepend = true)
-                    }
-                }
-            }
             YtMusicRepository.HOME_SUPPLEMENT_BROWSE_IDS.forEach { browseId ->
                 launch {
                     try {
                         YtMusicRepository.homeSupplement(browseId).onSuccess { shelves ->
-                            if (isCurrentHomeLoad(identity, generation)) publishHomeShelves(shelves)
+                            if (isCurrentHomeLoad(identity, generation) && !hasFreshCache) {
+                                publishHomeShelves(shelves)
+                            }
                         }
                     } finally {
                         homeShelfRequestSettled(identity, generation)

@@ -167,40 +167,4 @@ object RecommendationEngine {
             .sortedByDescending { it.second }
             .map { it.first }
     }
-
-    /**
-     * Generates a personalized Home Feed recommendation shelf using the user's top recent listening.
-     */
-    suspend fun generatePersonalizedShelf(): HomeShelf? = withContext(Dispatchers.IO) {
-        val summary = runCatching { ListeningStats.summary(ReplayPeriod.THIS_WEEK) }.getOrNull()
-            ?: runCatching { ListeningStats.summary(ReplayPeriod.THIS_MONTH) }.getOrNull()
-            ?: return@withContext null
-
-        val topSongs = summary.songs.take(3).map { it.song }
-        if (topSongs.isEmpty()) return@withContext null
-
-        val topSeed = topSongs.first()
-        val seedVideoId = youtubeSeedFor(topSeed) ?: return@withContext null
-
-        val radioTracks = YtMusicRepository.radio(seedVideoId).getOrNull() ?: return@withContext null
-        val seedArtists = topSongs.flatMap { QueueBuilder.artistSet(it.artist) }.take(2).toSet()
-
-        val ranked = scoreAndRankCandidates(radioTracks, seedArtists)
-        val selected = QueueBuilder.extend(topSongs, ranked, limit = 12)
-        if (selected.isEmpty()) return@withContext null
-
-        HomeShelf(
-            title = "Recommended For You",
-            subtitle = "Based on your recent listening",
-            items = selected.map { song ->
-                ShelfItem(
-                    title = song.title,
-                    subtitle = listOfNotNull(song.artist, song.albumName).filter { it.isNotBlank() }.joinToString(" • "),
-                    thumbnailUrl = song.thumbnailUrl,
-                    videoId = song.videoId,
-                    browseId = null,
-                )
-            },
-        )
-    }
 }

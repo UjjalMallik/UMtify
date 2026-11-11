@@ -153,15 +153,31 @@ object SourceRegistry {
         forceJioSaavnOff: Boolean,
         applyDefaultSourcesV2: Boolean = false,
     ): List<SourceConfig> {
-        // Seeded rather than persisted-on-first-write, so a build adding a new
-        // built-in kind picks it up for existing installs too.
-        val seeded = stored + BUILT_IN_KINDS
+        // If no custom order has been saved yet by the user, set clean initial default order:
+        // SoundCloud, JioSaavn, Jamendo, Internet Archive, YouTube Music
+        // with only YouTube Music (Always-On) and SoundCloud enabled by default.
+        if (stored.isEmpty()) {
+            return BUILT_IN_KINDS.map { kind ->
+                SourceConfig(
+                    kind = kind,
+                    enabled = when (kind) {
+                        SourceKind.YOUTUBE -> true
+                        SourceKind.SOUNDCLOUD -> true
+                        else -> false
+                    },
+                )
+            }
+        }
+
+        // When stored order exists, 100% respect the exact order arranged by the user!
+        // Only append missing built-in kinds at the tail.
+        val missing = BUILT_IN_KINDS
             .filter { kind -> stored.none { it.kind == kind } }
             .map { SourceConfig(kind = it) }
 
-        // The retired built-in module is removed, while a custom module entered
-        // by the user is preserved.
-        val mapped = seeded
+        val seeded = stored + missing
+
+        return seeded
             .filterNot { it.kind == SourceKind.MODULE }
             .map { config ->
                 when {
@@ -173,13 +189,6 @@ object SourceRegistry {
                     else -> config
                 }
             }
-
-        // YouTube Music must always be at the bottom of the list as the universal fallback,
-        // ensuring high-quality sources (JioSaavn, SoundCloud, Jamendo, Internet Archive, and user Addons)
-        // are prioritized above YouTube.
-        val nonYouTube = mapped.filterNot { it.kind == SourceKind.YOUTUBE }
-        val youtube = mapped.filter { it.kind == SourceKind.YOUTUBE }
-        return nonYouTube + youtube
     }
 
     /**

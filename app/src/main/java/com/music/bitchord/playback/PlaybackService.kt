@@ -918,6 +918,7 @@ class PlaybackService : MediaLibraryService() {
             if (isPlaying) prefetchAround(exoPlayer) else cancelPrefetch()
             if (isPlaying) lookForBetterCopy(exoPlayer)
             savePlaybackState(exoPlayer)
+            notifyKeepAliveService(isPlaying)
             // Not strictly needed for the glyph — onPlayWhenReadyChanged has
             // already flipped that — but this is where hasNext/hasPrevious and
             // the artwork are known to be settled.
@@ -978,6 +979,7 @@ class PlaybackService : MediaLibraryService() {
             // quiet again and the receiver is asked instead.
             if (playWhenReady) player?.let(speakers::onLocalStartedPlaying)
             publishWidgetState(playing = playWhenReady)
+            notifyKeepAliveService(playWhenReady)
             // The only place the *reason* can be read. A party has to tell a
             // pause the listener asked for from one another app imposed, and
             // [Player] does not keep the answer around to be asked later.
@@ -1031,6 +1033,8 @@ class PlaybackService : MediaLibraryService() {
             // current — or it is the one that moved, and this is the phone
             // catching up, which [CastPlayback] tells apart by track.
             speakers.onLocalTransition(mediaItem, reason)
+            lastPrefetchedNearEndIndex = C.INDEX_UNSET
+            notifyKeepAliveService(exoPlayer.isPlaying || exoPlayer.playWhenReady)
 
             // No crossfade case to allow for here any more. A blended advance
             // never reaches this callback — the incoming track starts as the
@@ -6457,14 +6461,56 @@ class PlaybackService : MediaLibraryService() {
      */
     private fun farBufferingLoadControl() = DefaultLoadControl.Builder()
         .setBufferDurationsMs(
-            DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
-            /* maxBufferMs = */ FAR_BUFFER_MS,
-            /* bufferForPlaybackMs = */ START_PLAYBACK_MS,
-            /* bufferForPlaybackAfterRebufferMs = */ RESUME_PLAYBACK_MS,
+            /* minBufferMs = */ 30_000,
+            /* maxBufferMs = */ 90_000,
+            /* bufferForPlaybackMs = */ 1_000,
+            /* bufferForPlaybackAfterRebufferMs = */ 2_500,
         )
         .setTargetBufferBytes(FAR_BUFFER_BYTES)
         .setBackBuffer(/* backBufferDurationMs = */ BACK_BUFFER_MS, /* retainBackBufferFromKeyframe = */ true)
         .build()
+
+    private var lastPrefetchedNearEndIndex: Int = C.INDEX_UNSET
+
+    /**
+     * Pre-resolves the next track's stream URL in the queue 15 seconds before the
+     * current track ends so track transitions are instant and gapless.
+     */
+    private fun checkNearEndPrefetch() {
+        val exoPlayer = player ?: return
+        if (!exoPlayer.isPlaying) return
+        val duration = exoPlayer.duration
+        val pos = exoPlayer.currentPosition
+        if (duration > 0 && (duration - pos) <= 15_000L) {
+            val nextIndex = exoPlayer.nextMediaItemIndex
+            if (nextIndex != C.INDEX_UNSET && nextIndex != lastPrefetchedNearEndIndex) {
+                lastPrefetchedNearEndIndex = nextIndex
+                val nextItem = exoPlayer.getMediaItemAt(nextIndex).toSong()
+                scope.launch(Dispatchers.IO) {
+                    val target = TrackMatcher.targetOf(nextItem)
+                    if (SourceResolver.canSubstituteForYouTube()) {
+                        runCatching { SourceResolver.prefetchSubstitute(target) }
+                            .getOrNull()
+                            ?.also { StreamChoice.remember(nextItem.videoId, it, substituted = true) }
+                    }
+                    runCatching { StreamResolver.resolve(nextItem.videoId) }
+                }
+            }
+        }
+    }
+
+    /** Synchronizes current playback state to :keepalive secondary process companion service. */
+    private fun notifyKeepAliveService(playing: Boolean) {
+        runCatching {
+            val intent = Intent(this, KeepAliveService::class.java).apply {
+                action = KeepAliveService.ACTION_SYNC
+                putExtra(KeepAliveService.EXTRA_IS_PLAYING, playing)
+                putExtra(KeepAliveService.EXTRA_MEDIA_ID, player?.currentMediaItem?.mediaId)
+                putExtra(KeepAliveService.EXTRA_POSITION_MS, player?.currentPosition ?: 0L)
+            }
+            startService(intent)
+        }
+    }
 
     /**
      * Renderers whose audio sink only skips silence worth skipping.
@@ -7458,13 +7504,18 @@ class PlaybackService : MediaLibraryService() {
         super.onStartCommand(intent, flags, startId)
         if (intent?.action == "com.music.bitchord.action.KEEP_ALIVE") {
             val exoPlayer = player
-            if (exoPlayer != null && !exoPlayer.isPlaying) {
+            if (exoPlayer != null) {
                 if (exoPlayer.mediaItemCount == 0) {
                     restoreLastQueue(exoPlayer)
-                    exoPlayer.play()
-                } else if (exoPlayer.playWhenReady || intent.getBooleanExtra("play_when_ready", false)) {
-                    exoPlayer.play()
                 }
+                val pos = intent.getLongExtra("position_ms", -1L)
+                if (pos >= 0L && exoPlayer.currentPosition < pos) {
+                    exoPlayer.seekTo(pos)
+                }
+                exoPlayer.playWhenReady = true
+                exoPlayer.prepare()
+                exoPlayer.play()
+                notifyKeepAliveService(true)
             }
         }
         return START_STICKY
@@ -7496,6 +7547,7 @@ class PlaybackService : MediaLibraryService() {
                     saveQueueSnapshotImmediately(exoPlayer)
                     savePlaybackState(exoPlayer)
                 }
+                notifyKeepAliveService(true)
                 runCatching {
                     currentNotification?.let { notif ->
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -7710,6 +7762,7 @@ class PlaybackService : MediaLibraryService() {
         lyricsTickerJob = scope.launch(Dispatchers.Main) {
             while (isActive) {
                 updateLyricSubtitle()
+                checkNearEndPrefetch()
                 delay(500L)
             }
         }

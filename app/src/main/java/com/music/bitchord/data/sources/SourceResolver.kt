@@ -263,67 +263,25 @@ object SourceResolver {
         val youtube = active.firstOrNull { it.kind == SourceKind.YOUTUBE }
         val request = requestForNow()
 
-        // Fast parallel resolution with 2.5s timeout:
-        // Priority: Sources -> Internet Archive / Jamendo / SoundCloud -> YouTube fallback
+        // Fast parallel resolution with 2.5s timeout strictly respecting user-defined source order:
         val resolved = withTimeoutOrNull(2500L) {
             coroutineScope {
-                val sourcesDeferred = if (youtube != null) {
-                    val ranked = rankedAbove(youtube.configId, active)
-                    if (ranked.isNotEmpty()) {
-                        async(Dispatchers.IO) {
-                            runCatching {
-                                bestAcross(ranked, target, request)
-                            }.getOrNull()
-                        }
-                    } else null
-                } else if (active.isNotEmpty()) {
-                    async(Dispatchers.IO) {
-                        runCatching {
-                            bestAcross(active, target, request)
-                        }.getOrNull()
-                    }
-                } else null
+                val candidateSources = if (youtube != null) {
+                    rankedAbove(youtube.configId, active)
+                } else {
+                    active
+                }
+                if (candidateSources.isEmpty()) return@coroutineScope null
 
-                val archiveDeferred = if (InternetArchiveProvider.isEnabled) {
-                    async(Dispatchers.IO) {
-                        runCatching {
-                            InternetArchiveProvider.resolveStream(target.title, target.artist, target.durationSec)
-                        }.getOrNull()
-                    }
-                } else null
-
-                val jamendoDeferred = if (JamendoProvider.isEnabled) {
-                    async(Dispatchers.IO) {
-                        runCatching {
-                            JamendoProvider.resolveStream(target.title, target.artist, target.durationSec)
-                        }.getOrNull()
-                    }
-                } else null
-
-                val soundcloudDeferred = if (SoundCloudProvider.isEnabled) {
-                    async(Dispatchers.IO) {
-                        runCatching {
-                            SoundCloudProvider.resolveStream(target.title, target.artist, target.durationSec)
-                        }.getOrNull()
-                    }
-                } else null
-
-                // 1. Sources ranked above YouTube (or all active if YouTube disabled)
-                sourcesDeferred?.await()?.let { (source, stream) ->
+                val winner = bestAcross(candidateSources, target, request)
+                winner?.let { (source, stream) ->
                     TrackLog.d(
                         TAG,
                         "substituted: '${target.title}' served by ${source.displayName} over YouTube" +
                             " at ${stream.format.summary}" + if (stream.belowRequest) " (below request)" else "",
                     )
-                    return@coroutineScope stream.copy(sourceName = source.displayName)
+                    stream.copy(sourceName = source.displayName)
                 }
-
-                // 2. Direct provider lookups
-                archiveDeferred?.await()?.let { return@coroutineScope it }
-                jamendoDeferred?.await()?.let { return@coroutineScope it }
-                soundcloudDeferred?.await()?.let { return@coroutineScope it }
-
-                null
             }
         }
 

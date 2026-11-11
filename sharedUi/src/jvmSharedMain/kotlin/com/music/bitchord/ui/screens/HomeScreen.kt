@@ -40,13 +40,18 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,6 +59,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -160,6 +166,15 @@ fun HomeScreen(
     onSearchClick: (() -> Unit)? = null,
 ) {
     val recentsViewType by AppUi.host.homeRecentsViewType.collectAsStateWithLifecycle()
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        visible = true
+    }
+    val entranceAlpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "homeEntranceFade",
+    )
 
     val homeBg = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
     PullToRefresh(
@@ -168,7 +183,8 @@ fun HomeScreen(
         state = pullState,
         modifier = modifier
             .fillMaxSize()
-            .background(homeBg),
+            .background(homeBg)
+            .graphicsLayer { alpha = entranceAlpha },
     ) {
         LazyColumn(
             state = listState,
