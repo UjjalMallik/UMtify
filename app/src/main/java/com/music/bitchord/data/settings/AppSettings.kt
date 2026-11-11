@@ -569,7 +569,9 @@ object AppSettings {
 
     fun hasAnyBuiltInLossless(): Boolean =
         enableInternetArchiveLossless.value ||
-        enableJamendoLossless.value
+        enableJamendoLossless.value ||
+        com.music.bitchord.data.sources.builtin.SoundCloudProvider.isEnabled ||
+        (com.music.bitchord.data.sources.SourceRegistry.configs.value.firstOrNull { it.kind == SourceKind.JIOSAAVN }?.enabled == true)
 
     /**
      * Blows the player's cover art out to a full-bleed banner running off the

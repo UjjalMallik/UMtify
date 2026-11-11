@@ -87,6 +87,8 @@ class JioSaavnSource(
                     String.format(Locale.US, "%d:%02d", m, s)
                 },
                 sourceQuality = "HIGH",
+                downloadFormat = "MP3",
+                playbackSource = "JioSaavn",
                 isExplicit = raw.isExplicit,
             )
         }

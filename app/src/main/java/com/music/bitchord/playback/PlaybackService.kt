@@ -7456,6 +7456,17 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
+        if (intent?.action == "com.music.bitchord.action.KEEP_ALIVE") {
+            val exoPlayer = player
+            if (exoPlayer != null && !exoPlayer.isPlaying) {
+                if (exoPlayer.mediaItemCount == 0) {
+                    restoreLastQueue(exoPlayer)
+                    exoPlayer.play()
+                } else if (exoPlayer.playWhenReady || intent.getBooleanExtra("play_when_ready", false)) {
+                    exoPlayer.play()
+                }
+            }
+        }
         return START_STICKY
     }
 
@@ -7472,13 +7483,19 @@ class PlaybackService : MediaLibraryService() {
      * this guard exists to prevent.
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
-        if (!AppSettings.stopOnTaskRemoved.value) {
+        val hasActivePlayback = isPlayingAnywhere() || player?.playWhenReady == true || (player?.mediaItemCount ?: 0) > 0
+        if (!AppSettings.stopOnTaskRemoved.value || hasActivePlayback) {
             // Keep playback service running in the foreground so playback and
             // system notifications (including OriginOS Atomic Island) continue seamlessly.
             // DO NOT call super.onTaskRemoved(rootIntent) because Media3's default MediaSessionService
             // implementation calls pauseAllPlayersAndStopSelf()!
-            val isPlayingOrReady = player?.isPlaying == true || player?.playWhenReady == true || (player?.mediaItemCount ?: 0) > 0
-            if (isPlayingOrReady) {
+            val exoPlayer = player
+            if (hasActivePlayback && exoPlayer != null) {
+                // Synchronously commit exact position and state
+                runCatching {
+                    saveQueueSnapshotImmediately(exoPlayer)
+                    savePlaybackState(exoPlayer)
+                }
                 runCatching {
                     currentNotification?.let { notif ->
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -7489,28 +7506,32 @@ class PlaybackService : MediaLibraryService() {
                     }
                 }
                 updateWakeLock()
-                // Fast restart fallback via AlarmManager in case aggressive task clear (e.g. OriginOS) kills process
+                // Fast restart fallback via AlarmManager + BroadcastReceiver in case aggressive task clear (e.g. OriginOS) kills process
                 runCatching {
-                    val restartIntent = Intent(applicationContext, PlaybackService::class.java).apply {
+                    val receiverIntent = Intent(applicationContext, PlaybackKeepAliveReceiver::class.java).apply {
                         action = "com.music.bitchord.action.KEEP_ALIVE"
+                        putExtra("media_id", exoPlayer.currentMediaItem?.mediaId)
+                        putExtra("position_ms", exoPlayer.currentPosition)
+                        putExtra("play_when_ready", exoPlayer.playWhenReady)
                     }
-                    val pendingIntent = PendingIntent.getService(
+                    val pendingIntent = PendingIntent.getBroadcast(
                         applicationContext,
                         1002,
-                        restartIntent,
+                        receiverIntent,
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                     )
                     val alarmManager = getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+                    val triggerAt = SystemClock.elapsedRealtime() + 100L
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         alarmManager?.setExactAndAllowWhileIdle(
                             AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                            SystemClock.elapsedRealtime() + 150L,
+                            triggerAt,
                             pendingIntent,
                         )
                     } else {
                         alarmManager?.setExact(
                             AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                            SystemClock.elapsedRealtime() + 150L,
+                            triggerAt,
                             pendingIntent,
                         )
                     }

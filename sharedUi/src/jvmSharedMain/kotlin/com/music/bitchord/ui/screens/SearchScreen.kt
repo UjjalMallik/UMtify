@@ -53,8 +53,12 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -177,6 +181,7 @@ fun SearchScreen(
      */
     sourceSwitcher: (@Composable () -> Unit)? = null,
 ) {
+    var selectedProviderFilter: String? by remember { mutableStateOf(null) }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -329,6 +334,8 @@ fun SearchScreen(
                     onAddonHistoryClick = onAddonHistoryClick,
                     onAddonHistoryRemove = onAddonHistoryRemove,
                     onAddonHistoryClear = onAddonHistoryClear,
+                    selectedFilter = selectedProviderFilter,
+                    onSelectFilter = { selectedProviderFilter = it },
                     currentSong = currentSong,
                     isPlaying = isPlaying,
                     onSongClick = onLibrarySongClick,
@@ -471,6 +478,8 @@ private fun LazyListScope.librarySearchResults(
     onAddonHistoryClick: (String) -> Unit,
     onAddonHistoryRemove: (String) -> Unit,
     onAddonHistoryClear: () -> Unit,
+    selectedFilter: String? = null,
+    onSelectFilter: (String?) -> Unit = {},
     currentSong: Song?,
     isPlaying: Boolean,
     onSongClick: (List<Song>, Int) -> Unit,
@@ -479,7 +488,10 @@ private fun LazyListScope.librarySearchResults(
 ) {
     if (addons) {
         item(key = "lossless_sources_shelf") {
-            LosslessSourcesShelf()
+            LosslessSourcesShelf(
+                selectedFilter = selectedFilter,
+                onSelectFilter = onSelectFilter,
+            )
         }
     }
     when (results) {
@@ -492,41 +504,61 @@ private fun LazyListScope.librarySearchResults(
         }
         UiState.Loading -> songListSkeleton(keyPrefix = "skeleton:search:library")
         is UiState.Error -> item(key = "library:error") { MessageState(results.message) }
-        is UiState.Success -> if (results.data.isEmpty()) {
-            item(key = "library:no-match") {
-                MessageState(
-                    if (addons) {
-                        stringResource(Res.string.search_addons_no_results, query)
-                    } else {
-                        stringResource(Res.string.search_library_no_results, query)
-                    },
-                )
-            }
-        } else {
-            val tracks = results.data
-            val isCurrentRow = playingRowMatcher(tracks, currentSong)
-            itemsIndexed(
-                items = tracks,
-                key = { index, song -> "${if (addons) "addon" else "library"}_${song.videoId}_$index" },
-                contentType = { _, _ -> "track" },
-            ) { index, song ->
-                SongRow(
-                    song = song,
-                    onClick = { onSongClick(tracks, index) },
-                    onLongPress = { onSongLongPress(song) },
-                    onSwipeToQueue = { onSongSwipe(song) },
-                    isCurrent = isCurrentRow(song),
-                    isPlaying = isPlaying && isCurrentRow(song),
-                    searchPlayingStyle = true,
-                    activeTint = PlayingAccent,
-                    showSourceQuality = addons,
-                )
-                if (index < tracks.lastIndex) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
-                        thickness = 0.5.dp,
-                        color = MaterialTheme.colorScheme.outline,
+        is UiState.Success -> {
+            val rawTracks = results.data
+            val tracks = if (addons && selectedFilter != null) {
+                rawTracks.filter { song ->
+                    when (selectedFilter) {
+                        "JioSaavn" -> song.playbackSource.equals("JioSaavn", ignoreCase = true) || song.sourceQuality == "HIGH"
+                        "SoundCloud" -> song.playbackSource.equals("SoundCloud", ignoreCase = true)
+                        "Jamendo" -> song.playbackSource.equals("Jamendo", ignoreCase = true)
+                        "Archive.org" -> song.playbackSource.equals("Archive.org", ignoreCase = true)
+                        "Add-ons" -> !song.playbackSource.equals("JioSaavn", ignoreCase = true) &&
+                            !song.playbackSource.equals("SoundCloud", ignoreCase = true) &&
+                            !song.playbackSource.equals("Jamendo", ignoreCase = true) &&
+                            !song.playbackSource.equals("Archive.org", ignoreCase = true)
+                        else -> true
+                    }
+                }
+            } else rawTracks
+
+            if (tracks.isEmpty()) {
+                item(key = "library:no-match") {
+                    MessageState(
+                        if (addons && selectedFilter != null) {
+                            "No results from $selectedFilter for \"$query\""
+                        } else if (addons) {
+                            stringResource(Res.string.search_addons_no_results, query)
+                        } else {
+                            stringResource(Res.string.search_library_no_results, query)
+                        },
                     )
+                }
+            } else {
+                val isCurrentRow = playingRowMatcher(tracks, currentSong)
+                itemsIndexed(
+                    items = tracks,
+                    key = { index, song -> "${if (addons) "addon" else "library"}_${song.videoId}_$index" },
+                    contentType = { _, _ -> "track" },
+                ) { index, song ->
+                    SongRow(
+                        song = song,
+                        onClick = { onSongClick(tracks, index) },
+                        onLongPress = { onSongLongPress(song) },
+                        onSwipeToQueue = { onSongSwipe(song) },
+                        isCurrent = isCurrentRow(song),
+                        isPlaying = isPlaying && isCurrentRow(song),
+                        searchPlayingStyle = true,
+                        activeTint = PlayingAccent,
+                        showSourceQuality = addons,
+                    )
+                    if (index < tracks.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                            thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
                 }
             }
         }
@@ -534,7 +566,11 @@ private fun LazyListScope.librarySearchResults(
 }
 
 @Composable
-private fun LosslessSourcesShelf(modifier: Modifier = Modifier) {
+private fun LosslessSourcesShelf(
+    selectedFilter: String? = null,
+    onSelectFilter: (String?) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -565,20 +601,61 @@ private fun LosslessSourcesShelf(modifier: Modifier = Modifier) {
                 .padding(horizontal = PAGE_GUTTER, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            LosslessProviderChip(name = "Archive.org", badge = "FLAC")
-            LosslessProviderChip(name = "Jamendo", badge = "Indie FLAC")
-            LosslessProviderChip(name = "SoundCloud", badge = "HQ Stream")
-            LosslessProviderChip(name = "Add-ons", badge = "Hi-Res")
+            LosslessProviderChip(
+                name = "All",
+                badge = "Combined",
+                isSelected = selectedFilter == null,
+                onClick = { onSelectFilter(null) },
+            )
+            LosslessProviderChip(
+                name = "JioSaavn",
+                badge = "320kbps",
+                isSelected = selectedFilter == "JioSaavn",
+                onClick = { onSelectFilter(if (selectedFilter == "JioSaavn") null else "JioSaavn") },
+            )
+            LosslessProviderChip(
+                name = "SoundCloud",
+                badge = "HQ Stream",
+                isSelected = selectedFilter == "SoundCloud",
+                onClick = { onSelectFilter(if (selectedFilter == "SoundCloud") null else "SoundCloud") },
+            )
+            LosslessProviderChip(
+                name = "Jamendo",
+                badge = "Indie FLAC",
+                isSelected = selectedFilter == "Jamendo",
+                onClick = { onSelectFilter(if (selectedFilter == "Jamendo") null else "Jamendo") },
+            )
+            LosslessProviderChip(
+                name = "Archive.org",
+                badge = "FLAC",
+                isSelected = selectedFilter == "Archive.org",
+                onClick = { onSelectFilter(if (selectedFilter == "Archive.org") null else "Archive.org") },
+            )
+            LosslessProviderChip(
+                name = "Add-ons",
+                badge = "Hi-Res",
+                isSelected = selectedFilter == "Add-ons",
+                onClick = { onSelectFilter(if (selectedFilter == "Add-ons") null else "Add-ons") },
+            )
         }
     }
 }
 
 @Composable
-private fun LosslessProviderChip(name: String, badge: String) {
+private fun LosslessProviderChip(
+    name: String,
+    badge: String,
+    isSelected: Boolean = false,
+    onClick: () -> Unit = {},
+) {
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.65f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.65f),
+        border = BorderStroke(
+            1.dp,
+            if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+        ),
+        modifier = Modifier.clickable(onClick = onClick),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -587,17 +664,19 @@ private fun LosslessProviderChip(name: String, badge: String) {
         ) {
             Text(
                 text = name,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                ),
+                color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
             )
             Surface(
                 shape = RoundedCornerShape(6.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
             ) {
                 Text(
                     text = badge,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
                 )
             }

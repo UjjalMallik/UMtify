@@ -27,8 +27,11 @@ class SoundCloudSource(
 
     override suspend fun stream(trackId: String, request: StreamRequest): SourceStream? {
         if (trackId.startsWith("http://") || trackId.startsWith("https://")) {
+            val direct = if (trackId.contains("api-v2.soundcloud.com") || trackId.contains("transcodings")) {
+                SoundCloudProvider.resolveTranscodingUrl(trackId) ?: trackId
+            } else trackId
             return SourceStream(
-                url = trackId,
+                url = direct,
                 format = StreamFormat(codec = "mp3", kbps = 256),
                 sourceName = "SoundCloud",
             )

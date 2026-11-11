@@ -118,6 +118,7 @@ object SourceRegistry {
         val stored = prefs.getString(KEY_SOURCES, null)?.let(::decodeStored) ?: emptyList()
         val jioOptInMigrationDone = prefs.getBoolean(KEY_JIOSAAVN_OPT_IN_V1, false)
         val defaultSourcesV2Done = prefs.getBoolean(KEY_DEFAULT_SOURCES_V2, false)
+        val youtubeOrderV3Done = prefs.getBoolean(KEY_YOUTUBE_FALLBACK_ORDER_V3, false)
         val after = sourcesForInit(
             stored,
             forceJioSaavnOff = !jioOptInMigrationDone,
@@ -129,11 +130,12 @@ object SourceRegistry {
         // disabled source, the next launch would otherwise believe the forced
         // opt-out had already happened and silently restore the old on state.
         publish(after, persist = false)
-        if (after != stored || !jioOptInMigrationDone || !defaultSourcesV2Done) {
+        if (after != stored || !jioOptInMigrationDone || !defaultSourcesV2Done || !youtubeOrderV3Done) {
             prefs.edit()
                 .putString(KEY_SOURCES, json.encodeToString(ListSerializer(SourceConfig.serializer()), after))
                 .putBoolean(KEY_JIOSAAVN_OPT_IN_V1, true)
                 .putBoolean(KEY_DEFAULT_SOURCES_V2, true)
+                .putBoolean(KEY_YOUTUBE_FALLBACK_ORDER_V3, true)
                 .apply()
         }
     }
@@ -159,7 +161,7 @@ object SourceRegistry {
 
         // The retired built-in module is removed, while a custom module entered
         // by the user is preserved.
-        return seeded
+        val mapped = seeded
             .filterNot { it.kind == SourceKind.MODULE }
             .map { config ->
                 when {
@@ -171,6 +173,13 @@ object SourceRegistry {
                     else -> config
                 }
             }
+
+        // YouTube Music must always be at the bottom of the list as the universal fallback,
+        // ensuring high-quality sources (JioSaavn, SoundCloud, Jamendo, Internet Archive, and user Addons)
+        // are prioritized above YouTube.
+        val nonYouTube = mapped.filterNot { it.kind == SourceKind.YOUTUBE }
+        val youtube = mapped.filter { it.kind == SourceKind.YOUTUBE }
+        return nonYouTube + youtube
     }
 
     /**
@@ -509,10 +518,10 @@ object SourceRegistry {
             .toString()
 
     private val BUILT_IN_KINDS = listOf(
-        SourceKind.INTERNET_ARCHIVE,
-        SourceKind.JAMENDO,
-        SourceKind.SOUNDCLOUD,
         SourceKind.JIOSAAVN,
+        SourceKind.SOUNDCLOUD,
+        SourceKind.JAMENDO,
+        SourceKind.INTERNET_ARCHIVE,
         SourceKind.YOUTUBE,
     )
 
@@ -520,6 +529,7 @@ object SourceRegistry {
     /** One-shot migration: existing users must explicitly opt in again. */
     private const val KEY_JIOSAAVN_OPT_IN_V1 = "jiosaavn_opt_in_v1"
     private const val KEY_DEFAULT_SOURCES_V2 = "default_sources_v2"
+    private const val KEY_YOUTUBE_FALLBACK_ORDER_V3 = "youtube_fallback_order_v3"
     private const val PREFIX = "src:"
     private const val SEPARATOR = "::"
 }

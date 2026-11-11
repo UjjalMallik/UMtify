@@ -116,48 +116,55 @@ object JamendoProvider : BuiltInLosslessProvider {
     }
 
     override suspend fun searchTracks(query: String, limit: Int): List<Song> = withContext(Dispatchers.IO) {
-        if (!isEnabled || query.isBlank()) return@withContext emptyList()
+        if (!isEnabled || query.isBlank()) return@withContext emptyList<Song>()
 
         val clientId = effectiveClientId
         val encoded = URLEncoder.encode(query.trim(), "UTF-8")
         val searchUrl = "https://api.jamendo.com/v3.0/tracks/?client_id=$clientId&format=json&namesearch=$encoded&audioformat=flac&limit=$limit"
 
         runCatching {
-            val req = Request.Builder().url(searchUrl).header("User-Agent", "UMtify/1.0").build()
-            Http.client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@runCatching emptyList()
-                val body = resp.body?.string().orEmpty()
-                val parsed = json.parseToJsonElement(body).jsonObject
-                val results = parsed["results"]?.jsonArray ?: return@runCatching emptyList()
+            var searchTargetUrl = searchUrl
+            var resp = Http.client.newCall(Request.Builder().url(searchTargetUrl).header("User-Agent", "UMtify/1.0").build()).execute()
+            var body = resp.body?.string().orEmpty()
+            var parsed = json.parseToJsonElement(body).jsonObject
+            var results = parsed["results"]?.jsonArray ?: kotlinx.serialization.json.JsonArray(emptyList())
 
-                results.mapNotNull { item ->
-                    val obj = item.jsonObject
-                    val id = obj["id"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val name = obj["name"]?.jsonPrimitive?.content ?: id
-                    val artistName = obj["artist_name"]?.jsonPrimitive?.content ?: "Jamendo Artist"
-                    val albumName = obj["album_name"]?.jsonPrimitive?.content
-                    val duration = obj["duration"]?.jsonPrimitive?.content?.toIntOrNull()
-                    val audio = obj["audio"]?.jsonPrimitive?.content
-                    val audiodl = obj["audiodl"]?.jsonPrimitive?.content
-                    val image = obj["image"]?.jsonPrimitive?.content
-
-                    val streamUrl = audiodl?.ifBlank { null } ?: audio?.ifBlank { null } ?: return@mapNotNull null
-
-                    Song(
-                        videoId = streamUrl,
-                        title = name,
-                        artist = artistName,
-                        albumName = albumName,
-                        thumbnailUrl = image,
-                        durationText = duration?.let { formatDuration(it) },
-                        sourceQuality = "LOSSLESS",
-                        sourceHiRes = false,
-                        downloadFormat = "FLAC",
-                        playbackSource = "Jamendo",
-                    )
-                }
+            if (results.isEmpty()) {
+                // Fallback without strict flac filter so general Jamendo audio results are returned
+                val fallbackUrl = "https://api.jamendo.com/v3.0/tracks/?client_id=$clientId&format=json&namesearch=$encoded&limit=$limit"
+                resp = Http.client.newCall(Request.Builder().url(fallbackUrl).header("User-Agent", "UMtify/1.0").build()).execute()
+                body = resp.body?.string().orEmpty()
+                parsed = json.parseToJsonElement(body).jsonObject
+                results = parsed["results"]?.jsonArray ?: kotlinx.serialization.json.JsonArray(emptyList())
             }
-        }.getOrDefault(emptyList())
+
+            results.mapNotNull { item ->
+                val obj = item.jsonObject
+                val id = obj["id"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                val name = obj["name"]?.jsonPrimitive?.content ?: id
+                val artistName = obj["artist_name"]?.jsonPrimitive?.content ?: "Jamendo Artist"
+                val albumName = obj["album_name"]?.jsonPrimitive?.content
+                val duration = obj["duration"]?.jsonPrimitive?.content?.toIntOrNull()
+                val audio = obj["audio"]?.jsonPrimitive?.content
+                val audiodl = obj["audiodl"]?.jsonPrimitive?.content
+                val image = obj["image"]?.jsonPrimitive?.content
+
+                val streamUrl = audiodl?.ifBlank { null } ?: audio?.ifBlank { null } ?: return@mapNotNull null
+
+                Song(
+                    videoId = streamUrl,
+                    title = name,
+                    artist = artistName,
+                    albumName = albumName,
+                    thumbnailUrl = image,
+                    durationText = duration?.let { formatDuration(it) },
+                    sourceQuality = "LOSSLESS",
+                    sourceHiRes = false,
+                    downloadFormat = "FLAC",
+                    playbackSource = "Jamendo",
+                )
+            }
+        }.getOrNull() ?: emptyList()
     }
 
     private fun formatDuration(sec: Int): String =

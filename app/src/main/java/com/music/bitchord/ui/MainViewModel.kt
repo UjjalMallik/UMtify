@@ -2269,6 +2269,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         val addons = SourceRegistry.active().filterIsInstance<AddonSource>()
+        val jioSaavnSource = SourceRegistry.active().firstOrNull { it.kind == SourceKind.JIOSAAVN }
         val hasBuiltIn = AppSettings.hasAnyBuiltInLossless()
         if (addons.isEmpty() && !hasBuiltIn) {
             _addonResults.value = UiState.Error(text(R.string.search_addons_none))
@@ -2284,6 +2285,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         } ?: emptyList()
                     }
                 }
+
+                val jioSaavnJob: Deferred<List<Song>>? = if (jioSaavnSource != null) {
+                    async {
+                        withTimeoutOrNull(ADDON_SEARCH_TIMEOUT_MS) {
+                            runCatching { jioSaavnSource.search(q, limit = ADDON_SEARCH_LIMIT) }.getOrDefault(emptyList())
+                        } ?: emptyList()
+                    }
+                } else null
 
                 val archiveJob: Deferred<List<Song>>? = if (InternetArchiveProvider.isEnabled) {
                     async {
@@ -2311,6 +2320,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
                 buildList {
                     addAll(addonJobs.map { it.await() })
+                    jioSaavnJob?.await()?.let { add(it) }
                     archiveJob?.await()?.let { add(it) }
                     jamendoJob?.await()?.let { add(it) }
                     soundcloudJob?.await()?.let { add(it) }

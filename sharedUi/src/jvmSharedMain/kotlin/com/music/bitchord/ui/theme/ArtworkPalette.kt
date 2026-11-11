@@ -343,6 +343,10 @@ private val NEUTRAL_SEED = Seed(
  * and only the hue, and the artwork's own chroma through
  * [adaptedArtworkSaturation], come from the sleeve.
  */
+/** Enough separation for a secondary and tertiary that belongs to the cover without echoing it, in degrees. */
+private const val SECONDARY_HUE_SHIFT = 15f
+private const val TERTIARY_HUE_SHIFT = 35f
+
 internal fun dynamicDarkScheme(dominant: Color, accent: Color): ColorScheme {
     fun Color.hasChroma() = chroma() >= TINT_MIN_CHROMA
     val base = when {
@@ -351,6 +355,7 @@ internal fun dynamicDarkScheme(dominant: Color, accent: Color): ColorScheme {
         else -> NEUTRAL_SEED.dominant
     }
     val highlight = if (accent.hasChroma()) accent else base
+    val secondarySource = highlight.withHsl(hue = { it + SECONDARY_HUE_SHIFT })
     val tertiarySource = highlight.withHsl(hue = { it + TERTIARY_HUE_SHIFT })
 
     fun Color.tone(minimum: Float, maximum: Float, lightness: Float) = withHsl(
@@ -359,7 +364,7 @@ internal fun dynamicDarkScheme(dominant: Color, accent: Color): ColorScheme {
     )
 
     val primary = highlight.tone(0.46f, 0.88f, 0.78f)
-    val secondary = base.tone(0.26f, 0.54f, 0.80f)
+    val secondary = secondarySource.tone(0.26f, 0.54f, 0.80f)
     val tertiary = tertiarySource.tone(0.34f, 0.62f, 0.80f)
     return darkColorScheme(
         primary = primary,
@@ -368,9 +373,9 @@ internal fun dynamicDarkScheme(dominant: Color, accent: Color): ColorScheme {
         onPrimaryContainer = highlight.tone(0.28f, 0.58f, 0.90f),
         inversePrimary = highlight.tone(0.52f, 0.92f, 0.41f),
         secondary = secondary,
-        onSecondary = base.tone(0.30f, 0.58f, 0.18f),
-        secondaryContainer = base.tone(0.24f, 0.50f, 0.25f),
-        onSecondaryContainer = base.tone(0.22f, 0.48f, 0.90f),
+        onSecondary = secondarySource.tone(0.30f, 0.58f, 0.18f),
+        secondaryContainer = secondarySource.tone(0.24f, 0.50f, 0.25f),
+        onSecondaryContainer = secondarySource.tone(0.22f, 0.48f, 0.90f),
         tertiary = tertiary,
         onTertiary = tertiarySource.tone(0.36f, 0.64f, 0.18f),
         tertiaryContainer = tertiarySource.tone(0.28f, 0.54f, 0.27f),
@@ -409,6 +414,7 @@ internal fun dynamicLightScheme(dominant: Color, accent: Color): ColorScheme {
         else -> NEUTRAL_SEED.dominant
     }
     val highlight = if (accent.hasChroma()) accent else base
+    val secondarySource = highlight.withHsl(hue = { it + SECONDARY_HUE_SHIFT })
     val tertiarySource = highlight.withHsl(hue = { it + TERTIARY_HUE_SHIFT })
 
     fun Color.tone(minimum: Float, maximum: Float, lightness: Float) = withHsl(
@@ -417,7 +423,7 @@ internal fun dynamicLightScheme(dominant: Color, accent: Color): ColorScheme {
     )
 
     val primary = highlight.tone(0.65f, 0.95f, 0.40f)
-    val secondary = base.tone(0.35f, 0.65f, 0.45f)
+    val secondary = secondarySource.tone(0.35f, 0.65f, 0.45f)
     val tertiary = tertiarySource.tone(0.35f, 0.65f, 0.45f)
     return lightColorScheme(
         primary = primary,
@@ -427,8 +433,8 @@ internal fun dynamicLightScheme(dominant: Color, accent: Color): ColorScheme {
         inversePrimary = highlight.tone(0.50f, 0.85f, 0.75f),
         secondary = secondary,
         onSecondary = Color.White,
-        secondaryContainer = base.tone(0.25f, 0.50f, 0.90f),
-        onSecondaryContainer = base.tone(0.30f, 0.60f, 0.15f),
+        secondaryContainer = secondarySource.tone(0.25f, 0.50f, 0.90f),
+        onSecondaryContainer = secondarySource.tone(0.30f, 0.60f, 0.15f),
         tertiary = tertiary,
         onTertiary = Color.White,
         tertiaryContainer = tertiarySource.tone(0.25f, 0.50f, 0.90f),
@@ -458,9 +464,6 @@ internal fun dynamicLightScheme(dominant: Color, accent: Color): ColorScheme {
         surfaceContainerLowest = Color.White,
     )
 }
-
-/** Enough separation for a tertiary that belongs to the cover without echoing it, in degrees. */
-private const val TERTIARY_HUE_SHIFT = 40f
 
 private fun Seed.playerTones(): PlayerTones? {
     val source = listOf(dominant, vibrant).firstOrNull { it.chroma() >= TINT_MIN_CHROMA } ?: return null

@@ -46,9 +46,9 @@ object InternetArchiveProvider : BuiltInLosslessProvider {
         val cleanTitle = clean(title)
         val cleanArtist = clean(artist)
         val queryStr = if (cleanArtist.isNotBlank()) {
-            "mediatype:(audio) AND format:(Flac) AND (title:(\"$cleanTitle\") OR creator:(\"$cleanArtist\"))"
+            "mediatype:(audio) AND (title:(\"$cleanTitle\") OR creator:(\"$cleanArtist\"))"
         } else {
-            "mediatype:(audio) AND format:(Flac) AND title:(\"$cleanTitle\")"
+            "mediatype:(audio) AND title:(\"$cleanTitle\")"
         }
 
         val encodedQuery = URLEncoder.encode(queryStr, "UTF-8")
@@ -146,7 +146,7 @@ object InternetArchiveProvider : BuiltInLosslessProvider {
     }
 
     override suspend fun searchTracks(query: String, limit: Int): List<Song> = withContext(Dispatchers.IO) {
-        if (!isEnabled || query.isBlank()) return@withContext emptyList()
+        if (!isEnabled || query.isBlank()) return@withContext emptyList<Song>()
 
         val cleanQuery = clean(query)
         val queryStr = "mediatype:(audio) AND (format:(Flac) OR format:(VBR MP3)) AND ($cleanQuery)"
@@ -158,9 +158,9 @@ object InternetArchiveProvider : BuiltInLosslessProvider {
             Http.client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@runCatching emptyList()
                 val body = resp.body?.string().orEmpty()
-                json.parseToJsonElement(body).jsonObject["response"]?.jsonObject?.get("docs")?.jsonArray ?: emptyList()
+                json.parseToJsonElement(body).jsonObject["response"]?.jsonObject?.get("docs")?.jsonArray?.toList() ?: emptyList()
             }
-        }.getOrDefault(emptyList())
+        }.getOrNull() ?: emptyList()
 
         if (docs.isEmpty()) return@withContext emptyList()
 

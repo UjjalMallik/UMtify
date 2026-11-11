@@ -137,9 +137,12 @@ object SoundCloudProvider {
         if (!isEnabled || query.isBlank()) return@withContext emptyList()
         val tracks = searchInternal(query.trim(), limit = limit)
         tracks.mapNotNull { track ->
-            val streamUrl = resolveDirectStreamUrl(track.transcodings) ?: return@mapNotNull null
+            val transUrl = track.transcodings.firstOrNull { it.protocol == "progressive" }?.url
+                ?: track.transcodings.firstOrNull { it.protocol == "hls" }?.url
+                ?: track.transcodings.firstOrNull()?.url
+                ?: return@mapNotNull null
             Song(
-                videoId = streamUrl,
+                videoId = transUrl,
                 title = track.title,
                 artist = track.artist,
                 thumbnailUrl = track.artworkUrl,
@@ -149,6 +152,38 @@ object SoundCloudProvider {
                 playbackSource = "SoundCloud",
             )
         }
+    }
+
+    suspend fun resolveTranscodingUrl(transcodingUrl: String): String? = withContext(Dispatchers.IO) {
+        val cid = getClientId()
+        val targetUrl = if (transcodingUrl.contains("?")) "$transcodingUrl&client_id=$cid" else "$transcodingUrl?client_id=$cid"
+        runCatching {
+            val req = Request.Builder()
+                .url(targetUrl)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                .build()
+            Http.client.newCall(req).execute().use { resp ->
+                if (resp.code == 401) {
+                    val freshCid = refreshClientId()
+                    val retryUrl = if (transcodingUrl.contains("?")) "$transcodingUrl&client_id=$freshCid" else "$transcodingUrl?client_id=$freshCid"
+                    val retryReq = Request.Builder()
+                        .url(retryUrl)
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                        .build()
+                    Http.client.newCall(retryReq).execute().use { rResp ->
+                        if (!rResp.isSuccessful) return@runCatching null
+                        val body = rResp.body?.string().orEmpty()
+                        val parsed = json.parseToJsonElement(body).jsonObject
+                        parsed["url"]?.jsonPrimitive?.content
+                    }
+                } else {
+                    if (!resp.isSuccessful) return@runCatching null
+                    val body = resp.body?.string().orEmpty()
+                    val parsed = json.parseToJsonElement(body).jsonObject
+                    parsed["url"]?.jsonPrimitive?.content
+                }
+            }
+        }.getOrNull()
     }
 
     private suspend fun searchInternal(query: String, limit: Int): List<SoundCloudTrack> {
