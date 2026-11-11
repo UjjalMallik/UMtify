@@ -918,7 +918,6 @@ class PlaybackService : MediaLibraryService() {
             if (isPlaying) prefetchAround(exoPlayer) else cancelPrefetch()
             if (isPlaying) lookForBetterCopy(exoPlayer)
             savePlaybackState(exoPlayer)
-            notifyKeepAliveService(isPlaying)
             // Not strictly needed for the glyph — onPlayWhenReadyChanged has
             // already flipped that — but this is where hasNext/hasPrevious and
             // the artwork are known to be settled.
@@ -979,7 +978,6 @@ class PlaybackService : MediaLibraryService() {
             // quiet again and the receiver is asked instead.
             if (playWhenReady) player?.let(speakers::onLocalStartedPlaying)
             publishWidgetState(playing = playWhenReady)
-            notifyKeepAliveService(playWhenReady)
             // The only place the *reason* can be read. A party has to tell a
             // pause the listener asked for from one another app imposed, and
             // [Player] does not keep the answer around to be asked later.
@@ -1034,7 +1032,6 @@ class PlaybackService : MediaLibraryService() {
             // catching up, which [CastPlayback] tells apart by track.
             speakers.onLocalTransition(mediaItem, reason)
             lastPrefetchedNearEndIndex = C.INDEX_UNSET
-            notifyKeepAliveService(exoPlayer.isPlaying || exoPlayer.playWhenReady)
 
             // No crossfade case to allow for here any more. A blended advance
             // never reaches this callback — the incoming track starts as the
@@ -6499,19 +6496,6 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
-    /** Synchronizes current playback state to :keepalive secondary process companion service. */
-    private fun notifyKeepAliveService(playing: Boolean) {
-        runCatching {
-            val intent = Intent(this, KeepAliveService::class.java).apply {
-                action = KeepAliveService.ACTION_SYNC
-                putExtra(KeepAliveService.EXTRA_IS_PLAYING, playing)
-                putExtra(KeepAliveService.EXTRA_MEDIA_ID, player?.currentMediaItem?.mediaId)
-                putExtra(KeepAliveService.EXTRA_POSITION_MS, player?.currentPosition ?: 0L)
-            }
-            startService(intent)
-        }
-    }
-
     /**
      * Renderers whose audio sink only skips silence worth skipping.
      *
@@ -7502,22 +7486,6 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
-        if (intent?.action == "com.music.bitchord.action.KEEP_ALIVE") {
-            val exoPlayer = player
-            if (exoPlayer != null) {
-                if (exoPlayer.mediaItemCount == 0) {
-                    restoreLastQueue(exoPlayer)
-                }
-                val pos = intent.getLongExtra("position_ms", -1L)
-                if (pos >= 0L && exoPlayer.currentPosition < pos) {
-                    exoPlayer.seekTo(pos)
-                }
-                exoPlayer.playWhenReady = true
-                exoPlayer.prepare()
-                exoPlayer.play()
-                notifyKeepAliveService(true)
-            }
-        }
         return START_STICKY
     }
 
@@ -7547,7 +7515,6 @@ class PlaybackService : MediaLibraryService() {
                     saveQueueSnapshotImmediately(exoPlayer)
                     savePlaybackState(exoPlayer)
                 }
-                notifyKeepAliveService(true)
                 runCatching {
                     currentNotification?.let { notif ->
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -7558,36 +7525,6 @@ class PlaybackService : MediaLibraryService() {
                     }
                 }
                 updateWakeLock()
-                // Fast restart fallback via AlarmManager + BroadcastReceiver in case aggressive task clear (e.g. OriginOS) kills process
-                runCatching {
-                    val receiverIntent = Intent(applicationContext, PlaybackKeepAliveReceiver::class.java).apply {
-                        action = "com.music.bitchord.action.KEEP_ALIVE"
-                        putExtra("media_id", exoPlayer.currentMediaItem?.mediaId)
-                        putExtra("position_ms", exoPlayer.currentPosition)
-                        putExtra("play_when_ready", exoPlayer.playWhenReady)
-                    }
-                    val pendingIntent = PendingIntent.getBroadcast(
-                        applicationContext,
-                        1002,
-                        receiverIntent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-                    )
-                    val alarmManager = getSystemService(Context.ALARM_SERVICE) as? AlarmManager
-                    val triggerAt = SystemClock.elapsedRealtime() + 100L
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        alarmManager?.setExactAndAllowWhileIdle(
-                            AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                            triggerAt,
-                            pendingIntent,
-                        )
-                    } else {
-                        alarmManager?.setExact(
-                            AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                            triggerAt,
-                            pendingIntent,
-                        )
-                    }
-                }
             }
             return
         }

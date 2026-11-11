@@ -303,20 +303,6 @@
             </intent-filter>
         </service>
 
-        <service
-            android:name=".playback.KeepAliveService"
-            android:exported="false"
-            android:process=":keepalive"
-            android:stopWithTask="false" />
-
-        <receiver
-            android:name=".playback.PlaybackKeepAliveReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.music.bitchord.action.KEEP_ALIVE" />
-            </intent-filter>
-        </receiver>
-
         <!--
           Commands from the BitChord watch app (wearos/). Exported because Play
           services binds it; only messages from the same package and signing key
