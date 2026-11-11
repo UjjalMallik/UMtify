@@ -432,6 +432,7 @@ fun MiniPlayer(
                 val imageRequest = remember(remoteArt) {
                     coil3.request.ImageRequest.Builder(context)
                         .data(remoteArt.artworkAt(ROW_ART_PX))
+                        .size(256, 256)
                         .crossfade(false)
                         .build()
                 }

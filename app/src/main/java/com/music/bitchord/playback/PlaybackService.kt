@@ -3286,6 +3286,7 @@ class PlaybackService : MediaLibraryService() {
         .setLoadControl(farBufferingLoadControl())
         .setAudioAttributes(AUDIO_ATTRIBUTES, /* handleAudioFocus = */ ownsSession)
         .setHandleAudioBecomingNoisy(ownsSession)
+        .setWakeMode(C.WAKE_MODE_NETWORK)
         // Back restarts the track once you're this far into it; only a
         // press before that steps to the previous one.
         .setMaxSeekToPreviousPositionMs(BACK_RESTARTS_AFTER_MS)
@@ -7468,9 +7469,11 @@ class PlaybackService : MediaLibraryService() {
      * this guard exists to prevent.
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
-        if (isPlayingAnywhere()) {
+        if (!AppSettings.stopOnTaskRemoved.value) {
             // Keep playback service running in the foreground so playback and
             // system notifications (including OriginOS Atomic Island) continue seamlessly.
+            // DO NOT call super.onTaskRemoved(rootIntent) because Media3's default MediaSessionService
+            // implementation calls pauseAllPlayersAndStopSelf()!
             runCatching {
                 currentNotification?.let { notif ->
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -7494,7 +7497,6 @@ class PlaybackService : MediaLibraryService() {
             stopSelf()
             return
         }
-        super.onTaskRemoved(rootIntent)
     }
 
     /**

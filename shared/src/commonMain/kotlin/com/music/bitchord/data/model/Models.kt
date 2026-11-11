@@ -325,7 +325,7 @@ private val PARAM_SIZE_HINT = Regex("""=s\d+""")
  * Rounded up, and one value for every row in the app rather than one per
  * row height, so they share a cache entry instead of each fetching its own.
  */
-const val ROW_ART_PX = 160
+const val ROW_ART_PX = 256
 
 /** Artwork for a shelf card: 166dp wide, so a little under 450px at 3x. */
 const val CARD_ART_PX = 480
@@ -341,17 +341,9 @@ const val HEADER_ART_PX = 720
 const val NOTIFICATION_ART_PX = 544
 
 /**
- * Artwork for the full player — the sleeve and the full-bleed banner both, and
- * the largest rung on the ladder.
- *
- * Named here rather than left as a private constant in the player because the
- * home-screen widget picks its own size off this ladder, and a size only one
- * surface asks for is a cache entry only that surface fills. A large widget and
- * an open player were fetching the same cover twice at two sizes, and either
- * fetch could fail on its own — so the two could disagree about whether the
- * track had artwork at all.
+ * Artwork for the full player — capped at 720px to prevent 4K decodes bloating RAM.
  */
-const val PLAYER_ART_PX = 1200
+const val PLAYER_ART_PX = 720
 
 enum class BrowseType { ALBUM, ARTIST, PLAYLIST, OTHER }
 

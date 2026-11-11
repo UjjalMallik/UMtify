@@ -3,12 +3,15 @@ package com.music.bitchord
 import androidx.compose.material3.surfaceColorAtElevation
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.View
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -382,6 +385,28 @@ class MainActivity : AppCompatActivity() {
             val composeView = LocalView.current
             LaunchedEffect(highPerformance, performanceRefreshRate, composeView) {
                 applyPerformanceMode(highPerformance, performanceRefreshRate, composeView)
+            }
+            val batteryContext = LocalContext.current
+            val batteryOptPrompted by AppSettings.batteryOptPrompted.collectAsStateWithLifecycle()
+            LaunchedEffect(batteryOptPrompted) {
+                if (!batteryOptPrompted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    val pm = batteryContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                    val isIgnoring = pm?.isIgnoringBatteryOptimizations(batteryContext.packageName) == true
+                    val isVivoOrIqoo = Build.MANUFACTURER.contains("vivo", ignoreCase = true) ||
+                        Build.BRAND.contains("vivo", ignoreCase = true) ||
+                        Build.BRAND.contains("iqoo", ignoreCase = true) ||
+                        batteryContext.packageName == "com.tencent.qqmusic" ||
+                        BuildConfig.FLAVOR == "originos"
+                    if (isVivoOrIqoo && !isIgnoring) {
+                        AppSettings.setBatteryOptPrompted(true)
+                        runCatching {
+                            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                data = Uri.parse("package:${batteryContext.packageName}")
+                            }
+                            batteryContext.startActivity(intent)
+                        }
+                    }
+                }
             }
             // Hoisted above the theme because the dynamic palette is built from
             // the current track: the whole app changes colour with the cover,

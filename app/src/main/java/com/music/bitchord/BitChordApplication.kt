@@ -9,6 +9,7 @@ import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
 import coil3.disk.directory
 import coil3.memory.MemoryCache
+import coil3.request.allowHardware
 import coil3.request.crossfade
 import coil3.svg.SvgDecoder
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
@@ -238,9 +239,10 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
                     .maxSizeBytes(100L * 1024 * 1024)
                     .build()
             }
-            // Covers arriving with a hard cut read as the list flickering as
-            // it scrolls; a short fade reads as them developing.
-            .crossfade(200)
+            // Hardware bitmaps avoid allocating large software byte-arrays in Java/Kotlin heap,
+            // and crossfade(false) guarantees instant frame presentation without jank on 120Hz displays.
+            .allowHardware(true)
+            .crossfade(false)
             .build()
 
     companion object {

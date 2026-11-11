@@ -283,7 +283,11 @@ internal fun LazyListScope.localFolderItems(
                 )
             }
         } else {
-            itemsIndexed(songs, key = { index, song -> "song-${song.videoId}-$index" }) { index, song ->
+            itemsIndexed(
+                items = songs,
+                key = { index, song -> "song-${song.videoId}-$index" },
+                contentType = { _, _ -> "local_song_row" },
+            ) { index, song ->
                 SongRow(
                     song = song,
                     selected = song.videoId in state.selectedIds,
@@ -309,7 +313,11 @@ internal fun LazyListScope.localFolderItems(
                 ArtistGridCard(group, palette, onClick = { groupClick(group) }, onLongPress = { groupHold(group) })
             }
         } else {
-            items(groups, key = { it.browseId }) { group ->
+            items(
+                items = groups,
+                key = { it.browseId },
+                contentType = { "artist_row" },
+            ) { group ->
                 ArtistRow(group, palette, onClick = { groupClick(group) }, onLongPress = { groupHold(group) })
                 FolderDivider(palette)
             }
@@ -326,7 +334,11 @@ internal fun LazyListScope.localFolderItems(
                 )
             }
         } else {
-            items(groups, key = { it.browseId }) { group ->
+            items(
+                items = groups,
+                key = { it.browseId },
+                contentType = { "album_row" },
+            ) { group ->
                 AlbumRow(
                     group = group,
                     palette = palette,

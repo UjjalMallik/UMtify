@@ -36,10 +36,13 @@ data class SourceConfig(
     /** What the user called it. Blank falls back to the server's host, or the kind's own label. */
     val label: String = "",
     val baseUrl: String = "",
-    /** JioSaavn is opt-in because catalogue matches can select the wrong recording. */
+    /** JioSaavn, Archive, Jamendo are disabled by default. YouTube Music & SoundCloud enabled. */
     val enabled: Boolean = when (kind) {
+        SourceKind.YOUTUBE -> true
+        SourceKind.SOUNDCLOUD -> true
         SourceKind.JIOSAAVN -> false
-        SourceKind.YOUTUBE -> AppSettings.enableYouTubeMusic.value
+        SourceKind.INTERNET_ARCHIVE -> false
+        SourceKind.JAMENDO -> false
         else -> true
     },
     /**
@@ -114,17 +117,23 @@ object SourceRegistry {
 
         val stored = prefs.getString(KEY_SOURCES, null)?.let(::decodeStored) ?: emptyList()
         val jioOptInMigrationDone = prefs.getBoolean(KEY_JIOSAAVN_OPT_IN_V1, false)
-        val after = sourcesForInit(stored, forceJioSaavnOff = !jioOptInMigrationDone)
+        val defaultSourcesV2Done = prefs.getBoolean(KEY_DEFAULT_SOURCES_V2, false)
+        val after = sourcesForInit(
+            stored,
+            forceJioSaavnOff = !jioOptInMigrationDone,
+            applyDefaultSourcesV2 = !defaultSourcesV2Done,
+        )
 
         // Publish state and the migration marker in one preferences edit. If a
         // process dies after recording the marker but before recording the
         // disabled source, the next launch would otherwise believe the forced
         // opt-out had already happened and silently restore the old on state.
         publish(after, persist = false)
-        if (after != stored || !jioOptInMigrationDone) {
+        if (after != stored || !jioOptInMigrationDone || !defaultSourcesV2Done) {
             prefs.edit()
                 .putString(KEY_SOURCES, json.encodeToString(ListSerializer(SourceConfig.serializer()), after))
                 .putBoolean(KEY_JIOSAAVN_OPT_IN_V1, true)
+                .putBoolean(KEY_DEFAULT_SOURCES_V2, true)
                 .apply()
         }
     }
@@ -140,10 +149,10 @@ object SourceRegistry {
     internal fun sourcesForInit(
         stored: List<SourceConfig>,
         forceJioSaavnOff: Boolean,
+        applyDefaultSourcesV2: Boolean = false,
     ): List<SourceConfig> {
         // Seeded rather than persisted-on-first-write, so a build adding a new
-        // built-in kind picks it up for existing installs too. SourceConfig's
-        // default is the policy: JioSaavn off, YouTube on.
+        // built-in kind picks it up for existing installs too.
         val seeded = stored + BUILT_IN_KINDS
             .filter { kind -> stored.none { it.kind == kind } }
             .map { SourceConfig(kind = it) }
@@ -154,8 +163,11 @@ object SourceRegistry {
             .filterNot { it.kind == SourceKind.MODULE }
             .map { config ->
                 when {
-                    config.kind == SourceKind.YOUTUBE -> config.copy(enabled = AppSettings.enableYouTubeMusic.value)
-                    config.kind == SourceKind.JIOSAAVN && forceJioSaavnOff -> config.copy(enabled = false)
+                    config.kind == SourceKind.YOUTUBE -> config.copy(enabled = true)
+                    config.kind == SourceKind.JIOSAAVN && (forceJioSaavnOff || applyDefaultSourcesV2) -> config.copy(enabled = false)
+                    config.kind == SourceKind.INTERNET_ARCHIVE && applyDefaultSourcesV2 -> config.copy(enabled = false)
+                    config.kind == SourceKind.JAMENDO && applyDefaultSourcesV2 -> config.copy(enabled = false)
+                    config.kind == SourceKind.SOUNDCLOUD && applyDefaultSourcesV2 -> config.copy(enabled = true)
                     else -> config
                 }
             }
@@ -306,7 +318,9 @@ object SourceRegistry {
     fun setEnabled(configId: String, enabled: Boolean) {
         val target = config(configId)
         if (target?.kind == SourceKind.YOUTUBE) {
-            AppSettings.setEnableYouTubeMusic(enabled)
+            AppSettings.setEnableYouTubeMusic(true)
+            publish(configs.value.map { if (it.id == configId) it.copy(enabled = true) else it })
+            return
         }
         publish(configs.value.map { if (it.id == configId) it.copy(enabled = enabled) else it })
     }
@@ -505,6 +519,7 @@ object SourceRegistry {
     private const val KEY_SOURCES = "sources"
     /** One-shot migration: existing users must explicitly opt in again. */
     private const val KEY_JIOSAAVN_OPT_IN_V1 = "jiosaavn_opt_in_v1"
+    private const val KEY_DEFAULT_SOURCES_V2 = "default_sources_v2"
     private const val PREFIX = "src:"
     private const val SEPARATOR = "::"
 }

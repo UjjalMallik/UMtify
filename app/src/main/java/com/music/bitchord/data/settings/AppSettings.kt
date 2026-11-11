@@ -559,12 +559,12 @@ object AppSettings {
     val signatureApiEnabled = MutableStateFlow(false)
     val signatureApiUrl = MutableStateFlow("")
 
-    /** Persistent toggle for YouTube Music source. Defaults to true. */
+    /** Persistent toggle for YouTube Music source. Permanently enabled. */
     val enableYouTubeMusic = MutableStateFlow(true)
 
-    /** Built-in Lossless audio providers: Internet Archive, Jamendo. */
-    val enableInternetArchiveLossless = MutableStateFlow(true)
-    val enableJamendoLossless = MutableStateFlow(true)
+    /** Built-in Lossless audio providers: Internet Archive, Jamendo (disabled by default). */
+    val enableInternetArchiveLossless = MutableStateFlow(false)
+    val enableJamendoLossless = MutableStateFlow(false)
     val jamendoClientId = MutableStateFlow("")
 
     fun hasAnyBuiltInLossless(): Boolean =
@@ -582,6 +582,8 @@ object AppSettings {
      * [NowPlayingScreen][com.music.bitchord.ui.player.NowPlayingScreen].
      */
     val fullBleedArtwork = MutableStateFlow(true)
+
+    val batteryOptPrompted = MutableStateFlow(false)
 
     /**
      * Puts v1.5's backdrop back on the player: four quantised blobs drifting
@@ -981,10 +983,11 @@ object AppSettings {
         prioritizeSpotifyCanvas.value = prefs.getBoolean(KEY_PRIORITIZE_SPOTIFY_CANVAS, false)
         signatureApiEnabled.value = prefs.getBoolean(KEY_SIGNATURE_API_ENABLED, false)
         signatureApiUrl.value = normalizeSignatureApiUrl(prefs.getString(KEY_SIGNATURE_API_URL, "").orEmpty())
-        enableYouTubeMusic.value = prefs.getBoolean(KEY_ENABLE_YOUTUBE_MUSIC, true)
-        enableInternetArchiveLossless.value = prefs.getBoolean(KEY_ENABLE_INTERNET_ARCHIVE_LOSSLESS, true)
-        enableJamendoLossless.value = prefs.getBoolean(KEY_ENABLE_JAMENDO_LOSSLESS, true)
+        enableYouTubeMusic.value = true
+        enableInternetArchiveLossless.value = prefs.getBoolean(KEY_ENABLE_INTERNET_ARCHIVE_LOSSLESS, false)
+        enableJamendoLossless.value = prefs.getBoolean(KEY_ENABLE_JAMENDO_LOSSLESS, false)
         jamendoClientId.value = prefs.getString(KEY_JAMENDO_CLIENT_ID, "") ?: ""
+        batteryOptPrompted.value = prefs.getBoolean(KEY_BATTERY_OPT_PROMPTED, false)
         fullBleedArtwork.value = prefs.getBoolean(KEY_FULL_BLEED_ARTWORK, true)
         legacyMeshGradient.value = prefs.getBoolean(KEY_LEGACY_MESH_GRADIENT, false)
         lastPlayerScreen.value = runCatching {
@@ -1682,8 +1685,9 @@ object AppSettings {
     }
 
     fun setEnableYouTubeMusic(value: Boolean) {
-        enableYouTubeMusic.value = value
-        prefs.edit().putBoolean(KEY_ENABLE_YOUTUBE_MUSIC, value).apply()
+        // YouTube Music is permanently enabled
+        enableYouTubeMusic.value = true
+        prefs.edit().putBoolean(KEY_ENABLE_YOUTUBE_MUSIC, true).apply()
     }
 
     fun setEnableInternetArchiveLossless(value: Boolean) {
@@ -1700,6 +1704,11 @@ object AppSettings {
         val trimmed = value.trim()
         jamendoClientId.value = trimmed
         prefs.edit().putString(KEY_JAMENDO_CLIENT_ID, trimmed).apply()
+    }
+
+    fun setBatteryOptPrompted(value: Boolean) {
+        batteryOptPrompted.value = value
+        prefs.edit().putBoolean(KEY_BATTERY_OPT_PROMPTED, value).apply()
     }
 
     fun setFullBleedArtwork(value: Boolean) {
@@ -2307,6 +2316,7 @@ object AppSettings {
     private const val KEY_ENABLE_INTERNET_ARCHIVE_LOSSLESS = "enable_internet_archive_lossless"
     private const val KEY_ENABLE_JAMENDO_LOSSLESS = "enable_jamendo_lossless"
     private const val KEY_JAMENDO_CLIENT_ID = "jamendo_client_id"
+    private const val KEY_BATTERY_OPT_PROMPTED = "battery_opt_prompted"
 }
 
 

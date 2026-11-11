@@ -195,7 +195,7 @@ internal const val ART_PX = PLAYER_ART_PX
  * full-bleed presentation asks for [ART_PX], because there the same bitmap has
  * to fill a taller frame.
  */
-internal const val CARD_ART_PX = 800
+internal const val CARD_ART_PX = 720
 
 /**
  * How many further goes a cover that failed to load gets.

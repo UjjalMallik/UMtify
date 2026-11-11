@@ -705,7 +705,11 @@ fun DetailScreen(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 flingBehavior = rememberSnapFlingBehavior(lazyListState = topSongsState),
                             ) {
-                                items(top.chunked(SONGS_PER_COLUMN)) { column ->
+                                items(
+                                    items = top.chunked(SONGS_PER_COLUMN),
+                                    key = { col -> col.joinToString("-") { it.videoId } },
+                                    contentType = { "artist_top_column" },
+                                ) { column ->
                                     Column(Modifier.width(columnWidth)) {
                                         column.forEach { song ->
                                             CompactSongRow(
@@ -737,6 +741,7 @@ fun DetailScreen(
                     itemsIndexed(
                         items = matches,
                         key = { _, entry -> "${entry.index}_${entry.value.videoId}" },
+                        contentType = { _, _ -> "song_row" },
                     ) { position, entry ->
                         val song = entry.value
                         val isCurrent = isCurrentRow(song)
@@ -807,7 +812,11 @@ fun DetailScreen(
             }
 
             // Albums / Singles & EPs carousels (artist pages).
-            items(page.sections) { shelf ->
+            items(
+                items = page.sections,
+                key = { it.title },
+                contentType = { "artist_section" },
+            ) { shelf ->
                 val canShowAll = shelf.items.size > ARTIST_ROW_MAX_ITEMS
                 val displayItems = remember(shelf.items) {
                     if (canShowAll) shelf.items.take(ARTIST_ROW_MAX_ITEMS) else shelf.items
@@ -826,7 +835,11 @@ fun DetailScreen(
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                         flingBehavior = rememberSnapFlingBehavior(lazyListState = carouselState),
                     ) {
-                        items(displayItems) { item ->
+                        items(
+                            items = displayItems,
+                            key = { it.browseId ?: (it.title + it.subtitle.orEmpty()) },
+                            contentType = { "section_card" },
+                        ) { item ->
                             SectionCard(
                                 item = item,
                                 palette = palette,

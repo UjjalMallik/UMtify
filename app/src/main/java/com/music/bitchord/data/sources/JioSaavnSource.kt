@@ -4,8 +4,33 @@ import com.music.bitchord.data.TrackLog
 import com.music.bitchord.data.jiosaavn.JioSaavnService
 import com.music.bitchord.data.jiosaavn.prioritizeExplicit
 import com.music.bitchord.data.model.Song
+import java.util.Locale
 
 private const val TAG = "BitChord"
+
+internal fun String.decodeHtml(): String {
+    if (!contains('&')) return this
+    var result = this
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&#039;", "'")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&nbsp;", " ")
+        .replace("&copy;", "©")
+        .replace("&reg;", "®")
+    result = Regex("&#(\\d+);").replace(result) { match ->
+        val code = match.groupValues[1].toIntOrNull()
+        if (code != null && code in 1..0x10FFFF) String(Character.toChars(code)) else match.value
+    }
+    result = Regex("&#x([0-9a-fA-F]+);", RegexOption.IGNORE_CASE).replace(result) { match ->
+        val code = match.groupValues[1].toIntOrNull(16)
+        if (code != null && code in 1..0x10FFFF) String(Character.toChars(code)) else match.value
+    }
+    return result
+}
 
 class JioSaavnSource(
     override val config: SourceConfig,
@@ -33,8 +58,16 @@ class JioSaavnSource(
             }' ${it.moreInfo.duration}s id=${it.id} album='${it.moreInfo.album}' " +
                 "explicit=${it.explicitContent}" }.takeIf { results.isNotEmpty() }.orEmpty())
         return results.take(limit).map { raw ->
-            val primaryArtists = raw.moreInfo.artistMap.primaryArtists.joinToString(", ") { it.name }
-            val artistName = primaryArtists.ifBlank { "Unknown Artist" }
+            val primaryFromMap = raw.moreInfo.artistMap.primaryArtists
+                .map { it.name.decodeHtml().trim() }
+                .filter { it.isNotBlank() }
+                .joinToString(", ")
+            val fallbackArtists = raw.moreInfo.primaryArtistsStr.decodeHtml().trim().ifBlank {
+                raw.moreInfo.singers.decodeHtml().trim()
+            }
+            val artistName = primaryFromMap.ifBlank { fallbackArtists }.ifBlank { "Unknown Artist" }
+            val decodedTitle = raw.title.decodeHtml().trim()
+            val decodedAlbum = raw.moreInfo.album.decodeHtml().trim().ifBlank { null }
             
             // Generate higher quality thumbnail link (e.g. 500x500)
             val thumbnail = raw.image
@@ -43,21 +76,15 @@ class JioSaavnSource(
 
             Song(
                 videoId = SourceRegistry.trackKey(config.id, raw.id),
-                title = raw.title,
+                title = decodedTitle,
                 artist = artistName,
-                // Keep the release identity JioSaavn already gave us. Its
-                // catalogue contains different recordings under the same
-                // title and artist (notably the two "Brown Rang" rows), so
-                // dropping this left duration to choose between them.
-                albumName = raw.moreInfo.album.ifBlank { null },
+                // Keep the release identity JioSaavn already gave us.
+                albumName = decodedAlbum,
                 thumbnailUrl = thumbnail,
-                // JioSaavn provides duration in seconds, but Song expects durationText ("M:SS")
-                // Alternatively, Song.durationMillis() will parse durationText. Let's just 
-                // format it since BitChord uses string duration.
                 durationText = raw.moreInfo.duration.toIntOrNull()?.let { seconds ->
                     val m = seconds / 60
                     val s = seconds % 60
-                    String.format("%d:%02d", m, s)
+                    String.format(Locale.US, "%d:%02d", m, s)
                 },
                 sourceQuality = "HIGH",
                 isExplicit = raw.isExplicit,

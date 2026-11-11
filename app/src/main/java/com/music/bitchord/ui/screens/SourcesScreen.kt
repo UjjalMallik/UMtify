@@ -244,7 +244,7 @@ fun SourcesScreen(
                         // delete. JioSaavn and YouTube have no address to
                         // change, so a tap on them would open an empty editor.
                         onClick = if (config.kind.needsServer) ({ onEditSource(config) }) else null,
-                        onToggle = { enabled ->
+                        onToggle = if (config.kind == SourceKind.YOUTUBE) null else { enabled ->
                             if (config.kind == SourceKind.JIOSAAVN && enabled && !config.enabled) {
                                 onConfirmJioSaavn()
                             } else {

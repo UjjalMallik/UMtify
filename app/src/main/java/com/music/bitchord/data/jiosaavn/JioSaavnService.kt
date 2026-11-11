@@ -13,13 +13,34 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
+
+object LenientStringSerializer : KSerializer<String> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("LenientString", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: String) = encoder.encodeString(value)
+    override fun deserialize(decoder: Decoder): String {
+        val jsonDecoder = decoder as? JsonDecoder ?: return decoder.decodeString()
+        return when (val element = jsonDecoder.decodeJsonElement()) {
+            is JsonPrimitive -> element.content
+            else -> element.toString()
+        }
+    }
+}
 
 @Serializable
 data class RawArtistMapItem(
@@ -32,22 +53,42 @@ data class RawArtistMap(
     @SerialName("primary_artists") val primaryArtists: List<RawArtistMapItem> = emptyList(),
 )
 
+object LenientArtistMapSerializer : KSerializer<RawArtistMap> {
+    override val descriptor: SerialDescriptor = RawArtistMap.serializer().descriptor
+    override fun serialize(encoder: Encoder, value: RawArtistMap) =
+        RawArtistMap.serializer().serialize(encoder, value)
+    override fun deserialize(decoder: Decoder): RawArtistMap {
+        val jsonDecoder = decoder as? JsonDecoder
+            ?: return RawArtistMap.serializer().deserialize(decoder)
+        val element = jsonDecoder.decodeJsonElement()
+        if (element !is JsonObject) return RawArtistMap()
+        return jsonDecoder.json.decodeFromJsonElement(RawArtistMap.serializer(), element)
+    }
+}
+
 @Serializable
 data class RawMoreInfo(
+    @Serializable(with = LenientStringSerializer::class)
     val album_id: String = "",
     val album: String = "",
     @SerialName("encrypted_media_url") val encryptedMediaUrl: String = "",
+    @Serializable(with = LenientStringSerializer::class)
     val duration: String = "",
     /**
-     * Whether a 320kbps rendition exists, as `"true"`/`"false"`.
-     *
-     * The catalogue states this per track and it is frequently false. Asking
-     * the CDN for `_320` anyway does not produce one.
+     * Whether a 320kbps rendition exists, as `"true"`/`"false"` or boolean.
      */
-    @SerialName("320kbps") val has320: String = "",
+    @SerialName("320kbps")
+    @Serializable(with = LenientStringSerializer::class)
+    val has320: String = "",
+    @SerialName("primary_artists")
+    val primaryArtistsStr: String = "",
+    val singers: String = "",
+    @Serializable(with = LenientArtistMapSerializer::class)
+    @SerialName("artist_map")
     val artistMap: RawArtistMap = RawArtistMap(),
 ) {
-    val supports320: Boolean get() = has320.equals("true", ignoreCase = true)
+    val supports320: Boolean
+        get() = has320.equals("true", ignoreCase = true) || has320 == "1"
 }
 
 /** A decoded CDN URL and the bitrate it will really deliver. */
@@ -74,6 +115,7 @@ internal fun selectBestSaavnStream(decryptedUrl: String, supports320: Boolean): 
         ?: return SaavnStream(decryptedUrl, null)
 
     val offered = rendition.groupValues[1].toInt()
+    if (offered == 320) return SaavnStream(decryptedUrl, 320)
     if (!supports320) return SaavnStream(decryptedUrl, offered)
 
     val extension = rendition.groupValues[2]
@@ -88,8 +130,10 @@ data class RawSongItem(
     val id: String = "",
     val title: String = "",
     val image: String = "",
-    /** JioSaavn sends this as the string `"1"` or `"0"`. */
-    @SerialName("explicit_content") val explicitContent: String = "",
+    /** JioSaavn sends this as the string `"1"` or `"0"` or number. */
+    @SerialName("explicit_content")
+    @Serializable(with = LenientStringSerializer::class)
+    val explicitContent: String = "",
     @SerialName("more_info") val moreInfo: RawMoreInfo = RawMoreInfo()
 ) {
     val isExplicit: Boolean
@@ -138,11 +182,11 @@ object JioSaavnService {
             }
             defaultRequest {
                 url(BASE_URL)
-                headers.append(HttpHeaders.Accept, "application/json")
+                headers.append(HttpHeaders.Accept, "application/json, text/plain, */*")
                 headers.append(HttpHeaders.UserAgent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
                 headers.append("X-Forwarded-For", "49.36.0.1")
                 headers.append("X-Real-IP", "49.36.0.1")
-                headers.append("Accept-Language", "en-IN,en;q=0.9")
+                headers.append("Accept-Language", "en-IN,en;q=0.9,bn;q=0.8,hi;q=0.7")
                 headers.append(HttpHeaders.Cookie, "explicit_content=1")
             }
             expectSuccess = false
@@ -150,13 +194,14 @@ object JioSaavnService {
     }
 
     private fun decryptUrl(encryptedUrl: String): String {
-        if (encryptedUrl.isBlank()) return ""
+        val trimmed = encryptedUrl.trim()
+        if (trimmed.isBlank()) return ""
         return try {
             val key = "38346591" // DES 8-byte key
             val secretKey = SecretKeySpec(key.toByteArray(Charsets.UTF_8), "DES")
             val cipher = Cipher.getInstance("DES/ECB/PKCS5Padding")
             cipher.init(Cipher.DECRYPT_MODE, secretKey)
-            val decodedBytes = Base64.decode(encryptedUrl, Base64.DEFAULT)
+            val decodedBytes = Base64.decode(trimmed, Base64.DEFAULT)
             val decryptedBytes = cipher.doFinal(decodedBytes)
             String(decryptedBytes, Charsets.UTF_8).trim()
         } catch (e: Exception) {
@@ -188,7 +233,7 @@ object JioSaavnService {
             parameter("_format", "json")
             parameter("_marker", "0")
             parameter("api_version", "4")
-            parameter("ctx", "android")
+            parameter("ctx", "web6dot0")
             parameter("q", query)
             parameter("p", "1")
             parameter("n", "10")
@@ -199,7 +244,14 @@ object JioSaavnService {
             return@runCatching emptyList()
         }
 
-        val body = json.decodeFromString<RawSearchResponse>(response.bodyAsText())
+        val rawText = response.bodyAsText().trim()
+        val jsonText = if (rawText.startsWith("{") || rawText.startsWith("[")) {
+            rawText
+        } else {
+            val start = rawText.indexOf('{')
+            if (start != -1) rawText.substring(start) else rawText
+        }
+        val body = json.decodeFromString<RawSearchResponse>(jsonText)
         body.results
     }.getOrElse {
         TrackLog.w(TAG, "Saavn search error: ${it.message}")
@@ -213,7 +265,7 @@ object JioSaavnService {
                 parameter("_format", "json")
                 parameter("_marker", "0")
                 parameter("api_version", "4")
-                parameter("ctx", "android")
+                parameter("ctx", "web6dot0")
                 parameter("pids", saavnSongId)
             }
 
@@ -229,9 +281,17 @@ object JioSaavnService {
             // list under `ignoreUnknownKeys`, and returned null without an
             // error or an exception to explain itself. Both shapes are read
             // here so neither endpoint changing its mind breaks the other.
-            val root = json.parseToJsonElement(response.bodyAsText()) as? JsonObject
+            val rawText = response.bodyAsText().trim()
+            val jsonText = if (rawText.startsWith("{") || rawText.startsWith("[")) {
+                rawText
+            } else {
+                val start = rawText.indexOf('{')
+                if (start != -1) rawText.substring(start) else rawText
+            }
+            val root = json.parseToJsonElement(jsonText) as? JsonObject
                 ?: return@runCatching null
             val songElement = (root["songs"] as? JsonArray)?.firstOrNull()
+                ?: root[saavnSongId]
                 ?: root.values.firstOrNull { it is JsonObject }
                 ?: run {
                     TrackLog.w(TAG, "Saavn getDetails held no song for $saavnSongId")
