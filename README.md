@@ -1,6 +1,9 @@
-<div align="center">
-  <img src="banner.jpg" alt="UMtify Showcase" width="100%" />
-</div>
+<p align="center">
+  <img src="assets/screenshot_home.jpg" width="24%" alt="Home Screen" />
+  <img src="assets/screenshot_player.jpg" width="24%" alt="Now Playing Screen" />
+  <img src="assets/screenshot_settings.jpg" width="24%" alt="Settings Screen" />
+  <img src="assets/screenshot_widgets.jpg" width="24%" alt="Lockscreen & Home Widgets" />
+</p>
 
 <div align="center">
 
