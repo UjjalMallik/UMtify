@@ -15,7 +15,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
@@ -120,13 +126,75 @@ fun AccountProfileSelector(
                 LazyColumn(
                     modifier = Modifier.heightIn(max = 420.dp),
                 ) {
-                    item(key = "title", contentType = "header") {
-                        Text(
-                            stringResource(R.string.switch_account),
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(20.dp, 18.dp, 20.dp, 8.dp),
+                    item(key = "offline_mode_toggle", contentType = "header") {
+                        val offlineMode by AppSettings.offlineModeEnabled.collectAsStateWithLifecycle()
+                        val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+                        val toggleShape = RoundedCornerShape(18.dp)
+                        val toggleBorder = Brush.linearGradient(
+                            listOf(
+                                Color.White.copy(alpha = 0.35f),
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+                                Color.White.copy(alpha = 0.08f),
+                            ),
                         )
+                        val toggleBg = if (isLight) {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.70f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.60f)
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                                .clip(toggleShape)
+                                .background(toggleBg)
+                                .border(1.dp, toggleBorder, toggleShape)
+                                .clickable { AppSettings.setOfflineModeEnabled(!offlineMode) }
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (offlineMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
+                                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.50f)
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.CloudOff,
+                                    contentDescription = null,
+                                    tint = if (offlineMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = stringResource(R.string.offline_mode),
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                )
+                                Text(
+                                    text = "Downloads, cached & local only",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Switch(
+                                checked = offlineMode,
+                                onCheckedChange = AppSettings::setOfflineModeEnabled,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        }
                     }
                     accounts.forEach { account ->
                         item(key = "account_label_${account.accountId}", contentType = "account_label") {

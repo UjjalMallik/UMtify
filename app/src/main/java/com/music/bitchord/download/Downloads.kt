@@ -9,6 +9,7 @@ import com.music.bitchord.data.DebugLog as Log
 import androidx.core.content.ContextCompat
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.model.durationMillis
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.DownloadQuality
 import com.music.bitchord.data.sources.SourceResolver
@@ -638,6 +639,9 @@ object Downloads {
             if (!seenUris.add(meta.uri)) continue
             val uri = meta.uri.toUri()
             if (DownloadStore.exists(context, uri)) {
+                if (meta.durationText.durationMillis() in 1..30_000L || (meta.durationText != null && meta.durationText.durationMillis() <= 30_000L)) {
+                    continue
+                }
                 val fileModifiedMillis = uri.takeIf { it.scheme == "file" }
                     ?.path
                     ?.let(::File)

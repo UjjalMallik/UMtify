@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.ImageBitmap
 import coil3.compose.LocalPlatformContext
@@ -366,6 +367,18 @@ internal fun dynamicDarkScheme(dominant: Color, accent: Color): ColorScheme {
     val primary = highlight.tone(0.46f, 0.88f, 0.78f)
     val secondary = secondarySource.tone(0.26f, 0.54f, 0.80f)
     val tertiary = tertiarySource.tone(0.34f, 0.62f, 0.80f)
+
+    val dimBackground = lerp(Color(0xFF08090C), base, 0.05f)
+    val dimSurface = lerp(Color(0xFF0B0D12), base, 0.06f)
+    val dimSurfaceVariant = lerp(Color(0xFF141720), base, 0.06f)
+    val dimSurfaceDim = Color(0xFF060709)
+    val dimSurfaceBright = lerp(Color(0xFF222630), base, 0.08f)
+    val dimSurfaceContainerLowest = Color(0xFF040507)
+    val dimSurfaceContainerLow = lerp(Color(0xFF0D0F14), base, 0.05f)
+    val dimSurfaceContainer = lerp(Color(0xFF11141A), base, 0.06f)
+    val dimSurfaceContainerHigh = lerp(Color(0xFF171A22), base, 0.07f)
+    val dimSurfaceContainerHighest = lerp(Color(0xFF1D212A), base, 0.08f)
+
     return darkColorScheme(
         primary = primary,
         onPrimary = highlight.tone(0.50f, 0.90f, 0.18f),
@@ -380,11 +393,11 @@ internal fun dynamicDarkScheme(dominant: Color, accent: Color): ColorScheme {
         onTertiary = tertiarySource.tone(0.36f, 0.64f, 0.18f),
         tertiaryContainer = tertiarySource.tone(0.28f, 0.54f, 0.27f),
         onTertiaryContainer = tertiarySource.tone(0.24f, 0.50f, 0.90f),
-        background = base.tone(0.12f, 0.24f, 0.07f),
-        onBackground = base.tone(0.04f, 0.08f, 0.94f),
-        surface = base.tone(0.14f, 0.26f, 0.09f),
-        onSurface = base.tone(0.04f, 0.08f, 0.93f),
-        surfaceVariant = base.tone(0.16f, 0.30f, 0.14f),
+        background = dimBackground,
+        onBackground = Color(0xFFF0F1F5),
+        surface = dimSurface,
+        onSurface = Color(0xFFE8E9ED),
+        surfaceVariant = dimSurfaceVariant,
         onSurfaceVariant = base.tone(0.06f, 0.14f, 0.78f),
         surfaceTint = primary,
         inverseSurface = base.tone(0.04f, 0.08f, 0.90f),
@@ -396,13 +409,13 @@ internal fun dynamicDarkScheme(dominant: Color, accent: Color): ColorScheme {
         outline = base.tone(0.10f, 0.20f, 0.45f),
         outlineVariant = base.tone(0.08f, 0.16f, 0.22f),
         scrim = Color.Black,
-        surfaceBright = base.tone(0.12f, 0.22f, 0.20f),
-        surfaceDim = base.tone(0.10f, 0.20f, 0.065f),
-        surfaceContainer = base.tone(0.14f, 0.26f, 0.095f),
-        surfaceContainerHigh = base.tone(0.15f, 0.28f, 0.12f),
-        surfaceContainerHighest = base.tone(0.16f, 0.30f, 0.15f),
-        surfaceContainerLow = base.tone(0.13f, 0.24f, 0.08f),
-        surfaceContainerLowest = base.tone(0.10f, 0.20f, 0.05f),
+        surfaceBright = dimSurfaceBright,
+        surfaceDim = dimSurfaceDim,
+        surfaceContainer = dimSurfaceContainer,
+        surfaceContainerHigh = dimSurfaceContainerHigh,
+        surfaceContainerHighest = dimSurfaceContainerHighest,
+        surfaceContainerLow = dimSurfaceContainerLow,
+        surfaceContainerLowest = dimSurfaceContainerLowest,
     )
 }
 

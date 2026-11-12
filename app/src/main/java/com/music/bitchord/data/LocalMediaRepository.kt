@@ -371,7 +371,7 @@ object LocalMediaRepository {
      * of scanner metadata so the same bad rows stay out across Android vendors.
      */
     internal fun isEligibleLocalMusic(durationMs: Long, displayName: String, path: String?): Boolean {
-        if (durationMs in 1 until MIN_LOCAL_MUSIC_DURATION_MS) return false
+        if (durationMs in 1..MIN_LOCAL_MUSIC_DURATION_MS) return false
 
         val fileName = path?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
             ?: displayName

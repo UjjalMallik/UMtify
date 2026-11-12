@@ -39,6 +39,7 @@ import com.music.bitchord.auth.CapturedSession
 import com.music.bitchord.auth.WebSessionMode
 import com.music.bitchord.data.model.Account
 import com.music.bitchord.data.model.AccountChannel
+import com.music.bitchord.data.model.durationMillis
 import com.music.bitchord.data.model.BrowseType
 import com.music.bitchord.data.model.DetailPage
 import com.music.bitchord.data.model.HomeShelf
@@ -158,14 +159,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun readOfflineHome(): OfflineHome = withContext(Dispatchers.IO) {
         val context = getApplication<Application>()
         val downloads = runCatching { Downloads.getDownloadedSongs(context) }.getOrDefault(emptyList())
-            .filter { it.videoId.isNotBlank() }
+            .filter { it.videoId.isNotBlank() && it.durationMillis() > 30_000L }
         val cached = runCatching { AudioCache.cachedSongs().map { it.song } }.getOrDefault(emptyList())
-            .filter { it.videoId.isNotBlank() }
+            .filter { it.videoId.isNotBlank() && it.durationMillis() > 30_000L }
         // Unpermitted is not the same as empty, but offline the page has no
         // way to ask for it politely; the folder still can when opened.
         val local = if (LocalMediaRepository.hasStoragePermission(context)) {
             runCatching { LocalMediaRepository.getLocalMusic(context) }.getOrDefault(emptyList())
-                .filter { it.videoId.isNotBlank() }
+                .filter { it.videoId.isNotBlank() && it.durationMillis() > 30_000L }
         } else {
             emptyList()
         }
@@ -3226,7 +3227,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     private suspend fun downloadedPlaylist(browseId: String): List<Song> {
         val id = Downloads.recordIdOf(browseId) ?: return emptyList()
-        return Downloads.getCollectionSongs(getApplication(), id)
+        return Downloads.getCollectionSongs(getApplication(), id).filter { it.durationMillis() > 30_000L }
     }
 
     /**
@@ -3237,7 +3238,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun downloadedCopyOf(browseId: String): List<Song> {
         val bare = browseId.removePrefix("VL")
         val id = Downloads.collections.value.keys.firstOrNull { it.removePrefix("VL") == bare } ?: return emptyList()
-        return Downloads.getCollectionSongs(getApplication(), id)
+        return Downloads.getCollectionSongs(getApplication(), id).filter { it.durationMillis() > 30_000L }
     }
 
     /**
@@ -3245,7 +3246,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * is holding, most recently played first. See [AudioCache.cachedSongs].
      */
     private suspend fun cachedSongsState(): UiState<List<Song>> {
-        val songs = AudioCache.cachedSongs().map { it.song }
+        val songs = AudioCache.cachedSongs().map { it.song }.filter { it.durationMillis() > 30_000L }
         return if (songs.isEmpty()) UiState.Error(text(R.string.cached_songs_empty)) else UiState.Success(songs)
     }
 

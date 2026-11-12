@@ -69,8 +69,8 @@ internal data class MediaWidgetSnapshot(
             hasNext = false,
         )
 
-        fun save(context: Context, snapshot: MediaWidgetSnapshot) {
-            prefs(context).edit()
+        fun save(context: Context, snapshot: MediaWidgetSnapshot, commitSync: Boolean = true) {
+            val editor = prefs(context).edit()
                 .putString(KEY_MEDIA_ID, snapshot.mediaId)
                 .putString(KEY_TITLE, snapshot.title)
                 .putString(KEY_ARTIST, snapshot.artist)
@@ -83,7 +83,11 @@ internal data class MediaWidgetSnapshot(
                 .putBoolean(KEY_SHUFFLE, snapshot.shuffleEnabled)
                 .putLong(KEY_POSITION, snapshot.positionMs)
                 .putLong(KEY_DURATION, snapshot.durationMs)
-                .apply()
+            if (commitSync) editor.commit() else editor.apply()
+        }
+
+        fun setPlaying(context: Context, isPlaying: Boolean) {
+            prefs(context).edit().putBoolean(KEY_PLAYING, isPlaying).commit()
         }
 
         /** The last state published by the live playback service. */

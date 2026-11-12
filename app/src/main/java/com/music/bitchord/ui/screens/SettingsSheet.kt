@@ -1,6 +1,9 @@
 package com.music.bitchord.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.material3.Surface
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Favorite
@@ -500,8 +503,6 @@ fun SettingsScreen(
             search.matches(accountTitle, "scrobbling", "listenbrainz", "sign in", "profile", "email")
         val showListenCard =
             search.matches(listenTogetherTitle, "jam", "party", "sync", "friends")
-        val showOfflineCard =
-            search.matches(offlineModeTitle, "offline", "downloaded", "local", "no internet")
         if (showAccountCard || showListenCard) {
             Spacer(Modifier.height(14.dp))
             Row(
@@ -542,28 +543,6 @@ fun SettingsScreen(
                     )
                 }
             }
-        }
-        if (showOfflineCard) {
-            Spacer(Modifier.height(12.dp))
-            SettingsFeatureCard(
-                icon = Icons.Rounded.CloudOff,
-                title = offlineModeTitle,
-                subtitle = stringResource(R.string.offline_mode_subtitle),
-                trailing = {
-                    Switch(
-                        checked = offlineMode,
-                        onCheckedChange = AppSettings::setOfflineModeEnabled,
-                        colors = SwitchDefaults.colors(
-                            checkedTrackColor = MaterialTheme.colorScheme.primary,
-                            checkedBorderColor = MaterialTheme.colorScheme.primary,
-                        ),
-                    )
-                },
-                onClick = { AppSettings.setOfflineModeEnabled(!offlineMode) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = GROUP_INSET),
-            )
         }
 
         // The row that used to sit at the top of this group was called
@@ -2726,35 +2705,68 @@ internal fun Modifier.liquidGlassCard(
     shape: Shape = GroupShape,
     isLight: Boolean = MaterialTheme.colorScheme.background.luminance() > 0.5f,
 ): Modifier {
-    val darkBorder = Brush.verticalGradient(
-        listOf(
-            Color.White.copy(alpha = 0.28f),
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
-            Color.White.copy(alpha = 0.06f),
+    val primary = MaterialTheme.colorScheme.primary
+    val surfaceHigh = MaterialTheme.colorScheme.surfaceContainerHigh
+    val surfaceNormal = MaterialTheme.colorScheme.surfaceContainer
+
+    val darkSurface = Brush.linearGradient(
+        colors = listOf(
+            surfaceHigh.copy(alpha = 0.72f),
+            primary.copy(alpha = 0.16f),
+            surfaceNormal.copy(alpha = 0.48f),
         ),
+        start = Offset.Zero,
+        end = Offset.Infinite,
     )
-    val lightBorder = Brush.verticalGradient(
-        listOf(
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.30f),
+    val lightSurface = Brush.linearGradient(
+        colors = listOf(
+            Color.White.copy(alpha = 0.92f),
+            primary.copy(alpha = 0.10f),
+            Color.White.copy(alpha = 0.78f),
+        ),
+        start = Offset.Zero,
+        end = Offset.Infinite,
+    )
+
+    val darkBorder = Brush.linearGradient(
+        colors = listOf(
+            Color.White.copy(alpha = 0.34f),
+            primary.copy(alpha = 0.28f),
+            Color.White.copy(alpha = 0.08f),
+        ),
+        start = Offset.Zero,
+        end = Offset.Infinite,
+    )
+    val lightBorder = Brush.linearGradient(
+        colors = listOf(
+            Color.White.copy(alpha = 0.60f),
+            primary.copy(alpha = 0.30f),
             Color.Black.copy(alpha = 0.12f),
         ),
+        start = Offset.Zero,
+        end = Offset.Infinite,
     )
-    val darkSheen = Brush.linearGradient(
-        listOf(Color.White.copy(alpha = 0.10f), Color.White.copy(alpha = 0.02f)),
-    )
-    val darkBase = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.65f)
-    val lightBase = Color.White.copy(alpha = 0.85f)
 
     return this
         .clip(shape)
-        .background(if (isLight) lightBase else darkBase)
-        .then(
-            if (isLight) {
-                Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.06f))
-            } else {
-                Modifier.background(darkSheen)
-            },
-        )
+        .background(if (isLight) lightSurface else darkSurface)
+        .drawWithContent {
+            drawContent()
+            if (!isLight) {
+                val sheenHeight = size.height * 0.35f
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.14f),
+                            Color.Transparent,
+                        ),
+                        startY = 0f,
+                        endY = sheenHeight,
+                    ),
+                    size = Size(size.width, sheenHeight),
+                )
+            }
+        }
         .border(1.2.dp, if (isLight) lightBorder else darkBorder, shape)
 }
 internal val GROUP_INSET = 16.dp

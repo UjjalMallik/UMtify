@@ -1,6 +1,15 @@
 package com.music.bitchord.ui.screens
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.surfaceColorAtElevation
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -34,6 +43,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -471,12 +481,7 @@ private fun OfflineTitle(title: String, onSearchClick: (() -> Unit)? = null) {
 }
 
 /**
- * The pill that explains the page.
- *
- * It is a status, not a banner: nothing here is broken, the feed simply moved
- * onto the device. Its one control — switching Offline mode back off — appears
- * only when that would actually change something, so a phone in a tunnel is not
- * offered a button that does nothing.
+ * Striking, prominent Liquid Glass Status Bar / Pill Card across the top of Listen Now.
  */
 @Composable
 private fun OfflineChip(
@@ -485,43 +490,160 @@ private fun OfflineChip(
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
-            .padding(start = 14.dp, end = 4.dp, top = 7.dp, bottom = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            imageVector = Icons.Rounded.CloudOff,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(17.dp),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = stringResource(R.string.offline_mode_on),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        if (!networkAvailable) {
-            Text(
-                text = "  ·  ${stringResource(R.string.offline_mode_no_internet)}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+    val primary = MaterialTheme.colorScheme.primary
+    val surfaceHigh = MaterialTheme.colorScheme.surfaceContainerHigh
+    val surfaceContainer = MaterialTheme.colorScheme.surfaceContainer
+    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val barShape = RoundedCornerShape(22.dp)
+
+    val infiniteTransition = rememberInfiniteTransition(label = "offlinePulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.55f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "pulseAlpha",
+    )
+
+    val backgroundGradient = remember(primary, surfaceHigh, surfaceContainer, isLight) {
+        if (isLight) {
+            Brush.linearGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.95f),
+                    primary.copy(alpha = 0.12f),
+                    Color.White.copy(alpha = 0.85f),
+                ),
+                start = Offset.Zero,
+                end = Offset.Infinite,
+            )
+        } else {
+            Brush.linearGradient(
+                listOf(
+                    surfaceHigh.copy(alpha = 0.82f),
+                    primary.copy(alpha = 0.20f),
+                    surfaceContainer.copy(alpha = 0.60f),
+                ),
+                start = Offset.Zero,
+                end = Offset.Infinite,
             )
         }
-        if (manualOffline && networkAvailable) {
-            Text(
-                text = stringResource(R.string.offline_mode_turn_off),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .padding(start = 10.dp)
-                    .clip(CircleShape)
-                    .clickable(onClick = onExit)
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
+    }
+
+    val borderBrush = remember(primary, isLight) {
+        if (isLight) {
+            Brush.linearGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.70f),
+                    primary.copy(alpha = 0.35f),
+                    Color.Black.copy(alpha = 0.12f),
+                ),
+                start = Offset.Zero,
+                end = Offset.Infinite,
             )
+        } else {
+            Brush.linearGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.45f),
+                    primary.copy(alpha = 0.40f),
+                    Color.White.copy(alpha = 0.12f),
+                ),
+                start = Offset.Zero,
+                end = Offset.Infinite,
+            )
+        }
+    }
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(barShape)
+            .background(backgroundGradient)
+            .drawWithContent {
+                drawContent()
+                if (!isLight) {
+                    val sheenHeight = size.height * 0.40f
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            listOf(Color.White.copy(alpha = 0.16f), Color.Transparent),
+                            startY = 0f,
+                            endY = sheenHeight,
+                        ),
+                        size = Size(size.width, sheenHeight),
+                    )
+                }
+            }
+            .border(1.2.dp, borderBrush, barShape)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Pulsing offline badge icon
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(primary.copy(alpha = 0.18f * pulseAlpha))
+                .border(1.dp, primary.copy(alpha = 0.38f * pulseAlpha), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.CloudOff,
+                contentDescription = null,
+                tint = primary,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+
+        Spacer(Modifier.width(12.dp))
+
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = "Offline Mode Active",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = if (!networkAvailable && !manualOffline) {
+                    stringResource(R.string.offline_mode_no_internet)
+                } else {
+                    "Playing from on-device storage"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        // Highlighted glossy pill button "Turn Off"
+        if (manualOffline || networkAvailable) {
+            androidx.compose.material3.Surface(
+                onClick = onExit,
+                shape = RoundedCornerShape(percent = 50),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.88f),
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.2.dp,
+                    Brush.linearGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.60f),
+                            primary.copy(alpha = 0.50f),
+                            Color.White.copy(alpha = 0.20f),
+                        ),
+                    ),
+                ),
+                shadowElevation = 2.dp,
+                modifier = Modifier.padding(start = 8.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.offline_mode_turn_off),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                )
+            }
         }
     }
 }
@@ -578,7 +700,17 @@ private fun QuickAccessCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .clip(RoundedCornerShape(14.dp))
+                .clip(RoundedCornerShape(16.dp))
+                .border(
+                    1.2.dp,
+                    Brush.linearGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.40f),
+                            Color.White.copy(alpha = 0.12f),
+                        ),
+                    ),
+                    RoundedCornerShape(16.dp),
+                )
                 .clickable(onClick = onOpen),
             contentAlignment = Alignment.Center,
         ) {

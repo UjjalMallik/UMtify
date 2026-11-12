@@ -82,6 +82,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -208,44 +210,82 @@ fun trackColumnWidth(available: Dp): Dp =
 /**
  * Clean Liquid Glass modifier for translucent cards without hardware shadow projection artifacts.
  */
+/**
+ * 3-layer Crystal Glossy Glass modifier for high-contrast music cards.
+ */
 @Composable
 fun Modifier.liquidGlassCard(
     shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(18.dp),
     isLight: Boolean = MaterialTheme.colorScheme.background.luminance() > 0.5f,
 ): Modifier {
+    val primary = MaterialTheme.colorScheme.primary
+    val surfaceHigh = MaterialTheme.colorScheme.surfaceContainerHigh
+    val surfaceNormal = MaterialTheme.colorScheme.surfaceContainer
+
+    // Layer 1 (Distinct Elevated Tinted Fill):
+    // Brighter/richer translucent diagonal glass gradient
     val darkSurface = Brush.linearGradient(
         colors = listOf(
-            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f),
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
-            MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.35f),
+            surfaceHigh.copy(alpha = 0.72f),
+            primary.copy(alpha = 0.16f),
+            surfaceNormal.copy(alpha = 0.48f),
         ),
+        start = Offset.Zero,
+        end = Offset.Infinite,
     )
     val lightSurface = Brush.linearGradient(
         colors = listOf(
-            Color.White.copy(alpha = 0.88f),
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.06f),
-            Color.White.copy(alpha = 0.72f),
+            Color.White.copy(alpha = 0.92f),
+            primary.copy(alpha = 0.10f),
+            Color.White.copy(alpha = 0.78f),
         ),
+        start = Offset.Zero,
+        end = Offset.Infinite,
     )
-    val darkBorder = Brush.verticalGradient(
-        listOf(
-            Color.White.copy(alpha = 0.24f),
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
-            Color.White.copy(alpha = 0.05f),
+
+    // Layer 3 (Crisp Dual-Stop Glass Border):
+    // 1.2.dp border that gleams at top-left
+    val darkBorder = Brush.linearGradient(
+        colors = listOf(
+            Color.White.copy(alpha = 0.34f),
+            primary.copy(alpha = 0.28f),
+            Color.White.copy(alpha = 0.08f),
         ),
+        start = Offset.Zero,
+        end = Offset.Infinite,
     )
-    val lightBorder = Brush.verticalGradient(
-        listOf(
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
-            Color.Black.copy(alpha = 0.10f),
-            Color.White.copy(alpha = 0.35f),
+    val lightBorder = Brush.linearGradient(
+        colors = listOf(
+            Color.White.copy(alpha = 0.60f),
+            primary.copy(alpha = 0.30f),
+            Color.Black.copy(alpha = 0.12f),
         ),
+        start = Offset.Zero,
+        end = Offset.Infinite,
     )
 
     return this
         .clip(shape)
         .background(if (isLight) lightSurface else darkSurface)
-        .border(1.dp, if (isLight) lightBorder else darkBorder, shape)
+        // Layer 2 (Top Glossy Specular Sheen across upper 35%):
+        .drawWithContent {
+            drawContent()
+            if (!isLight) {
+                val sheenHeight = size.height * 0.35f
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.14f),
+                            Color.Transparent,
+                        ),
+                        startY = 0f,
+                        endY = sheenHeight,
+                    ),
+                    size = Size(size.width, sheenHeight),
+                )
+            }
+        }
+        .border(1.2.dp, if (isLight) lightBorder else darkBorder, shape)
 }
 
 /** How many cards sit across a library grid row, and how wide each lands. */

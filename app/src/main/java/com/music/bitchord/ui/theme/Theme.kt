@@ -26,11 +26,11 @@ val AccentRed = Color(0xFFFA2D48)
 private val DarkColors = darkColorScheme(
     primary = Color.White,
     onPrimary = Color.Black,
-    background = Color.Black,
+    background = Color(0xFF08090C),
     onBackground = Color.White,
-    surface = Color(0xFF0D0D0F),
+    surface = Color(0xFF0B0D12),
     onSurface = Color.White,
-    surfaceVariant = Color(0xFF1C1C1E),
+    surfaceVariant = Color(0xFF141720),
     onSurfaceVariant = Color(0xFF8E8E93),
     outline = Color(0xFF2C2C2E),
 )

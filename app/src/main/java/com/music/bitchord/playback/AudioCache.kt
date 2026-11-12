@@ -21,6 +21,7 @@ import androidx.media3.datasource.cache.SimpleCache
 import java.io.IOException
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.model.durationMillis
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.sources.DeviceCodecs
 import com.music.bitchord.data.sources.SourceKind
@@ -793,19 +794,31 @@ object AudioCache {
             if (origin == Origin.OTHER) continue
             if (meta.get(META_PLAYED, null as String?) == null) continue
             val mediaId = meta.get(META_MEDIA_ID, null as String?) ?: continue
+
+            // 100% complete cache check: require full byte range on disk
+            val contentLength = ContentMetadata.getContentLength(meta)
+            if (contentLength <= 0L) continue
             val spans = cache.getCachedSpans(key).filter { it.isCached && it.file?.exists() == true }
             val bytes = spans.sumOf { it.length }
             if (bytes <= 0L) continue
+            val cachedBytes = cache.getCachedBytes(key, 0, contentLength)
+            val isFull = cache.isCached(key, 0, contentLength) || (cachedBytes >= (contentLength * 0.99).toLong())
+            if (!isFull) continue
+
             val touched = spans.maxOf { it.lastTouchTimestamp }
             byTrack.getOrPut(mediaId) { mutableListOf() } += Entry(origin, meta, bytes, touched)
         }
-        byTrack.map { (mediaId, entries) ->
+        byTrack.mapNotNull { (mediaId, entries) ->
             fun field(name: String): String? =
                 entries.firstNotNullOfOrNull { it.meta.get(name, null as String?)?.takeIf(String::isNotBlank) }
             val bytes = entries.sumOf { it.bytes }
             val lastUsed = entries.maxOf { it.touched }
             val origin = entries.maxBy { it.bytes }.origin
             val noted = notedSongs[mediaId]
+            val durationText = field(META_DURATION) ?: noted?.durationText
+            val durationMs = durationText.durationMillis()
+            // Strictly exclude tracks <= 30 seconds
+            if (durationMs in 1..30_000L || (durationMs <= 30_000L && durationText != null)) return@mapNotNull null
             val art = field(META_ART) ?: noted?.thumbnailUrl
                 ?: mediaId.takeIf { SourceRegistry.parseTrackKey(it) == null }
                     ?.let { "https://i.ytimg.com/vi/$it/hqdefault.jpg" }
@@ -815,7 +828,7 @@ object AudioCache {
                     title = field(META_TITLE) ?: noted?.title?.takeIf(String::isNotBlank) ?: mediaId,
                     artist = field(META_ARTIST) ?: noted?.artist.orEmpty(),
                     thumbnailUrl = art,
-                    durationText = field(META_DURATION) ?: noted?.durationText,
+                    durationText = durationText,
                     albumName = field(META_ALBUM) ?: noted?.albumName,
                     // The row's second line: where the copy came from and
                     // what it costs on disk.

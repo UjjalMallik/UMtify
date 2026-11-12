@@ -918,10 +918,8 @@ class PlaybackService : MediaLibraryService() {
             if (isPlaying) prefetchAround(exoPlayer) else cancelPrefetch()
             if (isPlaying) lookForBetterCopy(exoPlayer)
             savePlaybackState(exoPlayer)
-            // Not strictly needed for the glyph — onPlayWhenReadyChanged has
-            // already flipped that — but this is where hasNext/hasPrevious and
-            // the artwork are known to be settled.
-            publishWidgetState()
+            val actuallyPlaying = isPlaying && exoPlayer.playbackState != Player.STATE_ENDED && exoPlayer.playbackState != Player.STATE_IDLE
+            publishWidgetState(playing = actuallyPlaying)
 
             val song = exoPlayer.currentMediaItem?.toSong()
             val durationMs = exoPlayer.duration.takeIf { it > 0 }
@@ -977,7 +975,8 @@ class PlaybackService : MediaLibraryService() {
             // already sends a listener's play to the receiver. The phone goes
             // quiet again and the receiver is asked instead.
             if (playWhenReady) player?.let(speakers::onLocalStartedPlaying)
-            publishWidgetState(playing = playWhenReady)
+            val actuallyPlaying = playWhenReady && (player?.let { it.isPlaying && it.playbackState != Player.STATE_ENDED && it.playbackState != Player.STATE_IDLE } == true)
+            publishWidgetState(playing = actuallyPlaying)
             // The only place the *reason* can be read. A party has to tell a
             // pause the listener asked for from one another app imposed, and
             // [Player] does not keep the answer around to be asked later.
@@ -1087,6 +1086,8 @@ class PlaybackService : MediaLibraryService() {
             // The player this fired on, which is by definition the one the
             // session is currently pointed at.
             val exoPlayer = player ?: return
+            val actuallyPlaying = exoPlayer.isPlaying && state != Player.STATE_ENDED && state != Player.STATE_IDLE
+            publishWidgetState(playing = actuallyPlaying)
             if (state == Player.STATE_ENDED) {
                 SleepTimer.cancel()
                 // The queue ran dry, so no transition will ever close the last
@@ -1309,6 +1310,7 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
+        isServiceRunning = true
 
         if (com.music.bitchord.data.innertube.Innertube.cookie == null) {
             com.music.bitchord.data.innertube.Innertube.cookie = com.music.bitchord.auth.AuthStore(this).cookie
@@ -6061,8 +6063,20 @@ class PlaybackService : MediaLibraryService() {
      * play right up to the moment it is released.
      */
     private fun publishWidgetState(playing: Boolean? = null) {
-        val exoPlayer = player ?: return
-        val song = exoPlayer.currentMediaItem?.toSong() ?: return
+        val exoPlayer = player
+        val reported: Player? = mediaSession?.player ?: exoPlayer
+        val actuallyPlaying = playing ?: (reported?.let {
+            it.isPlaying && it.playbackState != Player.STATE_ENDED && it.playbackState != Player.STATE_IDLE
+        } ?: false)
+
+        val song = reported?.currentMediaItem?.toSong() ?: exoPlayer?.currentMediaItem?.toSong()
+        if (song == null) {
+            MediaWidgetSnapshot.setPlaying(this, false)
+            val baseSnapshot = MediaWidgetSnapshot.load(this).copy(isPlaying = false)
+            MediaWidgetSnapshot.save(this, baseSnapshot, commitSync = true)
+            MediaWidget.refresh(this)
+            return
+        }
         // LikeState only knows ratings this process has seen: a fresh service
         // started from the widget or a restart has none until something seeds
         // it. Unknown is not "not liked", so keep what was last published for
@@ -6070,32 +6084,28 @@ class PlaybackService : MediaLibraryService() {
         val liked = LikeState.overrides.value[song.videoId]?.let { it == LikeStatus.LIKE }
             ?: MediaWidgetSnapshot.load(this).takeIf { it.mediaId == song.videoId }?.isLiked
             ?: false
-        val reported: Player = mediaSession?.player ?: exoPlayer
         val snapshot = MediaWidgetSnapshot(
             mediaId = song.videoId,
             title = song.title,
             artist = song.artist,
             artworkUrl = song.thumbnailUrl,
-            // playWhenReady, not isPlaying — see MediaWidgetSnapshot.isPlaying.
-            // Through the session player, which answers for Cast or the watch
-            // while one of them is the speaker.
-            isPlaying = playing ?: reported.playWhenReady,
-            hasPrevious = exoPlayer.hasPreviousMediaItem(),
-            hasNext = exoPlayer.hasNextMediaItem(),
+            isPlaying = actuallyPlaying,
+            hasPrevious = exoPlayer?.hasPreviousMediaItem() ?: false,
+            hasNext = exoPlayer?.hasNextMediaItem() ?: false,
             isLiked = liked,
-            canLike = canLike(exoPlayer.currentMediaItem),
+            canLike = canLike(exoPlayer?.currentMediaItem),
             shuffleEnabled = QueueShuffle.enabled.value,
             // The clock on the widget's progress bar. Position is read through
             // the session player like everything else here, so a Cast or watch
             // speaker reports where it actually is rather than where this
             // process last left off. Unknown position reads as zero.
-            positionMs = reported.currentPosition.coerceAtLeast(0L),
-            durationMs = reported.duration.coerceAtLeast(0L),
+            positionMs = reported?.currentPosition?.coerceAtLeast(0L) ?: 0L,
+            durationMs = reported?.duration?.coerceAtLeast(0L) ?: 0L,
         )
-        MediaWidgetSnapshot.save(this, snapshot)
+        MediaWidgetSnapshot.save(this, snapshot, commitSync = true)
         MediaWidget.refresh(this)
         // The watch app follows the widget — same moments, same snapshot.
-        WearBridge.publish(this, snapshot, reported, playing)
+        reported?.let { WearBridge.publish(this, snapshot, it, actuallyPlaying) }
     }
 
     private var foreignCachePurgeJob: Job? = null
@@ -7515,6 +7525,8 @@ class PlaybackService : MediaLibraryService() {
                     saveQueueSnapshotImmediately(exoPlayer)
                     savePlaybackState(exoPlayer)
                 }
+                val actuallyPlaying = exoPlayer.isPlaying && exoPlayer.playbackState != Player.STATE_ENDED && exoPlayer.playbackState != Player.STATE_IDLE
+                publishWidgetState(playing = actuallyPlaying)
                 runCatching {
                     currentNotification?.let { notif ->
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -7549,6 +7561,11 @@ class PlaybackService : MediaLibraryService() {
         player?.isPlaying == true || spare?.isPlaying == true || castPlayback.isPlaying
 
     override fun onDestroy() {
+        isServiceRunning = false
+        MediaWidgetSnapshot.setPlaying(this, false)
+        val stoppedSnapshot = MediaWidgetSnapshot.load(this).copy(isPlaying = false)
+        MediaWidgetSnapshot.save(this, stoppedSnapshot, commitSync = true)
+        MediaWidget.pushSync(this, stoppedSnapshot)
         if (playbackWakeLock?.isHeld == true) {
             runCatching { playbackWakeLock?.release() }
         }
@@ -9139,7 +9156,10 @@ class PlaybackService : MediaLibraryService() {
             )
             .build()
 
-    private companion object {
+    companion object {
+        @Volatile
+        var isServiceRunning: Boolean = false
+            internal set
         const val MEDIA_ROOT_ID = "root"
         const val MEDIA_RECENTS_ID = "recents"
         const val MEDIA_QUICK_PICKS_ID = "quick_picks"

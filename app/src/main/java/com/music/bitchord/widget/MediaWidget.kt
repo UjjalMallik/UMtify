@@ -136,6 +136,24 @@ abstract class MediaWidget : AppWidgetProvider() {
             }
         }
 
+        internal fun pushSync(context: Context, snapshot: MediaWidgetSnapshot) {
+            val app = context.applicationContext
+            val manager = runCatching { AppWidgetManager.getInstance(app) }.getOrNull() ?: return
+            val squareIds = runCatching {
+                manager.getAppWidgetIds(ComponentName(app, MediaWidgetSquare::class.java))
+            }.getOrNull()
+            if (squareIds != null && squareIds.isNotEmpty()) {
+                for (id in squareIds) {
+                    val size = measure(context, manager, id, SQUARE_WIDTH_DP)
+                    val v = views(context, id, snapshot, size, null, lastFace[id])
+                    manager.updateAppWidget(id, v)
+                    WidgetWave.stop(id)
+                }
+            }
+            MediaWidgetPill.pushSync(app, snapshot)
+            CrystalVinylWidgetProvider.pushSync(app, snapshot)
+        }
+
         /**
          * Redraws [ids], each within its own [RENDER_TIMEOUT_MS].
          *
@@ -211,7 +229,8 @@ abstract class MediaWidget : AppWidgetProvider() {
 
             // The spectrum holds a ticker, so every path that isn't "playing,
             // with a track" has to stop it.
-            if (snapshot.isPlaying && snapshot.hasTrack) {
+            val isLivePlaying = snapshot.isPlaying && com.music.bitchord.playback.PlaybackService.isServiceRunning
+            if (isLivePlaying && snapshot.hasTrack) {
                 WidgetWave.play(
                     context = context,
                     id = id,
@@ -255,13 +274,14 @@ abstract class MediaWidget : AppWidgetProvider() {
             bindWave(views, id, snapshot, size)
             bindSeek(views, context, snapshot, size, art)
 
+            val isLivePlaying = snapshot.isPlaying && com.music.bitchord.playback.PlaybackService.isServiceRunning
             views.setImageViewResource(
                 R.id.widget_toggle,
-                if (snapshot.isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play,
+                if (isLivePlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play,
             )
             views.setContentDescription(
                 R.id.widget_toggle,
-                context.getString(if (snapshot.isPlaying) R.string.widget_pause else R.string.widget_play),
+                context.getString(if (isLivePlaying) R.string.widget_pause else R.string.widget_play),
             )
 
             // On the root, not on widget_glass: the root is the last view offered
@@ -312,10 +332,13 @@ abstract class MediaWidget : AppWidgetProvider() {
             size: WidgetSize,
         ) {
             views.setViewVisibility(R.id.widget_wave, View.VISIBLE)
-            val playing = snapshot.isPlaying && snapshot.hasTrack
+            val isLivePlaying = snapshot.isPlaying && com.music.bitchord.playback.PlaybackService.isServiceRunning
+            val playing = isLivePlaying && snapshot.hasTrack
             if (playing) {
                 WidgetWave.frameFor(id, size.waveWidthPx, size.waveHeightPx)
                     ?.let { views.setImageViewBitmap(R.id.widget_wave, it) }
+            } else {
+                WidgetWave.stop(id)
             }
             views.setImageAlpha(R.id.widget_wave, if (playing) ALPHA_ENABLED else ALPHA_HIDDEN)
         }

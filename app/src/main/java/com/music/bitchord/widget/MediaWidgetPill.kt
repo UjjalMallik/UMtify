@@ -100,6 +100,20 @@ class MediaWidgetPill : AppWidgetProvider() {
             }
         }
 
+        internal fun pushSync(context: Context, snapshot: MediaWidgetSnapshot) {
+            val app = context.applicationContext
+            val manager = runCatching { AppWidgetManager.getInstance(app) }.getOrNull() ?: return
+            val ids = runCatching {
+                manager.getAppWidgetIds(ComponentName(app, MediaWidgetPill::class.java))
+            }.getOrNull() ?: return
+            for (id in ids) {
+                val specs = specs(context, manager, id)
+                val v = views(context, id, snapshot, specs, null, lastFace[id])
+                manager.updateAppWidget(id, v)
+                WidgetWave.stop(id)
+            }
+        }
+
         /**
          * Pushes the controls at once when the pictures still have to be drawn,
          * for the same reason [MediaWidget] does: a tap should be answered in a
@@ -140,7 +154,8 @@ class MediaWidgetPill : AppWidgetProvider() {
                 lastFace[id] = face
                 manager.push(id, views(context, id, snapshot, specs, art, face))
 
-                if (specs.waveWidthPx > 0 && snapshot.isPlaying && snapshot.hasTrack) {
+                val isLivePlaying = snapshot.isPlaying && com.music.bitchord.playback.PlaybackService.isServiceRunning
+                if (specs.waveWidthPx > 0 && isLivePlaying && snapshot.hasTrack) {
                     WidgetWave.play(
                         context = context,
                         id = id,
@@ -292,11 +307,14 @@ class MediaWidgetPill : AppWidgetProvider() {
             // Fully hidden, not merely unpainted: pausing must leave no frame
             // of the spectrum behind. While playing, the ticker's current frame
             // rides along so a full update never blanks it.
-            val playing = !compact && hasTrack && snapshot.isPlaying
+            val isLivePlaying = snapshot.isPlaying && com.music.bitchord.playback.PlaybackService.isServiceRunning
+            val playing = !compact && hasTrack && isLivePlaying
             views.setViewVisibility(R.id.widget_wave, if (compact) View.GONE else View.VISIBLE)
             if (playing) {
                 WidgetWave.frameFor(id, specs.waveWidthPx, specs.waveHeightPx)
                     ?.let { views.setImageViewBitmap(R.id.widget_wave, it) }
+            } else {
+                WidgetWave.stop(id)
             }
             views.setImageAlpha(
                 R.id.widget_wave,
@@ -305,11 +323,11 @@ class MediaWidgetPill : AppWidgetProvider() {
 
             views.setImageViewResource(
                 R.id.widget_toggle,
-                if (snapshot.isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play,
+                if (isLivePlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play,
             )
             views.setContentDescription(
                 R.id.widget_toggle,
-                context.getString(if (snapshot.isPlaying) R.string.widget_pause else R.string.widget_play),
+                context.getString(if (isLivePlaying) R.string.widget_pause else R.string.widget_play),
             )
 
             val open = openPlayer(context)
