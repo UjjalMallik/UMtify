@@ -36,13 +36,14 @@ data class SourceConfig(
     /** What the user called it. Blank falls back to the server's host, or the kind's own label. */
     val label: String = "",
     val baseUrl: String = "",
-    /** JioSaavn, Archive, Jamendo are disabled by default. YouTube Music & SoundCloud enabled. */
-    val enabled: Boolean = when (kind) {
-        SourceKind.YOUTUBE -> true
-        SourceKind.SOUNDCLOUD -> true
-        SourceKind.JIOSAAVN -> false
-        SourceKind.INTERNET_ARCHIVE -> false
-        SourceKind.JAMENDO -> false
+    /** JioSaavn, Archive, Jamendo, and UMtify HQ are disabled by default. YouTube Music & SoundCloud enabled. */
+    val enabled: Boolean = when {
+        kind == SourceKind.YOUTUBE -> true
+        kind == SourceKind.SOUNDCLOUD -> true
+        kind == SourceKind.JIOSAAVN -> false
+        kind == SourceKind.INTERNET_ARCHIVE -> false
+        kind == SourceKind.JAMENDO -> false
+        id == "prebundled_addon_umtifyhq" || baseUrl.contains("umtifyhq") -> false
         else -> true
     },
     /**
@@ -116,79 +117,111 @@ object SourceRegistry {
         prefs = EncryptedPrefs.open(context, "bitchord_sources", "bitchord_sources_plain")
 
         val stored = prefs.getString(KEY_SOURCES, null)?.let(::decodeStored) ?: emptyList()
-        val jioOptInMigrationDone = prefs.getBoolean(KEY_JIOSAAVN_OPT_IN_V1, false)
-        val defaultSourcesV2Done = prefs.getBoolean(KEY_DEFAULT_SOURCES_V2, false)
-        val youtubeOrderV3Done = prefs.getBoolean(KEY_YOUTUBE_FALLBACK_ORDER_V3, false)
+        val defaultSourcesV4Done = prefs.getBoolean(KEY_DEFAULT_SOURCES_V4, false)
         val after = sourcesForInit(
             stored,
-            forceJioSaavnOff = !jioOptInMigrationDone,
-            applyDefaultSourcesV2 = !defaultSourcesV2Done,
+            applyDefaultSourcesV4 = !defaultSourcesV4Done,
         )
 
-        // Publish state and the migration marker in one preferences edit. If a
-        // process dies after recording the marker but before recording the
-        // disabled source, the next launch would otherwise believe the forced
-        // opt-out had already happened and silently restore the old on state.
+        // Publish state and the migration marker in one preferences edit.
         publish(after, persist = false)
-        if (after != stored || !jioOptInMigrationDone || !defaultSourcesV2Done || !youtubeOrderV3Done) {
+        if (after != stored || !defaultSourcesV4Done) {
             prefs.edit()
                 .putString(KEY_SOURCES, json.encodeToString(ListSerializer(SourceConfig.serializer()), after))
                 .putBoolean(KEY_JIOSAAVN_OPT_IN_V1, true)
                 .putBoolean(KEY_DEFAULT_SOURCES_V2, true)
                 .putBoolean(KEY_YOUTUBE_FALLBACK_ORDER_V3, true)
+                .putBoolean(KEY_DEFAULT_SOURCES_V4, true)
                 .apply()
         }
     }
 
     /**
      * Built-in seeding and one-time source migrations, kept pure for tests.
-     *
-     * [forceJioSaavnOff] is true exactly once for every install that first runs
-     * this version, including upgrades whose stored config currently says on.
-     * Once the marker is written, a user who deliberately enables JioSaavn is
-     * left enabled on subsequent launches.
      */
     internal fun sourcesForInit(
         stored: List<SourceConfig>,
-        forceJioSaavnOff: Boolean,
+        forceJioSaavnOff: Boolean = false,
         applyDefaultSourcesV2: Boolean = false,
+        applyDefaultSourcesV4: Boolean = false,
     ): List<SourceConfig> {
-        // If no custom order has been saved yet by the user, set clean initial default order:
-        // SoundCloud, JioSaavn, Jamendo, Internet Archive, YouTube Music
-        // with only YouTube Music (Always-On) and SoundCloud enabled by default.
+        val hqConfig = createUmtifyHqConfig()
+
+        // Default order:
+        // 1. SoundCloud (Default: ON)
+        // 2. JioSaavn (Default: OFF)
+        // 3. YouTube Music (Always on)
+        // 4. UMtify HQ (https://umtifyhq-nine.vercel.app/) (Default: OFF)
+        // 5. Jamendo (Default: OFF)
+        // 6. Internet Archive (Default: OFF)
+        val defaultOrder = listOf(
+            SourceConfig(kind = SourceKind.SOUNDCLOUD, enabled = true),
+            SourceConfig(kind = SourceKind.JIOSAAVN, enabled = false),
+            SourceConfig(kind = SourceKind.YOUTUBE, enabled = true),
+            hqConfig,
+            SourceConfig(kind = SourceKind.JAMENDO, enabled = false),
+            SourceConfig(kind = SourceKind.INTERNET_ARCHIVE, enabled = false),
+        )
+
         if (stored.isEmpty()) {
-            return BUILT_IN_KINDS.map { kind ->
-                SourceConfig(
-                    kind = kind,
-                    enabled = when (kind) {
-                        SourceKind.YOUTUBE -> true
-                        SourceKind.SOUNDCLOUD -> true
-                        else -> false
-                    },
-                )
+            return defaultOrder
+        }
+
+        // Check if UMtify HQ addon exists in stored configs
+        val existingHq = stored.firstOrNull {
+            it.id == UMTIFY_HQ_ADDON_ID ||
+                (it.kind == SourceKind.ADDON && canonicalUrl(it.baseUrl) == canonicalUrl(UMTIFY_HQ_BASE_URL))
+        }
+
+        var list = stored.filterNot { it.kind == SourceKind.MODULE }
+
+        // If UMtify HQ is not in list, insert right after YouTube Music
+        if (existingHq == null) {
+            val ytIndex = list.indexOfFirst { it.kind == SourceKind.YOUTUBE }
+            list = if (ytIndex >= 0) {
+                list.subList(0, ytIndex + 1) + hqConfig + list.subList(ytIndex + 1, list.size)
+            } else {
+                list + hqConfig
             }
         }
 
-        // When stored order exists, 100% respect the exact order arranged by the user!
-        // Only append missing built-in kinds at the tail.
+        // Add any missing built-in kinds
         val missing = BUILT_IN_KINDS
-            .filter { kind -> stored.none { it.kind == kind } }
+            .filter { kind -> list.none { it.kind == kind } }
             .map { SourceConfig(kind = it) }
 
-        val seeded = stored + missing
+        list = list + missing
 
-        return seeded
-            .filterNot { it.kind == SourceKind.MODULE }
-            .map { config ->
-                when {
-                    config.kind == SourceKind.YOUTUBE -> config.copy(enabled = true)
-                    config.kind == SourceKind.JIOSAAVN && (forceJioSaavnOff || applyDefaultSourcesV2) -> config.copy(enabled = false)
-                    config.kind == SourceKind.INTERNET_ARCHIVE && applyDefaultSourcesV2 -> config.copy(enabled = false)
-                    config.kind == SourceKind.JAMENDO && applyDefaultSourcesV2 -> config.copy(enabled = false)
-                    config.kind == SourceKind.SOUNDCLOUD && applyDefaultSourcesV2 -> config.copy(enabled = true)
-                    else -> config
-                }
+        if (applyDefaultSourcesV4) {
+            val userAddons = list.filter {
+                it.kind.isUserAdded &&
+                    it.id != UMTIFY_HQ_ADDON_ID &&
+                    canonicalUrl(it.baseUrl) != canonicalUrl(UMTIFY_HQ_BASE_URL)
             }
+            val sc = list.firstOrNull { it.kind == SourceKind.SOUNDCLOUD }?.copy(enabled = true)
+                ?: SourceConfig(kind = SourceKind.SOUNDCLOUD, enabled = true)
+            val js = list.firstOrNull { it.kind == SourceKind.JIOSAAVN }?.copy(enabled = false)
+                ?: SourceConfig(kind = SourceKind.JIOSAAVN, enabled = false)
+            val yt = list.firstOrNull { it.kind == SourceKind.YOUTUBE }?.copy(enabled = true)
+                ?: SourceConfig(kind = SourceKind.YOUTUBE, enabled = true)
+            val hq = (list.firstOrNull { it.id == UMTIFY_HQ_ADDON_ID || canonicalUrl(it.baseUrl) == canonicalUrl(UMTIFY_HQ_BASE_URL) } ?: hqConfig)
+                .copy(enabled = false)
+            val ja = list.firstOrNull { it.kind == SourceKind.JAMENDO }?.copy(enabled = false)
+                ?: SourceConfig(kind = SourceKind.JAMENDO, enabled = false)
+            val ia = list.firstOrNull { it.kind == SourceKind.INTERNET_ARCHIVE }?.copy(enabled = false)
+                ?: SourceConfig(kind = SourceKind.INTERNET_ARCHIVE, enabled = false)
+
+            return userAddons + listOf(sc, js, yt, hq, ja, ia)
+        }
+
+        return list.map { config ->
+            when {
+                config.kind == SourceKind.YOUTUBE -> config.copy(enabled = true)
+                config.id == UMTIFY_HQ_ADDON_ID && applyDefaultSourcesV4 -> config.copy(enabled = false)
+                config.kind == SourceKind.JIOSAAVN && (forceJioSaavnOff || applyDefaultSourcesV4) -> config.copy(enabled = false)
+                else -> config
+            }
+        }
     }
 
     /**
@@ -526,12 +559,23 @@ object SourceRegistry {
             .build()
             .toString()
 
-    private val BUILT_IN_KINDS = listOf(
-        SourceKind.JIOSAAVN,
+    const val UMTIFY_HQ_ADDON_ID = "prebundled_addon_umtifyhq"
+    const val UMTIFY_HQ_BASE_URL = "https://umtifyhq-nine.vercel.app"
+
+    fun createUmtifyHqConfig() = SourceConfig(
+        id = UMTIFY_HQ_ADDON_ID,
+        kind = SourceKind.ADDON,
+        label = "UMtify HQ",
+        baseUrl = UMTIFY_HQ_BASE_URL,
+        enabled = false,
+    )
+
+    val BUILT_IN_KINDS = listOf(
         SourceKind.SOUNDCLOUD,
+        SourceKind.JIOSAAVN,
+        SourceKind.YOUTUBE,
         SourceKind.JAMENDO,
         SourceKind.INTERNET_ARCHIVE,
-        SourceKind.YOUTUBE,
     )
 
     private const val KEY_SOURCES = "sources"
@@ -539,6 +583,7 @@ object SourceRegistry {
     private const val KEY_JIOSAAVN_OPT_IN_V1 = "jiosaavn_opt_in_v1"
     private const val KEY_DEFAULT_SOURCES_V2 = "default_sources_v2"
     private const val KEY_YOUTUBE_FALLBACK_ORDER_V3 = "youtube_fallback_order_v3"
+    private const val KEY_DEFAULT_SOURCES_V4 = "default_sources_v4"
     private const val PREFIX = "src:"
     private const val SEPARATOR = "::"
 }

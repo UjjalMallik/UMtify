@@ -2,8 +2,12 @@ package com.music.bitchord.ui.screens
 
 import com.music.bitchord.sharedui.resources.*
 import org.jetbrains.compose.resources.stringResource
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -12,28 +16,35 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
@@ -53,6 +64,7 @@ import com.music.bitchord.ui.components.PAGE_GUTTER
 import com.music.bitchord.ui.components.PullToRefresh
 import com.music.bitchord.ui.components.ShimmerBox
 import com.music.bitchord.ui.components.feedSkeleton
+import com.music.bitchord.ui.components.liquidGlassCard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,6 +81,11 @@ fun ExploreScreen(
     /** The big "Explore" heading; the desktop's pages carry none. */
     showTitle: Boolean = true,
 ) {
+    var selectedFilter by remember { mutableStateOf("All Vibes") }
+    val filterOptions = remember {
+        listOf("All Vibes", "Moods & Moments", "Genres", "Charts & Trending")
+    }
+
     PullToRefresh(
         refreshing = refreshing,
         onRefresh = onRefresh,
@@ -88,26 +105,126 @@ fun ExploreScreen(
                             text = stringResource(Res.string.explore),
                             style = MaterialTheme.typography.displayLarge,
                             color = MaterialTheme.colorScheme.onBackground,
-                            // 14dp under the title, the same gap Library leaves
-                            // above its first card (8dp title + 6dp Replay row).
                             modifier = Modifier.padding(
                                 start = PAGE_GUTTER,
                                 end = PAGE_GUTTER,
                                 top = 8.dp,
-                                bottom = 14.dp,
+                                bottom = 8.dp,
                             ),
                         )
                     }
                 }
+
+                // Top "Vibe & Moods" Frosted Glass Filter Bar
+                item {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = PAGE_GUTTER)
+                            .padding(bottom = 16.dp),
+                    ) {
+                        filterOptions.forEach { filter ->
+                            val isSelected = filter == selectedFilter
+                            val primary = MaterialTheme.colorScheme.primary
+                            val chipBg by animateColorAsState(
+                                targetValue = if (isSelected) primary.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.08f),
+                                animationSpec = spring(),
+                                label = "chipBg",
+                            )
+                            val chipBorderColor by animateColorAsState(
+                                targetValue = if (isSelected) primary.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.18f),
+                                animationSpec = spring(),
+                                label = "chipBorder",
+                            )
+                            val textColor by animateColorAsState(
+                                targetValue = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                                animationSpec = spring(),
+                                label = "textColor",
+                            )
+
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(chipBg)
+                                    .border(
+                                        width = if (isSelected) 1.2.dp else 0.8.dp,
+                                        color = chipBorderColor,
+                                        shape = RoundedCornerShape(16.dp),
+                                    )
+                                    .clickable { selectedFilter = filter }
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = filter,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = textColor,
+                                )
+                            }
+                        }
+                    }
+                }
+
                 when (state) {
                     UiState.Loading -> item { ExploreSkeletonRows(columns) }
                     is UiState.Error -> item {
                         MessageState(state.message, actionLabel = stringResource(Res.string.retry), onAction = onRetry)
                     }
                     is UiState.Success -> {
-                        // Moods and genres read as one grid; the server's
-                        // grouping only decides the order.
-                        val rows = state.data.flatMap(MoodGenreSection::items)
+                        val allSections = state.data
+                        val filteredSections = when (selectedFilter) {
+                            "Moods & Moments" -> {
+                                val moodSections = allSections.filter { sec ->
+                                    sec.title.contains("mood", ignoreCase = true) ||
+                                        sec.title.contains("moment", ignoreCase = true)
+                                }
+                                if (moodSections.isNotEmpty()) {
+                                    moodSections
+                                } else {
+                                    val moodKeywords = setOf("chill", "commute", "energy", "focus", "party", "romance", "sleep", "workout", "feel good", "relax", "sad")
+                                    val items = allSections.flatMap { it.items }.filter { item ->
+                                        moodKeywords.any { kw -> item.title.contains(kw, ignoreCase = true) }
+                                    }
+                                    if (items.isNotEmpty()) listOf(MoodGenreSection("Moods & Moments", items)) else allSections
+                                }
+                            }
+                            "Genres" -> {
+                                val genreSections = allSections.filter { sec ->
+                                    sec.title.contains("genre", ignoreCase = true)
+                                }
+                                if (genreSections.isNotEmpty()) {
+                                    genreSections
+                                } else {
+                                    val genreKeywords = setOf("pop", "rock", "hip-hop", "rap", "r&b", "electronic", "dance", "indie", "metal", "classical", "jazz", "country", "folk", "latin", "k-pop", "j-pop")
+                                    val items = allSections.flatMap { it.items }.filter { item ->
+                                        genreKeywords.any { kw -> item.title.contains(kw, ignoreCase = true) }
+                                    }
+                                    if (items.isNotEmpty()) listOf(MoodGenreSection("Genres", items)) else allSections
+                                }
+                            }
+                            "Charts & Trending" -> {
+                                val chartSections = allSections.filter { sec ->
+                                    sec.title.contains("chart", ignoreCase = true) ||
+                                        sec.title.contains("trend", ignoreCase = true) ||
+                                        sec.title.contains("top", ignoreCase = true)
+                                }
+                                if (chartSections.isNotEmpty()) {
+                                    chartSections
+                                } else {
+                                    val chartKeywords = setOf("chart", "top", "trending", "hits", "hot", "viral")
+                                    val items = allSections.flatMap { it.items }.filter { item ->
+                                        chartKeywords.any { kw -> item.title.contains(kw, ignoreCase = true) }
+                                    }
+                                    if (items.isNotEmpty()) listOf(MoodGenreSection("Charts & Trending", items)) else allSections
+                                }
+                            }
+                            else -> allSections
+                        }
+
+                        val rows = filteredSections.flatMap(MoodGenreSection::items)
                             .distinctBy { it.browseId to it.params }
                             .chunked(columns)
                         items(rows, key = { row -> row.first().let { "${it.browseId}|${it.params}" } }) { row ->
@@ -150,22 +267,23 @@ private fun MoodGenreCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val cardShape = RoundedCornerShape(22.dp)
     MoodGenreSleeve(
         item = item,
         modifier = modifier
             .aspectRatio(MOOD_CARD_ASPECT)
-            .clip(MOOD_CARD_SHAPE)
+            .liquidGlassCard(shape = cardShape)
+            .clip(cardShape)
             .clickable(onClick = onClick),
     )
 }
 
 /**
- * A solid stripe down the left and the category's cover filling the rest,
- * redrawn as a duotone of the stripe's colour so every card reads as one
- * tinted sleeve rather than a photo pasted onto a swatch.
+ * Unique full-bleed Liquid Glass Bento Card for Explore moods and genres.
  *
- * Only the artwork: the caller sizes, clips and makes it clickable, which is
- * how the TV app wraps the same sleeve in its own focus treatment.
+ * Full-bleed artwork with high-gloss diagonal multi-stop scrim,
+ * frosted glass top-left pill badge with category glowing dot,
+ * and a subtle bottom-right specular glass play orb.
  */
 @Composable
 fun MoodGenreSleeve(
@@ -174,79 +292,133 @@ fun MoodGenreSleeve(
     titleStyle: TextStyle = MaterialTheme.typography.titleMedium,
 ) {
     val tone = remember(item.stripeColor, item.title) { moodTone(item) }
-    Box(modifier = modifier.background(tone.stripe)) {
+
+    Box(modifier = modifier.background(tone.placeholder)) {
+        // 1. Full-bleed category cover artwork
+        item.thumbnailUrl?.let { artwork ->
+            AsyncImage(
+                model = artwork,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        // 2. Rich Multi-Stop Liquid Glass Scrim (Top-Right sheen -> Center accent -> Bottom-Left moody dark)
         Box(
             Modifier
-                .align(Alignment.CenterEnd)
-                .fillMaxHeight()
-                .fillMaxWidth(1f - MOOD_STRIPE_FRACTION)
-                .background(tone.placeholder),
+                .fillMaxSize()
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Color.Black.copy(alpha = 0.12f),
+                            tone.stripe.copy(alpha = 0.38f),
+                            Color.Black.copy(alpha = 0.82f),
+                        ),
+                        start = Offset(Float.POSITIVE_INFINITY, 0f),
+                        end = Offset(0f, Float.POSITIVE_INFINITY),
+                    ),
+                ),
+        )
+
+        // Top edge crystal highlight line for glass depth
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.45f),
+                            Color.White.copy(alpha = 0.10f),
+                            Color.Transparent,
+                        ),
+                    ),
+                ),
+        )
+
+        // 3. Top-Left Frosted Glass Pill Badge
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(12.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color.Black.copy(alpha = 0.45f))
+                .border(
+                    width = 0.8.dp,
+                    color = Color.White.copy(alpha = 0.22f),
+                    shape = RoundedCornerShape(14.dp),
+                )
+                .padding(horizontal = 10.dp, vertical = 5.dp),
         ) {
-            item.thumbnailUrl?.let { artwork ->
-                AsyncImage(
-                    model = artwork,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    colorFilter = tone.duotone,
-                    modifier = Modifier.fillMaxSize(),
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                // Category glowing dot
+                Box(
+                    Modifier
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(tone.stripe),
+                )
+                Text(
+                    text = item.title,
+                    style = titleStyle.copy(
+                        shadow = Shadow(
+                            color = Color.Black.copy(alpha = 0.5f),
+                            offset = Offset(0f, 1f),
+                            blurRadius = 4f,
+                        ),
+                    ),
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
-        // Pale stripes (Energize's cream, Feel good's mint) would swallow
-        // white type; a soft shade under the title keeps it legible.
+
+        // 4. Bottom-Right Subtle Glass Play Orb
         Box(
-            Modifier
-                .matchParentSize()
-                .background(Brush.verticalGradient(0f to Color.Black.copy(alpha = .24f), .62f to Color.Transparent)),
-        )
-        Text(
-            text = item.title,
-            style = titleStyle.copy(
-                shadow = Shadow(Color.Black.copy(alpha = .35f), offset = Offset(0f, 1f), blurRadius = 6f),
-            ),
-            fontWeight = FontWeight.Bold,
-            color = Color.White,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
             modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-        )
+                .align(Alignment.BottomEnd)
+                .padding(12.dp)
+                .size(30.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.15f))
+                .border(
+                    width = 0.8.dp,
+                    brush = Brush.verticalGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.45f),
+                            Color.White.copy(alpha = 0.15f),
+                        ),
+                    ),
+                    shape = CircleShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.PlayArrow,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.92f),
+                modifier = Modifier.size(16.dp),
+            )
+        }
     }
 }
 
-private class MoodTone(val stripe: Color, val placeholder: Color, val duotone: ColorFilter)
+private class MoodTone(val stripe: Color, val placeholder: Color)
 
 private fun moodTone(item: MoodGenre): MoodTone {
     val base = item.stripeColor?.let { Color(it.toInt()) } ?: fallbackMoodColor(item.title)
-    // YouTube's palette is already pastel; a touch of black keeps it from
-    // glowing against the black page.
     val stripe = lerp(base, Color.Black, .08f)
     val shadow = lerp(base, Color.Black, .68f)
     val highlight = lerp(base, Color.White, .32f)
     return MoodTone(
         stripe = stripe,
         placeholder = lerp(shadow, highlight, .45f),
-        duotone = duotone(shadow, highlight),
-    )
-}
-
-/**
- * Maps each pixel's luminance onto the ramp [shadow] to [highlight]. Offsets
- * are in 0..255, which Compose honours on Skia too (it rescales them).
- */
-private fun duotone(shadow: Color, highlight: Color): ColorFilter {
-    fun channel(from: Float, to: Float): FloatArray {
-        val span = to - from
-        return floatArrayOf(span * .299f, span * .587f, span * .114f, 0f, from * 255f)
-    }
-    return ColorFilter.colorMatrix(
-        ColorMatrix(
-            channel(shadow.red, highlight.red) +
-                channel(shadow.green, highlight.green) +
-                channel(shadow.blue, highlight.blue) +
-                floatArrayOf(0f, 0f, 0f, 1f, 0f),
-        ),
     )
 }
 
@@ -265,20 +437,13 @@ private fun fallbackMoodColor(title: String): Color = when ((title.hashCode() an
 /** Gap between mood cards, in both directions. */
 private val MOOD_SPACING = 12.dp
 
-private val MOOD_CARD_SHAPE = RoundedCornerShape(18.dp)
+private val MOOD_CARD_SHAPE = RoundedCornerShape(22.dp)
 
 /** Width over height; a two-column phone row lands at about 100dp tall. */
-const val MOOD_CARD_ASPECT = 1.72f
-
-/** How much of the card the solid stripe covers before the artwork starts. */
-private const val MOOD_STRIPE_FRACTION = .28f
+const val MOOD_CARD_ASPECT = 1.68f
 
 /**
  * The narrowest a mood card is let get before the row drops a column.
- *
- * Pitched so every phone still gets its two (the widest, 448dp, has room for
- * 1.8 of these), while a tablet or a window lays out as many as fit rather
- * than two cards each half a screen wide.
  */
 private val MOOD_MIN_CARD_WIDTH = 220.dp
 

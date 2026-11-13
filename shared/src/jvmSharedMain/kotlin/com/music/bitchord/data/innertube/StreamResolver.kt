@@ -280,6 +280,33 @@ object StreamResolver {
         return stream.url
     }
 
+    /**
+     * Resolves a progressive HTTP video+audio stream (MP4) for in-player video rendering.
+     * Falls back to standard audio stream resolution if no progressive video stream is found.
+     */
+    suspend fun resolveVideoStream(videoId: String): String {
+        init
+        return withContext(Dispatchers.IO) {
+            val videoUrl = runCatching {
+                extractionGate.withLock {
+                    val extractor = ServiceList.YouTube.getStreamExtractor(
+                        "https://www.youtube.com/watch?v=$videoId",
+                    )
+                    extractor.fetchPage()
+                    val videoStreams = extractor.videoStreams
+                        .filter {
+                            !it.content.isNullOrBlank() &&
+                                it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP
+                        }
+                    val picked = videoStreams.maxByOrNull { it.resolution ?: "" }
+                        ?: videoStreams.firstOrNull()
+                    picked?.content
+                }
+            }.getOrNull()
+            videoUrl ?: resolve(videoId)
+        }
+    }
+
     /** Per-track loudness, read once and kept for as long as the process runs. */
     private val loudness = ConcurrentHashMap<String, Double>()
 

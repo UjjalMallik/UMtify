@@ -698,6 +698,7 @@ fun Song.toMediaItem(): MediaItem {
         // Auto. Everything downstream reads the item's URI and nothing reads
         // the preference, so this is the only place it has to be said.
         OriginalVersion.isPinned(videoId) -> directYouTubeUri()
+        isVideo -> "bitchord://watch?v=$videoId&video=1${matchQuery()}"
         // The same three fields, for the same reason, on the YouTube path: a
         // source ranked above YouTube gets offered this track before YouTube
         // resolves it — see [SourceResolver.substituteForYouTube] — and that

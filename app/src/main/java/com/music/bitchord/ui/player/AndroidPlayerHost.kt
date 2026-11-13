@@ -12,7 +12,11 @@ import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.view.TextureView
+import android.view.ViewGroup
 import android.widget.Toast
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.session.MediaController
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -55,6 +59,10 @@ import kotlin.math.roundToInt
  * moved into the shared module.
  */
 class AndroidPlayerHost(context: Context) : PlayerHost {
+    companion object {
+        var activeController: MediaController? = null
+    }
+
     private val app = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val main = Handler(Looper.getMainLooper())
@@ -108,6 +116,29 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
     @Composable
     override fun CanvasVideo(spec: CanvasVideoSpec, modifier: Modifier) = AndroidCanvasVideo(spec, modifier)
+
+    @Composable
+    override fun VideoPlayer(modifier: Modifier) {
+        val controller = activeController ?: return
+        AndroidView(
+            modifier = modifier,
+            factory = { ctx ->
+                TextureView(ctx).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                    controller.setVideoTextureView(this)
+                }
+            },
+            update = { textureView ->
+                controller.setVideoTextureView(textureView)
+            },
+            onRelease = { textureView ->
+                controller.clearVideoTextureView(textureView)
+            },
+        )
+    }
 
     @Composable
     override fun rememberRemoteArtworkUrl(song: Song?): String? =

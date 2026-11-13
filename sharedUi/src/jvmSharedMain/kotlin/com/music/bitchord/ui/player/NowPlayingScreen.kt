@@ -3206,6 +3206,14 @@ fun NowPlayingScreen(
                                     )
                                 }
                             }
+
+                            if (song.isVideo) {
+                                WhileShown({ !collapsePastHalf }) {
+                                    PlayerPlatform.host.VideoPlayer(
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                }
+                            }
                         }
 
                         // The card's slot: where the sleeve sits as a card, whether or

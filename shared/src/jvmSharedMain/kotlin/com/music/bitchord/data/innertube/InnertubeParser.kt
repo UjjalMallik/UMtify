@@ -1338,6 +1338,35 @@ object InnertubeParser {
     }
 
     /**
+     * Counterpart video ID in a watch queue (`next` response), if YouTube
+     * explicitly declared one for the given track or in the player overlay.
+     */
+    fun parseCounterpartVideoId(root: JsonElement, currentVideoId: String? = null): String? {
+        val rows = collectRenderers(root, "playlistPanelVideoRenderer")
+        val targetRows = if (!currentVideoId.isNullOrBlank()) {
+            rows.filter { it.s("videoId") == currentVideoId }.ifEmpty { rows }
+        } else {
+            rows
+        }
+        for (row in targetRows) {
+            val counterpart = row.a("counterpart")
+            if (counterpart != null) {
+                for (cp in counterpart) {
+                    val cpRenderer = cp.o("counterpartRenderer")
+                    val vid = cpRenderer.s("videoId")
+                        ?: cpRenderer.o("navigationEndpoint").o("watchEndpoint").s("videoId")
+                    if (!vid.isNullOrBlank() && vid != currentVideoId) return vid
+                }
+            }
+        }
+        collectRenderers(root, "counterpartRenderer").forEach { cp ->
+            val vid = cp.s("videoId") ?: cp.o("navigationEndpoint").o("watchEndpoint").s("videoId")
+            if (!vid.isNullOrBlank() && vid != currentVideoId) return vid
+        }
+        return null
+    }
+
+    /**
      * The account's own state for one track, read off the watch queue's row
      * menu: the thumbs rating, and the tokens that toggle library membership.
      *

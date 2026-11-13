@@ -390,6 +390,14 @@ class MainActivity : AppCompatActivity() {
             // the current track: the whole app changes colour with the cover,
             // not only the player screen that already reads its tones.
             val controller = rememberMediaController()
+            DisposableEffect(controller) {
+                com.music.bitchord.ui.player.AndroidPlayerHost.activeController = controller
+                onDispose {
+                    if (com.music.bitchord.ui.player.AndroidPlayerHost.activeController === controller) {
+                        com.music.bitchord.ui.player.AndroidPlayerHost.activeController = null
+                    }
+                }
+            }
             val player = rememberPlayerState(controller)
             val dynamicVariant by AppSettings.dynamicThemeVariant.collectAsStateWithLifecycle()
             val variantColor = remember(dynamicVariant) { resolveVariantColor(dynamicVariant) }
@@ -1421,6 +1429,9 @@ private fun BitChordApp(
 
             if (video == null || video.videoId == song.videoId) {
                 TrackLog.w("Player", "video switch found no distinct video", song.videoId)
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(context, "No video version found for this track", android.widget.Toast.LENGTH_SHORT).show()
+                }
                 if (stillCurrent && resumeAfterResolution) c.play()
                 return
             }
@@ -4485,7 +4496,6 @@ private fun BitChordApp(
                 !song.isVideo && convertedVideoId != song.videoId
             }
             val onToggleVersion: (() -> Unit)? = if (fromPlayer &&
-                hasAlternateVersion &&
                 !switchingAudioVersion &&
                 controller?.currentMediaItem?.mediaId == song.videoId
             ) {
@@ -4536,6 +4546,7 @@ private fun BitChordApp(
                             scope.launch { switchToMusicOnly(song, pauseWhileResolving = false) }
                         }
                         else -> {
+                            android.widget.Toast.makeText(context, "Switching to video...", android.widget.Toast.LENGTH_SHORT).show()
                             val cached = YtMusicRepository.cachedVideoVersion(song.videoId)
                                 ?: YtMusicRepository.cachedVideoVersion(versionEffectiveSong.videoId)
                             if (cached != null && cached.videoId != song.videoId &&

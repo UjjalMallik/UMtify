@@ -422,21 +422,50 @@ object YtMusicRepository {
      * for a catalogue track. Returns null when no video version is found.
      */
     suspend fun resolveVideo(song: Song): Song? {
-        if (song.isVideo) return null
+        if (song.isVideo) return song
         videoVersionCache[song.videoId]?.let { return it }
+
+        // 1. Try counterpart from YouTube's watch queue endpoint (next)
+        if (!song.videoId.startsWith("src:") && !song.videoId.startsWith("http")) {
+            val counterpartId = runCatching {
+                InnertubeParser.parseCounterpartVideoId(Innertube.next(song.videoId), song.videoId)
+            }.getOrNull()
+            if (!counterpartId.isNullOrBlank()) {
+                val resolvedSong = runCatching { trackLinks(counterpartId).getOrNull() }.getOrNull()
+                    ?.copy(isVideo = true, isVideoOrigin = true)
+                    ?: song.copy(
+                        videoId = counterpartId,
+                        isVideo = true,
+                        isVideoOrigin = true,
+                    )
+                Log.d(TAG, "video switch counterpart: '${song.title}' -> '${resolvedSong.title}' ($counterpartId)")
+                videoVersionCache[song.videoId] = resolvedSong
+                return resolvedSong
+            }
+        }
+
+        // 2. Search YouTube Videos for official music video
         val target = TrackMatcher.targetOf(song)
-        for (query in TrackMatcher.queries(target)) {
+        val queries = (listOf(
+            "${song.title} ${song.artist} official music video",
+            "${song.title} ${song.artist}",
+        ) + TrackMatcher.queries(target)).distinct()
+
+        for (query in queries) {
             val candidates = search(query, SearchFilter.VIDEOS)
                 .getOrNull()
                 ?.filterIsInstance<SearchResult.Track>()
                 ?.map { it.song }
                 .orEmpty()
-            TrackMatcher.best(candidates, target)?.let { match ->
+            val match = TrackMatcher.bestOfficialVideoForAudio(candidates, target)
+                ?: TrackMatcher.best(candidates, target)?.copy(isVideo = true, isVideoOrigin = true)
+            if (match != null) {
                 Log.d(TAG, "video switch: '${song.title}' -> '${match.title}' ($query)")
                 videoVersionCache[song.videoId] = match
                 return match
             }
         }
+
         Log.w(TAG, "video switch: no video match for '${song.title}' by '${song.artist}'")
         videoVersionCache[song.videoId] = null
         return null

@@ -42,6 +42,10 @@ interface PlayerHost {
     @Composable
     fun CanvasVideo(spec: CanvasVideoSpec, modifier: Modifier)
 
+    /** Seamless in-player video surface decoded from the active player session. */
+    @Composable
+    fun VideoPlayer(modifier: Modifier = Modifier) = Unit
+
     /**
      * Artwork for [song], resolving covers that live inside a remote file
      * (WebDAV, SMB) where the platform can. Returns [Song.thumbnailUrl] otherwise.

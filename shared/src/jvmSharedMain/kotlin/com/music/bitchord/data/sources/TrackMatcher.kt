@@ -169,6 +169,46 @@ object TrackMatcher {
     }
 
     /**
+     * Finds the best official music video for an audio catalogue track.
+     * Unlike ordinary audio matching, official videos often have extra packaging
+     * in the title ("Official Music Video", "MV") and intro/outro duration drift.
+     */
+    fun bestOfficialVideoForAudio(candidates: List<Song>, target: Target): Song? {
+        val wanted = parseTitle(target.title, target.artist)
+        if (wanted.core.isEmpty()) return null
+        return candidates
+            .mapNotNull { candidate ->
+                val got = parseTitle(candidate.title, candidate.artist)
+                val coreMatches = wanted.core == got.core ||
+                    (wanted.core.isNotEmpty() && got.core.contains(wanted.core)) ||
+                    (got.core.isNotEmpty() && wanted.core.contains(got.core))
+                if (!coreMatches) return@mapNotNull null
+
+                val artistMatch = artistScore(target.artist, candidate.artist)
+                    ?: if (sharesArtist(target.artist, candidate.artist)) 50 else null
+                    ?: if (candidate.title.contains(primaryArtist(target.artist), ignoreCase = true)) 30 else null
+                    ?: return@mapNotNull null
+
+                val lowerTitle = candidate.title.lowercase()
+                val officialBonus = when {
+                    lowerTitle.contains("official music video") || lowerTitle.contains("official video") -> 500
+                    lowerTitle.contains("music video") || lowerTitle.contains("mv") -> 300
+                    else -> 0
+                }
+
+                val durationPenalty = target.durationSec?.let { expected ->
+                    secondsOf(candidate.durationText)?.let { actual -> -abs(expected - actual) }
+                        ?: -120
+                } ?: 0
+
+                candidate.copy(isVideo = true, isVideoOrigin = true) to (artistMatch * 100 + officialBonus + durationPenalty)
+            }
+            .sortedByDescending { it.second }
+            .firstOrNull()
+            ?.first
+    }
+
+    /**
      * Every candidate that really is [target], most confident first.
      *
      * The whole list rather than the winner, because identity is not the only
