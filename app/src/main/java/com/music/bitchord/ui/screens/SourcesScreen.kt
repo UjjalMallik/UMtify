@@ -165,7 +165,8 @@ fun SourcesScreen(
             // the [configs] it is reading. A rename on the addon's side is
             // picked up the next time this screen is opened.
             if (source is AddonSource) {
-                val named = withContext(Dispatchers.IO) { runCatching { source.manifestName() }.getOrNull() }
+                val isUmtifyHq = config.id == SourceRegistry.UMTIFY_HQ_ADDON_ID || config.baseUrl.contains("umtifyhq")
+                val named = if (isUmtifyHq) "UMtify" else withContext(Dispatchers.IO) { runCatching { source.manifestName() }.getOrNull() }
                 if (named != null && named != config.label) {
                     SourceRegistry.update(config.copy(label = named))
                 }
@@ -876,6 +877,14 @@ private fun AudioQuality.localizedLabel(): String = stringResource(
 /** The second line of a row: what this source is, or what is wrong with it. */
 @Composable
 private fun SourceConfig.statusLine(health: SourceHealth?): String = when {
+    id == SourceRegistry.UMTIFY_HQ_ADDON_ID || baseUrl.contains("umtifyhq") -> {
+        val baseDesc = "UMtify HQ · FLAC · Lossless · Hi-Res"
+        if (!allowDownloads) {
+            "$baseDesc · " + stringResource(R.string.source_downloads_off)
+        } else {
+            baseDesc
+        }
+    }
     !isComplete -> stringResource(R.string.source_setup_required)
     kind == SourceKind.JIOSAAVN -> stringResource(R.string.jiosaavn_mismatch_warning)
     health is SourceHealth.Ok -> listOfNotNull(

@@ -1440,6 +1440,7 @@ private fun BitChordApp(
                 return
             }
 
+            keepVideoId = video.videoId
             convertedFromAudio = song
             convertedVideoId = video.videoId
             TrackLog.d("Player", "video switch applying '${video.title}' (${video.videoId})", song.videoId)
@@ -1447,9 +1448,11 @@ private fun BitChordApp(
                 queueTier = song.queueTier,
                 queueEntryId = song.queueEntryId,
                 radioName = song.radioName,
-                playbackSource = song.playbackSource,
-                playbackSourceType = song.playbackSourceType,
-                playbackSourceId = song.playbackSourceId,
+                playbackSource = null,
+                playbackSourceType = null,
+                playbackSourceId = null,
+                isVideo = true,
+                isVideoOrigin = true,
             )
             // Not while an alignment is still owed: claiming the video here
             // would show a version the player is not playing yet, and would

@@ -1829,13 +1829,88 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _selectedMoodGenre.value = item
         _moodGenreShelves.value = UiState.Loading
         viewModelScope.launch {
-            _moodGenreShelves.value = YtMusicRepository.moodGenreShelves(item.browseId, item.params).fold(
-                onSuccess = { shelves ->
-                    if (shelves.isEmpty()) UiState.Error(text(R.string.nothing_to_explore))
-                    else UiState.Success(shelves)
-                },
-                onFailure = { UiState.Error(it.friendly()) },
-            )
+            val primaryResult = runCatching {
+                YtMusicRepository.moodGenreShelves(item.browseId, item.params).getOrNull()
+            }.getOrNull()
+
+            if (!primaryResult.isNullOrEmpty()) {
+                _moodGenreShelves.value = UiState.Success(primaryResult)
+                return@launch
+            }
+
+            // Smart Multi-Shelf Fallback in parallel:
+            // 1. Top Songs in {Category}
+            // 2. Featured {Category} Playlists
+            // 3. Popular {Category} Albums & Releases
+            try {
+                val (songs, playlists, albums) = kotlinx.coroutines.coroutineScope {
+                    val songsDef = async {
+                        runCatching {
+                            YtMusicRepository.searchPage("${item.title} songs", SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
+                        }.getOrDefault(emptyList())
+                    }
+                    val playlistsDef = async {
+                        runCatching {
+                            YtMusicRepository.searchPage("${item.title} playlist", SearchFilter.PLAYLISTS).getOrNull()?.rows.orEmpty()
+                        }.getOrDefault(emptyList())
+                    }
+                    val albumsDef = async {
+                        runCatching {
+                            YtMusicRepository.searchPage(item.title, SearchFilter.ALBUMS).getOrNull()?.rows.orEmpty()
+                        }.getOrDefault(emptyList())
+                    }
+                    Triple(songsDef.await(), playlistsDef.await(), albumsDef.await())
+                }
+
+                val fallbackShelves = mutableListOf<HomeShelf>()
+                if (songs.isNotEmpty()) {
+                    fallbackShelves += HomeShelf(
+                        title = "Top ${item.title} Songs",
+                        subtitle = "Popular tracks & essentials",
+                        items = songs.mapNotNull { sr ->
+                            when (sr) {
+                                is SearchResult.Track -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
+                                is SearchResult.TopTrack -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
+                                is SearchResult.Browse -> ShelfItem(sr.item.title, sr.item.subtitle, sr.item.thumbnailUrl, null, sr.item.browseId)
+                            }
+                        }
+                    )
+                }
+                if (playlists.isNotEmpty()) {
+                    fallbackShelves += HomeShelf(
+                        title = "Featured ${item.title} Playlists",
+                        subtitle = "Curated collections & mixes",
+                        items = playlists.mapNotNull { sr ->
+                            when (sr) {
+                                is SearchResult.Browse -> ShelfItem(sr.item.title, sr.item.subtitle, sr.item.thumbnailUrl, null, sr.item.browseId)
+                                is SearchResult.Track -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
+                                is SearchResult.TopTrack -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
+                            }
+                        }
+                    )
+                }
+                if (albums.isNotEmpty()) {
+                    fallbackShelves += HomeShelf(
+                        title = "Popular ${item.title} Releases",
+                        subtitle = "Albums, EPs & Singles",
+                        items = albums.mapNotNull { sr ->
+                            when (sr) {
+                                is SearchResult.Browse -> ShelfItem(sr.item.title, sr.item.subtitle, sr.item.thumbnailUrl, null, sr.item.browseId)
+                                is SearchResult.Track -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
+                                is SearchResult.TopTrack -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
+                            }
+                        }
+                    )
+                }
+
+                if (fallbackShelves.isNotEmpty()) {
+                    _moodGenreShelves.value = UiState.Success(fallbackShelves)
+                } else {
+                    _moodGenreShelves.value = UiState.Error(text(R.string.nothing_to_explore))
+                }
+            } catch (e: Exception) {
+                _moodGenreShelves.value = UiState.Error(e.friendly())
+            }
         }
     }
 

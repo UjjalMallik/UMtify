@@ -70,10 +70,13 @@ data class SourceConfig(
 
     /** What the sources screen and the player show. Never blank. */
     val displayName: String
-        get() = label.ifBlank {
-            baseUrl.takeIf { it.isNotBlank() }
-                ?.let { runCatching { Uri.parse(it).host }.getOrNull() }
-                ?: kind.label
+        get() = when {
+            id == SourceRegistry.UMTIFY_HQ_ADDON_ID || baseUrl.contains("umtifyhq") -> "UMtify"
+            else -> label.ifBlank {
+                baseUrl.takeIf { it.isNotBlank() }
+                    ?.let { runCatching { Uri.parse(it).host }.getOrNull() }
+                    ?: kind.label
+            }
         }
 
     /** Whether this has enough filled in to be worth contacting at all. */
@@ -192,29 +195,37 @@ object SourceRegistry {
 
         list = list + missing
 
+        val listWithLabels = list.map { config ->
+            if (config.id == UMTIFY_HQ_ADDON_ID || (config.kind == SourceKind.ADDON && canonicalUrl(config.baseUrl) == canonicalUrl(UMTIFY_HQ_BASE_URL))) {
+                config.copy(label = "UMtify")
+            } else {
+                config
+            }
+        }
+
         if (applyDefaultSourcesV4) {
-            val userAddons = list.filter {
+            val userAddons = listWithLabels.filter {
                 it.kind.isUserAdded &&
                     it.id != UMTIFY_HQ_ADDON_ID &&
                     canonicalUrl(it.baseUrl) != canonicalUrl(UMTIFY_HQ_BASE_URL)
             }
-            val sc = list.firstOrNull { it.kind == SourceKind.SOUNDCLOUD }?.copy(enabled = true)
+            val sc = listWithLabels.firstOrNull { it.kind == SourceKind.SOUNDCLOUD }?.copy(enabled = true)
                 ?: SourceConfig(kind = SourceKind.SOUNDCLOUD, enabled = true)
-            val js = list.firstOrNull { it.kind == SourceKind.JIOSAAVN }?.copy(enabled = false)
+            val js = listWithLabels.firstOrNull { it.kind == SourceKind.JIOSAAVN }?.copy(enabled = false)
                 ?: SourceConfig(kind = SourceKind.JIOSAAVN, enabled = false)
-            val yt = list.firstOrNull { it.kind == SourceKind.YOUTUBE }?.copy(enabled = true)
+            val yt = listWithLabels.firstOrNull { it.kind == SourceKind.YOUTUBE }?.copy(enabled = true)
                 ?: SourceConfig(kind = SourceKind.YOUTUBE, enabled = true)
-            val hq = (list.firstOrNull { it.id == UMTIFY_HQ_ADDON_ID || canonicalUrl(it.baseUrl) == canonicalUrl(UMTIFY_HQ_BASE_URL) } ?: hqConfig)
-                .copy(enabled = false)
-            val ja = list.firstOrNull { it.kind == SourceKind.JAMENDO }?.copy(enabled = false)
+            val hq = (listWithLabels.firstOrNull { it.id == UMTIFY_HQ_ADDON_ID || canonicalUrl(it.baseUrl) == canonicalUrl(UMTIFY_HQ_BASE_URL) } ?: hqConfig)
+                .copy(label = "UMtify", enabled = false)
+            val ja = listWithLabels.firstOrNull { it.kind == SourceKind.JAMENDO }?.copy(enabled = false)
                 ?: SourceConfig(kind = SourceKind.JAMENDO, enabled = false)
-            val ia = list.firstOrNull { it.kind == SourceKind.INTERNET_ARCHIVE }?.copy(enabled = false)
+            val ia = listWithLabels.firstOrNull { it.kind == SourceKind.INTERNET_ARCHIVE }?.copy(enabled = false)
                 ?: SourceConfig(kind = SourceKind.INTERNET_ARCHIVE, enabled = false)
 
             return userAddons + listOf(sc, js, yt, hq, ja, ia)
         }
 
-        return list.map { config ->
+        return listWithLabels.map { config ->
             when {
                 config.kind == SourceKind.YOUTUBE -> config.copy(enabled = true)
                 config.id == UMTIFY_HQ_ADDON_ID && applyDefaultSourcesV4 -> config.copy(enabled = false)
@@ -259,8 +270,16 @@ object SourceRegistry {
      * [active], minus the addons whose manifest said `allowDownloads: 0`. A
      * download walks this instead, so the next source in line serves it.
      */
-    fun activeForDownload(): List<MusicSource> =
-        active().filter { config(it.configId)?.allowDownloads != false }
+    fun activeForDownload(): List<MusicSource> {
+        val base = active().filter { config(it.configId)?.allowDownloads != false }
+        val keepsLossless = runCatching { AppSettings.downloadQuality.value.keepsLossless }.getOrDefault(false)
+        return if (keepsLossless) {
+            val (hq, others) = base.partition { it.configId == UMTIFY_HQ_ADDON_ID || config(it.configId)?.baseUrl?.contains("umtifyhq") == true }
+            hq + others
+        } else {
+            base
+        }
+    }
 
     /**
      * Records what an addon's manifest said about downloads and lossless
@@ -289,6 +308,14 @@ object SourceRegistry {
     internal fun enabledConfigs(configs: List<SourceConfig>): List<SourceConfig> =
         configs.filter { it.enabled && it.isComplete }
 
+    fun ensureUmtifyHqEnabled() {
+        val list = configs.value
+        val hq = list.firstOrNull { it.id == UMTIFY_HQ_ADDON_ID || it.baseUrl.contains("umtifyhq") }
+        if (hq != null && !hq.enabled) {
+            publish(list.map { if (it.id == hq.id) it.copy(enabled = true) else it })
+        }
+    }
+
     /**
      * [active], minus the sources the ceiling on the connection in hand does
      * not pay for — see [AudioQuality.permits].
@@ -303,7 +330,13 @@ object SourceRegistry {
      */
     fun activeForPlayback(): List<MusicSource> {
         val ceiling = AppSettings.effectiveAudioQuality
-        return active().filter { ceiling.permits(it.kind) }
+        val list = active().filter { ceiling.permits(it.kind) }
+        return if (ceiling == AudioQuality.LOSSLESS) {
+            val (hq, others) = list.partition { it.configId == UMTIFY_HQ_ADDON_ID || config(it.configId)?.baseUrl?.contains("umtifyhq") == true }
+            hq + others
+        } else {
+            list
+        }
     }
 
     fun instance(configId: String): MusicSource? = instances[configId]
@@ -565,7 +598,7 @@ object SourceRegistry {
     fun createUmtifyHqConfig() = SourceConfig(
         id = UMTIFY_HQ_ADDON_ID,
         kind = SourceKind.ADDON,
-        label = "UMtify HQ",
+        label = "UMtify",
         baseUrl = UMTIFY_HQ_BASE_URL,
         enabled = false,
     )

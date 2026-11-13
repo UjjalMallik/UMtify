@@ -1200,11 +1200,17 @@ object AppSettings {
     fun setAudioQualityWifi(value: AudioQuality) {
         audioQualityWifi.value = value
         prefs.edit().putString(KEY_QUALITY_WIFI, value.name).apply()
+        if (value == AudioQuality.LOSSLESS) {
+            com.music.bitchord.data.sources.SourceRegistry.ensureUmtifyHqEnabled()
+        }
     }
 
     fun setAudioQualityCellular(value: AudioQuality) {
         audioQualityCellular.value = value
         prefs.edit().putString(KEY_QUALITY_CELLULAR, value.name).apply()
+        if (value == AudioQuality.LOSSLESS) {
+            com.music.bitchord.data.sources.SourceRegistry.ensureUmtifyHqEnabled()
+        }
     }
 
     fun setUpgradeLengthSlackSeconds(value: Int) {
@@ -1219,6 +1225,9 @@ object AppSettings {
     fun setDownloadQuality(value: DownloadQuality) {
         downloadQuality.value = value
         prefs.edit().putString(KEY_QUALITY_DOWNLOAD, value.name).apply()
+        if (value.keepsLossless) {
+            com.music.bitchord.data.sources.SourceRegistry.ensureUmtifyHqEnabled()
+        }
     }
 
     fun setWifiOnlyDownloads(value: Boolean) {

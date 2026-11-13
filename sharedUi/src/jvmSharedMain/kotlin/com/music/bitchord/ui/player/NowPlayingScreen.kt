@@ -32,7 +32,10 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitVerticalTouchSlopOrCancellation
@@ -3212,6 +3215,38 @@ fun NowPlayingScreen(
                                     PlayerPlatform.host.VideoPlayer(
                                         modifier = Modifier.fillMaxSize(),
                                     )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopCenter)
+                                        .padding(top = 12.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(Color.Black.copy(alpha = 0.55f))
+                                        .border(
+                                            width = 0.8.dp,
+                                            color = Color.White.copy(alpha = 0.25f),
+                                            shape = RoundedCornerShape(16.dp),
+                                        )
+                                        .clickable { onOpenMenu() }
+                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.PlayArrow,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(13.dp),
+                                        )
+                                        Text(
+                                            text = "Switch to audio",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    }
                                 }
                             }
                         }
