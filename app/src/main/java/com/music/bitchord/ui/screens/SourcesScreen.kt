@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 import com.music.bitchord.playback.audio.LosslessOutput
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -494,15 +495,12 @@ private fun ReorderableSources(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .zIndex(if (isDragging) 1f else 0f)
+                    .zIndex(if (isDragging) 5f else 0f)
                     .onSizeChanged { pitchPx = it.height.toFloat() }
                     .graphicsLayer {
-                        // Read in the draw phase, so a drag moves the row
-                        // without recomposing the list at all. The row sits
-                        // wherever the finger has carried it from where it was
-                        // picked up, less whatever the swaps have already moved
-                        // its slot — so a swap relocates the slot and shortens
-                        // this by exactly as much, and the row does not budge.
+                        scaleX = if (isDragging) 1.03f else 1f
+                        scaleY = if (isDragging) 1.03f else 1f
+                        shadowElevation = if (isDragging) 16f else 0f
                         translationY = if (isDragging) {
                             totalDrag -
                                 (liveOrder.indexOfFirst { it.id == config.id } - startIndex) * lockedPitchPx
@@ -512,15 +510,9 @@ private fun ReorderableSources(
                     },
             ) {
                 row(index + 1, config) {
-                    Icon(
-                        imageVector = Icons.Rounded.DragHandle,
-                        contentDescription = stringResource(R.string.drag_to_reorder),
-                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                    Box(
                         modifier = Modifier
-                            .size(20.dp)
-                            // A constant key on purpose: the row is pinned by
-                            // [key] above, so nothing about a reorder should
-                            // restart this coroutine.
+                            .size(44.dp)
                             .pointerInput(Unit) {
                                 detectDragGestures(
                                     onDragStart = {
@@ -536,19 +528,11 @@ private fun ReorderableSources(
                                         var at = liveOrder.indexOfFirst { it.id == config.id }
                                         if (at < 0) return@detectDragGestures
 
-                                        // Held past either end the row stops
-                                        // there under the finger, rather than
-                                        // running off the list and having to be
-                                        // dragged all the way back.
                                         totalDrag = (totalDrag + delta.y).coerceIn(
                                              -startIndex * pitch,
-                                            (liveOrder.lastIndex - startIndex) * pitch,
+                                             (liveOrder.lastIndex - startIndex) * pitch,
                                         )
 
-                                        // A loop, not an `if`: one pointer event
-                                        // can cover several rows when the finger
-                                        // is quick, and settling one row per
-                                        // event would leave the list trailing.
                                         while (true) {
                                             val travelled = totalDrag / pitch
                                             val moved = (at - startIndex).toFloat()
@@ -577,7 +561,15 @@ private fun ReorderableSources(
                                     },
                                 )
                             },
-                    )
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.DragHandle,
+                            contentDescription = stringResource(R.string.drag_to_reorder),
+                            tint = if (isDragging) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
                 }
                 // After the row, not before it, so every wrapper is exactly one
                 // row plus one hairline — the pitch the drag measures against.

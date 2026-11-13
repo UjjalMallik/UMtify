@@ -310,10 +310,10 @@ object SourceRegistry {
 
     fun ensureUmtifyHqEnabled() {
         val list = configs.value
-        val hq = list.firstOrNull { it.id == UMTIFY_HQ_ADDON_ID || it.baseUrl.contains("umtifyhq") }
-        if (hq != null && !hq.enabled) {
-            publish(list.map { if (it.id == hq.id) it.copy(enabled = true) else it })
-        }
+        val hq = list.firstOrNull { it.id == UMTIFY_HQ_ADDON_ID || it.baseUrl.contains("umtifyhq") } ?: return
+        val enabledHq = hq.copy(enabled = true)
+        val others = list.filterNot { it.id == hq.id }
+        publish(listOf(enabledHq) + others)
     }
 
     /**

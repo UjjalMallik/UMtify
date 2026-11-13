@@ -1010,6 +1010,7 @@ private fun BitChordApp(
     val webdavUrl by AppSettings.webdavUrl.collectAsStateWithLifecycle()
     val smbHost by AppSettings.smbHost.collectAsStateWithLifecycle()
     val librarySort by AppSettings.librarySort.collectAsStateWithLifecycle()
+    val exploreOrder by AppSettings.exploreCardOrder.collectAsStateWithLifecycle()
     // The releases those files were asked for as — read here rather than in the
     // page so the Downloads folder recomposes when one is added, the same way it
     // does when a file is.
@@ -3390,6 +3391,8 @@ private fun BitChordApp(
                             onRefresh = { viewModel.refresh(MainViewModel.Feed.EXPLORE) },
                             pullState = explorePull,
                             contentPadding = listPadding,
+                            customOrder = exploreOrder,
+                            onReorder = AppSettings::setExploreCardOrder,
                         )
                         TAB_SEARCH -> SearchScreen(
                             query = query,

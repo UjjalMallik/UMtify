@@ -266,7 +266,11 @@ object SourceResolver {
         // Fast parallel resolution with 2.5s timeout strictly respecting user-defined source order:
         val resolved = withTimeoutOrNull(2500L) {
             coroutineScope {
-                val candidateSources = if (youtube != null) {
+                val candidateSources = if (request is StreamRequest.Lossless || AppSettings.effectiveAudioQuality == AudioQuality.LOSSLESS) {
+                    val losslessCandidates = active.filter { it.kind.canServeLossless || it is AddonSource }
+                    val others = if (youtube != null) rankedAbove(youtube.configId, active) - losslessCandidates.toSet() else active - losslessCandidates.toSet()
+                    losslessCandidates + others
+                } else if (youtube != null) {
                     rankedAbove(youtube.configId, active)
                 } else {
                     active
@@ -837,20 +841,19 @@ object SourceResolver {
         requireSharedArtist: Boolean = false,
         accept: (MusicSource, SourceStream) -> Boolean = { _, _ -> true },
     ): Pair<MusicSource, SourceStream>? = coroutineScope {
-        val running: MutableList<Deferred<Pair<MusicSource, SourceStream?>>> = sources
-            .map { source ->
-                async {
-                    source to matchAndStream(
-                        source,
-                        target,
-                        request,
-                        waitForAll,
-                        strictLength,
-                        requireSharedArtist,
-                    )
-                }
+        val sourceByJob = sources.associateBy { source ->
+            async {
+                source to matchAndStream(
+                    source,
+                    target,
+                    request,
+                    waitForAll,
+                    strictLength,
+                    requireSharedArtist,
+                )
             }
-            .toMutableList()
+        }
+        val running: MutableList<Deferred<Pair<MusicSource, SourceStream?>>> = sourceByJob.keys.toMutableList()
         var best: Pair<MusicSource, SourceStream>? = null
         try {
             while (running.isNotEmpty()) {
@@ -874,7 +877,15 @@ object SourceResolver {
                 // playing, and its caller explicitly requested every source's
                 // patient result. Let every source finish so a fast lower tier
                 // cannot cancel a later, better rendition.
-                if (best != null && !waitForAll) break
+                // Furthermore, if Lossless was requested and our best result so far is lossy,
+                // do not cancel while lossless-capable sources (e.g. UMtify HQ addon) are still running.
+                val waitingForLossless = request is StreamRequest.Lossless &&
+                    best?.second?.format?.isLossless != true &&
+                    running.any { job ->
+                        val src = sourceByJob[job]
+                        src != null && (src.kind.canServeLossless || src is AddonSource)
+                    }
+                if (best != null && !waitForAll && !waitingForLossless) break
             }
         } finally {
             running.forEach { it.cancel() }

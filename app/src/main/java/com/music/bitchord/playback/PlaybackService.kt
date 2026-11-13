@@ -6494,8 +6494,8 @@ class PlaybackService : MediaLibraryService() {
         .setBufferDurationsMs(
             /* minBufferMs = */ 30_000,
             /* maxBufferMs = */ 90_000,
-            /* bufferForPlaybackMs = */ 1_000,
-            /* bufferForPlaybackAfterRebufferMs = */ 2_500,
+            /* bufferForPlaybackMs = */ 450,
+            /* bufferForPlaybackAfterRebufferMs = */ 1_200,
         )
         .setTargetBufferBytes(FAR_BUFFER_BYTES)
         .setBackBuffer(/* backBufferDurationMs = */ BACK_BUFFER_MS, /* retainBackBufferFromKeyframe = */ true)

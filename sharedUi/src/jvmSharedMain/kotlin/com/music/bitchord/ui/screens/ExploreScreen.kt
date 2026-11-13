@@ -4,6 +4,7 @@ import com.music.bitchord.sharedui.resources.*
 import org.jetbrains.compose.resources.stringResource
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -37,6 +38,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -46,13 +48,17 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
@@ -86,6 +92,8 @@ fun ExploreScreen(
     modifier: Modifier = Modifier,
     /** The big "Explore" heading; the desktop's pages carry none. */
     showTitle: Boolean = true,
+    customOrder: List<String> = emptyList(),
+    onReorder: ((List<String>) -> Unit)? = null,
 ) {
     var selectedFilter by remember { mutableStateOf("All Vibes") }
     val filterOptions = remember {
@@ -100,6 +108,75 @@ fun ExploreScreen(
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val columns = moodColumns(maxWidth)
+            val allSections = (state as? UiState.Success)?.data ?: emptyList()
+            val filteredSections = remember(allSections, selectedFilter) {
+                when (selectedFilter) {
+                    "Moods & Moments" -> {
+                        val moodSections = allSections.filter { sec ->
+                            sec.title.contains("mood", ignoreCase = true) ||
+                                sec.title.contains("moment", ignoreCase = true)
+                        }
+                        if (moodSections.isNotEmpty()) {
+                            moodSections
+                        } else {
+                            val moodKeywords = setOf("chill", "commute", "energy", "focus", "party", "romance", "sleep", "workout", "feel good", "relax", "sad")
+                            val items = allSections.flatMap { it.items }.filter { item ->
+                                moodKeywords.any { kw -> item.title.contains(kw, ignoreCase = true) }
+                            }
+                            if (items.isNotEmpty()) listOf(MoodGenreSection("Moods & Moments", items)) else allSections
+                        }
+                    }
+                    "Genres" -> {
+                        val genreSections = allSections.filter { sec ->
+                            sec.title.contains("genre", ignoreCase = true)
+                        }
+                        if (genreSections.isNotEmpty()) {
+                            genreSections
+                        } else {
+                            val genreKeywords = setOf("pop", "rock", "hip-hop", "rap", "r&b", "electronic", "dance", "indie", "metal", "classical", "jazz", "country", "folk", "latin", "k-pop", "j-pop")
+                            val items = allSections.flatMap { it.items }.filter { item ->
+                                genreKeywords.any { kw -> item.title.contains(kw, ignoreCase = true) }
+                            }
+                            if (items.isNotEmpty()) listOf(MoodGenreSection("Genres", items)) else allSections
+                        }
+                    }
+                    "Charts & Trending" -> {
+                        val chartSections = allSections.filter { sec ->
+                            sec.title.contains("chart", ignoreCase = true) ||
+                                sec.title.contains("trend", ignoreCase = true) ||
+                                sec.title.contains("top", ignoreCase = true)
+                        }
+                        if (chartSections.isNotEmpty()) {
+                            chartSections
+                        } else {
+                            val chartKeywords = setOf("chart", "top", "trending", "hits", "hot", "viral")
+                            val items = allSections.flatMap { it.items }.filter { item ->
+                                chartKeywords.any { kw -> item.title.contains(kw, ignoreCase = true) }
+                            }
+                            if (items.isNotEmpty()) listOf(MoodGenreSection("Charts & Trending", items)) else allSections
+                        }
+                    }
+                    else -> allSections
+                }
+            }
+
+            val allItems = remember(filteredSections, customOrder) {
+                val items = filteredSections.flatMap(MoodGenreSection::items)
+                    .distinctBy { it.browseId to it.params }
+                if (customOrder.isEmpty()) {
+                    items
+                } else {
+                    val orderMap = customOrder.withIndex().associate { it.value to it.index }
+                    items.sortedBy { orderMap[it.title] ?: (10000 + items.indexOf(it)) }
+                }
+            }
+
+            var liveItems by remember(allItems) { mutableStateOf(allItems) }
+            var draggedItemTitle by remember { mutableStateOf<String?>(null) }
+            var dragOffset by remember { mutableStateOf(Offset.Zero) }
+            var cellWidthPx by remember { mutableFloatStateOf(0f) }
+            var cellHeightPx by remember { mutableFloatStateOf(0f) }
+
             LazyColumn(
                 state = listState,
                 contentPadding = contentPadding,
@@ -121,31 +198,41 @@ fun ExploreScreen(
                     }
                 }
 
-                // Top "Vibe & Moods" Frosted Glass Filter Bar
                 item {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState())
                             .padding(horizontal = PAGE_GUTTER)
-                            .padding(bottom = 16.dp),
+                            .padding(top = 4.dp, bottom = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         filterOptions.forEach { filter ->
                             val isSelected = filter == selectedFilter
-                            val primary = MaterialTheme.colorScheme.primary
                             val chipBg by animateColorAsState(
-                                targetValue = if (isSelected) primary.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.08f),
+                                targetValue = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                                },
                                 animationSpec = spring(),
                                 label = "chipBg",
                             )
                             val chipBorderColor by animateColorAsState(
-                                targetValue = if (isSelected) primary.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.18f),
+                                targetValue = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
+                                } else {
+                                    Color.White.copy(alpha = 0.12f)
+                                },
                                 animationSpec = spring(),
-                                label = "chipBorder",
+                                label = "chipBorderColor",
                             )
                             val textColor by animateColorAsState(
-                                targetValue = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                                targetValue = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                                 animationSpec = spring(),
                                 label = "textColor",
                             )
@@ -180,61 +267,72 @@ fun ExploreScreen(
                         MessageState(state.message, actionLabel = stringResource(Res.string.retry), onAction = onRetry)
                     }
                     is UiState.Success -> {
-                        val allSections = state.data
-                        val filteredSections = when (selectedFilter) {
-                            "Moods & Moments" -> {
-                                val moodSections = allSections.filter { sec ->
-                                    sec.title.contains("mood", ignoreCase = true) ||
-                                        sec.title.contains("moment", ignoreCase = true)
-                                }
-                                if (moodSections.isNotEmpty()) {
-                                    moodSections
-                                } else {
-                                    val moodKeywords = setOf("chill", "commute", "energy", "focus", "party", "romance", "sleep", "workout", "feel good", "relax", "sad")
-                                    val items = allSections.flatMap { it.items }.filter { item ->
-                                        moodKeywords.any { kw -> item.title.contains(kw, ignoreCase = true) }
-                                    }
-                                    if (items.isNotEmpty()) listOf(MoodGenreSection("Moods & Moments", items)) else allSections
-                                }
-                            }
-                            "Genres" -> {
-                                val genreSections = allSections.filter { sec ->
-                                    sec.title.contains("genre", ignoreCase = true)
-                                }
-                                if (genreSections.isNotEmpty()) {
-                                    genreSections
-                                } else {
-                                    val genreKeywords = setOf("pop", "rock", "hip-hop", "rap", "r&b", "electronic", "dance", "indie", "metal", "classical", "jazz", "country", "folk", "latin", "k-pop", "j-pop")
-                                    val items = allSections.flatMap { it.items }.filter { item ->
-                                        genreKeywords.any { kw -> item.title.contains(kw, ignoreCase = true) }
-                                    }
-                                    if (items.isNotEmpty()) listOf(MoodGenreSection("Genres", items)) else allSections
-                                }
-                            }
-                            "Charts & Trending" -> {
-                                val chartSections = allSections.filter { sec ->
-                                    sec.title.contains("chart", ignoreCase = true) ||
-                                        sec.title.contains("trend", ignoreCase = true) ||
-                                        sec.title.contains("top", ignoreCase = true)
-                                }
-                                if (chartSections.isNotEmpty()) {
-                                    chartSections
-                                } else {
-                                    val chartKeywords = setOf("chart", "top", "trending", "hits", "hot", "viral")
-                                    val items = allSections.flatMap { it.items }.filter { item ->
-                                        chartKeywords.any { kw -> item.title.contains(kw, ignoreCase = true) }
-                                    }
-                                    if (items.isNotEmpty()) listOf(MoodGenreSection("Charts & Trending", items)) else allSections
-                                }
-                            }
-                            else -> allSections
-                        }
-
-                        val rows = filteredSections.flatMap(MoodGenreSection::items)
-                            .distinctBy { it.browseId to it.params }
-                            .chunked(columns)
+                        val rows = liveItems.chunked(columns)
                         items(rows, key = { row -> row.first().let { "${it.browseId}|${it.params}" } }) { row ->
-                            MoodGenreRow(row = row, columns = columns, onCategoryClick = onCategoryClick)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(MOOD_SPACING),
+                                modifier = Modifier
+                                    .padding(horizontal = PAGE_GUTTER)
+                                    .padding(bottom = MOOD_SPACING),
+                            ) {
+                                row.forEach { item ->
+                                    val isDragging = item.title == draggedItemTitle
+                                    MoodGenreCard(
+                                        item = item,
+                                        onClick = { onCategoryClick(item) },
+                                        isDragging = isDragging,
+                                        dragOffset = if (isDragging) dragOffset else Offset.Zero,
+                                        onDragStart = {
+                                            draggedItemTitle = item.title
+                                            dragOffset = Offset.Zero
+                                        },
+                                        onDrag = { delta ->
+                                            dragOffset += delta
+                                            val currentIndex = liveItems.indexOfFirst { it.title == item.title }
+                                            if (currentIndex >= 0 && cellWidthPx > 0 && cellHeightPx > 0) {
+                                                val colShift = when {
+                                                    dragOffset.x > cellWidthPx * 0.5f -> 1
+                                                    dragOffset.x < -cellWidthPx * 0.5f -> -1
+                                                    else -> 0
+                                                }
+                                                val rowShift = when {
+                                                    dragOffset.y > cellHeightPx * 0.5f -> 1
+                                                    dragOffset.y < -cellHeightPx * 0.5f -> -1
+                                                    else -> 0
+                                                }
+                                                if (colShift != 0 || rowShift != 0) {
+                                                    val targetIndex = (currentIndex + colShift + rowShift * columns).coerceIn(0, liveItems.lastIndex)
+                                                    if (targetIndex != currentIndex) {
+                                                        liveItems = liveItems.toMutableList().apply {
+                                                            add(targetIndex, removeAt(currentIndex))
+                                                        }
+                                                        dragOffset = Offset(
+                                                            dragOffset.x - colShift * cellWidthPx,
+                                                            dragOffset.y - rowShift * cellHeightPx,
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        onDragEnd = {
+                                            draggedItemTitle = null
+                                            dragOffset = Offset.Zero
+                                            onReorder?.invoke(liveItems.map { it.title })
+                                        },
+                                        onDragCancel = {
+                                            draggedItemTitle = null
+                                            dragOffset = Offset.Zero
+                                            liveItems = allItems
+                                        },
+                                        onSize = { width, height ->
+                                            cellWidthPx = width
+                                            cellHeightPx = height
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                            }
                         }
                     }
                 }
@@ -272,16 +370,66 @@ private fun MoodGenreCard(
     item: MoodGenre,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    isDragging: Boolean = false,
+    dragOffset: Offset = Offset.Zero,
+    onDragStart: () -> Unit = {},
+    onDrag: (Offset) -> Unit = {},
+    onDragEnd: () -> Unit = {},
+    onDragCancel: () -> Unit = {},
+    onSize: (Float, Float) -> Unit = { _, _ -> },
 ) {
     val cardShape = RoundedCornerShape(22.dp)
-    MoodGenreSleeve(
-        item = item,
+    val scale = if (isDragging) 1.05f else 1.0f
+
+    Box(
         modifier = modifier
-            .aspectRatio(MOOD_CARD_ASPECT)
-            .liquidGlassCard(shape = cardShape)
-            .clip(cardShape)
-            .clickable(onClick = onClick),
-    )
+            .zIndex(if (isDragging) 10f else 0f)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                translationX = dragOffset.x
+                translationY = dragOffset.y
+                shadowElevation = if (isDragging) 24f else 0f
+            }
+            .then(
+                if (isDragging) {
+                    Modifier.border(
+                        width = 1.5.dp,
+                        brush = Brush.horizontalGradient(
+                            listOf(
+                                Color.White.copy(alpha = 0.85f),
+                                Color(0xFF64B5F6),
+                                Color.White.copy(alpha = 0.85f),
+                            ),
+                        ),
+                        shape = cardShape,
+                    )
+                } else {
+                    Modifier
+                },
+            )
+            .onSizeChanged { onSize(it.width.toFloat(), it.height.toFloat()) }
+            .pointerInput(item.title) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { onDragStart() },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        onDrag(dragAmount)
+                    },
+                    onDragEnd = { onDragEnd() },
+                    onDragCancel = { onDragCancel() },
+                )
+            },
+    ) {
+        MoodGenreSleeve(
+            item = item,
+            modifier = Modifier
+                .aspectRatio(MOOD_CARD_ASPECT)
+                .liquidGlassCard(shape = cardShape)
+                .clip(cardShape)
+                .clickable(onClick = onClick),
+        )
+    }
 }
 
 /**

@@ -55,6 +55,7 @@ data class AppLanguage(val tag: String, val nameRes: Int)
 
 val SUPPORTED_LANGUAGES = listOf(
     AppLanguage("en", R.string.english),
+    AppLanguage("bn", R.string.bengali),
     AppLanguage("es", R.string.spanish),
     AppLanguage("fr", R.string.french),
     AppLanguage("de", R.string.german),

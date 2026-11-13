@@ -997,6 +997,7 @@ object AppSettings {
         syncedLyrics.value = prefs.getBoolean(KEY_SYNCED_LYRICS, true)
         lyricsSources.value = readLyricsSources()
         lyricsSourceOrder.value = readLyricsSourceOrder()
+        exploreCardOrder.value = readExploreCardOrder()
         prioritizeSyllableSync.value = prefs.getBoolean(KEY_PRIORITIZE_SYLLABLE_SYNC, false)
         paxSenixApiKey.value = prefs.getString(KEY_PAXSENIX_API_KEY, "").orEmpty()
         com.music.bitchord.data.lyrics.PaxSenix.setApiKey(paxSenixApiKey.value)
@@ -1637,6 +1638,18 @@ object AppSettings {
         return LyricsSource.ordered(saved)
     }
 
+    val exploreCardOrder = MutableStateFlow<List<String>>(emptyList())
+
+    fun setExploreCardOrder(value: List<String>) {
+        exploreCardOrder.value = value
+        prefs.edit().putString(KEY_EXPLORE_CARD_ORDER, value.joinToString(",")).apply()
+    }
+
+    private fun readExploreCardOrder(): List<String> {
+        val stored = prefs.getString(KEY_EXPLORE_CARD_ORDER, null) ?: return emptyList()
+        return stored.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
     fun setPrioritizeSyllableSync(value: Boolean) {
         prioritizeSyllableSync.value = value
         prefs.edit().putBoolean(KEY_PRIORITIZE_SYLLABLE_SYNC, value).apply()
@@ -2272,6 +2285,7 @@ object AppSettings {
     private const val KEY_LYRICS_SOURCES = "lyrics_sources"
     private const val KEY_LYRICS_SOURCES_SEEN = "lyrics_sources_seen"
     private const val KEY_LYRICS_SOURCE_ORDER = "lyrics_source_order"
+    private const val KEY_EXPLORE_CARD_ORDER = "explore_card_order"
     private const val KEY_PRIORITIZE_SYLLABLE_SYNC = "prioritize_syllable_sync"
     private const val KEY_PAXSENIX_API_KEY = "paxsenix_api_key"
     private const val KEY_FILTER_NON_MUSIC_AUDIO = "filter_non_music_audio"

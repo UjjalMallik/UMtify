@@ -205,6 +205,7 @@
     <string name="app_language">App language</string>
     <string name="app_language_description">Choose the language used by UMtify.</string>
     <string name="english">English</string>
+    <string name="bengali">বাংলা (Bengali)</string>
     <string name="spanish">Spanish</string>
     <string name="french">French</string>
     <string name="german">German</string>

@@ -72,6 +72,8 @@ import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Storage
 import com.music.bitchord.ui.icons.BitChordIcons
@@ -117,8 +119,12 @@ private fun List<ShelfItem>.playingItemMatcher(song: Song?): (ShelfItem) -> Bool
     // The card that was played, when the shelf holds it, and only that one —
     // see [com.music.bitchord.data.model.playingRowMatcher], which rows use.
     if (any { it.videoId == song.videoId }) return { it.videoId == song.videoId }
-    val byName = firstOrNull { it.videoId != null && it.title == song.title && it.subtitle == song.artist }
-        ?: return { false }
+    val byName = firstOrNull {
+        it.videoId != null &&
+            it.title.equals(song.title, ignoreCase = true) &&
+            (it.subtitle.contains(song.artist, ignoreCase = true) ||
+                song.artist.contains(it.subtitle, ignoreCase = true))
+    } ?: return { false }
     return { it == byName }
 }
 
@@ -500,12 +506,13 @@ fun CompactTrackRow(
     ) {
         Box(Modifier.size(44.dp)) {
             val isBrokenOrBlank = thumbnailUrl.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(thumbnailUrl)
+            val coverBorder = if (isLight) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.14f)
             if (isBrokenOrBlank) {
                 com.music.bitchord.ui.components.DefaultCoverTile(
                     modifier = Modifier
                         .size(44.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp)),
+                        .border(0.8.dp, coverBorder, RoundedCornerShape(10.dp)),
                     contentScale = ContentScale.Crop,
                 )
             } else {
@@ -528,11 +535,30 @@ fun CompactTrackRow(
                     modifier = Modifier
                         .size(44.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+                        .border(0.8.dp, coverBorder, RoundedCornerShape(10.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                 )
             }
-            if (isCurrent && isPlaying) SearchPlayingBars(Modifier.align(Alignment.Center))
+            if (isCurrent) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.Black.copy(alpha = 0.35f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (isPlaying) {
+                        SearchPlayingBars()
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.Pause,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            }
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
@@ -734,7 +760,15 @@ internal fun localizeShelfTitle(title: String): String {
         trimmed.equals("Quick picks", ignoreCase = true) ||
             trimmed.equals("Lựa chọn nhanh", ignoreCase = true) ||
             trimmed.equals("Chọn nhanh đài phát", ignoreCase = true) ||
-            trimmed.equals("クイック ミックス", ignoreCase = true) ->
+            trimmed.equals("クイック ミックス", ignoreCase = true) ||
+            trimmed.equals("দ্রুত পছন্দ", ignoreCase = true) ||
+            trimmed.equals("দ্রুত বাছাই", ignoreCase = true) ||
+            trimmed.equals("ত্বরিত चयन", ignoreCase = true) ||
+            trimmed.equals("Schnellauswahl", ignoreCase = true) ||
+            trimmed.equals("Selección rápida", ignoreCase = true) ||
+            trimmed.equals("Sélection rapide", ignoreCase = true) ||
+            trimmed.equals("快速选择", ignoreCase = true) ||
+            trimmed.equals("快速選擇", ignoreCase = true) ->
             stringResource(Res.string.shelf_quick_picks)
         trimmed.equals("Listen again", ignoreCase = true) ||
             trimmed.equals("Nghe lại", ignoreCase = true) ||
@@ -953,7 +987,34 @@ private fun HeroCard(
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        if (isCurrent && isPlaying) SearchPlayingBars(Modifier.align(Alignment.Center))
+        if (isCurrent) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.35f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (isPlaying) {
+                    SearchPlayingBars()
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.60f))
+                            .border(0.8.dp, Color.White.copy(alpha = 0.30f), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Pause,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+            }
+        }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1052,12 +1113,13 @@ internal fun NewShelfCard(
             .clickable(onClick = onClick)
             .padding(8.dp),
     ) {
+        val coverBorder = if (isLight) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.14f)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(14.dp))
-                .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
+                .border(0.8.dp, coverBorder, RoundedCornerShape(14.dp))
                 .background(if (isLight) Color.Black.copy(alpha = 0.04f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
             contentAlignment = Alignment.Center,
         ) {
@@ -1104,12 +1166,15 @@ internal fun NewShelfCard(
  */
 @Composable
 private fun ServiceCard(colors: List<Color>, trackKey: String, icon: ImageVector) {
+    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
     val palette = remember { MeshPalette(colors) }
+    val coverBorder = if (isLight) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.14f)
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(1f)
-            .clip(RoundedCornerShape(12.dp)),
+            .clip(RoundedCornerShape(14.dp))
+            .border(0.8.dp, coverBorder, RoundedCornerShape(14.dp)),
         contentAlignment = Alignment.Center,
     ) {
         MeshGradientBackground(
@@ -1141,29 +1206,7 @@ internal fun ShelfCard(
 ) {
     val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
     val cardShape = RoundedCornerShape(18.dp)
-    val cardBorder = if (isLight) {
-        Brush.verticalGradient(
-            listOf(
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
-                Color.Black.copy(alpha = 0.10f),
-            ),
-        )
-    } else {
-        Brush.verticalGradient(
-            listOf(
-                Color.White.copy(alpha = 0.22f),
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-            ),
-        )
-    }
-    val cardSheen = Brush.linearGradient(
-        listOf(Color.White.copy(alpha = 0.08f), Color.White.copy(alpha = 0.02f)),
-    )
-    val cardBase = if (isLight) {
-        Color.White.copy(alpha = 0.80f)
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.50f)
-    }
+    val coverBorder = if (isLight) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.14f)
 
     Column(
         modifier = modifier
@@ -1186,7 +1229,7 @@ internal fun ShelfCard(
                         .fillMaxWidth()
                         .aspectRatio(1f)
                         .clip(RoundedCornerShape(14.dp))
-                        .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp)),
+                        .border(0.8.dp, coverBorder, RoundedCornerShape(14.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
                     MeshGradientBackground(
@@ -1201,7 +1244,34 @@ internal fun ShelfCard(
                         tint = Color.White,
                         modifier = Modifier.size(40.dp),
                     )
-                    if (isCurrent && isPlaying) SearchPlayingBars(Modifier.align(Alignment.Center))
+                    if (isCurrent) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.35f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (isPlaying) {
+                                SearchPlayingBars()
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.60f))
+                                        .border(0.8.dp, Color.White.copy(alpha = 0.30f), CircleShape),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Pause,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
             item.browseId == "local:downloads" -> {
@@ -1210,7 +1280,8 @@ internal fun ShelfCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(1f)
-                        .clip(RoundedCornerShape(12.dp)),
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(0.8.dp, coverBorder, RoundedCornerShape(14.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
                     MeshGradientBackground(
@@ -1253,7 +1324,7 @@ internal fun ShelfCard(
                         .fillMaxWidth()
                         .aspectRatio(1f)
                         .clip(RoundedCornerShape(14.dp))
-                        .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
+                        .border(0.8.dp, coverBorder, RoundedCornerShape(14.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                 ) {
                     val isBrokenOrBlank = item.thumbnailUrl.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(item.thumbnailUrl)
@@ -1282,11 +1353,65 @@ internal fun ShelfCard(
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
-                    if (isCurrent && isPlaying) SearchPlayingBars(Modifier.align(Alignment.Center))
+                    if (isCurrent) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.35f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (isPlaying) {
+                                SearchPlayingBars()
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.60f))
+                                        .border(0.8.dp, Color.White.copy(alpha = 0.30f), CircleShape),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Pause,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                            }
+                        }
+                    } else if (item.videoId != null) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(6.dp)
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.48f))
+                                .border(
+                                    width = 0.8.dp,
+                                    brush = Brush.verticalGradient(
+                                        listOf(
+                                            Color.White.copy(alpha = 0.65f),
+                                            Color.White.copy(alpha = 0.18f),
+                                        ),
+                                    ),
+                                    shape = CircleShape,
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.PlayArrow,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
                 }
             }
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -1311,7 +1436,7 @@ internal fun ShelfCard(
         }
         val displaySubtitle = localizeCardSubtitle(item.subtitle)
         Text(
-            text = displaySubtitle,
+            text = displaySubtitle.ifBlank { " " },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,

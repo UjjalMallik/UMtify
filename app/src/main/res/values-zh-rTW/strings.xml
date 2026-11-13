@@ -613,7 +613,7 @@
     <string name="this_year">今年</string>
     <string name="all_time">全部時間</string>
 
-    <!-- Listen together -->
+    
     <string name="listen_together">一起聽</string>
     <string name="listen_together_subtitle">分享一個程式碼，同步播放同一首音樂</string>
     <string name="listen_together_in_party">派對中 · %1$s</string>
@@ -1270,4 +1270,65 @@
     <string name="wear_os_code_hint">配對碼</string>
     <string name="wear_os_done">完成</string>
     <string name="spotify_use_spdc_token">使用 sp_dc 權杖</string>
-</resources>
+<string name="widget_vinyl_label">Now playing (Crystal Vinyl)</string>
+    <string name="widget_vinyl_description">A circular cover inside crystal rings, with the track, the wave and playback controls.</string>
+    <string name="dolby_atmos_fallback_subtitle">Play Dolby Atmos &amp; spatial audio tracks (uses built-in binaural spatializer on unsupported devices)</string>
+    <string name="bengali">বাংলা (Bengali)</string>
+    <string name="custom_font">Custom font</string>
+    <string name="custom_font_subtitle">Use a .ttf or .otf file from your storage</string>
+    <string name="custom_font_active">Using %1$s</string>
+    <string name="custom_font_reset">Reset</string>
+    <string name="custom_font_failed">That file could not be read as a font</string>
+    <string name="font_size">Font size</string>
+    <string name="font_size_subtitle">Type size, on top of the system\'s own font scale</string>
+    <string name="display_size">Display size</string>
+    <string name="display_size_subtitle">Spacing, icons and layout, on top of the system\'s display scale</string>
+    <string name="interface_scale_value">%1$d%%</string>
+    <string name="interface_scale_reset">Reset text and layout size</string>
+    <string name="interface_scale_reset_subtitle">Both back to 100 — the system\'s own scales, nothing added</string>
+    <string name="artist_signatures">Artist signatures</string>
+    <string name="artist_signatures_subtitle">Shows a handwritten signature when Apple Music has no title logo</string>
+    <string name="artist_signatures_url">Signature API URL</string>
+    <string name="artist_signatures_url_hint">https://signatures.example.com</string>
+    <string name="artist_signatures_unconfigured">Not configured — tap to set the API URL</string>
+    <string name="artist_signatures_test_failed">Could not reach the API at that URL</string>
+    <string name="capsule_artwork_description">Album cover</string>
+    <string name="capsule_play_pause_description">Play or pause</string>
+    <string name="capsule_next_description">Next track</string>
+    <string name="show_player_bottom_toolbar">Show bottom action bar</string>
+    <string name="show_player_bottom_toolbar_subtitle">The queue, sleep timer, shuffle, lyrics, repeat and more buttons under the player</string>
+    <string name="show_queue_button">Queue button</string>
+    <string name="show_sleep_timer_button">Sleep timer button</string>
+    <string name="show_shuffle_button">Shuffle button</string>
+    <string name="show_lyrics_button">Lyrics button</string>
+    <string name="show_repeat_button">Repeat button</string>
+    <string name="show_more_button">More options button</string>
+    <string name="dynamic">Dynamic</string>
+    <string name="edit_song_info">Edit song info</string>
+    <string name="offline_mode">Offline mode</string>
+    <string name="offline_mode_subtitle">Show only downloaded, cached, and local music on Home</string>
+    <string name="offline_mode_on">Offline Mode</string>
+    <string name="offline_mode_no_internet">No internet</string>
+    <string name="offline_mode_turn_off">Turn off</string>
+    <string name="offline_quick_access">Quick access</string>
+    <string name="offline_play_all">Play all</string>
+    <string name="offline_shuffle_all">Shuffle all</string>
+    <string name="offline_recently_played">Recently played offline</string>
+    <string name="offline_nothing_yet">Nothing to play offline yet.</string>
+    <string name="offline_search_hint">Offline · only what is on this device</string>
+    <string name="search_offline_no_results">Nothing called \"%1$s\" is on this device.</string>
+    <string name="offline_playback_blocked">Offline Mode is on, so nothing is streamed. Turn it off in Settings to play this track.</string>
+    <string name="signed_by">Signed by %1$s</string>
+    <string name="settings_group_player_lyrics">Player &amp; Lyrics</string>
+    <string name="settings_group_local_storage">Local Music &amp; Storage</string>
+    <string name="settings_group_audio_subtitle">Where sound comes from and how good it is</string>
+    <string name="settings_group_downloads_subtitle">What is kept on the device, and at what size</string>
+    <string name="settings_group_playback_subtitle">How a track is rendered, and how the next one starts</string>
+    <string name="settings_group_appearance_subtitle">Theme, type, motion and refresh rate</string>
+    <string name="settings_group_player_subtitle">The sleeve, the words and the buttons under the player</string>
+    <string name="settings_group_storage_subtitle">Files on this device and the space they use</string>
+    <string name="settings_group_data_subtitle">Listening stats and backups</string>
+    <string name="settings_group_misc_subtitle">Everything without a better home</string>
+    <string name="settings_group_expand">Expand %1$s</string>
+    <string name="settings_group_collapse">Collapse %1$s</string>
+    </resources>

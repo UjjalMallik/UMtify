@@ -61,6 +61,7 @@ object LocaleTags {
         return when (normalizeAppTag(appTag)) {
             ZH_HANT -> "TW"
             ZH_HANS -> "CN"
+            "bn" -> "IN"
             else -> "US"
         }
     }
