@@ -186,9 +186,11 @@ fun ReplayShareSheet(
 
         Spacer(Modifier.height(14.dp))
 
+        val isBn = remember { Locale.getDefault().language == "bn" }
+
         // Dynamic Palette Swatch Row
         Text(
-            text = "GLASS PALETTE",
+            text = if (isBn) "গ্লাস কালার প্যালেট" else "GLASS PALETTE",
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -260,7 +262,7 @@ fun ReplayShareSheet(
                     }
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = theme.displayName,
+                        text = theme.localizedName(isBn),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                         color = if (isSelected) {

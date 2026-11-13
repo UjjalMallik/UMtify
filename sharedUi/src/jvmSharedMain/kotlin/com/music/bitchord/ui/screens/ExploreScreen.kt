@@ -28,8 +28,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -171,6 +175,7 @@ fun ExploreScreen(
                 }
             }
 
+            val isBn = remember { java.util.Locale.getDefault().language == "bn" }
             var liveItems by remember(allItems) { mutableStateOf(allItems) }
             var draggedItemTitle by remember { mutableStateOf<String?>(null) }
             var dragOffset by remember { mutableStateOf(Offset.Zero) }
@@ -250,8 +255,15 @@ fun ExploreScreen(
                                     .padding(horizontal = 16.dp, vertical = 8.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
+                                val chipLabel = when (filter) {
+                                    "All Vibes" -> if (isBn) "সব ভাইব" else "All Vibes"
+                                    "Moods & Moments" -> if (isBn) "মুড ও মুহূর্ত" else "Moods & Moments"
+                                    "Genres" -> if (isBn) "জনরা" else "Genres"
+                                    "Charts & Trending" -> if (isBn) "চার্ট ও ট্রেন্ডিং" else "Charts & Trending"
+                                    else -> filter
+                                }
                                 Text(
-                                    text = filter,
+                                    text = chipLabel,
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                     color = textColor,
@@ -268,7 +280,7 @@ fun ExploreScreen(
                     }
                     is UiState.Success -> {
                         val rows = liveItems.chunked(columns)
-                        items(rows, key = { row -> row.first().let { "${it.browseId}|${it.params}" } }) { row ->
+                        items(rows, key = { row -> row.joinToString("|") { it.title } }) { row ->
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(MOOD_SPACING),
                                 modifier = Modifier
@@ -379,7 +391,8 @@ private fun MoodGenreCard(
     onSize: (Float, Float) -> Unit = { _, _ -> },
 ) {
     val cardShape = RoundedCornerShape(22.dp)
-    val scale = if (isDragging) 1.05f else 1.0f
+    val scale = if (isDragging) 1.06f else 1.0f
+    val haptic = LocalHapticFeedback.current
 
     Box(
         modifier = modifier
@@ -389,17 +402,17 @@ private fun MoodGenreCard(
                 scaleY = scale
                 translationX = dragOffset.x
                 translationY = dragOffset.y
-                shadowElevation = if (isDragging) 24f else 0f
+                shadowElevation = if (isDragging) 28f else 0f
             }
             .then(
                 if (isDragging) {
                     Modifier.border(
-                        width = 1.5.dp,
+                        width = 2.dp,
                         brush = Brush.horizontalGradient(
                             listOf(
-                                Color.White.copy(alpha = 0.85f),
+                                Color.White.copy(alpha = 0.95f),
                                 Color(0xFF64B5F6),
-                                Color.White.copy(alpha = 0.85f),
+                                Color.White.copy(alpha = 0.95f),
                             ),
                         ),
                         shape = cardShape,
@@ -411,7 +424,10 @@ private fun MoodGenreCard(
             .onSizeChanged { onSize(it.width.toFloat(), it.height.toFloat()) }
             .pointerInput(item.title) {
                 detectDragGesturesAfterLongPress(
-                    onDragStart = { onDragStart() },
+                    onDragStart = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onDragStart()
+                    },
                     onDrag = { change, dragAmount ->
                         change.consume()
                         onDrag(dragAmount)
@@ -423,6 +439,13 @@ private fun MoodGenreCard(
     ) {
         MoodGenreSleeve(
             item = item,
+            onDragHandleStart = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onDragStart()
+            },
+            onDragHandleMove = { delta -> onDrag(delta) },
+            onDragHandleEnd = { onDragEnd() },
+            onDragHandleCancel = { onDragCancel() },
             modifier = Modifier
                 .aspectRatio(MOOD_CARD_ASPECT)
                 .liquidGlassCard(shape = cardShape)
@@ -444,9 +467,15 @@ fun MoodGenreSleeve(
     item: MoodGenre,
     modifier: Modifier = Modifier,
     titleStyle: TextStyle = MaterialTheme.typography.titleMedium,
+    onDragHandleStart: () -> Unit = {},
+    onDragHandleMove: (Offset) -> Unit = {},
+    onDragHandleEnd: () -> Unit = {},
+    onDragHandleCancel: () -> Unit = {},
 ) {
+    val isBn = remember { java.util.Locale.getDefault().language == "bn" }
     val tone = remember(item.stripeColor, item.title) { moodTone(item) }
-    val subtitle = remember(item.title) { categorySubtitle(item.title) }
+    val subtitle = remember(item.title, isBn) { categorySubtitle(item.title, isBn) }
+    val displayTitle = remember(item.title, isBn) { localizeMoodTitle(item.title, isBn) }
 
     Box(
         modifier = modifier
@@ -539,6 +568,36 @@ fun MoodGenreSleeve(
             }
         }
 
+        // 3.5. Dedicated Drag Grip Handle in top-right corner
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(8.dp)
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.32f))
+                .border(0.8.dp, Color.White.copy(alpha = 0.35f), CircleShape)
+                .pointerInput(item.title) {
+                    detectDragGestures(
+                        onDragStart = { onDragHandleStart() },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            onDragHandleMove(dragAmount)
+                        },
+                        onDragEnd = { onDragHandleEnd() },
+                        onDragCancel = { onDragHandleCancel() },
+                    )
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.DragHandle,
+                contentDescription = "Reorder",
+                tint = Color.White.copy(alpha = 0.88f),
+                modifier = Modifier.size(16.dp),
+            )
+        }
+
         // 4. Content Column on Left: Title + Subtitle + Glowing Play Orb
         Column(
             modifier = Modifier
@@ -561,7 +620,7 @@ fun MoodGenreSleeve(
                             .background(Color.White.copy(alpha = 0.95f)),
                     )
                     Text(
-                        text = item.title,
+                        text = displayTitle,
                         style = titleStyle.copy(
                             shadow = Shadow(
                                 color = Color.Black.copy(alpha = 0.65f),
@@ -614,31 +673,68 @@ fun MoodGenreSleeve(
     }
 }
 
+/** Localized titles for Explore moods and genres. */
+fun localizeMoodTitle(title: String, isBn: Boolean = java.util.Locale.getDefault().language == "bn"): String = if (!isBn) title else when {
+    title.equals("Gaming", ignoreCase = true) -> "গেমিং"
+    title.equals("Chill", ignoreCase = true) -> "চিল"
+    title.equals("Commute", ignoreCase = true) -> "কম্যুট"
+    title.equals("Energize", ignoreCase = true) || title.equals("Energy", ignoreCase = true) -> "এনার্জাইজ"
+    title.equals("Feel good", ignoreCase = true) -> "ফিল গুড"
+    title.equals("Focus", ignoreCase = true) -> "ফোকাস"
+    title.equals("Party", ignoreCase = true) -> "পার্টি"
+    title.equals("Romance", ignoreCase = true) -> "রোমান্স"
+    title.equals("Sad", ignoreCase = true) -> "স্যাড"
+    title.equals("Sleep", ignoreCase = true) -> "স্লিপ"
+    title.equals("Workout", ignoreCase = true) -> "ওয়ার্কআউট"
+    title.equals("African", ignoreCase = true) -> "আফ্রিকান"
+    title.equals("Arabic", ignoreCase = true) -> "আরবি"
+    title.equals("Bengali", ignoreCase = true) -> "বাংলা"
+    title.equals("Bollywood", ignoreCase = true) -> "বলিউড"
+    title.equals("Classical", ignoreCase = true) -> "ক্লাসিক্যাল"
+    title.equals("Country", ignoreCase = true) -> "কান্ট্রি"
+    title.equals("Dance", ignoreCase = true) -> "ড্যান্স"
+    title.equals("Electronic", ignoreCase = true) -> "ইলেকট্রনিক"
+    title.equals("Folk", ignoreCase = true) -> "ফোক"
+    title.equals("Hip-Hop", ignoreCase = true) || title.equals("Rap", ignoreCase = true) -> "হিপ-হপ"
+    title.equals("Indie", ignoreCase = true) -> "ইন্ডি"
+    title.equals("Jazz", ignoreCase = true) -> "জ্যাজ"
+    title.equals("K-Pop", ignoreCase = true) -> "কে-পপ"
+    title.equals("Latin", ignoreCase = true) -> "ল্যাটিন"
+    title.equals("Metal", ignoreCase = true) -> "মেটাল"
+    title.equals("Pop", ignoreCase = true) -> "পপ"
+    title.equals("R&B", ignoreCase = true) -> "আরঅ্যান্ডবি"
+    title.equals("Rock", ignoreCase = true) -> "রক"
+    title.equals("Charts", ignoreCase = true) -> "চার্টস"
+    title.equals("Trending", ignoreCase = true) -> "ট্রেন্ডিং"
+    else -> title
+}
+
 /** Rich curated subtitle descriptors for Explore moods and genres. */
-private fun categorySubtitle(title: String): String = when {
-    title.contains("Bengali", ignoreCase = true) -> "Top Hits, Rabindra & Classics"
-    title.contains("Carnatic", ignoreCase = true) -> "South Classical & Sacred Ragas"
-    title.contains("Hindustani", ignoreCase = true) -> "North Classical, Khayal & Sitar"
-    title.contains("Hindi", ignoreCase = true) || title.contains("Bollywood", ignoreCase = true) -> "Blockbusters & Melodies"
-    title.contains("Chill", ignoreCase = true) -> "Lo-Fi, Acoustic & Relax"
-    title.contains("Commute", ignoreCase = true) -> "On The Move & Roadtrips"
-    title.contains("Energy", ignoreCase = true) || title.contains("Energize", ignoreCase = true) -> "High Voltage & Power Beats"
-    title.contains("Focus", ignoreCase = true) -> "Deep Study & Concentration"
-    title.contains("Party", ignoreCase = true) -> "Club Anthems & Dancefloor"
-    title.contains("Romance", ignoreCase = true) -> "Love Ballads & Duets"
-    title.contains("Sleep", ignoreCase = true) -> "Ambient, Drone & Calm"
-    title.contains("Workout", ignoreCase = true) -> "Pump & Cardio Beats"
-    title.contains("Feel good", ignoreCase = true) -> "Sunny Day Vibes & Uplift"
-    title.contains("Sad", ignoreCase = true) -> "Heartbreak & Melancholy"
-    title.contains("Pop", ignoreCase = true) -> "Chart Toppers & Viral"
-    title.contains("Hip-Hop", ignoreCase = true) || title.contains("Rap", ignoreCase = true) -> "Trap, Bars & Street"
-    title.contains("Rock", ignoreCase = true) -> "Classic Riffs & Alt Anthems"
-    title.contains("Electronic", ignoreCase = true) || title.contains("Dance", ignoreCase = true) -> "EDM, Synthwave & Club"
-    title.contains("Indie", ignoreCase = true) -> "Alternative & Indie Folk"
-    title.contains("Classical", ignoreCase = true) -> "Symphonies & Masterpieces"
-    title.contains("K-Pop", ignoreCase = true) -> "Global Hits & Idol Anthems"
-    title.contains("Jazz", ignoreCase = true) -> "Smooth Sax & Standards"
-    else -> "Curated Mixes & Highlights"
+fun categorySubtitle(title: String, isBn: Boolean = java.util.Locale.getDefault().language == "bn"): String = when {
+    title.contains("Bengali", ignoreCase = true) -> if (isBn) "সেরা হিট, রবীন্দ্র ও ক্ল্যাসিক গান" else "Top Hits, Rabindra & Classics"
+    title.contains("Carnatic", ignoreCase = true) -> if (isBn) "দক্ষিণী শাস্ত্রীয় ও পবিত্র রাগ" else "South Classical & Sacred Ragas"
+    title.contains("Hindustani", ignoreCase = true) -> if (isBn) "উত্তর ভারতীয় শাস্ত্রীয় ও সেতার" else "North Classical, Khayal & Sitar"
+    title.contains("Hindi", ignoreCase = true) || title.contains("Bollywood", ignoreCase = true) -> if (isBn) "ব্লকবাস্টার হিট ও মেলোডি" else "Blockbusters & Melodies"
+    title.contains("Chill", ignoreCase = true) -> if (isBn) "লো-ফাই, অ্যাকোস্টিক ও রিল্যাক্স সুর" else "Lo-Fi, Acoustic & Relax"
+    title.contains("Commute", ignoreCase = true) -> if (isBn) "যাত্রাপথের গান ও রোডট্রিপ" else "On The Move & Roadtrips"
+    title.contains("Energy", ignoreCase = true) || title.contains("Energize", ignoreCase = true) -> if (isBn) "হাই ভোল্টেজ ও পাওয়ার বিটস" else "High Voltage & Power Beats"
+    title.contains("Focus", ignoreCase = true) -> if (isBn) "মনোযোগ সহকারে পড়াশোনা ও কাজ" else "Deep Study & Concentration"
+    title.contains("Gaming", ignoreCase = true) -> if (isBn) "গেমিং বিটস, হাইলাইটস ও মিক্স" else "Curated Mixes & Gaming Highlights"
+    title.contains("Party", ignoreCase = true) -> if (isBn) "ক্লাব অ্যান্থেম ও ড্যান্সফ্লোর হিট" else "Club Anthems & Dancefloor"
+    title.contains("Romance", ignoreCase = true) -> if (isBn) "রোমান্টিক গান ও ভালোবাসার সুর" else "Love Ballads & Duets"
+    title.contains("Sleep", ignoreCase = true) -> if (isBn) "শান্ত সুর ও আরামদায়ক ঘুম" else "Ambient, Drone & Calm"
+    title.contains("Workout", ignoreCase = true) -> if (isBn) "জিম ও কার্ডিও পাম্প বিটস" else "Pump & Cardio Beats"
+    title.contains("Feel good", ignoreCase = true) -> if (isBn) "আনন্দময় ও উজ্জ্বল অনুভূতি" else "Sunny Day Vibes & Uplift"
+    title.contains("Sad", ignoreCase = true) -> if (isBn) "হৃদয়ভাঙা সুর ও মনখারাপ" else "Heartbreak & Melancholy"
+    title.contains("Pop", ignoreCase = true) -> if (isBn) "টপ চার্ট ও ভাইরাল গানসমূহ" else "Chart Toppers & Viral"
+    title.contains("Hip-Hop", ignoreCase = true) || title.contains("Rap", ignoreCase = true) -> if (isBn) "ট্র্যাপ, র‍্যাপ ও স্ট্রিট বিটস" else "Trap, Bars & Street"
+    title.contains("Rock", ignoreCase = true) -> if (isBn) "ক্লাসিক রিফ ও অল্টারনেটিভ রক" else "Classic Riffs & Alt Anthems"
+    title.contains("Electronic", ignoreCase = true) || title.contains("Dance", ignoreCase = true) -> if (isBn) "ইডিএম, সিন্থওয়েভ ও ক্লাব" else "EDM, Synthwave & Club"
+    title.contains("Indie", ignoreCase = true) -> if (isBn) "অল্টারনেটিভ ও ইন্ডি ফোক" else "Alternative & Indie Folk"
+    title.contains("Classical", ignoreCase = true) -> if (isBn) "সিম্ফনি ও বিশ্বখ্যাত মাস্টারপিস" else "Symphonies & Masterpieces"
+    title.contains("K-Pop", ignoreCase = true) -> if (isBn) "গ্লোবাল হিট ও জনপ্রিয় কে-পপ" else "Global Hits & Idol Anthems"
+    title.contains("Jazz", ignoreCase = true) -> if (isBn) "স্মুথ স্যাক্সোফোন ও জ্যাজ" else "Smooth Sax & Standards"
+    else -> if (isBn) "বাছাইকৃত মিক্স ও হাইলাইটস" else "Curated Mixes & Highlights"
 }
 
 private class MoodTone(val stripe: Color, val placeholder: Color)

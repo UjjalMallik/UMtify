@@ -65,4 +65,14 @@ enum class ReplayGlassTheme(
 
     fun resolvedArgbColors(themeArgb: List<Int>?): List<Int> =
         if (this == AUTO && !themeArgb.isNullOrEmpty()) themeArgb else argbColors
+
+    fun localizedName(isBn: Boolean): String = if (!isBn) displayName else when (this) {
+        AUTO -> "অ্যাপ থিম"
+        COSMIC_AURORA -> "কসমিক অরোরা"
+        ROYAL_AMETHYST -> "রয়্যাল অ্যামিথিস্ট"
+        EMERALD_NEBULA -> "এমেরাল্ড নেবুলা"
+        CRIMSON_VELVET -> "ক্রিমসন ভেলভেট"
+        MIDNIGHT_SAPPHIRE -> "মিডনাইট স্যাফায়ার"
+        SUNSET_AMBER -> "সানসেট অ্যাম্বার"
+    }
 }

@@ -763,7 +763,7 @@ internal fun localizeShelfTitle(title: String): String {
             trimmed.equals("クイック ミックス", ignoreCase = true) ||
             trimmed.equals("দ্রুত পছন্দ", ignoreCase = true) ||
             trimmed.equals("দ্রুত বাছাই", ignoreCase = true) ||
-            trimmed.equals("ত্বরিত चयन", ignoreCase = true) ||
+            trimmed.equals("সেরা বাছাই", ignoreCase = true) ||
             trimmed.equals("Schnellauswahl", ignoreCase = true) ||
             trimmed.equals("Selección rápida", ignoreCase = true) ||
             trimmed.equals("Sélection rapide", ignoreCase = true) ||

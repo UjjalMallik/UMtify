@@ -156,6 +156,24 @@ private const val AUTOPLAY_TAP_WINDOW_MS = 700L
  * playing *out of*, in the words the caption uses.
  */
 @Composable
+private fun localizeOriginSource(source: String?): String? {
+    if (source == null) return null
+    return when {
+        source.equals("Recents", ignoreCase = true) -> stringResource(Res.string.shelf_recents)
+        source.equals("Listen again", ignoreCase = true) -> stringResource(Res.string.shelf_listen_again)
+        source.equals("Quick picks", ignoreCase = true) -> stringResource(Res.string.shelf_quick_picks)
+        source.equals("For you", ignoreCase = true) -> stringResource(Res.string.shelf_for_you)
+        source.equals("Mixed for you", ignoreCase = true) -> stringResource(Res.string.shelf_mixed_for_you)
+        source.equals("Downloads", ignoreCase = true) -> stringResource(Res.string.downloaded)
+        source.equals("On Device", ignoreCase = true) || source.equals("Local Music", ignoreCase = true) -> stringResource(Res.string.on_device)
+        source.equals("Charts", ignoreCase = true) -> stringResource(Res.string.shelf_charts)
+        source.equals("Trending", ignoreCase = true) -> stringResource(Res.string.shelf_trending)
+        source.equals("New releases", ignoreCase = true) -> stringResource(Res.string.shelf_new_releases)
+        else -> source
+    }
+}
+
+@Composable
 internal fun playbackOriginText(song: Song, playedBy: String?): String =
     playedBy?.let {
         stringResource(Res.string.played_by, it)
@@ -163,7 +181,7 @@ internal fun playbackOriginText(song: Song, playedBy: String?): String =
         stringResource(Res.string.playing_radio, it)
     } ?: stringResource(
         Res.string.playing_from,
-        song.playbackSource ?: song.albumName ?: stringResource(Res.string.queue),
+        localizeOriginSource(song.playbackSource) ?: song.albumName ?: stringResource(Res.string.queue),
     )
 
 /**
