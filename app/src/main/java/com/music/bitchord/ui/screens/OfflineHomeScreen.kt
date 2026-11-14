@@ -176,139 +176,89 @@ fun OfflineHomeScreen(
         }
         val snapshot = data ?: return@LazyColumn
 
-        // Offline Quick-Filter Chip Bar
+        // Floating Glass Segmented Filter Bar
         item(key = "offline-filter-chips") {
-            Row(
+            androidx.compose.foundation.lazy.LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = PAGE_GUTTER)
                     .padding(bottom = 12.dp),
+                contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                val primary = MaterialTheme.colorScheme.primary
                 val filters = listOf(
-                    "ALL" to if (isBn) "সব অফলাইন" else "All Offline",
-                    "LOCAL" to if (isBn) "ফোনের গান" else "Local Tracks",
-                    "DOWNLOADS" to if (isBn) "ডাউনলোড" else "Downloads",
-                    "CACHED" to if (isBn) "১০০% ক্যাশড" else "100% Cached",
+                    Triple("ALL", if (isBn) "সব অফলাইন" else "All Offline", Icons.Rounded.CloudOff),
+                    Triple("LOCAL", if (isBn) "ফোনের গান" else "Local Tracks", Icons.Rounded.Folder),
+                    Triple("DOWNLOADS", if (isBn) "ডাউনলোড" else "Downloads", Icons.Rounded.Download),
+                    Triple("CACHED", if (isBn) "১০০% ক্যাশড" else "100% Cached", Icons.Rounded.Bolt),
                 )
-                filters.forEach { (key, filterLabel) ->
+                items(filters) { (key, filterLabel, icon) ->
                     val isSelected = activeFilter == key
-                    Box(
+                    val chipBg = if (isSelected) {
+                        Brush.linearGradient(
+                            listOf(
+                                primary.copy(alpha = 0.38f),
+                                primary.copy(alpha = 0.18f),
+                            ),
+                        )
+                    } else {
+                        Brush.linearGradient(
+                            listOf(
+                                Color.White.copy(alpha = 0.08f),
+                                Color.White.copy(alpha = 0.04f),
+                            ),
+                        )
+                    }
+                    val chipBorder = if (isSelected) {
+                        Brush.linearGradient(
+                            listOf(
+                                primary.copy(alpha = 0.90f),
+                                primary.copy(alpha = 0.50f),
+                                Color.White.copy(alpha = 0.30f),
+                            ),
+                        )
+                    } else {
+                        Brush.linearGradient(
+                            listOf(
+                                Color.White.copy(alpha = 0.18f),
+                                Color.White.copy(alpha = 0.08f),
+                            ),
+                        )
+                    }
+                    Row(
                         modifier = Modifier
                             .clip(CircleShape)
-                            .background(
-                                if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
-                                else Color.White.copy(alpha = 0.06f),
-                            )
+                            .background(chipBg)
                             .border(
-                                0.8.dp,
-                                if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
-                                else Color.White.copy(alpha = 0.12f),
+                                if (isSelected) 1.5.dp else 0.8.dp,
+                                chipBorder,
                                 CircleShape,
                             )
                             .clickable { activeFilter = key }
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                            .padding(start = 10.dp, end = 13.dp, top = 7.dp, bottom = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = if (isSelected) primary else Color.White.copy(alpha = 0.65f),
+                            modifier = Modifier.size(14.dp),
+                        )
                         Text(
                             text = filterLabel,
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.labelMedium,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.75f),
+                            color = if (isSelected) primary else Color.White.copy(alpha = 0.75f),
                         )
                     }
                 }
             }
         }
 
-        // Hero Button: "Shuffle All Offline Music"
-        if (allOfflineSongs.isNotEmpty()) {
-            item(key = "offline-hero-shuffle") {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = PAGE_GUTTER)
-                        .padding(bottom = 14.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(
-                                    Color(0xFF6C5CE7).copy(alpha = 0.28f),
-                                    Color(0xFF00CEC9).copy(alpha = 0.18f),
-                                ),
-                            ),
-                        )
-                        .border(
-                            1.2.dp,
-                            Brush.horizontalGradient(
-                                listOf(
-                                    Color(0xFF6C5CE7).copy(alpha = 0.65f),
-                                    Color(0xFF00CEC9).copy(alpha = 0.45f),
-                                ),
-                            ),
-                            RoundedCornerShape(20.dp),
-                        )
-                        .clickable {
-                            onShuffleAll(allOfflineSongs, if (isBn) "সব অফলাইন" else "All Offline")
-                        }
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF6C5CE7).copy(alpha = 0.35f)),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Shuffle,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp),
-                                )
-                            }
-                            Column {
-                                Text(
-                                    text = if (isBn) "সব অফলাইন গান শাফেল করুন" else "Shuffle All Offline Music",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                )
-                                Text(
-                                    text = "${allOfflineSongs.size} ${if (isBn) "টি গান · ১০০% অফলাইন ভল্ট" else "tracks · 100% Offline Vault"}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color.White.copy(alpha = 0.65f),
-                                )
-                            }
-                        }
-                        Box(
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.15f))
-                                .border(0.8.dp, Color.White.copy(alpha = 0.30f), CircleShape)
-                                .padding(horizontal = 12.dp, vertical = 5.dp),
-                        ) {
-                            Text(
-                                text = if (isBn) "শাফল" else "Shuffle",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                            )
-                        }
-                    }
-                }
-            }
-        }
 
-        // "Crystal Vault" Bento Cards
+
+        // "Crystal Vault" 2-Over-1 Asymmetric Bento Layout
         item(key = "offline-quick-access") {
             OfflineSectionHeader(quickAccessLabel)
             Column(
@@ -317,7 +267,35 @@ fun OfflineHomeScreen(
                     .padding(horizontal = PAGE_GUTTER),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                if (activeFilter == "ALL" || activeFilter == "DOWNLOADS") {
+                val showDownloads = activeFilter == "ALL" || activeFilter == "DOWNLOADS"
+                val showLocal = activeFilter == "ALL" || activeFilter == "LOCAL"
+                if (showDownloads && showLocal) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        CompactBentoCard(
+                            label = downloadsLabel,
+                            badgeText = if (isBn) "ভল্ট · FLAC" else "Vault · FLAC",
+                            count = snapshot.downloads.size,
+                            browseId = "local:downloads",
+                            songs = snapshot.downloads,
+                            accentGlow = Color(0xFF3880FF),
+                            onOpen = { onOpenFolder("local:downloads", downloadsLabel, "") },
+                            modifier = Modifier.weight(1f),
+                        )
+                        CompactBentoCard(
+                            label = localLabel,
+                            badgeText = if (isBn) "লোকাল · Hi-Res" else "On-Device · Hi-Res",
+                            count = snapshot.local.size,
+                            browseId = "local:all",
+                            songs = snapshot.local,
+                            accentGlow = Color(0xFF10AC84),
+                            onOpen = { onOpenFolder("local:all", localLabel, "") },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                } else if (showDownloads) {
                     QuickAccessBentoCard(
                         label = downloadsLabel,
                         badgeText = if (isBn) "অফলাইন ভল্ট · FLAC" else "Offline Vault · FLAC",
@@ -327,8 +305,7 @@ fun OfflineHomeScreen(
                         accentGlow = Color(0xFF3880FF),
                         onOpen = { onOpenFolder("local:downloads", downloadsLabel, "") },
                     )
-                }
-                if (activeFilter == "ALL" || activeFilter == "LOCAL") {
+                } else if (showLocal) {
                     QuickAccessBentoCard(
                         label = localLabel,
                         badgeText = if (isBn) "FLAC · Hi-Res · লোকাল" else "FLAC · Hi-Res · On-Device",
@@ -339,6 +316,7 @@ fun OfflineHomeScreen(
                         onOpen = { onOpenFolder("local:all", localLabel, "") },
                     )
                 }
+                // Bottom Row: Cached songs full-width below
                 if (activeFilter == "ALL" || activeFilter == "CACHED") {
                     QuickAccessBentoCard(
                         label = cachedLabel,
@@ -721,6 +699,7 @@ private fun OfflineChip(
         }
     }
 
+    val isBn = remember { Locale.getDefault().language == "bn" }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -765,7 +744,7 @@ private fun OfflineChip(
 
         Column(Modifier.weight(1f)) {
             Text(
-                text = "Offline Mode Active",
+                text = if (isBn) "অফলাইন মোড · চালু" else "Offline Mode · ON",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
@@ -775,7 +754,7 @@ private fun OfflineChip(
                 text = if (!networkAvailable && !manualOffline) {
                     stringResource(R.string.offline_mode_no_internet)
                 } else {
-                    "Playing from on-device storage"
+                    if (isBn) "অন-ডিভাইস স্টোরেজ থেকে চলছে" else "Playing from on-device storage"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -784,31 +763,50 @@ private fun OfflineChip(
             )
         }
 
-        // Highlighted glossy pill button "Turn Off"
+        // Tactile glass toggle switch pill "Turn Off"
         if (manualOffline || networkAvailable) {
-            androidx.compose.material3.Surface(
-                onClick = onExit,
-                shape = RoundedCornerShape(percent = 50),
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.88f),
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                border = androidx.compose.foundation.BorderStroke(
-                    1.2.dp,
-                    Brush.linearGradient(
-                        listOf(
-                            Color.White.copy(alpha = 0.60f),
-                            primary.copy(alpha = 0.50f),
-                            Color.White.copy(alpha = 0.20f),
+            Box(
+                modifier = Modifier
+                    .padding(start = 8.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                primary.copy(alpha = 0.35f),
+                                primary.copy(alpha = 0.20f),
+                            ),
                         ),
-                    ),
-                ),
-                shadowElevation = 2.dp,
-                modifier = Modifier.padding(start = 8.dp),
+                    )
+                    .border(
+                        1.2.dp,
+                        Brush.linearGradient(
+                            listOf(
+                                Color.White.copy(alpha = 0.60f),
+                                primary.copy(alpha = 0.70f),
+                                Color.White.copy(alpha = 0.20f),
+                            ),
+                        ),
+                        CircleShape,
+                    )
+                    .clickable(onClick = onExit)
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
             ) {
-                Text(
-                    text = stringResource(R.string.offline_mode_turn_off),
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2ECC71)),
+                    )
+                    Text(
+                        text = if (isBn) "বন্ধ করুন" else stringResource(R.string.offline_mode_turn_off),
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White,
+                    )
+                }
             }
         }
     }
@@ -1048,6 +1046,171 @@ private fun QuickAccessBentoCard(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Compact square-ish card for the top-row side-by-side Bento layout.
+ * Taller than wide to fill a 50% column comfortably.
+ */
+@Composable
+private fun CompactBentoCard(
+    label: String,
+    badgeText: String,
+    count: Int,
+    browseId: String,
+    songs: List<Song>,
+    accentGlow: Color,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isBn = remember { Locale.getDefault().language == "bn" }
+    val cardShape = RoundedCornerShape(22.dp)
+    val cardBg = Brush.linearGradient(
+        listOf(
+            Color(0xFF161C26).copy(alpha = 0.95f),
+            Color(0xFF0C1018).copy(alpha = 0.98f),
+        ),
+    )
+    val specularBorder = Brush.linearGradient(
+        listOf(
+            Color.White.copy(alpha = 0.35f),
+            accentGlow.copy(alpha = 0.50f),
+            Color.White.copy(alpha = 0.10f),
+        ),
+    )
+    val previewSongs = remember(songs) { songs.take(4) }
+    val trackPreview = remember(songs, isBn) {
+        if (songs.isEmpty()) {
+            if (isBn) "কোনো গান নেই" else "No songs yet"
+        } else {
+            val tops = songs.take(2).map { it.title.trim() }.filter { it.isNotBlank() }
+            when {
+                tops.isEmpty() -> if (isBn) "অফলাইন ট্র্যাক" else "Offline tracks"
+                songs.size > 2 -> "${tops.first()} & more"
+                else -> tops.joinToString(", ")
+            }
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .heightIn(min = 150.dp)
+            .clip(cardShape)
+            .background(cardBg)
+            .drawWithContent {
+                drawContent()
+                // Top specular sheen
+                val sheenH = size.height * 0.35f
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        listOf(Color.White.copy(alpha = 0.12f), Color.Transparent),
+                        startY = 0f,
+                        endY = sheenH,
+                    ),
+                    size = Size(size.width, sheenH),
+                )
+            }
+            .border(1.2.dp, specularBorder, cardShape)
+            .clickable(onClick = onOpen)
+            .padding(14.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            // Top: artwork mosaic + count pill
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1.1f)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(accentGlow.copy(alpha = 0.12f))
+                    .border(0.8.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(14.dp)),
+            ) {
+                if (previewSongs.size >= 4) {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        Row(modifier = Modifier.weight(1f)) {
+                            MosaicTile(previewSongs[0], Modifier.weight(1f))
+                            MosaicTile(previewSongs[1], Modifier.weight(1f))
+                        }
+                        Row(modifier = Modifier.weight(1f)) {
+                            MosaicTile(previewSongs[2], Modifier.weight(1f))
+                            MosaicTile(previewSongs[3], Modifier.weight(1f))
+                        }
+                    }
+                } else if (previewSongs.isNotEmpty()) {
+                    val art = previewSongs.first().thumbnailUrl ?: previewSongs.first().artworkAt(CARD_ART_PX)
+                    if (!art.isNullOrBlank()) {
+                        AsyncImage(
+                            model = art,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.MusicNote,
+                            contentDescription = null,
+                            tint = accentGlow.copy(alpha = 0.65f),
+                            modifier = Modifier
+                                .size(32.dp)
+                                .align(Alignment.Center),
+                        )
+                    }
+                } else {
+                    Icon(
+                        imageVector = deviceFolderIcon(browseId) ?: BitChordIcons.Download,
+                        contentDescription = null,
+                        tint = accentGlow.copy(alpha = 0.55f),
+                        modifier = Modifier
+                            .size(32.dp)
+                            .align(Alignment.Center),
+                    )
+                }
+                // Count pill overlay bottom-left
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(6.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                ) {
+                    Text(
+                        text = "$count",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                    )
+                }
+            }
+            // Label + badge text
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = badgeText,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                color = accentGlow,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = trackPreview,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                color = Color.White.copy(alpha = 0.60f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

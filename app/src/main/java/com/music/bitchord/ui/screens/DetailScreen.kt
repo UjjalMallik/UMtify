@@ -912,92 +912,187 @@ private fun ReleaseHeader(
             .padding(top = topBarContentPadding(), bottom = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(
-            Modifier
-                .size(sleeveSize)
-                .shadow(SLEEVE_SHADOW, SLEEVE_SHAPE)
-                .background(palette.elevated)
-                .thumbnailBorder(SLEEVE_SHAPE),
-        ) {
-            // A cover that isn't there, or wouldn't load — a device folder, a
-            // playlist with nothing on it yet, files with no picture — gets a
-            // placeholder sleeve rather than an empty square. Not shown while a
-            // real one is still on its way, so a loading cover doesn't flash
-            // a glyph first.
-            var artFailed by remember(page.thumbnailUrl) { mutableStateOf(false) }
-            if (page.thumbnailUrl == null || artFailed) {
-                CoverPlaceholder(
-                    icon = page.placeholderIcon(),
-                    base = palette.elevated,
-                    tint = palette.onBackgroundVariant,
-                    modifier = Modifier.matchParentSize(),
-                )
-            }
-            AsyncImage(
-                model = page.thumbnailUrl.artworkAt(HEADER_ART_PX),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                onState = { artFailed = it is AsyncImagePainter.State.Error },
-                modifier = Modifier.matchParentSize(),
-            )
-            // Animated cover art, inside the same frame. Always running:
-            // unlike the player's sleeve there is no transport here to follow,
-            // and the page is only up while it's being read.
-            canvas?.let { clip ->
-                CanvasArtworkPlayer(
-                    canvas = clip,
-                    isPlaying = true,
-                    modifier = Modifier.matchParentSize(),
-                )
-            }
-        }
-
-        Spacer(Modifier.height(20.dp))
-        Text(
-            text = page.title,
-            style = MaterialTheme.typography.headlineMedium,
-            color = palette.onBackground,
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = HEADER_GUTTER),
-        )
-        if (credit.isNotBlank()) {
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = credit,
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.Normal,
-                    fontSize = 19.sp,
-                ),
-                color = palette.onBackgroundVariant,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+        if (page.browseId.startsWith("local:")) {
+            // Compact Liquid Glass Hero Banner — replaces the giant square for
+            // local folders (Downloads, Local Music, Cached songs).
+            val previewSongs = remember(songs) { songs.take(4) }
+            Row(
                 modifier = Modifier
-                    .padding(horizontal = HEADER_GUTTER)
-                    .let { m ->
-                        val id = artist?.artistId
-                        if (id == null || onArtistClick == null) {
-                            m
-                        } else {
-                            m.clip(RoundedCornerShape(6.dp))
-                                .clickable { onArtistClick(id, artist.artist) }
+                    .fillMaxWidth()
+                    .padding(horizontal = HEADER_GUTTER, vertical = 8.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(palette.elevated.copy(alpha = 0.85f))
+                    .border(
+                        1.dp,
+                        palette.accent.copy(alpha = 0.35f),
+                        RoundedCornerShape(20.dp),
+                    )
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                // 60dp artwork orb / mosaic
+                Box(
+                    modifier = Modifier
+                        .size(60.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(palette.accent.copy(alpha = 0.18f))
+                        .border(0.8.dp, palette.accent.copy(alpha = 0.40f), RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (previewSongs.size >= 4) {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            Row(modifier = Modifier.weight(1f)) {
+                                MiniMosaicTile(previewSongs[0], Modifier.weight(1f))
+                                MiniMosaicTile(previewSongs[1], Modifier.weight(1f))
+                            }
+                            Row(modifier = Modifier.weight(1f)) {
+                                MiniMosaicTile(previewSongs[2], Modifier.weight(1f))
+                                MiniMosaicTile(previewSongs[3], Modifier.weight(1f))
+                            }
                         }
-                    },
-            )
-        }
-        if (meta.isNotBlank()) {
-            Spacer(Modifier.height(4.dp))
+                    } else if (previewSongs.isNotEmpty()) {
+                        val art = previewSongs.first().thumbnailUrl ?: previewSongs.first().artworkAt(ROW_ART_PX)
+                        if (!art.isNullOrBlank()) {
+                            AsyncImage(
+                                model = art,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            CoverPlaceholder(
+                                icon = page.placeholderIcon(),
+                                base = palette.elevated,
+                                tint = palette.onBackgroundVariant,
+                                modifier = Modifier.matchParentSize(),
+                            )
+                        }
+                    } else {
+                        CoverPlaceholder(
+                            icon = page.placeholderIcon(),
+                            base = palette.elevated,
+                            tint = palette.onBackgroundVariant,
+                            modifier = Modifier.matchParentSize(),
+                        )
+                    }
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = page.title,
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = palette.onBackground,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (credit.isNotBlank()) {
+                        Text(
+                            text = credit,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = palette.onBackgroundVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (meta.isNotBlank()) {
+                        Text(
+                            text = meta,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = palette.onBackgroundVariant.copy(alpha = 0.75f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        } else {
+            Box(
+                Modifier
+                    .size(sleeveSize)
+                    .shadow(SLEEVE_SHADOW, SLEEVE_SHAPE)
+                    .background(palette.elevated)
+                    .thumbnailBorder(SLEEVE_SHAPE),
+            ) {
+                // A cover that isn't there, or wouldn't load — a device folder, a
+                // playlist with nothing on it yet, files with no picture — gets a
+                // placeholder sleeve rather than an empty square. Not shown while a
+                // real one is still on its way, so a loading cover doesn't flash
+                // a glyph first.
+                var artFailed by remember(page.thumbnailUrl) { mutableStateOf(false) }
+                if (page.thumbnailUrl == null || artFailed) {
+                    CoverPlaceholder(
+                        icon = page.placeholderIcon(),
+                        base = palette.elevated,
+                        tint = palette.onBackgroundVariant,
+                        modifier = Modifier.matchParentSize(),
+                    )
+                }
+                AsyncImage(
+                    model = page.thumbnailUrl.artworkAt(HEADER_ART_PX),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    onState = { artFailed = it is AsyncImagePainter.State.Error },
+                    modifier = Modifier.matchParentSize(),
+                )
+                // Animated cover art, inside the same frame. Always running:
+                // unlike the player's sleeve there is no transport here to follow,
+                // and the page is only up while it's being read.
+                canvas?.let { clip ->
+                    CanvasArtworkPlayer(
+                        canvas = clip,
+                        isPlaying = true,
+                        modifier = Modifier.matchParentSize(),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
             Text(
-                text = meta,
-                style = MaterialTheme.typography.labelMedium,
-                color = palette.onBackgroundVariant,
+                text = page.title,
+                style = MaterialTheme.typography.headlineMedium,
+                color = palette.onBackground,
                 textAlign = TextAlign.Center,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = HEADER_GUTTER),
             )
+            if (credit.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = credit,
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Normal,
+                        fontSize = 19.sp,
+                    ),
+                    color = palette.onBackgroundVariant,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .padding(horizontal = HEADER_GUTTER)
+                        .let { m ->
+                            val id = artist?.artistId
+                            if (id == null || onArtistClick == null) {
+                                m
+                            } else {
+                                m.clip(RoundedCornerShape(6.dp))
+                                    .clickable { onArtistClick(id, artist.artist) }
+                            }
+                        },
+                )
+            }
+            if (meta.isNotBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = meta,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = palette.onBackgroundVariant,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = HEADER_GUTTER),
+                )
+            }
         }
 
         if (songs.isNotEmpty()) {
@@ -1077,6 +1172,33 @@ private fun ReleaseHeader(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun MiniMosaicTile(song: Song, modifier: Modifier = Modifier) {
+    val art = song.thumbnailUrl ?: song.artworkAt(ROW_ART_PX)
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .background(Color.White.copy(alpha = 0.04f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (!art.isNullOrBlank()) {
+            AsyncImage(
+                model = art,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Icon(
+                imageVector = BitChordIcons.MusicNote,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.3f),
+                modifier = Modifier.size(10.dp),
+            )
         }
     }
 }
