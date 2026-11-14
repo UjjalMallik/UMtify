@@ -178,6 +178,15 @@ fun OfflineHomeScreen(
 
         // Floating Glass Segmented Filter Bar
         item(key = "offline-filter-chips") {
+            val primary = MaterialTheme.colorScheme.primary
+            val filters = remember(isBn) {
+                listOf(
+                    Triple("ALL", if (isBn) "সব অফলাইন" else "All Offline", Icons.Rounded.CloudOff),
+                    Triple("LOCAL", if (isBn) "ফোনের গান" else "Local Tracks", Icons.Rounded.Folder),
+                    Triple("DOWNLOADS", if (isBn) "ডাউনলোড" else "Downloads", Icons.Rounded.Download),
+                    Triple("CACHED", if (isBn) "১০০% ক্যাশড" else "100% Cached", Icons.Rounded.Bolt),
+                )
+            }
             androidx.compose.foundation.lazy.LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -185,13 +194,6 @@ fun OfflineHomeScreen(
                 contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                val primary = MaterialTheme.colorScheme.primary
-                val filters = listOf(
-                    Triple("ALL", if (isBn) "সব অফলাইন" else "All Offline", Icons.Rounded.CloudOff),
-                    Triple("LOCAL", if (isBn) "ফোনের গান" else "Local Tracks", Icons.Rounded.Folder),
-                    Triple("DOWNLOADS", if (isBn) "ডাউনলোড" else "Downloads", Icons.Rounded.Download),
-                    Triple("CACHED", if (isBn) "১০০% ক্যাশড" else "100% Cached", Icons.Rounded.Bolt),
-                )
                 items(filters) { (key, filterLabel, icon) ->
                     val isSelected = activeFilter == key
                     val chipBg = if (isSelected) {
