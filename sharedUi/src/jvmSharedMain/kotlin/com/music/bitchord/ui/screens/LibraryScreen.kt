@@ -2,7 +2,9 @@ package com.music.bitchord.ui.screens
 
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.luminance
 import com.music.bitchord.ui.components.liquidGlassCard
 import com.music.bitchord.sharedui.resources.*
@@ -46,6 +48,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -227,13 +230,18 @@ fun LibraryScreen(
 
 /** One of the Library's folder rows: the page [item] opens, behind [icon]. */
 /** [logo], when set, is drawn in place of [icon] — a service's own mark. */
-data class LibraryLink(val item: ShelfItem, val icon: ImageVector, val logo: DrawableResource? = null)
+data class LibraryLink(
+    val item: ShelfItem,
+    val icon: ImageVector,
+    val logo: DrawableResource? = null,
+    val count: Int? = null,
+)
 
 /**
- * Bento Layout for Library Collections:
- * - Top Row: Side-by-side Downloads (left) and Local Music (right)
- * - Below: Cached songs (compact card with dedicated Cache Music Symbol) and My Spotify (compact sleek card)
- * - Any other configured storage connections (WebDAV, SMB, etc.)
+ * Symmetrical 2x2 Bento Layout for Library Collections:
+ * - Row 1: Downloads (left) + Local Music (right) side-by-side
+ * - Row 2: Cached songs (left) + My Spotify (right) side-by-side matching Row 1
+ * - Below: Any other configured storage connections (WebDAV, SMB, etc.)
  */
 @Composable
 private fun LibraryLinkList(links: List<LibraryLink>, onClick: (ShelfItem) -> Unit) {
@@ -248,17 +256,17 @@ private fun LibraryLinkList(links: List<LibraryLink>, onClick: (ShelfItem) -> Un
             .fillMaxWidth()
             .padding(horizontal = PAGE_GUTTER)
             .padding(top = 4.dp, bottom = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // Top Row: Downloads + Local Music side-by-side
+        // Row 1: Downloads + Local Music side-by-side
         if (downloadsLink != null && localLink != null) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 LibraryBentoCard(
                     link = downloadsLink,
-                    accent = Color(0xFF3880FF),
+                    accent = MaterialTheme.colorScheme.primary,
                     onClick = { onClick(downloadsLink.item) },
                     modifier = Modifier.weight(1f),
                 )
@@ -269,42 +277,84 @@ private fun LibraryLinkList(links: List<LibraryLink>, onClick: (ShelfItem) -> Un
                     modifier = Modifier.weight(1f),
                 )
             }
-        } else {
-            downloadsLink?.let { dl ->
+        } else if (downloadsLink != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 LibraryBentoCard(
-                    link = dl,
-                    accent = Color(0xFF3880FF),
-                    onClick = { onClick(dl.item) },
-                    modifier = Modifier.fillMaxWidth(),
+                    link = downloadsLink,
+                    accent = MaterialTheme.colorScheme.primary,
+                    onClick = { onClick(downloadsLink.item) },
+                    modifier = Modifier.weight(1f),
                 )
+                Spacer(modifier = Modifier.weight(1f))
             }
-            localLink?.let { ll ->
+        } else if (localLink != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 LibraryBentoCard(
-                    link = ll,
+                    link = localLink,
                     accent = Color(0xFF10AC84),
-                    onClick = { onClick(ll.item) },
-                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { onClick(localLink.item) },
+                    modifier = Modifier.weight(1f),
                 )
+                Spacer(modifier = Modifier.weight(1f))
             }
         }
 
-        // Below Them: Cached songs compact card
-        if (cachedLink != null) {
-            LibraryCachedCard(
-                link = cachedLink,
-                onClick = { onClick(cachedLink.item) },
-            )
+        // Row 2: Cached Songs + My Spotify side-by-side matching Row 1
+        if (cachedLink != null && spotifyLink != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                LibraryBentoCard(
+                    link = cachedLink,
+                    accent = Color(0xFF9B59B6),
+                    onClick = { onClick(cachedLink.item) },
+                    modifier = Modifier.weight(1f),
+                )
+                LibraryBentoCard(
+                    link = spotifyLink,
+                    accent = Color(0xFF1ED760),
+                    isSpotify = true,
+                    onClick = { onClick(spotifyLink.item) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        } else if (cachedLink != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                LibraryBentoCard(
+                    link = cachedLink,
+                    accent = Color(0xFF9B59B6),
+                    onClick = { onClick(cachedLink.item) },
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(modifier = Modifier.weight(1f))
+            }
+        } else if (spotifyLink != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                LibraryBentoCard(
+                    link = spotifyLink,
+                    accent = Color(0xFF1ED760),
+                    isSpotify = true,
+                    onClick = { onClick(spotifyLink.item) },
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(modifier = Modifier.weight(1f))
+            }
         }
 
-        // Below Them: My Spotify compact sleek card
-        if (spotifyLink != null) {
-            LibrarySpotifyCard(
-                link = spotifyLink,
-                onClick = { onClick(spotifyLink.item) },
-            )
-        }
-
-        // Any other server links (WebDAV, SMB, etc.)
+        // Any other storage links (WebDAV, SMB, etc.)
         otherLinks.forEach { link ->
             LibraryGenericLinkCard(
                 link = link,
@@ -320,25 +370,37 @@ private fun LibraryBentoCard(
     accent: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    isSpotify: Boolean = false,
 ) {
+    val isBn = remember { java.util.Locale.getDefault().language == "bn" }
     val cardShape = RoundedCornerShape(22.dp)
+
+    val surfaceHigh = MaterialTheme.colorScheme.surfaceContainerHigh
+    val surfaceContainer = MaterialTheme.colorScheme.surfaceContainer
+    val outlineVariant = MaterialTheme.colorScheme.outlineVariant
+
     val cardBg = Brush.linearGradient(
         listOf(
-            Color(0xFF161C26).copy(alpha = 0.95f),
-            Color(0xFF0C1018).copy(alpha = 0.98f),
+            surfaceHigh.copy(alpha = 0.72f),
+            accent.copy(alpha = 0.14f),
+            surfaceContainer.copy(alpha = 0.52f),
         ),
+        start = Offset.Zero,
+        end = Offset.Infinite,
     )
     val specularBorder = Brush.linearGradient(
         listOf(
-            Color.White.copy(alpha = 0.35f),
-            accent.copy(alpha = 0.50f),
-            Color.White.copy(alpha = 0.10f),
+            Color.White.copy(alpha = 0.24f),
+            accent.copy(alpha = 0.35f),
+            outlineVariant.copy(alpha = 0.12f),
         ),
+        start = Offset.Zero,
+        end = Offset.Infinite,
     )
 
     Box(
         modifier = modifier
-            .heightIn(min = 116.dp)
+            .heightIn(min = 120.dp)
             .clip(cardShape)
             .background(cardBg)
             .border(1.2.dp, specularBorder, cardShape)
@@ -347,86 +409,91 @@ private fun LibraryBentoCard(
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(accent.copy(alpha = 0.18f))
-                    .border(0.8.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(12.dp)),
-                contentAlignment = Alignment.Center,
+            // Top Row: Icon squircle on left + live count pill on right
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    imageVector = link.icon,
-                    contentDescription = null,
-                    tint = accent,
-                    modifier = Modifier.size(24.dp),
-                )
+                // Top-left icon squircle badge
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(accent.copy(alpha = 0.18f))
+                        .border(0.8.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (isSpotify && link.logo != null) {
+                        Icon(
+                            painter = painterResource(link.logo),
+                            contentDescription = null,
+                            tint = Color(0xFF1ED760),
+                            modifier = Modifier.size(24.dp),
+                        )
+                    } else if (link.item.browseId == "local:cache") {
+                        Icon(
+                            imageVector = BitChordIcons.MusicNote,
+                            contentDescription = null,
+                            tint = accent,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    } else {
+                        Icon(
+                            imageVector = link.icon,
+                            contentDescription = null,
+                            tint = accent,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                }
+
+                // Top-right count pill badge
+                if (link.count != null) {
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(accent.copy(alpha = 0.14f))
+                            .border(0.7.dp, accent.copy(alpha = 0.40f), CircleShape)
+                            .padding(horizontal = 9.dp, vertical = 3.dp),
+                    ) {
+                        Text(
+                            text = "${link.count} ${if (isBn) "টি গান" else if (link.count == 1) "song" else "songs"}",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                } else if (isSpotify) {
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(accent.copy(alpha = 0.14f))
+                            .border(0.7.dp, accent.copy(alpha = 0.40f), CircleShape)
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                    ) {
+                        Text(
+                            text = if (isBn) "সংযুক্ত" else "Connected",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                            color = accent,
+                        )
+                    }
+                }
             }
-            Text(
-                text = link.item.title,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                ),
-                color = Color.White,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = link.item.subtitle,
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                color = Color.White.copy(alpha = 0.65f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
 
-@Composable
-private fun LibraryCachedCard(
-    link: LibraryLink,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val accent = Color(0xFF9B59B6)
-    val cardShape = RoundedCornerShape(20.dp)
-    val cardBg = Brush.linearGradient(
-        listOf(
-            Color(0xFF161C26).copy(alpha = 0.95f),
-            Color(0xFF0C1018).copy(alpha = 0.98f),
-        ),
-    )
-    val specularBorder = Brush.linearGradient(
-        listOf(
-            Color.White.copy(alpha = 0.35f),
-            accent.copy(alpha = 0.45f),
-            Color.White.copy(alpha = 0.10f),
-        ),
-    )
+            Spacer(Modifier.height(14.dp))
 
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = 72.dp)
-            .clip(cardShape)
-            .background(cardBg)
-            .border(1.2.dp, specularBorder, cardShape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
+            // Bottom texts: Title and Subtitle
             Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(end = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 Text(
                     text = link.item.title,
@@ -434,135 +501,18 @@ private fun LibraryCachedCard(
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
                     ),
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = link.item.subtitle,
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                    color = Color.White.copy(alpha = 0.65f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            // 52.dp dedicated Cache Music Symbol
-            Box(
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(accent.copy(alpha = 0.20f))
-                    .border(1.dp, accent.copy(alpha = 0.55f), RoundedCornerShape(14.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(accent.copy(alpha = 0.25f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = BitChordIcons.MusicNote,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LibrarySpotifyCard(
-    link: LibraryLink,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val accent = Color(0xFF1DB954)
-    val cardShape = RoundedCornerShape(20.dp)
-    val cardBg = Brush.linearGradient(
-        listOf(
-            Color(0xFF161C26).copy(alpha = 0.95f),
-            Color(0xFF0C1018).copy(alpha = 0.98f),
-        ),
-    )
-    val specularBorder = Brush.linearGradient(
-        listOf(
-            Color.White.copy(alpha = 0.35f),
-            accent.copy(alpha = 0.45f),
-            Color.White.copy(alpha = 0.10f),
-        ),
-    )
-
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = 72.dp)
-            .clip(cardShape)
-            .background(cardBg)
-            .border(1.2.dp, specularBorder, cardShape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(CircleShape)
-                    .background(accent.copy(alpha = 0.18f))
-                    .border(0.8.dp, accent.copy(alpha = 0.50f), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (link.logo != null) {
-                    Icon(
-                        painter = painterResource(link.logo),
-                        contentDescription = null,
-                        tint = Color(0xFF1ED760),
-                        modifier = Modifier.size(22.dp),
-                    )
-                } else {
-                    Icon(
-                        imageVector = link.icon,
-                        contentDescription = null,
-                        tint = accent,
-                        modifier = Modifier.size(22.dp),
-                    )
-                }
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
-                Text(
-                    text = "My Spotify",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                    ),
-                    color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = link.item.subtitle,
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                    color = Color.White.copy(alpha = 0.65f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Icon(
-                imageVector = BitChordIcons.ChevronRight,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.5f),
-                modifier = Modifier.size(20.dp),
-            )
         }
     }
 }
@@ -574,13 +524,16 @@ private fun LibraryGenericLinkCard(
     modifier: Modifier = Modifier,
 ) {
     val cardShape = RoundedCornerShape(18.dp)
+    val surfaceHigh = MaterialTheme.colorScheme.surfaceContainerHigh
+    val surfaceContainer = MaterialTheme.colorScheme.surfaceContainer
+    val primary = MaterialTheme.colorScheme.primary
+    val outlineVariant = MaterialTheme.colorScheme.outlineVariant
     val cardBg = Brush.linearGradient(
         listOf(
-            Color(0xFF161C26).copy(alpha = 0.94f),
-            Color(0xFF0E121A).copy(alpha = 0.98f),
+            surfaceHigh.copy(alpha = 0.72f),
+            surfaceContainer.copy(alpha = 0.52f),
         ),
     )
-    val secondary = MaterialTheme.colorScheme.secondary
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -589,7 +542,7 @@ private fun LibraryGenericLinkCard(
             .heightIn(min = 58.dp)
             .clip(cardShape)
             .background(cardBg)
-            .border(0.8.dp, Color.White.copy(alpha = 0.15f), cardShape)
+            .border(0.8.dp, outlineVariant.copy(alpha = 0.25f), cardShape)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
@@ -597,14 +550,14 @@ private fun LibraryGenericLinkCard(
             modifier = Modifier
                 .size(38.dp)
                 .clip(CircleShape)
-                .background(secondary.copy(alpha = 0.18f))
-                .border(0.8.dp, Color.White.copy(alpha = 0.22f), CircleShape),
+                .background(primary.copy(alpha = 0.18f))
+                .border(0.8.dp, primary.copy(alpha = 0.35f), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = link.icon,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = primary,
                 modifier = Modifier.size(20.dp),
             )
         }

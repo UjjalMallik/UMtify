@@ -866,18 +866,28 @@ private fun QuickAccessBentoCard(
     val isBn = remember { Locale.getDefault().language == "bn" }
     val isCachedCard = browseId == CACHE_FOLDER_BROWSE_ID
     val cardShape = RoundedCornerShape(22.dp)
+
+    val surfaceHigh = MaterialTheme.colorScheme.surfaceContainerHigh
+    val surfaceContainer = MaterialTheme.colorScheme.surfaceContainer
+    val outlineVariant = MaterialTheme.colorScheme.outlineVariant
+
     val cardBackground = Brush.linearGradient(
         listOf(
-            Color(0xFF161C26).copy(alpha = 0.94f),
-            Color(0xFF0E121A).copy(alpha = 0.98f),
+            surfaceHigh.copy(alpha = 0.72f),
+            accentGlow.copy(alpha = 0.14f),
+            surfaceContainer.copy(alpha = 0.52f),
         ),
+        start = Offset.Zero,
+        end = Offset.Infinite,
     )
     val specularBorder = Brush.linearGradient(
         listOf(
-            Color.White.copy(alpha = 0.38f),
-            accentGlow.copy(alpha = 0.45f),
-            Color.White.copy(alpha = 0.08f),
+            Color.White.copy(alpha = 0.24f),
+            accentGlow.copy(alpha = 0.35f),
+            outlineVariant.copy(alpha = 0.12f),
         ),
+        start = Offset.Zero,
+        end = Offset.Infinite,
     )
 
     val liveTrackPreview = remember(songs, isBn) {
@@ -939,15 +949,15 @@ private fun QuickAccessBentoCard(
                     Box(
                         modifier = Modifier
                             .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.08f))
-                            .border(0.6.dp, Color.White.copy(alpha = 0.20f), CircleShape)
+                            .background(accentGlow.copy(alpha = 0.14f))
+                            .border(0.6.dp, accentGlow.copy(alpha = 0.35f), CircleShape)
                             .padding(horizontal = 9.dp, vertical = 3.dp),
                     ) {
                         Text(
                             text = "$count ${if (isBn) "টি গান" else if (isCachedCard) "cached" else "tracks"}",
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color.White.copy(alpha = 0.90f),
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                     }
                     if (!isCachedCard && badgeText.isNotBlank()) {
@@ -975,7 +985,7 @@ private fun QuickAccessBentoCard(
                         fontSize = if (isCachedCard) 17.sp else 21.sp,
                         fontWeight = FontWeight.Bold,
                     ),
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -986,7 +996,7 @@ private fun QuickAccessBentoCard(
                         fontSize = if (isCachedCard) 12.sp else 14.sp,
                         fontWeight = FontWeight.Medium,
                     ),
-                    color = Color.White.copy(alpha = 0.70f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -1099,18 +1109,28 @@ private fun CompactBentoCard(
 ) {
     val isBn = remember { Locale.getDefault().language == "bn" }
     val cardShape = RoundedCornerShape(22.dp)
+
+    val surfaceHigh = MaterialTheme.colorScheme.surfaceContainerHigh
+    val surfaceContainer = MaterialTheme.colorScheme.surfaceContainer
+    val outlineVariant = MaterialTheme.colorScheme.outlineVariant
+
     val cardBg = Brush.linearGradient(
         listOf(
-            Color(0xFF161C26).copy(alpha = 0.95f),
-            Color(0xFF0C1018).copy(alpha = 0.98f),
+            surfaceHigh.copy(alpha = 0.72f),
+            accentGlow.copy(alpha = 0.14f),
+            surfaceContainer.copy(alpha = 0.52f),
         ),
+        start = Offset.Zero,
+        end = Offset.Infinite,
     )
     val specularBorder = Brush.linearGradient(
         listOf(
-            Color.White.copy(alpha = 0.35f),
-            accentGlow.copy(alpha = 0.50f),
-            Color.White.copy(alpha = 0.10f),
+            Color.White.copy(alpha = 0.24f),
+            accentGlow.copy(alpha = 0.35f),
+            outlineVariant.copy(alpha = 0.12f),
         ),
+        start = Offset.Zero,
+        end = Offset.Infinite,
     )
     val previewSongs = remember(songs) { songs.take(4) }
     val trackPreview = remember(songs, isBn) {
@@ -1207,14 +1227,15 @@ private fun CompactBentoCard(
                         .align(Alignment.BottomStart)
                         .padding(6.dp)
                         .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.55f))
+                        .background(accentGlow.copy(alpha = 0.20f))
+                        .border(0.6.dp, accentGlow.copy(alpha = 0.45f), CircleShape)
                         .padding(horizontal = 7.dp, vertical = 3.dp),
                 ) {
                     Text(
                         text = "$count",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
             }
@@ -1225,14 +1246,14 @@ private fun CompactBentoCard(
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                 ),
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = trackPreview,
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                color = Color.White.copy(alpha = 0.60f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

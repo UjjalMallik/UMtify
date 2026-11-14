@@ -9,19 +9,27 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Lan
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.util.Locale
 import com.music.bitchord.R
 import com.music.bitchord.sharedui.resources.Res
 import com.music.bitchord.sharedui.resources.spotify_logo
+import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.model.ShelfItem
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.download.Downloads
 import com.music.bitchord.download.SavedCollection
+import com.music.bitchord.playback.AudioCache
 import com.music.bitchord.ui.components.PAGE_GUTTER
 import com.music.bitchord.ui.components.ReplayCardRowSkeleton
 import com.music.bitchord.ui.replay.ReplayCardRow
@@ -38,12 +46,48 @@ import com.music.bitchord.ui.replay.ReplayStoryPage
  */
 @Composable
 fun libraryLinks(): List<LibraryLink> {
+    val context = LocalContext.current
+    val isBn = remember { Locale.getDefault().language == "bn" }
+
     val webdavConfigured by AppSettings.webdavUrl.collectAsStateWithLifecycle()
     val smbHost by AppSettings.smbHost.collectAsStateWithLifecycle()
     val smbShare by AppSettings.smbShare.collectAsStateWithLifecycle()
     val showCacheFolder by AppSettings.showCacheFolder.collectAsStateWithLifecycle()
     val spotifyConnected by AppSettings.spotifySpdcToken.collectAsStateWithLifecycle()
-    fun link(title: String, subtitle: String, browseId: String, icon: ImageVector = deviceFolderIcon(browseId) ?: Icons.Rounded.Cloud) = LibraryLink(
+
+    // Live saved downloads count
+    val savedDownloads by Downloads.saved.collectAsStateWithLifecycle()
+    var downloadsCount by remember { mutableStateOf<Int?>(savedDownloads.size) }
+    LaunchedEffect(savedDownloads) {
+        val count = runCatching { Downloads.getDownloadedSongs(context).size }.getOrDefault(savedDownloads.size)
+        downloadsCount = count
+    }
+
+    // Live local music count
+    val localFolders by AppSettings.localMusicFolders.collectAsStateWithLifecycle()
+    val localFolderUri by AppSettings.localMusicFolderUri.collectAsStateWithLifecycle()
+    val localExcludedSongs by AppSettings.localMusicExcludedSongs.collectAsStateWithLifecycle()
+    val localSelectedSongs by AppSettings.localMusicSelectedSongs.collectAsStateWithLifecycle()
+    var localMusicCount by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(localFolders, localFolderUri, localExcludedSongs, localSelectedSongs) {
+        val count = runCatching { LocalMediaRepository.getLocalMusic(context).size }.getOrNull()
+        localMusicCount = count
+    }
+
+    // Live cached songs count
+    var cachedSongsCount by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(showCacheFolder) {
+        val count = runCatching { AudioCache.cachedSongs().size }.getOrNull()
+        cachedSongsCount = count
+    }
+
+    fun link(
+        title: String,
+        subtitle: String,
+        browseId: String,
+        icon: ImageVector = deviceFolderIcon(browseId) ?: Icons.Rounded.Cloud,
+        count: Int? = null,
+    ) = LibraryLink(
         item = ShelfItem(
             title = title,
             subtitle = subtitle,
@@ -52,24 +96,47 @@ fun libraryLinks(): List<LibraryLink> {
             browseId = browseId,
         ),
         icon = icon,
+        count = count,
     )
+
+    val downloadsSubtitle = if (downloadsCount != null) {
+        if (isBn) "${downloadsCount}টি ডাউনলোড করা গান" else "$downloadsCount downloaded songs"
+    } else {
+        stringResource(R.string.downloaded_songs)
+    }
+
+    val localSubtitle = if (localMusicCount != null) {
+        if (isBn) "${localMusicCount}টি অডিও ফাইল ডিভাইসে" else "$localMusicCount audio files on device"
+    } else {
+        stringResource(R.string.audio_files_on_device)
+    }
+
+    val cachedSubtitle = if (cachedSongsCount != null) {
+        if (isBn) "${cachedSongsCount}টি ক্যাশড গান" else "$cachedSongsCount cached songs"
+    } else {
+        stringResource(R.string.cached_songs_subtitle)
+    }
+
     return listOfNotNull(
         link(
             stringResource(R.string.downloads),
-            stringResource(R.string.downloaded_songs),
+            downloadsSubtitle,
             "local:downloads",
+            count = downloadsCount,
         ),
         link(
             stringResource(R.string.local_music),
-            stringResource(R.string.audio_files_on_device),
+            localSubtitle,
             "local:all",
+            count = localMusicCount,
         ),
         // Opt-in from Settings → Storage: what the song cache is holding from
         // YouTube and JioSaavn. See [com.music.bitchord.playback.AudioCache.cachedSongs].
         link(
             stringResource(R.string.cached_songs),
-            stringResource(R.string.cached_songs_subtitle),
+            cachedSubtitle,
             CACHE_FOLDER_BROWSE_ID,
+            count = cachedSongsCount,
         ).takeIf { showCacheFolder },
         // Only once set up in Sources; unconfigured, they'd just be dead ends.
         link(
