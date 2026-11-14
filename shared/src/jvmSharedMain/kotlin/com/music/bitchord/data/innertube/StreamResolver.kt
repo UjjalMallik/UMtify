@@ -17,7 +17,16 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.ConnectionPool
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import org.schabi.newpipe.extractor.MediaFormat
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.ServiceList
@@ -39,6 +48,14 @@ import org.schabi.newpipe.extractor.stream.DeliveryMethod
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+
+data class VideoPlaybackInfo(
+    val videoUri: String,
+    val audioUri: String? = null,
+    val isHls: Boolean = false,
+    val userAgent: String = "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+    val headers: Map<String, String> = emptyMap(),
+)
 
 /**
  * Turns a videoId into a URL ExoPlayer can actually stream.
@@ -280,31 +297,215 @@ object StreamResolver {
         return stream.url
     }
 
+    private val videoInfoCache = ConcurrentHashMap<String, VideoPlaybackInfo>()
+
+    suspend fun resolveVideoPlaybackInfo(videoId: String): VideoPlaybackInfo? {
+        init
+        videoInfoCache[videoId]?.let { return it }
+
+        return withContext(Dispatchers.IO) {
+            // 1. Try InnerTube ANDROID_VR client (returns direct un-ciphered URLs)
+            val vrResult = queryInnerTubePlayerForVideo(
+                videoId = videoId,
+                clientName = "ANDROID_VR",
+                clientVersion = "1.65.10",
+                clientNumber = "28",
+                userAgent = "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+            )
+            if (vrResult != null) {
+                videoInfoCache[videoId] = vrResult
+                return@withContext vrResult
+            }
+
+            // 2. Try InnerTube IOS client
+            val iosResult = queryInnerTubePlayerForVideo(
+                videoId = videoId,
+                clientName = "IOS",
+                clientVersion = "21.26.4",
+                clientNumber = "5",
+                userAgent = "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
+            )
+            if (iosResult != null) {
+                videoInfoCache[videoId] = iosResult
+                return@withContext iosResult
+            }
+
+            // 3. Fallback to NewPipe extraction
+            val newPipeResult = runCatching {
+                extractionGate.withLock {
+                    val extractor = ServiceList.YouTube.getStreamExtractor("https://www.youtube.com/watch?v=$videoId")
+                    extractor.fetchPage()
+
+                    // Check progressive muxed
+                    val muxed = extractor.videoStreams
+                        .filter { !it.content.isNullOrBlank() && it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
+                    val pickedMuxed = muxed.maxByOrNull { it.resolution ?: "" } ?: muxed.firstOrNull()
+                    if (pickedMuxed != null && !pickedMuxed.content.isNullOrBlank()) {
+                        return@withLock VideoPlaybackInfo(
+                            videoUri = pickedMuxed.content,
+                            isHls = false,
+                            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+                        )
+                    }
+
+                    // Check HLS
+                    val hls = extractor.hlsUrl
+                    if (!hls.isNullOrBlank()) {
+                        return@withLock VideoPlaybackInfo(
+                            videoUri = hls,
+                            isHls = true,
+                            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+                        )
+                    }
+
+                    // Check adaptive video + audio
+                    val videoOnly = extractor.videoOnlyStreams.filter { !it.content.isNullOrBlank() }
+                    val bestVideo = videoOnly.filter { it.format == MediaFormat.MPEG_4 || (it.format?.name ?: "").contains("MP4") }
+                        .maxByOrNull { it.resolution ?: "" } ?: videoOnly.firstOrNull()
+
+                    val audioOnly = extractor.audioStreams.filter { !it.content.isNullOrBlank() }
+                    val bestAudio = audioOnly.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.bitrate }
+                        ?: audioOnly.maxByOrNull { it.bitrate }
+
+                    if (bestVideo != null && bestAudio != null && !bestVideo.content.isNullOrBlank() && !bestAudio.content.isNullOrBlank()) {
+                        return@withLock VideoPlaybackInfo(
+                            videoUri = bestVideo.content,
+                            audioUri = bestAudio.content,
+                            isHls = false,
+                            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+                        )
+                    }
+                    null
+                }
+            }.getOrNull()
+
+            if (newPipeResult != null) {
+                videoInfoCache[videoId] = newPipeResult
+                return@withContext newPipeResult
+            }
+
+            null
+        }
+    }
+
+    private fun queryInnerTubePlayerForVideo(
+        videoId: String,
+        clientName: String,
+        clientVersion: String,
+        clientNumber: String,
+        userAgent: String,
+    ): VideoPlaybackInfo? {
+        return try {
+            val payload = buildJsonObject {
+                putJsonObject("context") {
+                    putJsonObject("client") {
+                        put("clientName", clientName)
+                        put("clientVersion", clientVersion)
+                        put("hl", "en")
+                        put("gl", "US")
+                    }
+                }
+                put("videoId", videoId)
+                put("contentCheckOk", true)
+                put("racyCheckOk", true)
+            }.toString().toRequestBody("application/json".toMediaType())
+
+            val request = okhttp3.Request.Builder()
+                .url("https://www.youtube.com/youtubei/v1/player")
+                .header("User-Agent", userAgent)
+                .header("Content-Type", "application/json")
+                .header("X-YouTube-Client-Name", clientNumber)
+                .header("X-YouTube-Client-Version", clientVersion)
+                .post(payload)
+                .build()
+
+            Http.client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string() ?: return null
+                val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
+                val streamingData = root["streamingData"]?.jsonObject ?: return null
+
+                // 1. HLS
+                val hlsManifestUrl = streamingData["hlsManifestUrl"]?.jsonPrimitive?.content
+                if (!hlsManifestUrl.isNullOrBlank()) {
+                    return VideoPlaybackInfo(
+                        videoUri = hlsManifestUrl,
+                        isHls = true,
+                        userAgent = userAgent,
+                    )
+                }
+
+                // 2. Muxed progressive formats
+                val formats = streamingData["formats"]?.jsonArray?.mapNotNull { it.jsonObject }
+                val muxedMp4 = formats?.filter {
+                    val url = it["url"]?.jsonPrimitive?.content
+                    val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
+                    !url.isNullOrBlank() && mime.contains("video/mp4")
+                }?.maxByOrNull {
+                    it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                }
+                val muxedUrl = muxedMp4?.get("url")?.jsonPrimitive?.content
+                if (!muxedUrl.isNullOrBlank()) {
+                    return VideoPlaybackInfo(
+                        videoUri = muxedUrl,
+                        isHls = false,
+                        userAgent = userAgent,
+                    )
+                }
+
+                // 3. Adaptive formats
+                val adaptive = streamingData["adaptiveFormats"]?.jsonArray?.mapNotNull { it.jsonObject }
+                val videoAdaptive = adaptive?.filter {
+                    val url = it["url"]?.jsonPrimitive?.content
+                    val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
+                    !url.isNullOrBlank() && mime.contains("video/mp4")
+                }?.filter {
+                    val height = it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                    height in 360..720
+                }?.maxByOrNull {
+                    it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                } ?: adaptive?.filter {
+                    val url = it["url"]?.jsonPrimitive?.content
+                    val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
+                    !url.isNullOrBlank() && mime.contains("video/mp4")
+                }?.firstOrNull()
+
+                val audioAdaptive = adaptive?.filter {
+                    val url = it["url"]?.jsonPrimitive?.content
+                    val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
+                    !url.isNullOrBlank() && (mime.contains("audio/mp4") || mime.contains("audio/webm"))
+                }?.maxByOrNull {
+                    it["bitrate"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                }
+
+                val vidUrl = videoAdaptive?.get("url")?.jsonPrimitive?.content
+                val audUrl = audioAdaptive?.get("url")?.jsonPrimitive?.content
+                if (!vidUrl.isNullOrBlank() && !audUrl.isNullOrBlank()) {
+                    return VideoPlaybackInfo(
+                        videoUri = vidUrl,
+                        audioUri = audUrl,
+                        isHls = false,
+                        userAgent = userAgent,
+                    )
+                }
+                null
+            }
+        } catch (e: Exception) {
+            TrackLog.w("StreamResolver", "player endpoint query failed for $clientName: ${e.message}")
+            null
+        }
+    }
+
+    suspend fun hasDirectVideoStreams(videoId: String): Boolean =
+        resolveVideoPlaybackInfo(videoId) != null
+
     /**
      * Resolves a progressive HTTP video+audio stream (MP4) for in-player video rendering.
      * Falls back to standard audio stream resolution if no progressive video stream is found.
      */
     suspend fun resolveVideoStream(videoId: String): String {
-        init
-        return withContext(Dispatchers.IO) {
-            val videoUrl = runCatching {
-                extractionGate.withLock {
-                    val extractor = ServiceList.YouTube.getStreamExtractor(
-                        "https://www.youtube.com/watch?v=$videoId",
-                    )
-                    extractor.fetchPage()
-                    val videoStreams = extractor.videoStreams
-                        .filter {
-                            !it.content.isNullOrBlank() &&
-                                it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP
-                        }
-                    val picked = videoStreams.maxByOrNull { it.resolution ?: "" }
-                        ?: videoStreams.firstOrNull()
-                    picked?.content
-                }
-            }.getOrNull()
-            videoUrl ?: resolve(videoId)
-        }
+        val info = resolveVideoPlaybackInfo(videoId)
+        return info?.videoUri ?: resolve(videoId)
     }
 
     /** Per-track loudness, read once and kept for as long as the process runs. */

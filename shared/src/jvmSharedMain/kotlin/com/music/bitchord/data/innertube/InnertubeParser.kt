@@ -723,7 +723,8 @@ object InnertubeParser {
             albumId = credits.albumId ?: fallback.albumId,
             albumName = credits.albumName ?: fallback.albumName,
             setVideoId = renderer.o("playlistItemData").s("playlistSetVideoId"),
-            isVideo = rowType == "video" || rowType == "episode" ||
+            isVideo = false,
+            isVideoOrigin = rowType == "video" || rowType == "episode" ||
                 musicVideoType in setOf("MUSIC_VIDEO_TYPE_OMV", "MUSIC_VIDEO_TYPE_UGC", "MUSIC_VIDEO_TYPE_PODCAST_EPISODE") ||
                 thumbnails.isNotSquare(),
             isExplicit = renderer.hasExplicitBadge(),
@@ -795,7 +796,8 @@ object InnertubeParser {
             albumId = credits.albumId ?: fallback.albumId,
             albumName = credits.albumName ?: fallback.albumName,
             setVideoId = renderer.o("playlistItemData").s("playlistSetVideoId"),
-            isVideo = true,
+            isVideo = false,
+            isVideoOrigin = true,
             isExplicit = renderer.hasExplicitBadge(),
         )
     }
@@ -919,7 +921,8 @@ object InnertubeParser {
             artists = completeArtistCredits(artist.orEmpty(), credits.artists),
             albumId = credits.albumId,
             albumName = credits.albumName,
-            isVideo = rowType == "video" || thumbnails.isNotSquare(),
+            isVideo = false,
+            isVideoOrigin = rowType == "video" || thumbnails.isNotSquare(),
             isExplicit = renderer["subtitleBadges"].hasExplicitBadge(),
         )
     }
@@ -1330,7 +1333,8 @@ object InnertubeParser {
                 albumName = credits.albumName,
                 // A catalogue track is credited "Artist • Album • Year"; the
                 // matching music video is "Artist • 417M views • 2.4M likes".
-                isVideo = byline.any { it.contains("views", ignoreCase = true) },
+                isVideo = false,
+                isVideoOrigin = byline.any { it.contains("views", ignoreCase = true) },
                 isExplicit = renderer.hasExplicitBadge(),
             )
         }

@@ -425,11 +425,19 @@ object YtMusicRepository {
         if (song.isVideo) return song
         videoVersionCache[song.videoId]?.let { return it }
 
-        // 1. Try counterpart from YouTube's watch queue endpoint (next)
-        if (!song.videoId.startsWith("src:") && !song.videoId.startsWith("http")) {
+        // 1. Check if current videoId is a valid 11-char YouTube ID
+        val isValidYoutubeId = song.videoId.length == 11 &&
+            song.videoId.all { it.isLetterOrDigit() || it == '-' || it == '_' }
+
+        // Check if podcast/long episode (> 8 minutes = 480 seconds) or explicitly video-origin
+        val isLongEpisodeOrPodcast = (song.durationSec ?: 0L) > 480L || song.isVideoOrigin
+
+        if (isValidYoutubeId) {
+            // Check counterpart from next first
             val counterpartId = runCatching {
                 InnertubeParser.parseCounterpartVideoId(Innertube.next(song.videoId), song.videoId)
             }.getOrNull()
+
             if (!counterpartId.isNullOrBlank()) {
                 val resolvedSong = runCatching { trackLinks(counterpartId).getOrNull() }.getOrNull()
                     ?.copy(isVideo = true, isVideoOrigin = true)
@@ -439,6 +447,26 @@ object YtMusicRepository {
                         isVideoOrigin = true,
                     )
                 Log.d(TAG, "video switch counterpart: '${song.title}' -> '${resolvedSong.title}' ($counterpartId)")
+                videoVersionCache[song.videoId] = resolvedSong
+                return resolvedSong
+            }
+
+            // For podcasts / video episodes, the current track's videoId itself is the exact video
+            if (isLongEpisodeOrPodcast) {
+                val resolvedSong = song.copy(isVideo = true, isVideoOrigin = true)
+                Log.d(TAG, "video switch podcast/video episode: '${song.title}' ($song.videoId)")
+                videoVersionCache[song.videoId] = resolvedSong
+                return resolvedSong
+            }
+
+            // Check if current ID has direct video streams
+            val hasVideoStreams = runCatching {
+                StreamResolver.hasDirectVideoStreams(song.videoId)
+            }.getOrDefault(false)
+
+            if (hasVideoStreams) {
+                val resolvedSong = song.copy(isVideo = true, isVideoOrigin = true)
+                Log.d(TAG, "video switch current ID has video streams: '${song.title}' ($song.videoId)")
                 videoVersionCache[song.videoId] = resolvedSong
                 return resolvedSong
             }
@@ -464,6 +492,13 @@ object YtMusicRepository {
                 videoVersionCache[song.videoId] = match
                 return match
             }
+        }
+
+        // Fallback: if valid YouTube ID, use the current videoId as video
+        if (isValidYoutubeId) {
+            val resolvedSong = song.copy(isVideo = true, isVideoOrigin = true)
+            videoVersionCache[song.videoId] = resolvedSong
+            return resolvedSong
         }
 
         Log.w(TAG, "video switch: no video match for '${song.title}' by '${song.artist}'")

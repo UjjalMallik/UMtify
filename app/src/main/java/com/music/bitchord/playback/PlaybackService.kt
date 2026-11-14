@@ -40,6 +40,7 @@ import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer
 import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DecoderReuseEvaluation
@@ -47,6 +48,11 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.source.MediaSource
+import androidx.media3.exoplayer.source.MergingMediaSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioRendererEventListener
 import androidx.media3.exoplayer.audio.AudioSink
@@ -575,6 +581,12 @@ class PlaybackService : MediaLibraryService() {
      * capturing it.
      */
     private var player: ExoPlayer? = null
+        set(value) {
+            field = value
+            activeExoPlayer = value
+        }
+
+    private var isVideoMode: Boolean = false
 
     /**
      * The idle player. Between transitions it holds nothing; to arm one,
@@ -1025,6 +1037,16 @@ class PlaybackService : MediaLibraryService() {
             ) {
                 swappingMediaId = null
                 return
+            }
+
+            if (isVideoMode) {
+                isVideoMode = false
+                (exoPlayer.trackSelector as? DefaultTrackSelector)?.let { selector ->
+                    selector.setParameters(
+                        selector.buildUponParameters()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+                    )
+                }
             }
 
             // A receiver, if it is the speaker, is put on whatever became
@@ -2567,11 +2589,7 @@ class PlaybackService : MediaLibraryService() {
         val targetVideoId = args.getString("targetVideoId")
         val targetIsVideo = args.getBoolean("targetIsVideo", false)
 
-        if (targetVideoId == null || targetVideoId == song.videoId) return
-
-        val position = activePlayer.currentPosition
-        val wasPlaying = activePlayer.isPlaying
-        swappingMediaId = song.videoId
+        if (targetVideoId == null || (targetVideoId == song.videoId && targetIsVideo == song.isVideo)) return
 
         // Create the target song with the appropriate flags
         val targetSong = song.copy(
@@ -2580,9 +2598,117 @@ class PlaybackService : MediaLibraryService() {
             isVideoOrigin = if (targetIsVideo) false else song.isVideoOrigin,
         )
 
-        activePlayer.replaceMediaItem(index, targetSong.toMediaItem())
-        activePlayer.seekTo(index, position)
-        if (wasPlaying) activePlayer.play()
+        if (targetIsVideo) {
+            playVideoStreamForTrack(targetSong)
+        } else {
+            restoreAudioStreamForTrack(targetSong)
+        }
+    }
+
+    private fun playVideoStreamForTrack(targetSong: Song) {
+        val activePlayer = player ?: return
+        val pos = activePlayer.currentPosition
+        val currentIndex = activePlayer.currentMediaItemIndex
+        if (currentIndex !in 0 until activePlayer.mediaItemCount) return
+
+        isVideoMode = true
+        scope.launch(Dispatchers.Main) {
+            val videoInfo = withContext(Dispatchers.IO) {
+                com.music.bitchord.data.innertube.StreamResolver.resolveVideoPlaybackInfo(targetSong.videoId)
+            }
+
+            if (videoInfo == null) {
+                TrackLog.w("PlaybackService", "Failed to resolve video stream for ${targetSong.videoId}")
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(applicationContext, "Could not load video stream", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                isVideoMode = false
+                return@launch
+            }
+
+            val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+                .setUserAgent(videoInfo.userAgent)
+                .setAllowCrossProtocolRedirects(true)
+                .setConnectTimeoutMs(15_000)
+                .setReadTimeoutMs(20_000)
+
+            if (videoInfo.headers.isNotEmpty()) {
+                httpDataSourceFactory.setDefaultRequestProperties(videoInfo.headers)
+            }
+
+            val videoMediaItem = targetSong.toMediaItem().buildUpon()
+                .setUri(videoInfo.videoUri)
+                .build()
+
+            val videoMediaSource: MediaSource = when {
+                videoInfo.isHls -> {
+                    HlsMediaSource.Factory(httpDataSourceFactory)
+                        .createMediaSource(videoMediaItem)
+                }
+                videoInfo.audioUri != null -> {
+                    val audioMediaItem = targetSong.toMediaItem().buildUpon()
+                        .setUri(videoInfo.audioUri)
+                        .build()
+                    val videoSource = ProgressiveMediaSource.Factory(httpDataSourceFactory)
+                        .createMediaSource(videoMediaItem)
+                    val audioSource = ProgressiveMediaSource.Factory(httpDataSourceFactory)
+                        .createMediaSource(audioMediaItem)
+                    MergingMediaSource(videoSource, audioSource)
+                }
+                else -> {
+                    ProgressiveMediaSource.Factory(httpDataSourceFactory)
+                        .createMediaSource(videoMediaItem)
+                }
+            }
+
+            // Enable video track selection on the active player
+            (activePlayer.trackSelector as? DefaultTrackSelector)?.let { selector ->
+                selector.setParameters(
+                    selector.buildUponParameters()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false)
+                        .clearVideoSizeConstraints()
+                )
+            }
+
+            val seekPos = activePlayer.currentPosition.takeIf { it > 0 } ?: pos
+            val mediaSources = (0 until activePlayer.mediaItemCount).map { i ->
+                if (i == currentIndex) {
+                    videoMediaSource
+                } else {
+                    requireNotNull(mediaSourceFactory).createMediaSource(activePlayer.getMediaItemAt(i))
+                }
+            }
+            activePlayer.setMediaSources(mediaSources, currentIndex, seekPos)
+            activePlayer.prepare()
+            activePlayer.playWhenReady = true
+            refreshCustomLayouts()
+        }
+    }
+
+    private fun restoreAudioStreamForTrack(targetSong: Song) {
+        val activePlayer = player ?: return
+        val pos = activePlayer.currentPosition
+        val currentIndex = activePlayer.currentMediaItemIndex
+        if (currentIndex !in 0 until activePlayer.mediaItemCount) return
+
+        isVideoMode = false
+
+        // Disable video track selection
+        (activePlayer.trackSelector as? DefaultTrackSelector)?.let { selector ->
+            selector.setParameters(
+                selector.buildUponParameters()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+            )
+        }
+
+        val audioItem = targetSong.copy(isVideo = false).toMediaItem()
+        val mediaSources = (0 until activePlayer.mediaItemCount).map { i ->
+            val item = if (i == currentIndex) audioItem else activePlayer.getMediaItemAt(i)
+            requireNotNull(mediaSourceFactory).createMediaSource(item)
+        }
+        activePlayer.setMediaSources(mediaSources, currentIndex, pos)
+        activePlayer.prepare()
+        activePlayer.playWhenReady = true
         refreshCustomLayouts()
     }
 
@@ -3311,17 +3437,27 @@ class PlaybackService : MediaLibraryService() {
         filter: TransitionFilterProcessor,
         loudness: LoudnessProcessor,
         ownsSession: Boolean,
-    ): ExoPlayer = ExoPlayer.Builder(this)
-        .setRenderersFactory(silenceSkippingRenderers(spatial, equalizer, filter, loudness))
-        .setMediaSourceFactory(requireNotNull(mediaSourceFactory))
-        .setLoadControl(farBufferingLoadControl())
-        .setAudioAttributes(AUDIO_ATTRIBUTES, /* handleAudioFocus = */ ownsSession)
-        .setHandleAudioBecomingNoisy(ownsSession)
-        .setWakeMode(C.WAKE_MODE_NETWORK)
-        // Back restarts the track once you're this far into it; only a
-        // press before that steps to the previous one.
-        .setMaxSeekToPreviousPositionMs(BACK_RESTARTS_AFTER_MS)
-        .build()
+    ): ExoPlayer {
+        val trackSelector = DefaultTrackSelector(this).apply {
+            setParameters(
+                buildUponParameters()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+                    .clearVideoSizeConstraints()
+            )
+        }
+        return ExoPlayer.Builder(this)
+            .setTrackSelector(trackSelector)
+            .setRenderersFactory(silenceSkippingRenderers(spatial, equalizer, filter, loudness))
+            .setMediaSourceFactory(requireNotNull(mediaSourceFactory))
+            .setLoadControl(farBufferingLoadControl())
+            .setAudioAttributes(AUDIO_ATTRIBUTES, /* handleAudioFocus = */ ownsSession)
+            .setHandleAudioBecomingNoisy(ownsSession)
+            .setWakeMode(C.WAKE_MODE_NETWORK)
+            // Back restarts the track once you're this far into it; only a
+            // press before that steps to the previous one.
+            .setMaxSeekToPreviousPositionMs(BACK_RESTARTS_AFTER_MS)
+            .build()
+    }
 
     /**
      * Moves the session onto the player the crossfade has just started the
@@ -7589,6 +7725,7 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onDestroy() {
         isServiceRunning = false
+        activeExoPlayer = null
         MediaWidgetSnapshot.setPlaying(this, false)
         val stoppedSnapshot = MediaWidgetSnapshot.load(this).copy(isPlaying = false)
         MediaWidgetSnapshot.save(this, stoppedSnapshot, commitSync = true)
@@ -8383,7 +8520,11 @@ class PlaybackService : MediaLibraryService() {
                     val bundle = args.getBundle(EXTRA_SWAP_MEDIA_ITEM)
                     if (bundle != null) {
                         val targetSong = songFromBundle(bundle)
-                        smoothSwapCurrentTrackVersion(targetSong.toMediaItem())
+                        if (targetSong.isVideo) {
+                            playVideoStreamForTrack(targetSong)
+                        } else {
+                            restoreAudioStreamForTrack(targetSong)
+                        }
                     }
                 }
                 ACTION_QUEUE_DRAG -> {
@@ -9186,6 +9327,9 @@ class PlaybackService : MediaLibraryService() {
     companion object {
         @Volatile
         var isServiceRunning: Boolean = false
+            internal set
+        @Volatile
+        var activeExoPlayer: ExoPlayer? = null
             internal set
         const val MEDIA_ROOT_ID = "root"
         const val MEDIA_RECENTS_ID = "recents"

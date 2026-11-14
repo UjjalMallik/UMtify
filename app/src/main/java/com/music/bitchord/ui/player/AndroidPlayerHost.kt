@@ -37,6 +37,7 @@ import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.LastPlayerScreen
 import com.music.bitchord.playback.AudioOutputStatus
 import com.music.bitchord.playback.AudioRouting
+import com.music.bitchord.playback.PlaybackService
 import com.music.bitchord.playback.cast.CastController
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.CoroutineScope
@@ -119,7 +120,9 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
     @Composable
     override fun VideoPlayer(modifier: Modifier) {
-        val controller = activeController ?: return
+        val controller = activeController
+        val exoPlayer = PlaybackService.activeExoPlayer
+        if (controller == null && exoPlayer == null) return
         AndroidView(
             modifier = modifier,
             factory = { ctx ->
@@ -128,14 +131,17 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
                     )
-                    controller.setVideoTextureView(this)
+                    exoPlayer?.setVideoTextureView(this)
+                    controller?.setVideoTextureView(this)
                 }
             },
             update = { textureView ->
-                controller.setVideoTextureView(textureView)
+                exoPlayer?.setVideoTextureView(textureView)
+                controller?.setVideoTextureView(textureView)
             },
             onRelease = { textureView ->
-                controller.clearVideoTextureView(textureView)
+                exoPlayer?.clearVideoTextureView(textureView)
+                controller?.clearVideoTextureView(textureView)
             },
         )
     }

@@ -74,6 +74,7 @@ import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.LaunchedEffect
@@ -747,6 +748,7 @@ fun NowPlayingScreen(
     accountName: String?,
     likeStatus: LikeStatus,
     onToggleLike: () -> Unit,
+    onSwitchToAudio: (() -> Unit)? = null,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
@@ -3128,7 +3130,7 @@ fun NowPlayingScreen(
                                 // URL was never there, or the retries used it up.
                                 val artIsGone = art.url.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url) ||
                                     (art.failed && art.attempt >= ART_RETRIES)
-                                if (artIsGone && !canvasRendered) {
+                                if (!song.isVideo && artIsGone && !canvasRendered) {
                                     DefaultCoverTile(
                                         modifier = Modifier.graphicsLayer {
                                             val scale = 1f - 0.5f * p()
@@ -3139,7 +3141,7 @@ fun NowPlayingScreen(
                                     )
                                 }
                             }
-                            if (!art.url.isNullOrBlank() && !com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url)) {
+                            if (!song.isVideo && !art.url.isNullOrBlank() && !com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url)) {
                                 AsyncImage(
                                 // Decode at the sleeve's *expanded* size, always.
                                 // Coil otherwise sizes the decode to however large
@@ -3179,14 +3181,14 @@ fun NowPlayingScreen(
                                 // [PlayerArtwork.loaded] still flips the moment it does.
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .drawWithContent { if (art.loaded || !canvasRendered) drawContent() },
+                                    .drawWithContent { if (!song.isVideo && (art.loaded || !canvasRendered)) drawContent() },
                                 )
                             }
 
                             // Where the clip plays when it can't have the banner:
                             // inside the same clip as the still art, taking the
                             // sleeve's corners, shadow and paused shrink for free.
-                            if (!heroMode && canvas != null) {
+                            if (!song.isVideo && !heroMode && canvas != null) {
                                 WhileShown({ !collapsePastHalf }) {
                                     CanvasArtworkPlayer(
                                         canvas = canvas,
@@ -3212,9 +3214,26 @@ fun NowPlayingScreen(
 
                             if (song.isVideo) {
                                 WhileShown({ !collapsePastHalf }) {
-                                    PlayerPlatform.host.VideoPlayer(
-                                        modifier = Modifier.fillMaxSize(),
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(RoundedCornerShape(24.dp))
+                                            .background(Color.Black),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        PlayerPlatform.host.VideoPlayer(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(RoundedCornerShape(24.dp)),
+                                        )
+                                        if (isLoading) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(36.dp),
+                                                color = Color.White.copy(alpha = 0.7f),
+                                                strokeWidth = 3.dp,
+                                            )
+                                        }
+                                    }
                                 }
                                 Box(
                                     modifier = Modifier
@@ -3227,7 +3246,7 @@ fun NowPlayingScreen(
                                             color = Color.White.copy(alpha = 0.25f),
                                             shape = RoundedCornerShape(16.dp),
                                         )
-                                        .clickable { onOpenMenu() }
+                                        .clickable { onSwitchToAudio?.invoke() ?: onOpenMenu() }
                                         .padding(horizontal = 12.dp, vertical = 6.dp),
                                 ) {
                                     Row(

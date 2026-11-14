@@ -1360,23 +1360,23 @@ private fun BitChordApp(
             val stillCurrent = c.currentMediaItemIndex == index &&
                 c.currentMediaItem?.mediaId == song.videoId
 
-            // The original MediaItem was never removed, so failure only needs
-            // to release the loading state and resume it immediately.
-            if (audio == null || audio.videoId == song.videoId) {
-                TrackLog.w("Player", "audio switch found no distinct official song", song.videoId)
-                if (stillCurrent && resumeAfterResolution) c.play()
-                return
-            }
             if (!stillCurrent) {
                 TrackLog.d("Player", "audio switch discarded; listener changed track", song.videoId)
                 return
             }
 
+            val resolvedAudio = if (audio != null && audio.videoId != song.videoId) {
+                audio
+            } else {
+                song.copy(isVideo = false)
+            }
+
             convertedFromVideo = song
-            convertedAudioId = audio.videoId
-            TrackLog.d("Player", "audio switch applying '${audio.title}' (${audio.videoId})", song.videoId)
-            val target = audio.copy(
-                isVideoOrigin = true,
+            convertedAudioId = resolvedAudio.videoId
+            TrackLog.d("Player", "audio switch applying '${resolvedAudio.title}' (${resolvedAudio.videoId})", song.videoId)
+            val target = resolvedAudio.copy(
+                isVideo = false,
+                isVideoOrigin = song.isVideoOrigin,
                 queueTier = song.queueTier,
                 queueEntryId = song.queueEntryId,
                 radioName = song.radioName,
@@ -1428,8 +1428,8 @@ private fun BitChordApp(
             val stillCurrent = c.currentMediaItemIndex == index &&
                 c.currentMediaItem?.mediaId == song.videoId
 
-            if (video == null || video.videoId == song.videoId) {
-                TrackLog.w("Player", "video switch found no distinct video", song.videoId)
+            if (video == null) {
+                TrackLog.w("Player", "video switch found no video", song.videoId)
                 withContext(Dispatchers.Main) {
                     android.widget.Toast.makeText(context, "No video version found for this track", android.widget.Toast.LENGTH_SHORT).show()
                 }
@@ -2433,6 +2433,15 @@ private fun BitChordApp(
             durationMs = player.durationMs,
             audioVersionSwitching = switchingAudioVersion,
             qualityUpgraded = player.isQualityUpgraded,
+            onSwitchToAudio = {
+                optimisticVersionSong = null
+                convertedVideoId = null
+                convertedFromAudio = null
+                keepVideoId = null
+                scope.launch {
+                    switchToMusicOnly(displayedSong, pauseWhileResolving = false)
+                }
+            },
             onPlayPause = {
                 togglePlayPause()
             },
