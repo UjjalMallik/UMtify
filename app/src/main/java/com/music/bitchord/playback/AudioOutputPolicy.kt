@@ -33,10 +33,12 @@ internal object AudioOutputPolicy {
         requestedMode: OutputPcmMode,
         routeKind: AudioRouting.Kind,
         advertisesPcmFloat: Boolean,
+        isLosslessPreferred: Boolean = false,
     ): Boolean {
-        if (requestedMode != OutputPcmMode.FLOAT_32) return false
         if (routeKind == AudioRouting.Kind.PHONE) return false
-        return advertisesPcmFloat
+        if (requestedMode == OutputPcmMode.FLOAT_32) return advertisesPcmFloat
+        if (isLosslessPreferred && advertisesPcmFloat) return true
+        return false
     }
 
     /** Samsung's vendor FLAC decoder emits invalid timestamps with PCM float. */

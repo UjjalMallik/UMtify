@@ -129,6 +129,7 @@ import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.isUnresolvedSpotify
 import com.music.bitchord.data.scrobbling.ListenBrainzManager
 import com.music.bitchord.data.settings.AppSettings
+import com.music.bitchord.data.settings.AudioQuality
 import com.music.bitchord.data.settings.EqualizerMode
 import com.music.bitchord.data.sources.SourceResolver
 import com.music.bitchord.data.sources.SourceStream
@@ -6639,9 +6640,7 @@ class PlaybackService : MediaLibraryService() {
                 // such escape hatch; the equaliser screen says so, and the
                 // equaliser itself is unaffected because it runs upstream in
                 // [PrecisionAudioSink], not here.
-                .setEnableAudioTrackPlaybackParams(
-                    enableAudioTrackPlaybackParams || enableFloatOutput,
-                )
+                .setEnableAudioTrackPlaybackParams(true)
                 .setAudioProcessorChain(
                     DefaultAudioSink.DefaultAudioProcessorChain(
                         emptyArray<AudioProcessor>(),
@@ -6996,10 +6995,14 @@ class PlaybackService : MediaLibraryService() {
         // open. Float is what carries a 24-bit sample to the hardware intact,
         // so "32-bit float" in Output precision is the setting that preserves
         // a hi-res source, not the one that embellishes it.
+        val isLosslessPreferred = AppSettings.effectiveAudioQuality == AudioQuality.LOSSLESS ||
+            AppSettings.audioQualityWifi.value == AudioQuality.LOSSLESS ||
+            AppSettings.audioQualityCellular.value == AudioQuality.LOSSLESS
         return AudioOutputPolicy.shouldUseFloatOutput(
             requestedMode = AppSettings.outputPcmMode.value,
             routeKind = routeKind,
             advertisesPcmFloat = advertisesFloat || directFloatSupported,
+            isLosslessPreferred = isLosslessPreferred,
         )
     }
 
@@ -9227,6 +9230,7 @@ class PlaybackService : MediaLibraryService() {
         val AUDIO_ATTRIBUTES: AudioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .setAllowedCapturePolicy(C.ALLOW_CAPTURE_BY_ALL)
             .build()
 
         /** Length of a FLAC STREAMINFO block, which the format fixes at 34 bytes. */

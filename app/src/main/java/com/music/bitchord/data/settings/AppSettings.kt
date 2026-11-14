@@ -1983,6 +1983,28 @@ object AppSettings {
         setLocalMusicExcludedSongs(updated)
     }
 
+    fun includeLocalSongs(identifiers: Collection<String>) {
+        val idSet = identifiers.toSet()
+        val currentExcluded = localMusicExcludedSongs.value
+        if (currentExcluded.any { it in idSet }) {
+            setLocalMusicExcludedSongs(currentExcluded - idSet)
+        }
+        val currentSelected = localMusicSelectedSongs.value
+        if (currentSelected.isNotEmpty()) {
+            setLocalMusicSelectedSongs(currentSelected + idSet)
+        }
+    }
+
+    fun excludeLocalSongs(identifiers: Collection<String>) {
+        val idSet = identifiers.toSet()
+        val currentExcluded = localMusicExcludedSongs.value
+        setLocalMusicExcludedSongs(currentExcluded + idSet)
+        val currentSelected = localMusicSelectedSongs.value
+        if (currentSelected.isNotEmpty()) {
+            setLocalMusicSelectedSongs(currentSelected - idSet)
+        }
+    }
+
     fun setWebDavUrl(value: String) {
         val normalized = value.trim().trimEnd('/')
         webdavUrl.value = normalized

@@ -160,14 +160,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun readOfflineHome(): OfflineHome = withContext(Dispatchers.IO) {
         val context = getApplication<Application>()
         val downloads = runCatching { Downloads.getDownloadedSongs(context) }.getOrDefault(emptyList())
-            .filter { it.videoId.isNotBlank() && it.durationMillis() > 30_000L }
+            .filter { it.videoId.isNotBlank() }
         val cached = runCatching { AudioCache.cachedSongs().map { it.song } }.getOrDefault(emptyList())
-            .filter { it.videoId.isNotBlank() && it.durationMillis() > 30_000L }
+            .filter { it.videoId.isNotBlank() }
         // Unpermitted is not the same as empty, but offline the page has no
         // way to ask for it politely; the folder still can when opened.
         val local = if (LocalMediaRepository.hasStoragePermission(context)) {
             runCatching { LocalMediaRepository.getLocalMusic(context) }.getOrDefault(emptyList())
-                .filter { it.videoId.isNotBlank() && it.durationMillis() > 30_000L }
+                .filter { it.videoId.isNotBlank() }
         } else {
             emptyList()
         }
@@ -1638,6 +1638,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 loadAccount()
                 loadPlaylists()
             }
+        }
+        viewModelScope.launch {
+            combine(
+                AppSettings.localMusicFolders,
+                AppSettings.localMusicFolderUri,
+                AppSettings.localMusicExcludedSongs,
+                AppSettings.localMusicSelectedSongs,
+            ) { _, _, _, _ -> Unit }
+                .drop(1)
+                .collect {
+                    loadOfflineHome()
+                    loadLibrary()
+                }
         }
         viewModelScope.launch {
             // drop(1): the current value is just the count so far, not a play.

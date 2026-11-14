@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,14 +38,23 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import java.util.Locale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,6 +71,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.request.crossfade
 import com.music.bitchord.R
@@ -135,6 +146,13 @@ fun OfflineHomeScreen(
     val albumsLabel = stringResource(R.string.albums)
     val nothingLabel = stringResource(R.string.offline_nothing_yet)
 
+    val isBn = remember { Locale.getDefault().language == "bn" }
+    var activeFilter by remember { mutableStateOf("ALL") }
+    val allOfflineSongs = remember(data) {
+        val s = data ?: return@remember emptyList()
+        (s.downloads + s.local + s.cached).distinctBy { it.videoId }
+    }
+
     val offlineHomeBg = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
     LazyColumn(
         state = listState,
@@ -151,100 +169,255 @@ fun OfflineHomeScreen(
                 onExit = onExitOfflineMode,
                 modifier = Modifier
                     .padding(horizontal = PAGE_GUTTER)
-                    .padding(bottom = 18.dp),
+                    .padding(bottom = 14.dp),
             )
         }
         val snapshot = data ?: return@LazyColumn
-        item(key = "offline-quick-access") {
-            OfflineSectionHeader(quickAccessLabel)
+
+        // Offline Quick-Filter Chip Bar
+        item(key = "offline-filter-chips") {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = PAGE_GUTTER),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    .padding(horizontal = PAGE_GUTTER)
+                    .padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                QuickAccessCard(
-                    label = downloadsLabel,
-                    count = snapshot.downloads.size,
-                    browseId = "local:downloads",
-                    colors = listOf(Color(0xFF1E3C72), Color(0xFF2A5298)),
-                    modifier = Modifier.weight(1f),
-                    onOpen = { onOpenFolder("local:downloads", downloadsLabel, "") },
-                    onPlay = { onPlay(snapshot.downloads, 0, downloadsLabel) },
-                    onShuffle = { onShuffleAll(snapshot.downloads, downloadsLabel) },
+                val filters = listOf(
+                    "ALL" to if (isBn) "সব অফলাইন" else "All Offline",
+                    "LOCAL" to if (isBn) "ফোনের গান" else "Local Tracks",
+                    "DOWNLOADS" to if (isBn) "ডাউনলোড" else "Downloads",
+                    "CACHED" to if (isBn) "১০০% ক্যাশড" else "100% Cached",
                 )
-                QuickAccessCard(
-                    label = localLabel,
-                    count = snapshot.local.size,
-                    browseId = "local:all",
-                    colors = listOf(Color(0xFF134E5E), Color(0xFF71B280)),
-                    modifier = Modifier.weight(1f),
-                    onOpen = { onOpenFolder("local:all", localLabel, "") },
-                    onPlay = { onPlay(snapshot.local, 0, localLabel) },
-                    onShuffle = { onShuffleAll(snapshot.local, localLabel) },
-                )
-                QuickAccessCard(
-                    label = cachedLabel,
-                    count = snapshot.cached.size,
-                    browseId = CACHE_FOLDER_BROWSE_ID,
-                    colors = listOf(Color(0xFF42275A), Color(0xFF734B6D)),
-                    modifier = Modifier.weight(1f),
-                    onOpen = { onOpenFolder(CACHE_FOLDER_BROWSE_ID, cachedLabel, "") },
-                    onPlay = { onPlay(snapshot.cached, 0, cachedLabel) },
-                    onShuffle = { onShuffleAll(snapshot.cached, cachedLabel) },
-                )
+                filters.forEach { (key, filterLabel) ->
+                    val isSelected = activeFilter == key
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(
+                                if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+                                else Color.White.copy(alpha = 0.06f),
+                            )
+                            .border(
+                                0.8.dp,
+                                if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
+                                else Color.White.copy(alpha = 0.12f),
+                                CircleShape,
+                            )
+                            .clickable { activeFilter = key }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    ) {
+                        Text(
+                            text = filterLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.75f),
+                        )
+                    }
+                }
             }
         }
+
+        // Hero Button: "Shuffle All Offline Music"
+        if (allOfflineSongs.isNotEmpty()) {
+            item(key = "offline-hero-shuffle") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = PAGE_GUTTER)
+                        .padding(bottom = 14.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    Color(0xFF6C5CE7).copy(alpha = 0.28f),
+                                    Color(0xFF00CEC9).copy(alpha = 0.18f),
+                                ),
+                            ),
+                        )
+                        .border(
+                            1.2.dp,
+                            Brush.horizontalGradient(
+                                listOf(
+                                    Color(0xFF6C5CE7).copy(alpha = 0.65f),
+                                    Color(0xFF00CEC9).copy(alpha = 0.45f),
+                                ),
+                            ),
+                            RoundedCornerShape(20.dp),
+                        )
+                        .clickable {
+                            onShuffleAll(allOfflineSongs, if (isBn) "সব অফলাইন" else "All Offline")
+                        }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF6C5CE7).copy(alpha = 0.35f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Shuffle,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = if (isBn) "সব অফলাইন গান শাফেল করুন" else "Shuffle All Offline Music",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                )
+                                Text(
+                                    text = "${allOfflineSongs.size} ${if (isBn) "টি গান · ১০০% অফলাইন ভল্ট" else "tracks · 100% Offline Vault"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.White.copy(alpha = 0.65f),
+                                )
+                            }
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.15f))
+                                .border(0.8.dp, Color.White.copy(alpha = 0.30f), CircleShape)
+                                .padding(horizontal = 12.dp, vertical = 5.dp),
+                        ) {
+                            Text(
+                                text = if (isBn) "শাফল" else "Shuffle",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // "Crystal Vault" Bento Cards
+        item(key = "offline-quick-access") {
+            OfflineSectionHeader(quickAccessLabel)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = PAGE_GUTTER),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                if (activeFilter == "ALL" || activeFilter == "DOWNLOADS") {
+                    QuickAccessBentoCard(
+                        label = downloadsLabel,
+                        subtitle = if (isBn) "সংরক্ষিত অ্যালবাম ও ট্র্যাক" else "Saved tracks & releases",
+                        badgeText = if (isBn) "অফলাইন ভল্ট · FLAC" else "Offline Vault · FLAC",
+                        count = snapshot.downloads.size,
+                        browseId = "local:downloads",
+                        songs = snapshot.downloads,
+                        accentGlow = Color(0xFF3880FF),
+                        onOpen = { onOpenFolder("local:downloads", downloadsLabel, "") },
+                        onPlay = { onPlay(snapshot.downloads, 0, downloadsLabel) },
+                        onShuffle = { onShuffleAll(snapshot.downloads, downloadsLabel) },
+                    )
+                }
+                if (activeFilter == "ALL" || activeFilter == "LOCAL") {
+                    QuickAccessBentoCard(
+                        label = localLabel,
+                        subtitle = if (isBn) "ডিভাইসের মেমোরিতে থাকা গান" else "Device storage & audio folders",
+                        badgeText = if (isBn) "FLAC · Hi-Res · লোকাল" else "FLAC · Hi-Res · On-Device",
+                        count = snapshot.local.size,
+                        browseId = "local:all",
+                        songs = snapshot.local,
+                        accentGlow = Color(0xFF10AC84),
+                        onOpen = { onOpenFolder("local:all", localLabel, "") },
+                        onPlay = { onPlay(snapshot.local, 0, localLabel) },
+                        onShuffle = { onShuffleAll(snapshot.local, localLabel) },
+                    )
+                }
+                if (activeFilter == "ALL" || activeFilter == "CACHED") {
+                    QuickAccessBentoCard(
+                        label = cachedLabel,
+                        subtitle = if (isBn) "স্বয়ংক্রিয় দ্রুত ক্যাশ মেমোরি" else "Auto read-ahead cache",
+                        badgeText = if (isBn) "জিরো ডেটা · ইনস্ট্যান্ট" else "Zero Data · Instant Play",
+                        count = snapshot.cached.size,
+                        browseId = CACHE_FOLDER_BROWSE_ID,
+                        songs = snapshot.cached,
+                        accentGlow = Color(0xFF9B59B6),
+                        onOpen = { onOpenFolder(CACHE_FOLDER_BROWSE_ID, cachedLabel, "") },
+                        onPlay = { onPlay(snapshot.cached, 0, cachedLabel) },
+                        onShuffle = { onShuffleAll(snapshot.cached, cachedLabel) },
+                    )
+                }
+            }
+        }
+
         if (snapshot.cached.isEmpty() && snapshot.downloads.isEmpty() && snapshot.local.isEmpty()) {
             item(key = "offline-empty") { MessageState(nothingLabel) }
             return@LazyColumn
         }
-        // The cache is kept in the order playback last touched it, which is as
-        // close to a history of offline listening as anything on this device is.
-        shelf(
-            title = recentLabel,
-            songs = snapshot.cached.take(12),
-            currentSong = currentSong,
-            isPlaying = isPlaying,
-            onSongClick = { song -> onPlay(snapshot.cached, snapshot.cached.indexOf(song), recentLabel) },
-        )
-        shelfCards(
-            title = albumsLabel,
-            groups = snapshot.downloadedAlbums,
-            onOpenGroup = onOpenGroup,
-        )
-        songRows(
-            title = downloadsLabel,
-            songs = snapshot.downloads,
-            limit = ROWS_PER_SECTION,
-            showAll = { onOpenFolder("local:downloads", downloadsLabel, "") },
-            currentSong = currentSong,
-            isPlaying = isPlaying,
-            onSongClick = { _, index -> onPlay(snapshot.downloads, index, downloadsLabel) },
-        )
-        songRows(
-            title = cachedLabel,
-            songs = snapshot.cached,
-            limit = ROWS_PER_SECTION,
-            showAll = { onOpenFolder(CACHE_FOLDER_BROWSE_ID, cachedLabel, "") },
-            currentSong = currentSong,
-            isPlaying = isPlaying,
-            onSongClick = { _, index -> onPlay(snapshot.cached, index, cachedLabel) },
-        )
-        shelfCards(
-            title = localLabel,
-            groups = snapshot.localAlbums,
-            onOpenGroup = onOpenGroup,
-        )
-        songRows(
-            title = localLabel,
-            songs = snapshot.local,
-            limit = ROWS_PER_SECTION,
-            showAll = { onOpenFolder("local:all", localLabel, "") },
-            currentSong = currentSong,
-            isPlaying = isPlaying,
-            onSongClick = { _, index -> onPlay(snapshot.local, index, localLabel) },
-        )
+
+        // Filter-aware shelves and lists
+        if (activeFilter == "ALL" || activeFilter == "CACHED") {
+            shelf(
+                title = recentLabel,
+                songs = snapshot.cached.take(12),
+                currentSong = currentSong,
+                isPlaying = isPlaying,
+                onSongClick = { song -> onPlay(snapshot.cached, snapshot.cached.indexOf(song), recentLabel) },
+            )
+        }
+        if (activeFilter == "ALL" || activeFilter == "DOWNLOADS") {
+            shelfCards(
+                title = albumsLabel,
+                groups = snapshot.downloadedAlbums,
+                onOpenGroup = onOpenGroup,
+            )
+            songRows(
+                title = downloadsLabel,
+                songs = snapshot.downloads,
+                limit = ROWS_PER_SECTION,
+                showAll = { onOpenFolder("local:downloads", downloadsLabel, "") },
+                currentSong = currentSong,
+                isPlaying = isPlaying,
+                onSongClick = { _, index -> onPlay(snapshot.downloads, index, downloadsLabel) },
+            )
+        }
+        if (activeFilter == "ALL" || activeFilter == "CACHED") {
+            songRows(
+                title = cachedLabel,
+                songs = snapshot.cached,
+                limit = ROWS_PER_SECTION,
+                showAll = { onOpenFolder(CACHE_FOLDER_BROWSE_ID, cachedLabel, "") },
+                currentSong = currentSong,
+                isPlaying = isPlaying,
+                onSongClick = { _, index -> onPlay(snapshot.cached, index, cachedLabel) },
+            )
+        }
+        if (activeFilter == "ALL" || activeFilter == "LOCAL") {
+            shelfCards(
+                title = localLabel,
+                groups = snapshot.localAlbums,
+                onOpenGroup = onOpenGroup,
+            )
+            songRows(
+                title = localLabel,
+                songs = snapshot.local,
+                limit = ROWS_PER_SECTION,
+                showAll = { onOpenFolder("local:all", localLabel, "") },
+                currentSong = currentSong,
+                isPlaying = isPlaying,
+                onSongClick = { _, index -> onPlay(snapshot.local, index, localLabel) },
+            )
+        }
     }
 }
 
@@ -684,73 +857,272 @@ private fun OfflineSectionHeader(title: String, onShowAll: (() -> Unit)? = null)
  * same list playing, without asking first or showing it on the way.
  */
 @Composable
-private fun QuickAccessCard(
+private fun QuickAccessBentoCard(
     label: String,
+    subtitle: String,
+    badgeText: String,
     count: Int,
     browseId: String,
-    colors: List<Color>,
+    songs: List<Song>,
+    accentGlow: Color,
     onOpen: () -> Unit,
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val palette = remember(colors) { MeshPalette(colors) }
-    Column(modifier) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(16.dp))
-                .border(
-                    1.2.dp,
-                    Brush.linearGradient(
-                        listOf(
-                            Color.White.copy(alpha = 0.40f),
-                            Color.White.copy(alpha = 0.12f),
-                        ),
-                    ),
-                    RoundedCornerShape(16.dp),
-                )
-                .clickable(onClick = onOpen),
-            contentAlignment = Alignment.Center,
+    val isBn = remember { Locale.getDefault().language == "bn" }
+    val cardShape = RoundedCornerShape(22.dp)
+    val cardBackground = Brush.linearGradient(
+        listOf(
+            Color(0xFF161C26).copy(alpha = 0.92f),
+            Color(0xFF0F131C).copy(alpha = 0.96f),
+        ),
+    )
+    val specularBorder = Brush.linearGradient(
+        listOf(
+            Color.White.copy(alpha = 0.35f),
+            accentGlow.copy(alpha = 0.40f),
+            Color.White.copy(alpha = 0.08f),
+        ),
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(cardShape)
+            .background(cardBackground)
+            .border(1.dp, specularBorder, cardShape)
+            .clickable(onClick = onOpen)
+            .padding(14.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            MeshGradientBackground(
-                palette = palette,
-                trackKey = browseId,
-                blurRadius = 22.dp,
-            )
-            Icon(
-                imageVector = deviceFolderIcon(browseId) ?: BitChordIcons.Download,
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(30.dp),
-            )
+            // Top Row: Icon badge at left, live song count pill at right
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(accentGlow.copy(alpha = 0.22f))
+                        .border(0.8.dp, accentGlow.copy(alpha = 0.55f), RoundedCornerShape(10.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = deviceFolderIcon(browseId) ?: BitChordIcons.Download,
+                        contentDescription = null,
+                        tint = accentGlow,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .border(0.6.dp, Color.White.copy(alpha = 0.20f), CircleShape)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        text = "$count ${if (isBn) "টি গান" else "tracks"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White.copy(alpha = 0.90f),
+                    )
+                }
+            }
+
+            // Middle Row: Title & Subtitle at left, 2x2 artwork mosaic at right
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.60f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(accentGlow.copy(alpha = 0.15f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            text = badgeText,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Medium,
+                            color = accentGlow,
+                            fontSize = 10.sp,
+                        )
+                    }
+                }
+
+                // 2x2 miniature artwork mosaic preview
+                val previewSongs = remember(songs) { songs.take(4) }
+                Box(
+                    modifier = Modifier
+                        .size(54.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .border(0.8.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (previewSongs.size >= 4) {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            Row(modifier = Modifier.weight(1f)) {
+                                MosaicTile(previewSongs[0], Modifier.weight(1f))
+                                MosaicTile(previewSongs[1], Modifier.weight(1f))
+                            }
+                            Row(modifier = Modifier.weight(1f)) {
+                                MosaicTile(previewSongs[2], Modifier.weight(1f))
+                                MosaicTile(previewSongs[3], Modifier.weight(1f))
+                            }
+                        }
+                    } else if (previewSongs.isNotEmpty()) {
+                        val firstArt = previewSongs.first().thumbnailUrl ?: previewSongs.first().artworkAt(CARD_ART_PX)
+                        if (!firstArt.isNullOrBlank()) {
+                            AsyncImage(
+                                model = firstArt,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.MusicNote,
+                                contentDescription = null,
+                                tint = accentGlow.copy(alpha = 0.70f),
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.MusicNote,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.35f),
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
+            }
+
+            // Bottom Glass Bar: Tactile ▶ Play and 🔀 Shuffle pill buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // Play Pill
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.White.copy(alpha = if (count > 0) 0.12f else 0.04f))
+                        .border(
+                            0.8.dp,
+                            Color.White.copy(alpha = if (count > 0) 0.25f else 0.08f),
+                            RoundedCornerShape(12.dp),
+                        )
+                        .clickable(enabled = count > 0, onClick = onPlay)
+                        .padding(vertical = 7.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PlayArrow,
+                            contentDescription = null,
+                            tint = if (count > 0) Color.White else Color.White.copy(alpha = 0.3f),
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            text = if (isBn) "প্লে" else "Play",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (count > 0) Color.White else Color.White.copy(alpha = 0.3f),
+                        )
+                    }
+                }
+
+                // Shuffle Pill
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.White.copy(alpha = if (count > 0) 0.08f else 0.04f))
+                        .border(
+                            0.8.dp,
+                            Color.White.copy(alpha = if (count > 0) 0.20f else 0.08f),
+                            RoundedCornerShape(12.dp),
+                        )
+                        .clickable(enabled = count > 0, onClick = onShuffle)
+                        .padding(vertical = 7.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Shuffle,
+                            contentDescription = null,
+                            tint = if (count > 0) accentGlow else Color.White.copy(alpha = 0.3f),
+                            modifier = Modifier.size(15.dp),
+                        )
+                        Text(
+                            text = if (isBn) "শাফল" else "Shuffle",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (count > 0) accentGlow else Color.White.copy(alpha = 0.3f),
+                        )
+                    }
+                }
+            }
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onBackground,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = pluralStringResource(R.plurals.song_count_plural, count, count),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
-            MiniAction(
-                icon = BitChordIcons.Play,
-                description = stringResource(R.string.offline_play_all),
-                onClick = onPlay,
-                enabled = count > 0,
+    }
+}
+
+@Composable
+private fun MosaicTile(song: Song, modifier: Modifier = Modifier) {
+    val art = song.thumbnailUrl ?: song.artworkAt(CARD_ART_PX)
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .background(Color.White.copy(alpha = 0.04f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (!art.isNullOrBlank()) {
+            AsyncImage(
+                model = art,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
             )
-            MiniAction(
-                icon = BitChordIcons.Shuffle,
-                description = stringResource(R.string.offline_shuffle_all),
-                onClick = onShuffle,
-                enabled = count > 0,
+        } else {
+            Icon(
+                imageVector = Icons.Rounded.MusicNote,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.3f),
+                modifier = Modifier.size(10.dp),
             )
         }
     }
