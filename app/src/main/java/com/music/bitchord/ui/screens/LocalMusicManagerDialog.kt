@@ -1,8 +1,6 @@
 package com.music.bitchord.ui.screens
 
 import android.content.Context
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -75,8 +73,6 @@ import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.settings.AppSettings
 import java.util.Locale
 
-private enum class LocalManagerTab { FOLDERS, SONGS }
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LocalMusicManagerDialog(
@@ -93,10 +89,8 @@ fun LocalMusicManagerDialog(
     val excludedSongs by AppSettings.localMusicExcludedSongs.collectAsStateWithLifecycle()
     val selectedSongs by AppSettings.localMusicSelectedSongs.collectAsStateWithLifecycle()
 
-    var activeTab by remember { mutableStateOf(LocalManagerTab.FOLDERS) }
     var detectedFolders by remember { mutableStateOf<List<LocalMediaRepository.DeviceFolder>>(emptyList()) }
     var allLocalSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
-    var songSearchQuery by remember { mutableStateOf("") }
     var folderSongSearchQuery by remember { mutableStateOf("") }
     var drilledFolder by remember { mutableStateOf<LocalMediaRepository.DeviceFolder?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -170,70 +164,10 @@ fun LocalMusicManagerDialog(
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
 
-            // Tab Selector Chips
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color.White.copy(alpha = 0.06f))
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                LocalManagerTab.entries.forEach { tab ->
-                    val isSelected = activeTab == tab
-                    val tabBg by animateColorAsState(
-                        targetValue = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f) else Color.Transparent,
-                        animationSpec = spring(),
-                        label = "tabBg",
-                    )
-                    val tabBorder by animateColorAsState(
-                        targetValue = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.65f) else Color.Transparent,
-                        animationSpec = spring(),
-                        label = "tabBorder",
-                    )
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(tabBg)
-                            .border(1.dp, tabBorder, RoundedCornerShape(12.dp))
-                            .clickable { activeTab = tab }
-                            .padding(vertical = 10.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Icon(
-                                imageVector = if (tab == LocalManagerTab.FOLDERS) Icons.Rounded.Folder else Icons.Rounded.MusicNote,
-                                contentDescription = null,
-                                tint = if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.7f),
-                                modifier = Modifier.size(18.dp),
-                            )
-                            val label = when (tab) {
-                                LocalManagerTab.FOLDERS -> if (isBn) "ফোল্ডার" else "Folders"
-                                LocalManagerTab.SONGS -> if (isBn) "গান (${allLocalSongs.size})" else "Songs (${allLocalSongs.size})"
-                            }
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.7f),
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(14.dp))
-
-            when (activeTab) {
-                LocalManagerTab.FOLDERS -> {
-                    val currentDrill = drilledFolder
-                    if (currentDrill != null) {
+            val currentDrill = drilledFolder
+            if (currentDrill != null) {
                         // Folder Drill-Down View
                         val folderSongs = remember(allLocalSongs, currentDrill) {
                             allLocalSongs.filter { LocalMediaRepository.isInSelectedFolder(it.localPath, currentDrill.path) }
@@ -547,37 +481,67 @@ fun LocalMusicManagerDialog(
 
                         Spacer(Modifier.height(14.dp))
 
-                        // Action: Add System Folder via SAF
+                        // Actions: Add Custom Folder & Add Files
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color.White.copy(alpha = 0.04f))
-                                .clickable { onAddFolder() }
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(30.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)),
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(Color.White.copy(alpha = 0.05f))
+                                    .border(0.6.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
+                                    .clickable { onAddFolder() }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Add,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp),
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.CreateNewFolder,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Text(
+                                        text = if (isBn) "+ ফোল্ডার যোগ" else "+ Add folder",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
                             }
-                            Text(
-                                text = if (isBn) "+ পছন্দমতো সিস্টেম ফোল্ডার যোগ করুন..." else "+ Add custom storage folder...",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(Color.White.copy(alpha = 0.05f))
+                                    .border(0.6.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
+                                    .clickable { onAddSongs() }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.MusicNote,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Text(
+                                        text = if (isBn) "+ ফাইল যোগ" else "+ Add files",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
                         }
 
                         Spacer(Modifier.height(10.dp))
@@ -669,194 +633,6 @@ fun LocalMusicManagerDialog(
                             }
                         }
                     }
-                }
-
-                LocalManagerTab.SONGS -> {
-                    // Search bar
-                    OutlinedTextField(
-                        value = songSearchQuery,
-                        onValueChange = { songSearchQuery = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp)),
-                        placeholder = {
-                            Text(
-                                if (isBn) "গান বা শিল্পী খুঁজুন..." else "Search local songs, artists...",
-                                color = Color.White.copy(alpha = 0.45f),
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Rounded.Search,
-                                contentDescription = null,
-                                tint = Color.White.copy(alpha = 0.6f),
-                            )
-                        },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color.White.copy(alpha = 0.06f),
-                            unfocusedContainerColor = Color.White.copy(alpha = 0.04f),
-                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                        ),
-                    )
-
-                    Spacer(Modifier.height(10.dp))
-
-                    // Action Bar: Select All / Deselect All + Add Files
-                    val filteredSongs = remember(allLocalSongs, songSearchQuery) {
-                        if (songSearchQuery.isBlank()) allLocalSongs else {
-                            allLocalSongs.filter {
-                                it.title.contains(songSearchQuery, ignoreCase = true) ||
-                                it.artist.contains(songSearchQuery, ignoreCase = true)
-                            }
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "${filteredSongs.size} ${if (isBn) "টি গান" else "songs"}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.60f),
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            TextButton(
-                                onClick = {
-                                    AppSettings.setLocalMusicExcludedSongs(emptySet())
-                                    AppSettings.setLocalMusicSelectedSongs(emptySet())
-                                },
-                            ) {
-                                Text(
-                                    if (isBn) "সবগুলো চালু" else "Select All",
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontSize = 12.sp,
-                                )
-                            }
-                            TextButton(
-                                onClick = {
-                                    val allKeys = filteredSongs.flatMap { listOfNotNull(it.localPath, it.localUri, it.videoId) }.toSet()
-                                    AppSettings.excludeLocalSongs(allKeys)
-                                },
-                            ) {
-                                Text(
-                                    if (isBn) "সবগুলো বাদ" else "Deselect All",
-                                    color = Color.White.copy(alpha = 0.60f),
-                                    fontSize = 12.sp,
-                                )
-                            }
-                            TextButton(onClick = { onAddSongs() }) {
-                                Text(
-                                    if (isBn) "+ ফাইল যোগ" else "+ Add files",
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontSize = 12.sp,
-                                )
-                            }
-                        }
-                    }
-
-                    // Songs List
-                    LazyColumn(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                        contentPadding = PaddingValues(bottom = 16.dp),
-                    ) {
-                        items(filteredSongs, key = { it.localPath ?: it.localUri ?: it.videoId }) { song ->
-                            val songKeys = setOfNotNull(song.localPath, song.localUri, song.videoId)
-                            val isIncluded = songKeys.none { it in excludedSongs } &&
-                                (selectedSongs.isEmpty() || songKeys.any { it in selectedSongs })
-
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(Color.White.copy(alpha = if (isIncluded) 0.07f else 0.02f))
-                                    .border(0.6.dp, Color.White.copy(alpha = if (isIncluded) 0.20f else 0.06f), RoundedCornerShape(14.dp))
-                                    .clickable {
-                                        if (isIncluded) {
-                                            AppSettings.excludeLocalSongs(songKeys)
-                                        } else {
-                                            AppSettings.includeLocalSongs(songKeys)
-                                        }
-                                    }
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                        modifier = Modifier.weight(1f),
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(38.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(Color.White.copy(alpha = 0.08f)),
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            if (!song.thumbnailUrl.isNullOrBlank()) {
-                                                AsyncImage(
-                                                    model = song.thumbnailUrl,
-                                                    contentDescription = null,
-                                                    contentScale = ContentScale.Crop,
-                                                    modifier = Modifier.fillMaxSize(),
-                                                )
-                                            } else {
-                                                Icon(
-                                                    imageVector = Icons.Rounded.MusicNote,
-                                                    contentDescription = null,
-                                                    tint = Color.White.copy(alpha = 0.6f),
-                                                    modifier = Modifier.size(18.dp),
-                                                )
-                                            }
-                                        }
-                                        Column {
-                                            Text(
-                                                text = song.title,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.Medium,
-                                                color = if (isIncluded) Color.White else Color.White.copy(alpha = 0.45f),
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            Text(
-                                                text = "${song.artist} · ${song.durationText ?: ""}",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = Color.White.copy(alpha = 0.45f),
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        }
-                                    }
-                                    Checkbox(
-                                        checked = isIncluded,
-                                        onCheckedChange = {
-                                            if (isIncluded) {
-                                                AppSettings.excludeLocalSongs(songKeys)
-                                            } else {
-                                                AppSettings.includeLocalSongs(songKeys)
-                                            }
-                                        },
-                                        colors = CheckboxDefaults.colors(
-                                            checkedColor = MaterialTheme.colorScheme.primary,
-                                            checkmarkColor = Color.White,
-                                        ),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
 
             // Bottom Done Button
             Button(
