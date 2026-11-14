@@ -3363,6 +3363,9 @@ private fun BitChordApp(
                                                 title = item.title,
                                                 artist = InnertubeParser.artistFromSubtitle(item.subtitle),
                                                 thumbnailUrl = item.thumbnailUrl,
+                                                playbackSource = category.title,
+                                                playbackSourceType = PlaybackSourceType.EXPLORE,
+                                                playbackSourceId = category.browseId,
                                             ),
                                             QueueSource(
                                                 category.title,

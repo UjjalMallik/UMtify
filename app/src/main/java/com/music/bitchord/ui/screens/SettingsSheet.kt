@@ -308,6 +308,10 @@ fun SettingsScreen(
     val smartVersionAlignment by AppSettings.smartVersionAlignment.collectAsStateWithLifecycle()
     val filterNonMusicAudio by AppSettings.filterNonMusicAudio.collectAsStateWithLifecycle()
     val localMusicFolderUri by AppSettings.localMusicFolderUri.collectAsStateWithLifecycle()
+    val localMusicFolders by AppSettings.localMusicFolders.collectAsStateWithLifecycle()
+    val localMusicSelectedSongs by AppSettings.localMusicSelectedSongs.collectAsStateWithLifecycle()
+    val localMusicExcludedSongs by AppSettings.localMusicExcludedSongs.collectAsStateWithLifecycle()
+    var showLocalMusicManager by remember { mutableStateOf(false) }
     val highPerformanceMode by AppSettings.highPerformanceMode.collectAsStateWithLifecycle()
     val performanceRefreshRate by AppSettings.performanceRefreshRate.collectAsStateWithLifecycle()
     val currentDisplay = LocalView.current.display
@@ -376,6 +380,23 @@ fun SettingsScreen(
             )
         }
         AppSettings.setLocalMusicFolderUri(folder.toString())
+        AppSettings.toggleLocalMusicFolder(folder.toString())
+    }
+
+    val localMusicSongPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
+        uris.forEach { uri ->
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+        }
+        val current = AppSettings.localMusicSelectedSongs.value
+        AppSettings.setLocalMusicSelectedSongs(current + uris.map { it.toString() })
     }
 
     /**
@@ -1504,23 +1525,34 @@ fun SettingsScreen(
             forceExpanded = searchQuery.isNotBlank(),
         ) {
             val localMusicFolderTitle = stringResource(R.string.local_music_folder)
-            row(localMusicFolderTitle, "folder", "offline", "files") {
+            val foldersLabel = LocalMediaRepository.foldersSummaryLabel(localMusicFolders, localMusicFolderUri)
+            val subtitleText = when {
+                foldersLabel != null && localMusicExcludedSongs.isNotEmpty() ->
+                    "$foldersLabel · ${localMusicExcludedSongs.size} excluded"
+                foldersLabel != null -> foldersLabel
+                localMusicExcludedSongs.isNotEmpty() ->
+                    "${stringResource(R.string.all_audio_folders)} · ${localMusicExcludedSongs.size} excluded"
+                else -> stringResource(R.string.all_audio_folders)
+            }
+            row(localMusicFolderTitle, "folder", "offline", "files", "local music") {
                 SettingsRow(
                     icon = Icons.Rounded.Folder,
                     title = localMusicFolderTitle,
-                    subtitle = LocalMediaRepository.selectedFolderLabel(localMusicFolderUri)
-                        ?: stringResource(R.string.all_audio_folders),
-                    onClick = { localMusicFolderPicker.launch(null) },
+                    subtitle = subtitleText,
+                    onClick = { showLocalMusicManager = true },
                 )
             }
-            if (localMusicFolderUri.isNotBlank()) {
+            if (localMusicFolders.isNotEmpty() || localMusicFolderUri.isNotBlank()) {
                 val useAllAudioFoldersTitle = stringResource(R.string.use_all_audio_folders)
                 row(useAllAudioFoldersTitle, "folder") {
                     SettingsRow(
                         icon = Icons.Rounded.LibraryMusic,
                         title = useAllAudioFoldersTitle,
                         subtitle = stringResource(R.string.use_all_audio_folders_subtitle),
-                        onClick = { AppSettings.setLocalMusicFolderUri("") },
+                        onClick = {
+                            AppSettings.setLocalMusicFolders(emptySet())
+                            AppSettings.setLocalMusicFolderUri("")
+                        },
                     )
                 }
             }
@@ -2238,6 +2270,14 @@ fun SettingsScreen(
                 AppSettings.addCustomDynamicColor(colorArgb)
                 AppSettings.setDynamicThemeVariant("CUSTOM_$colorArgb")
             },
+        )
+    }
+
+    if (showLocalMusicManager) {
+        LocalMusicManagerDialog(
+            onDismiss = { showLocalMusicManager = false },
+            onAddFolder = { localMusicFolderPicker.launch(null) },
+            onAddSongs = { localMusicSongPicker.launch(arrayOf("audio/*")) },
         )
     }
 

@@ -679,6 +679,15 @@ object AppSettings {
     /** Empty means every MediaStore folder; otherwise this is a persisted SAF tree URI. */
     val localMusicFolderUri = MutableStateFlow("")
 
+    /** Multi-folder selection: set of persisted SAF tree URIs or local absolute folder paths. */
+    val localMusicFolders = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Explicitly selected local songs (empty means all are eligible unless in excluded set). */
+    val localMusicSelectedSongs = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Explicitly excluded local songs. */
+    val localMusicExcludedSongs = MutableStateFlow<Set<String>>(emptySet())
+
     // ── WebDAV ────────────────────────────────────────────────────────────
 
     /**
@@ -1019,6 +1028,9 @@ object AppSettings {
             ?: LibrarySort.DEFAULT
         detailSongSorts.value = readDetailSongSorts()
         localMusicFolderUri.value = prefs.getString(KEY_LOCAL_MUSIC_FOLDER_URI, "").orEmpty()
+        localMusicFolders.value = prefs.getStringSet(KEY_LOCAL_MUSIC_FOLDERS, emptySet()).orEmpty()
+        localMusicSelectedSongs.value = prefs.getStringSet(KEY_LOCAL_MUSIC_SELECTED_SONGS, emptySet()).orEmpty()
+        localMusicExcludedSongs.value = prefs.getStringSet(KEY_LOCAL_MUSIC_EXCLUDED_SONGS, emptySet()).orEmpty()
         webdavUrl.value = prefs.getString(KEY_WEBDAV_URL, "").orEmpty()
         webdavUsername.value = prefs.getString(KEY_WEBDAV_USERNAME, "").orEmpty()
         webdavPassword.value = authStore.webdavPassword.orEmpty()
@@ -1944,6 +1956,33 @@ object AppSettings {
         prefs.edit().putString(KEY_LOCAL_MUSIC_FOLDER_URI, value).apply()
     }
 
+    fun setLocalMusicFolders(values: Set<String>) {
+        localMusicFolders.value = values
+        prefs.edit().putStringSet(KEY_LOCAL_MUSIC_FOLDERS, values).apply()
+    }
+
+    fun toggleLocalMusicFolder(folderUriOrPath: String) {
+        val current = localMusicFolders.value
+        val updated = if (folderUriOrPath in current) current - folderUriOrPath else current + folderUriOrPath
+        setLocalMusicFolders(updated)
+    }
+
+    fun setLocalMusicSelectedSongs(songs: Set<String>) {
+        localMusicSelectedSongs.value = songs
+        prefs.edit().putStringSet(KEY_LOCAL_MUSIC_SELECTED_SONGS, songs).apply()
+    }
+
+    fun setLocalMusicExcludedSongs(songs: Set<String>) {
+        localMusicExcludedSongs.value = songs
+        prefs.edit().putStringSet(KEY_LOCAL_MUSIC_EXCLUDED_SONGS, songs).apply()
+    }
+
+    fun toggleLocalMusicExcludedSong(songIdentifier: String) {
+        val current = localMusicExcludedSongs.value
+        val updated = if (songIdentifier in current) current - songIdentifier else current + songIdentifier
+        setLocalMusicExcludedSongs(updated)
+    }
+
     fun setWebDavUrl(value: String) {
         val normalized = value.trim().trimEnd('/')
         webdavUrl.value = normalized
@@ -2166,6 +2205,9 @@ object AppSettings {
         "downloaded_tracks_metadata",
         "downloaded_collections",
         KEY_LOCAL_MUSIC_FOLDER_URI,
+        KEY_LOCAL_MUSIC_FOLDERS,
+        KEY_LOCAL_MUSIC_SELECTED_SONGS,
+        KEY_LOCAL_MUSIC_EXCLUDED_SONGS,
         KEY_LAST_VERSION_CODE,
         // The name is only ever the label of the file the listener imported
         // here; the file itself is not in the backup, so restoring the name
@@ -2299,6 +2341,9 @@ object AppSettings {
     private const val KEY_DOWNLOADED_MUSIC_VIEW_TYPE = "downloaded_music_view_type"
     private const val KEY_HOME_RECENTS_VIEW_TYPE = "home_recents_view_type"
     private const val KEY_LOCAL_MUSIC_FOLDER_URI = "local_music_folder_uri"
+    private const val KEY_LOCAL_MUSIC_FOLDERS = "local_music_folders"
+    private const val KEY_LOCAL_MUSIC_SELECTED_SONGS = "local_music_selected_songs"
+    private const val KEY_LOCAL_MUSIC_EXCLUDED_SONGS = "local_music_excluded_songs"
     private const val KEY_WEBDAV_URL = "webdav_url"
     private const val KEY_WEBDAV_USERNAME = "webdav_username"
     private const val KEY_SMB_HOST = "smb_host"

@@ -3,6 +3,7 @@ package com.music.bitchord.ui.screens
 import com.music.bitchord.sharedui.resources.*
 import org.jetbrains.compose.resources.stringResource
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateOffsetAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.background
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -43,6 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -178,13 +182,18 @@ fun ExploreScreen(
             val isBn = remember { java.util.Locale.getDefault().language == "bn" }
             var liveItems by remember(allItems) { mutableStateOf(allItems) }
             var draggedItemTitle by remember { mutableStateOf<String?>(null) }
-            var dragOffset by remember { mutableStateOf(Offset.Zero) }
+            var dragTotalOffset by remember { mutableStateOf(Offset.Zero) }
+            var dragInitialIndex by remember { mutableIntStateOf(-1) }
+            var dragTargetIndex by remember { mutableIntStateOf(-1) }
             var cellWidthPx by remember { mutableFloatStateOf(0f) }
             var cellHeightPx by remember { mutableFloatStateOf(0f) }
+            val density = LocalDensity.current
+            val spacingPx = with(density) { MOOD_SPACING.toPx() }
 
             LazyColumn(
                 state = listState,
                 contentPadding = contentPadding,
+                userScrollEnabled = (draggedItemTitle == null),
                 modifier = Modifier.fillMaxSize(),
             ) {
                 if (showTitle) {
@@ -280,7 +289,7 @@ fun ExploreScreen(
                     }
                     is UiState.Success -> {
                         val rows = liveItems.chunked(columns)
-                        items(rows, key = { row -> row.joinToString("|") { it.title } }) { row ->
+                        itemsIndexed(rows, key = { rowIndex, _ -> "explore_row_$rowIndex" }) { rowIndex, row ->
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(MOOD_SPACING),
                                 modifier = Modifier
@@ -289,52 +298,80 @@ fun ExploreScreen(
                             ) {
                                 row.forEach { item ->
                                     val isDragging = item.title == draggedItemTitle
+                                    val itemIndex = liveItems.indexOfFirst { it.title == item.title }
+
+                                    val targetOffset = when {
+                                        isDragging -> dragTotalOffset
+                                        draggedItemTitle != null && dragInitialIndex >= 0 && dragTargetIndex >= 0 -> {
+                                            val virtualIndex = when {
+                                                dragTargetIndex > dragInitialIndex && itemIndex in (dragInitialIndex + 1)..dragTargetIndex -> itemIndex - 1
+                                                dragTargetIndex < dragInitialIndex && itemIndex in dragTargetIndex until dragInitialIndex -> itemIndex + 1
+                                                else -> itemIndex
+                                            }
+                                            if (virtualIndex != itemIndex && cellWidthPx > 0f && cellHeightPx > 0f) {
+                                                val stepX = cellWidthPx + spacingPx
+                                                val stepY = cellHeightPx + spacingPx
+                                                val dCol = (virtualIndex % columns) - (itemIndex % columns)
+                                                val dRow = (virtualIndex / columns) - (itemIndex / columns)
+                                                Offset(dCol * stepX, dRow * stepY)
+                                            } else {
+                                                Offset.Zero
+                                            }
+                                        }
+                                        else -> Offset.Zero
+                                    }
+
+                                    val animatedOffset by animateOffsetAsState(
+                                        targetValue = if (isDragging) dragTotalOffset else targetOffset,
+                                        animationSpec = spring(),
+                                        label = "cardOffset",
+                                    )
+
                                     MoodGenreCard(
                                         item = item,
                                         onClick = { onCategoryClick(item) },
                                         isDragging = isDragging,
-                                        dragOffset = if (isDragging) dragOffset else Offset.Zero,
+                                        dragOffset = animatedOffset,
                                         onDragStart = {
-                                            draggedItemTitle = item.title
-                                            dragOffset = Offset.Zero
+                                            val idx = liveItems.indexOfFirst { it.title == item.title }
+                                            if (idx >= 0) {
+                                                draggedItemTitle = item.title
+                                                dragInitialIndex = idx
+                                                dragTargetIndex = idx
+                                                dragTotalOffset = Offset.Zero
+                                            }
                                         },
                                         onDrag = { delta ->
-                                            dragOffset += delta
-                                            val currentIndex = liveItems.indexOfFirst { it.title == item.title }
-                                            if (currentIndex >= 0 && cellWidthPx > 0 && cellHeightPx > 0) {
-                                                val colShift = when {
-                                                    dragOffset.x > cellWidthPx * 0.5f -> 1
-                                                    dragOffset.x < -cellWidthPx * 0.5f -> -1
-                                                    else -> 0
-                                                }
-                                                val rowShift = when {
-                                                    dragOffset.y > cellHeightPx * 0.5f -> 1
-                                                    dragOffset.y < -cellHeightPx * 0.5f -> -1
-                                                    else -> 0
-                                                }
-                                                if (colShift != 0 || rowShift != 0) {
-                                                    val targetIndex = (currentIndex + colShift + rowShift * columns).coerceIn(0, liveItems.lastIndex)
-                                                    if (targetIndex != currentIndex) {
-                                                        liveItems = liveItems.toMutableList().apply {
-                                                            add(targetIndex, removeAt(currentIndex))
-                                                        }
-                                                        dragOffset = Offset(
-                                                            dragOffset.x - colShift * cellWidthPx,
-                                                            dragOffset.y - rowShift * cellHeightPx,
-                                                        )
-                                                    }
-                                                }
+                                            dragTotalOffset += delta
+                                            if (dragInitialIndex >= 0 && cellWidthPx > 0f && cellHeightPx > 0f) {
+                                                val stepX = cellWidthPx + spacingPx
+                                                val stepY = cellHeightPx + spacingPx
+                                                val colShift = Math.round(dragTotalOffset.x / stepX)
+                                                val rowShift = Math.round(dragTotalOffset.y / stepY)
+                                                val initCol = dragInitialIndex % columns
+                                                val initRow = dragInitialIndex / columns
+                                                val targetCol = (initCol + colShift).coerceIn(0, columns - 1)
+                                                val targetRow = (initRow + rowShift).coerceAtLeast(0)
+                                                dragTargetIndex = (targetRow * columns + targetCol).coerceIn(0, liveItems.lastIndex)
                                             }
                                         },
                                         onDragEnd = {
+                                            if (dragInitialIndex >= 0 && dragTargetIndex >= 0 && dragInitialIndex != dragTargetIndex) {
+                                                liveItems = liveItems.toMutableList().apply {
+                                                    add(dragTargetIndex, removeAt(dragInitialIndex))
+                                                }
+                                                onReorder?.invoke(liveItems.map { it.title })
+                                            }
                                             draggedItemTitle = null
-                                            dragOffset = Offset.Zero
-                                            onReorder?.invoke(liveItems.map { it.title })
+                                            dragInitialIndex = -1
+                                            dragTargetIndex = -1
+                                            dragTotalOffset = Offset.Zero
                                         },
                                         onDragCancel = {
                                             draggedItemTitle = null
-                                            dragOffset = Offset.Zero
-                                            liveItems = allItems
+                                            dragInitialIndex = -1
+                                            dragTargetIndex = -1
+                                            dragTotalOffset = Offset.Zero
                                         },
                                         onSize = { width, height ->
                                             cellWidthPx = width
@@ -391,18 +428,18 @@ private fun MoodGenreCard(
     onSize: (Float, Float) -> Unit = { _, _ -> },
 ) {
     val cardShape = RoundedCornerShape(22.dp)
-    val scale = if (isDragging) 1.06f else 1.0f
+    val scale = if (isDragging) 1.08f else 1.0f
     val haptic = LocalHapticFeedback.current
 
     Box(
         modifier = modifier
-            .zIndex(if (isDragging) 10f else 0f)
+            .zIndex(if (isDragging) 100f else 0f)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
                 translationX = dragOffset.x
                 translationY = dragOffset.y
-                shadowElevation = if (isDragging) 28f else 0f
+                shadowElevation = if (isDragging) 32f else 0f
             }
             .then(
                 if (isDragging) {

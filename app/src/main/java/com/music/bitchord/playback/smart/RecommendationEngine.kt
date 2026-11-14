@@ -1,9 +1,13 @@
 package com.music.bitchord.playback.smart
 
 import android.os.SystemClock
+import com.music.bitchord.data.LanguageTrackFilter
 import com.music.bitchord.data.YtMusicRepository
 import com.music.bitchord.data.model.HomeShelf
+import com.music.bitchord.data.model.PlaybackSourceType
 import com.music.bitchord.data.model.QueueTier
+import com.music.bitchord.data.model.SearchFilter
+import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.ShelfItem
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.stats.ListeningStats
@@ -100,8 +104,36 @@ object RecommendationEngine {
             }
         }
 
+        // 2.5 Strict Language Filter for Explore categories or language seeds
+        val category = seedSong.playbackSource.orEmpty()
+        val isBengaliExplore = LanguageTrackFilter.isBengaliCategory(category) ||
+            (seedSong.playbackSourceType == PlaybackSourceType.EXPLORE && LanguageTrackFilter.isBengali(seedSong.title, seedSong.artist))
+        val isHindiExplore = LanguageTrackFilter.isHindiCategory(category) ||
+            (seedSong.playbackSourceType == PlaybackSourceType.EXPLORE && LanguageTrackFilter.isHindi(seedSong.title, seedSong.artist))
+
+        var languageFiltered = when {
+            isBengaliExplore -> allCandidates.filter { LanguageTrackFilter.isBengali(it.title, it.artist, it.albumName) }
+            isHindiExplore -> allCandidates.filter { LanguageTrackFilter.isHindi(it.title, it.artist, it.albumName) }
+            else -> allCandidates
+        }
+
+        if (languageFiltered.size < limit && (isBengaliExplore || isHindiExplore)) {
+            val query = if (isBengaliExplore) "Bengali songs ${seedSong.artist}" else "Hindi songs ${seedSong.artist}"
+            val extraTracks = runCatching {
+                YtMusicRepository.searchPage(query, SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
+            }.getOrDefault(emptyList()).mapNotNull { sr ->
+                (sr as? SearchResult.Track)?.song ?: (sr as? SearchResult.TopTrack)?.song
+            }
+            val cleanExtra = if (isBengaliExplore) {
+                extraTracks.filter { LanguageTrackFilter.isBengali(it.title, it.artist, it.albumName) }
+            } else {
+                extraTracks.filter { LanguageTrackFilter.isHindi(it.title, it.artist, it.albumName) }
+            }
+            languageFiltered = (languageFiltered + cleanExtra).distinctBy { it.videoId }
+        }
+
         // 3. Affinity scoring
-        val scoredCandidates = scoreAndRankCandidates(allCandidates, seedArtists)
+        val scoredCandidates = scoreAndRankCandidates(languageFiltered, seedArtists)
 
         // 4. Extend queue with artist caps & deduplication
         val extra = QueueBuilder.extend(existing, scoredCandidates, limit)

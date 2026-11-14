@@ -1,0 +1,633 @@
+package com.music.bitchord.ui.screens
+
+import android.content.Context
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.CreateNewFolder
+import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
+import com.music.bitchord.R
+import com.music.bitchord.data.LocalMediaRepository
+import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.settings.AppSettings
+import java.util.Locale
+
+private enum class LocalManagerTab { FOLDERS, SONGS }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LocalMusicManagerDialog(
+    onDismiss: () -> Unit,
+    onAddFolder: () -> Unit,
+    onAddSongs: () -> Unit,
+) {
+    val context = LocalContext.current
+    val isBn = remember { Locale.getDefault().language == "bn" }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    val localFolders by AppSettings.localMusicFolders.collectAsStateWithLifecycle()
+    val singleFolderUri by AppSettings.localMusicFolderUri.collectAsStateWithLifecycle()
+    val excludedSongs by AppSettings.localMusicExcludedSongs.collectAsStateWithLifecycle()
+    val selectedSongs by AppSettings.localMusicSelectedSongs.collectAsStateWithLifecycle()
+
+    var activeTab by remember { mutableStateOf(LocalManagerTab.FOLDERS) }
+    var detectedFolders by remember { mutableStateOf<List<LocalMediaRepository.DeviceFolder>>(emptyList()) }
+    var allLocalSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
+    var songSearchQuery by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(true) }
+
+    val allFoldersActive = localFolders.isEmpty() && singleFolderUri.isBlank()
+
+    LaunchedEffect(Unit) {
+        val folders = LocalMediaRepository.getAllDeviceAudioFolders(context)
+        val songs = LocalMediaRepository.getAllLocalSongsRaw(context)
+        detectedFolders = folders
+        allLocalSongs = songs
+        loading = false
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color(0xFF141923),
+        tonalElevation = 16.dp,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(top = 10.dp, bottom = 6.dp)
+                    .size(width = 38.dp, height = 4.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.35f))
+            )
+        },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.88f)
+                .padding(horizontal = 20.dp),
+        ) {
+            // Header
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column {
+                    Text(
+                        text = if (isBn) "লোকাল মিউজিক ম্যানেজার" else "Local Music Manager",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                    )
+                    Text(
+                        text = if (isBn) "ফোল্ডার ও পছন্দের গান নির্বাচন করুন" else "Select folders & filter individual songs",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.65f),
+                    )
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.08f)),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Close",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Tab Selector Chips
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.White.copy(alpha = 0.06f))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                LocalManagerTab.entries.forEach { tab ->
+                    val isSelected = activeTab == tab
+                    val tabBg by animateColorAsState(
+                        targetValue = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f) else Color.Transparent,
+                        animationSpec = spring(),
+                        label = "tabBg",
+                    )
+                    val tabBorder by animateColorAsState(
+                        targetValue = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.65f) else Color.Transparent,
+                        animationSpec = spring(),
+                        label = "tabBorder",
+                    )
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(tabBg)
+                            .border(1.dp, tabBorder, RoundedCornerShape(12.dp))
+                            .clickable { activeTab = tab }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Icon(
+                                imageVector = if (tab == LocalManagerTab.FOLDERS) Icons.Rounded.Folder else Icons.Rounded.MusicNote,
+                                contentDescription = null,
+                                tint = if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.7f),
+                                modifier = Modifier.size(18.dp),
+                            )
+                            val label = when (tab) {
+                                LocalManagerTab.FOLDERS -> if (isBn) "ফোল্ডার" else "Folders"
+                                LocalManagerTab.SONGS -> if (isBn) "গান (${allLocalSongs.size})" else "Songs (${allLocalSongs.size})"
+                            }
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.7f),
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            when (activeTab) {
+                LocalManagerTab.FOLDERS -> {
+                    // "All audio folders" Master Switch
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color.White.copy(alpha = 0.05f))
+                            .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(18.dp))
+                            .clickable {
+                                if (allFoldersActive) {
+                                    // Switch to first detected folder
+                                    val first = detectedFolders.firstOrNull()?.path
+                                    if (first != null) AppSettings.setLocalMusicFolders(setOf(first))
+                                } else {
+                                    // Reset to all folders
+                                    AppSettings.setLocalMusicFolders(emptySet())
+                                    AppSettings.setLocalMusicFolderUri("")
+                                }
+                            }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Folder,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        text = stringResource(R.string.all_audio_folders),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color.White,
+                                    )
+                                    Text(
+                                        text = if (isBn) "সকল ফোল্ডার থেকে গান অন্তর্ভুক্ত করবে" else "Scan and include all device audio folders",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.White.copy(alpha = 0.60f),
+                                    )
+                                }
+                            }
+                            Switch(
+                                checked = allFoldersActive,
+                                onCheckedChange = { checked ->
+                                    if (checked) {
+                                        AppSettings.setLocalMusicFolders(emptySet())
+                                        AppSettings.setLocalMusicFolderUri("")
+                                    } else {
+                                        val first = detectedFolders.firstOrNull()?.path
+                                        if (first != null) AppSettings.setLocalMusicFolders(setOf(first))
+                                    }
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(14.dp))
+
+                    // Action: Add System Folder via SAF
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.White.copy(alpha = 0.04f))
+                            .clickable { onAddFolder() }
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Add,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                        Text(
+                            text = if (isBn) "+ পছন্দমতো সিস্টেম ফোল্ডার যোগ করুন..." else "+ Add custom storage folder...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+
+                    Text(
+                        text = if (isBn) "ডিভাইসে প্রাপ্ত অডিও ফোল্ডারসমূহ" else "Detected Audio Folders",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color.White.copy(alpha = 0.50f),
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                    )
+
+                    // List of detected device folders
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(bottom = 16.dp),
+                    ) {
+                        items(detectedFolders, key = { it.path }) { folder ->
+                            val isChecked = allFoldersActive || (folder.path in localFolders) || (singleFolderUri == folder.path)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Color.White.copy(alpha = if (isChecked) 0.08f else 0.03f))
+                                    .border(0.6.dp, Color.White.copy(alpha = if (isChecked) 0.25f else 0.08f), RoundedCornerShape(16.dp))
+                                    .clickable {
+                                        if (allFoldersActive) {
+                                            // Switch from all to just this folder
+                                            AppSettings.setLocalMusicFolders(setOf(folder.path))
+                                            AppSettings.setLocalMusicFolderUri("")
+                                        } else {
+                                            AppSettings.toggleLocalMusicFolder(folder.path)
+                                        }
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        modifier = Modifier.weight(1f),
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Folder,
+                                            contentDescription = null,
+                                            tint = if (isChecked) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.5f),
+                                            modifier = Modifier.size(24.dp),
+                                        )
+                                        Column {
+                                            Text(
+                                                text = folder.name,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color.White,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Text(
+                                                text = "${folder.songCount} ${if (isBn) "টি গান" else "tracks"} · ${folder.path}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = Color.White.copy(alpha = 0.55f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
+                                    Checkbox(
+                                        checked = isChecked,
+                                        onCheckedChange = {
+                                            if (allFoldersActive) {
+                                                AppSettings.setLocalMusicFolders(setOf(folder.path))
+                                                AppSettings.setLocalMusicFolderUri("")
+                                            } else {
+                                                AppSettings.toggleLocalMusicFolder(folder.path)
+                                            }
+                                        },
+                                        colors = CheckboxDefaults.colors(
+                                            checkedColor = MaterialTheme.colorScheme.primary,
+                                            checkmarkColor = Color.White,
+                                        ),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                LocalManagerTab.SONGS -> {
+                    // Search bar
+                    OutlinedTextField(
+                        value = songSearchQuery,
+                        onValueChange = { songSearchQuery = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp)),
+                        placeholder = {
+                            Text(
+                                if (isBn) "গান বা শিল্পী খুঁজুন..." else "Search local songs, artists...",
+                                color = Color.White.copy(alpha = 0.45f),
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Rounded.Search,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.6f),
+                            )
+                        },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color.White.copy(alpha = 0.06f),
+                            unfocusedContainerColor = Color.White.copy(alpha = 0.04f),
+                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                        ),
+                    )
+
+                    Spacer(Modifier.height(10.dp))
+
+                    // Action Bar: Select All / Deselect All + Add Files
+                    val filteredSongs = remember(allLocalSongs, songSearchQuery) {
+                        if (songSearchQuery.isBlank()) allLocalSongs else {
+                            allLocalSongs.filter {
+                                it.title.contains(songSearchQuery, ignoreCase = true) ||
+                                it.artist.contains(songSearchQuery, ignoreCase = true)
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "${filteredSongs.size} ${if (isBn) "টি গান" else "songs"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.60f),
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(
+                                onClick = {
+                                    // Include all: clear exclusions
+                                    AppSettings.setLocalMusicExcludedSongs(emptySet())
+                                },
+                            ) {
+                                Text(
+                                    if (isBn) "সবগুলো চালু" else "Select All",
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontSize = 12.sp,
+                                )
+                            }
+                            TextButton(
+                                onClick = {
+                                    // Exclude all currently filtered songs
+                                    val allKeys = filteredSongs.mapNotNull { it.localPath ?: it.localUri ?: it.videoId }.toSet()
+                                    AppSettings.setLocalMusicExcludedSongs(excludedSongs + allKeys)
+                                },
+                            ) {
+                                Text(
+                                    if (isBn) "সবগুলো বাদ" else "Deselect All",
+                                    color = Color.White.copy(alpha = 0.60f),
+                                    fontSize = 12.sp,
+                                )
+                            }
+                            TextButton(onClick = { onAddSongs() }) {
+                                Text(
+                                    if (isBn) "+ ফাইল যোগ" else "+ Add files",
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontSize = 12.sp,
+                                )
+                            }
+                        }
+                    }
+
+                    // Songs List
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        contentPadding = PaddingValues(bottom = 16.dp),
+                    ) {
+                        items(filteredSongs, key = { it.localPath ?: it.localUri ?: it.videoId }) { song ->
+                            val songKey = song.localPath ?: song.localUri ?: song.videoId
+                            val isIncluded = songKey !in excludedSongs && song.videoId !in excludedSongs &&
+                                (selectedSongs.isEmpty() || songKey in selectedSongs || song.videoId in selectedSongs)
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(Color.White.copy(alpha = if (isIncluded) 0.07f else 0.02f))
+                                    .border(0.6.dp, Color.White.copy(alpha = if (isIncluded) 0.20f else 0.06f), RoundedCornerShape(14.dp))
+                                    .clickable {
+                                        AppSettings.toggleLocalMusicExcludedSong(songKey)
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        modifier = Modifier.weight(1f),
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(38.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color.White.copy(alpha = 0.08f)),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            if (!song.thumbnailUrl.isNullOrBlank()) {
+                                                AsyncImage(
+                                                    model = song.thumbnailUrl,
+                                                    contentDescription = null,
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                )
+                                            } else {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.MusicNote,
+                                                    contentDescription = null,
+                                                    tint = Color.White.copy(alpha = 0.6f),
+                                                    modifier = Modifier.size(18.dp),
+                                                )
+                                            }
+                                        }
+                                        Column {
+                                            Text(
+                                                text = song.title,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium,
+                                                color = if (isIncluded) Color.White else Color.White.copy(alpha = 0.45f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Text(
+                                                text = "${song.artist} · ${song.durationText ?: ""}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = Color.White.copy(alpha = 0.45f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
+                                    Checkbox(
+                                        checked = isIncluded,
+                                        onCheckedChange = {
+                                            AppSettings.toggleLocalMusicExcludedSong(songKey)
+                                        },
+                                        colors = CheckboxDefaults.colors(
+                                            checkedColor = MaterialTheme.colorScheme.primary,
+                                            checkmarkColor = Color.White,
+                                        ),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Bottom Done Button
+            Button(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp)
+                    .height(48.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                ),
+            ) {
+                Text(
+                    text = stringResource(R.string.done),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Black,
+                )
+            }
+        }
+    }
+}

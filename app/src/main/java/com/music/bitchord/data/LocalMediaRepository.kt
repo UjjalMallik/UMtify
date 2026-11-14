@@ -196,6 +196,12 @@ object LocalMediaRepository {
     @Volatile
     var extraLocalMusic: (suspend (Context, List<Song>) -> List<Song>)? = null
 
+    data class DeviceFolder(
+        val name: String,
+        val path: String,
+        val songCount: Int,
+    )
+
     /**
      * Queries MediaStore for all audio files available on the device.
      */
@@ -205,6 +211,10 @@ object LocalMediaRepository {
         }
 
         val songs = mutableListOf<Song>()
+        val selectedFolders = AppSettings.localMusicFolders.value
+        val singleFolderUri = AppSettings.localMusicFolderUri.value
+        val excludedSongs = AppSettings.localMusicExcludedSongs.value
+        val selectedSongs = AppSettings.localMusicSelectedSongs.value
         // This scan runs over every audio file on the device, which includes
         // whatever this app has downloaded into Music/BitChord alongside
         // everything else — but by content URI, the only thing MediaStore
@@ -233,11 +243,6 @@ object LocalMediaRepository {
         val selection = if (filterNonMusic) {
             buildString {
                 append("${MediaStore.Audio.Media.IS_MUSIC} != 0")
-                // A duration of 0 or NULL is the scanner failing to read one,
-                // not a short clip — fragmented MP4 (how ALAC downloads often
-                // come) reads as 0, high-rate DSD as NULL — so it is let
-                // through to the extension and path checks rather than
-                // dropped as too short.
                 append(
                     " AND (${MediaStore.Audio.Media.DURATION} >= ?" +
                         " OR ${MediaStore.Audio.Media.DURATION} <= 0" +
@@ -293,9 +298,19 @@ object LocalMediaRepository {
                     val path = cursor.getString(dataCol)
 
                     if (filterNonMusic && !isEligibleLocalMusic(durationMs, displayName, path)) continue
-                    if (!isInSelectedFolder(path, AppSettings.localMusicFolderUri.value)) continue
+                    if (!isInSelectedFolders(path, selectedFolders, singleFolderUri)) continue
 
                     val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id).toString()
+                    val videoId = videoIdByUri[contentUri] ?: contentUri
+                    val songIdentifier = path ?: contentUri
+
+                    if (excludedSongs.isNotEmpty() && (songIdentifier in excludedSongs || contentUri in excludedSongs || videoId in excludedSongs)) {
+                        continue
+                    }
+                    if (selectedSongs.isNotEmpty() && (songIdentifier !in selectedSongs && contentUri !in selectedSongs && videoId !in selectedSongs)) {
+                        continue
+                    }
+
                     val title = rawTitle.cleanTag()?.removeAudioExtension()
                         ?: displayName.substringBeforeLast('.').takeIf { it.isNotBlank() }
                         ?: "Track $id"
@@ -311,7 +326,7 @@ object LocalMediaRepository {
 
                     songs.add(
                         Song(
-                            videoId = videoIdByUri[contentUri] ?: contentUri,
+                            videoId = videoId,
                             title = title,
                             artist = artist,
                             thumbnailUrl = artworkUrl,
@@ -334,11 +349,134 @@ object LocalMediaRepository {
     /** Human-readable path for the folder setting without exposing provider internals. */
     fun selectedFolderLabel(treeUri: String): String? = selectedFolder(treeUri)?.label
 
+    fun foldersSummaryLabel(folderUris: Set<String>, singleUri: String): String? {
+        val all = (folderUris + singleUri).filter { it.isNotBlank() }
+        if (all.isEmpty()) return null
+        if (all.size == 1) {
+            val item = all.first()
+            return if (item.startsWith("/")) item.substringAfterLast('/') else selectedFolderLabel(item)
+        }
+        return "${all.size} folders"
+    }
+
     internal fun isInSelectedFolder(path: String?, treeUri: String): Boolean {
         if (treeUri.isBlank()) return true
+        if (treeUri.startsWith("/")) {
+            val candidate = path?.normalizedPath() ?: return false
+            val norm = treeUri.normalizedPath()
+            return candidate == norm || candidate.startsWith("$norm/")
+        }
         val folder = selectedFolder(treeUri) ?: return false
         val candidate = path?.normalizedPath() ?: return false
         return candidate == folder.absolutePath || candidate.startsWith("${folder.absolutePath}/")
+    }
+
+    fun isInSelectedFolders(path: String?, folderUris: Set<String>, singleUri: String): Boolean {
+        val all = (folderUris + singleUri).filter { it.isNotBlank() }
+        if (all.isEmpty()) return true
+        val candidate = path?.normalizedPath() ?: return false
+        return all.any { uriOrPath ->
+            isInSelectedFolder(path, uriOrPath)
+        }
+    }
+
+    suspend fun getAllDeviceAudioFolders(context: Context): List<DeviceFolder> = withContext(Dispatchers.IO) {
+        if (!hasStoragePermission(context)) return@withContext emptyList()
+        val projection = arrayOf(MediaStore.Audio.Media.DATA)
+        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
+        val folderCounts = mutableMapOf<String, Int>()
+
+        runCatching {
+            context.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                null,
+                null,
+            )?.use { cursor ->
+                val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+                while (cursor.moveToNext()) {
+                    val path = cursor.getString(dataCol) ?: continue
+                    val folderPath = File(path).parent ?: continue
+                    folderCounts[folderPath] = (folderCounts[folderPath] ?: 0) + 1
+                }
+            }
+        }
+
+        folderCounts.map { (path, count) ->
+            val name = path.substringAfterLast('/').ifBlank { "Storage" }
+            DeviceFolder(name, path, count)
+        }.sortedByDescending { it.songCount }
+    }
+
+    suspend fun getAllLocalSongsRaw(context: Context): List<Song> = withContext(Dispatchers.IO) {
+        if (!hasStoragePermission(context)) return@withContext emptyList()
+        val songs = mutableListOf<Song>()
+        val projection = arrayOf(
+            MediaStore.Audio.Media._ID,
+            MediaStore.Audio.Media.DISPLAY_NAME,
+            MediaStore.Audio.Media.TITLE,
+            MediaStore.Audio.Media.ARTIST,
+            MediaStore.Audio.Media.ALBUM,
+            MediaStore.Audio.Media.ALBUM_ID,
+            MediaStore.Audio.Media.DURATION,
+            MediaStore.Audio.Media.DATA,
+            MediaStore.Audio.Media.DATE_ADDED,
+            MediaStore.Audio.Media.DATE_MODIFIED,
+        )
+        val albumArtBaseUri = Uri.parse("content://media/external/audio/albumart")
+        runCatching {
+            context.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                "${MediaStore.Audio.Media.IS_MUSIC} != 0",
+                null,
+                "${MediaStore.Audio.Media.TITLE} ASC",
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                val displayNameCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
+                val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+                val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+                val dateModifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
+
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idCol)
+                    val displayName = cursor.getString(displayNameCol).orEmpty()
+                    val durationMs = cursor.getLong(durationCol)
+                    val path = cursor.getString(dataCol)
+                    if (isEligibleLocalMusic(durationMs, displayName, path)) {
+                        val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id).toString()
+                        val title = cursor.getString(titleCol).cleanTag()?.removeAudioExtension()
+                            ?: displayName.substringBeforeLast('.').takeIf { it.isNotBlank() }
+                            ?: "Track $id"
+                        val artist = cursor.getString(artistCol).cleanTag() ?: "Unknown Artist"
+                        val album = cursor.getString(albumCol).cleanTag()
+                        val albumId = cursor.getLong(albumIdCol)
+                        val artworkUrl = if (albumId > 0) ContentUris.withAppendedId(albumArtBaseUri, albumId).toString() else null
+                        songs.add(
+                            Song(
+                                videoId = contentUri,
+                                title = title,
+                                artist = artist,
+                                thumbnailUrl = artworkUrl,
+                                durationText = durationMs.takeIf { it > 0 }?.let(::formatDuration),
+                                albumName = album,
+                                localUri = contentUri,
+                                localPath = path,
+                                localDateAddedSeconds = cursor.getLong(dateAddedCol),
+                                localDateModifiedSeconds = cursor.getLong(dateModifiedCol),
+                            )
+                        )
+                    }
+                }
+            }
+        }
+        songs
     }
 
     private data class SelectedFolder(val absolutePath: String, val label: String)

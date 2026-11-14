@@ -16,6 +16,7 @@ import com.music.bitchord.auth.profileId
 import com.music.bitchord.auth.sessionId
 import com.music.bitchord.auth.adjacentProfile
 import com.music.bitchord.data.HomeCache
+import com.music.bitchord.data.LanguageTrackFilter
 import com.music.bitchord.data.LocalGroup
 import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.LikeState
@@ -1829,78 +1830,214 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _selectedMoodGenre.value = item
         _moodGenreShelves.value = UiState.Loading
         viewModelScope.launch {
-            val primaryResult = runCatching {
-                YtMusicRepository.moodGenreShelves(item.browseId, item.params).getOrNull()
-            }.getOrNull()
+            val isBn = java.util.Locale.getDefault().language == "bn"
+            val isBengali = LanguageTrackFilter.isBengaliCategory(item.title)
+            val isHindi = LanguageTrackFilter.isHindiCategory(item.title)
 
-            if (!primaryResult.isNullOrEmpty()) {
-                _moodGenreShelves.value = UiState.Success(primaryResult)
-                return@launch
+            // If not a language category, try the normal moodGenreShelves first
+            if (!isBengali && !isHindi) {
+                val primaryResult = runCatching {
+                    YtMusicRepository.moodGenreShelves(item.browseId, item.params).getOrNull()
+                }.getOrNull()
+
+                if (!primaryResult.isNullOrEmpty()) {
+                    _moodGenreShelves.value = UiState.Success(primaryResult)
+                    return@launch
+                }
             }
 
-            // Smart Multi-Shelf Fallback in parallel:
-            // 1. Top Songs in {Category}
-            // 2. Featured {Category} Playlists
-            // 3. Popular {Category} Albums & Releases
             try {
-                val (songs, playlists, albums) = kotlinx.coroutines.coroutineScope {
-                    val songsDef = async {
-                        runCatching {
-                            YtMusicRepository.searchPage("${item.title} songs", SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
-                        }.getOrDefault(emptyList())
-                    }
-                    val playlistsDef = async {
-                        runCatching {
-                            YtMusicRepository.searchPage("${item.title} playlist", SearchFilter.PLAYLISTS).getOrNull()?.rows.orEmpty()
-                        }.getOrDefault(emptyList())
-                    }
-                    val albumsDef = async {
-                        runCatching {
-                            YtMusicRepository.searchPage(item.title, SearchFilter.ALBUMS).getOrNull()?.rows.orEmpty()
-                        }.getOrDefault(emptyList())
-                    }
-                    Triple(songsDef.await(), playlistsDef.await(), albumsDef.await())
-                }
-
                 val fallbackShelves = mutableListOf<HomeShelf>()
-                if (songs.isNotEmpty()) {
-                    fallbackShelves += HomeShelf(
-                        title = "Top ${item.title} Songs",
-                        subtitle = "Popular tracks & essentials",
-                        items = songs.mapNotNull { sr ->
-                            when (sr) {
-                                is SearchResult.Track -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
-                                is SearchResult.TopTrack -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
-                                is SearchResult.Browse -> ShelfItem(sr.item.title, sr.item.subtitle, sr.item.thumbnailUrl, null, sr.item.browseId)
-                            }
+
+                if (isBengali) {
+                    val (bengaliHits, bandSongs, rabindraSongs, bengaliPlaylists) = kotlinx.coroutines.coroutineScope {
+                        val hitsDef = async {
+                            runCatching {
+                                YtMusicRepository.searchPage("Bangla Hit Songs Essentials", SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
+                            }.getOrDefault(emptyList())
                         }
-                    )
-                }
-                if (playlists.isNotEmpty()) {
-                    fallbackShelves += HomeShelf(
-                        title = "Featured ${item.title} Playlists",
-                        subtitle = "Curated collections & mixes",
-                        items = playlists.mapNotNull { sr ->
-                            when (sr) {
-                                is SearchResult.Browse -> ShelfItem(sr.item.title, sr.item.subtitle, sr.item.thumbnailUrl, null, sr.item.browseId)
-                                is SearchResult.Track -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
-                                is SearchResult.TopTrack -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
-                            }
+                        val bandDef = async {
+                            runCatching {
+                                YtMusicRepository.searchPage("Bengali Band Songs Fossils Anupam Roy Chandrabindoo", SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
+                            }.getOrDefault(emptyList())
                         }
-                    )
-                }
-                if (albums.isNotEmpty()) {
-                    fallbackShelves += HomeShelf(
-                        title = "Popular ${item.title} Releases",
-                        subtitle = "Albums, EPs & Singles",
-                        items = albums.mapNotNull { sr ->
-                            when (sr) {
-                                is SearchResult.Browse -> ShelfItem(sr.item.title, sr.item.subtitle, sr.item.thumbnailUrl, null, sr.item.browseId)
-                                is SearchResult.Track -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
-                                is SearchResult.TopTrack -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
-                            }
+                        val rabindraDef = async {
+                            runCatching {
+                                YtMusicRepository.searchPage("Rabindra Sangeet Nazrul Geeti Somlata", SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
+                            }.getOrDefault(emptyList())
                         }
-                    )
+                        val playlistsDef = async {
+                            runCatching {
+                                YtMusicRepository.searchPage("Bangla Hit Songs Playlist", SearchFilter.PLAYLISTS).getOrNull()?.rows.orEmpty()
+                            }.getOrDefault(emptyList())
+                        }
+                        listOf(hitsDef.await(), bandDef.await(), rabindraDef.await(), playlistsDef.await())
+                    }
+
+                    fun List<SearchResult>.toCleanShelfItems(): List<ShelfItem> = this.mapNotNull { sr ->
+                        when (sr) {
+                            is SearchResult.Track -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
+                            is SearchResult.TopTrack -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
+                            is SearchResult.Browse -> ShelfItem(sr.item.title, sr.item.subtitle, sr.item.thumbnailUrl, null, sr.item.browseId)
+                        }
+                    }.filter { LanguageTrackFilter.isBengali(it.title, it.subtitle) }
+
+                    val hits = bengaliHits.toCleanShelfItems()
+                    if (hits.isNotEmpty()) {
+                        fallbackShelves += HomeShelf(
+                            title = if (isBn) "সেরা বাংলা গান" else "Top Bangla Songs & Essentials",
+                            subtitle = if (isBn) "জনপ্রিয় গান ও চার্ট টপার" else "Popular tracks & essentials",
+                            items = hits,
+                        )
+                    }
+                    val bands = bandSongs.toCleanShelfItems()
+                    if (bands.isNotEmpty()) {
+                        fallbackShelves += HomeShelf(
+                            title = if (isBn) "বাংলা ব্যান্ড ও আধুনিক গান" else "Bengali Modern & Band Songs",
+                            subtitle = if (isBn) "ফসিলস, ক্যাকটাস ও অনুপম রায়" else "Rock, Indie & Modern melodies",
+                            items = bands,
+                        )
+                    }
+                    val rabindra = rabindraSongs.toCleanShelfItems()
+                    if (rabindra.isNotEmpty()) {
+                        fallbackShelves += HomeShelf(
+                            title = if (isBn) "রবীন্দ্র সংগীত ও চিরসবুজ গান" else "Rabindra Sangeet & Bengali Classics",
+                            subtitle = if (isBn) "শান্ত সুর ও শাস্ত্রীয় ধারা" else "Soulful & Classical heritage",
+                            items = rabindra,
+                        )
+                    }
+                    val playlists = bengaliPlaylists.toCleanShelfItems()
+                    if (playlists.isNotEmpty()) {
+                        fallbackShelves += HomeShelf(
+                            title = if (isBn) "বাছাইকৃত বাংলা প্লেলিস্ট" else "Featured Bangla Playlists",
+                            subtitle = if (isBn) "স্পেশাল অ্যালবাম ও মিক্স" else "Curated collections & mixes",
+                            items = playlists,
+                        )
+                    }
+                } else if (isHindi) {
+                    val (hindiHits, romanticSongs, indiePop, hindiPlaylists) = kotlinx.coroutines.coroutineScope {
+                        val hitsDef = async {
+                            runCatching {
+                                YtMusicRepository.searchPage("Bollywood Hindi Top Hit Songs", SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
+                            }.getOrDefault(emptyList())
+                        }
+                        val romanticDef = async {
+                            runCatching {
+                                YtMusicRepository.searchPage("Hindi Romantic Songs Arijit Shreya", SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
+                            }.getOrDefault(emptyList())
+                        }
+                        val indieDef = async {
+                            runCatching {
+                                YtMusicRepository.searchPage("Hindi Pop Indie Melodies", SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
+                            }.getOrDefault(emptyList())
+                        }
+                        val playlistsDef = async {
+                            runCatching {
+                                YtMusicRepository.searchPage("Bollywood Hindi Playlist Hits", SearchFilter.PLAYLISTS).getOrNull()?.rows.orEmpty()
+                            }.getOrDefault(emptyList())
+                        }
+                        listOf(hitsDef.await(), romanticDef.await(), indieDef.await(), playlistsDef.await())
+                    }
+
+                    fun List<SearchResult>.toCleanShelfItems(): List<ShelfItem> = this.mapNotNull { sr ->
+                        when (sr) {
+                            is SearchResult.Track -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
+                            is SearchResult.TopTrack -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
+                            is SearchResult.Browse -> ShelfItem(sr.item.title, sr.item.subtitle, sr.item.thumbnailUrl, null, sr.item.browseId)
+                        }
+                    }.filter { LanguageTrackFilter.isHindi(it.title, it.subtitle) }
+
+                    val hits = hindiHits.toCleanShelfItems()
+                    if (hits.isNotEmpty()) {
+                        fallbackShelves += HomeShelf(
+                            title = if (isBn) "বলিউড ব্লকবাস্টার হিট" else "Bollywood Blockbuster Hits",
+                            subtitle = if (isBn) "শীর্ষ জনপ্রিয় হিন্দি গান" else "Chartbusters & essentials",
+                            items = hits,
+                        )
+                    }
+                    val romantic = romanticSongs.toCleanShelfItems()
+                    if (romantic.isNotEmpty()) {
+                        fallbackShelves += HomeShelf(
+                            title = if (isBn) "রোমান্টিক হিন্দি মেলোডি" else "Romantic Hindi Melodies",
+                            subtitle = if (isBn) "অরিজিৎ সিং ও শ্রেয়া ঘোষাল" else "Love ballads & duets",
+                            items = romantic,
+                        )
+                    }
+                    val indie = indiePop.toCleanShelfItems()
+                    if (indie.isNotEmpty()) {
+                        fallbackShelves += HomeShelf(
+                            title = if (isBn) "হিন্দি পপ ও ইন্ডি ভাইব" else "Hindi Pop & Indie Hits",
+                            subtitle = if (isBn) "আধুনিক রিফ্রেশিং সুর" else "Refreshing indie sounds",
+                            items = indie,
+                        )
+                    }
+                    val playlists = hindiPlaylists.toCleanShelfItems()
+                    if (playlists.isNotEmpty()) {
+                        fallbackShelves += HomeShelf(
+                            title = if (isBn) "বাছাইকৃত হিন্দি প্লেলিস্ট" else "Featured Hindi Playlists",
+                            subtitle = if (isBn) "হিট কালেকশন ও মিক্স" else "Curated collections & mixes",
+                            items = playlists,
+                        )
+                    }
+                } else {
+                    val (songs, playlists, albums) = kotlinx.coroutines.coroutineScope {
+                        val songsDef = async {
+                            runCatching {
+                                YtMusicRepository.searchPage("${item.title} songs", SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
+                            }.getOrDefault(emptyList())
+                        }
+                        val playlistsDef = async {
+                            runCatching {
+                                YtMusicRepository.searchPage("${item.title} playlist", SearchFilter.PLAYLISTS).getOrNull()?.rows.orEmpty()
+                            }.getOrDefault(emptyList())
+                        }
+                        val albumsDef = async {
+                            runCatching {
+                                YtMusicRepository.searchPage(item.title, SearchFilter.ALBUMS).getOrNull()?.rows.orEmpty()
+                            }.getOrDefault(emptyList())
+                        }
+                        Triple(songsDef.await(), playlistsDef.await(), albumsDef.await())
+                    }
+
+                    if (songs.isNotEmpty()) {
+                        fallbackShelves += HomeShelf(
+                            title = "Top ${item.title} Songs",
+                            subtitle = "Popular tracks & essentials",
+                            items = songs.mapNotNull { sr ->
+                                when (sr) {
+                                    is SearchResult.Track -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
+                                    is SearchResult.TopTrack -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
+                                    is SearchResult.Browse -> ShelfItem(sr.item.title, sr.item.subtitle, sr.item.thumbnailUrl, null, sr.item.browseId)
+                                }
+                            }
+                        )
+                    }
+                    if (playlists.isNotEmpty()) {
+                        fallbackShelves += HomeShelf(
+                            title = "Featured ${item.title} Playlists",
+                            subtitle = "Curated collections & mixes",
+                            items = playlists.mapNotNull { sr ->
+                                when (sr) {
+                                    is SearchResult.Browse -> ShelfItem(sr.item.title, sr.item.subtitle, sr.item.thumbnailUrl, null, sr.item.browseId)
+                                    is SearchResult.Track -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
+                                    is SearchResult.TopTrack -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
+                                }
+                            }
+                        )
+                    }
+                    if (albums.isNotEmpty()) {
+                        fallbackShelves += HomeShelf(
+                            title = "Popular ${item.title} Releases",
+                            subtitle = "Albums, EPs & Singles",
+                            items = albums.mapNotNull { sr ->
+                                when (sr) {
+                                    is SearchResult.Browse -> ShelfItem(sr.item.title, sr.item.subtitle, sr.item.thumbnailUrl, null, sr.item.browseId)
+                                    is SearchResult.Track -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
+                                    is SearchResult.TopTrack -> ShelfItem(sr.song.title, sr.song.artist, sr.song.thumbnailUrl, sr.song.videoId, null)
+                                }
+                            }
+                        )
+                    }
                 }
 
                 if (fallbackShelves.isNotEmpty()) {
