@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -892,6 +894,7 @@ private fun QuickAccessBentoCard(
     Box(
         modifier = modifier
             .fillMaxWidth()
+            .heightIn(min = 112.dp)
             .clip(cardShape)
             .background(cardBackground)
             .border(1.2.dp, specularBorder, cardShape)
@@ -916,17 +919,17 @@ private fun QuickAccessBentoCard(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(11.dp))
                             .background(accentGlow.copy(alpha = 0.22f))
-                            .border(0.8.dp, accentGlow.copy(alpha = 0.55f), RoundedCornerShape(10.dp)),
+                            .border(0.8.dp, accentGlow.copy(alpha = 0.55f), RoundedCornerShape(11.dp)),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             imageVector = deviceFolderIcon(browseId) ?: BitChordIcons.Download,
                             contentDescription = null,
                             tint = accentGlow,
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(22.dp),
                         )
                     }
                     Box(
@@ -947,6 +950,7 @@ private fun QuickAccessBentoCard(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
                             .background(accentGlow.copy(alpha = 0.15f))
+                            .border(0.6.dp, accentGlow.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
                             .padding(horizontal = 7.dp, vertical = 3.dp),
                     ) {
                         Text(
@@ -973,10 +977,10 @@ private fun QuickAccessBentoCard(
                 Text(
                     text = liveTrackPreview,
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 13.5.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
                     ),
-                    color = Color.White.copy(alpha = 0.65f),
+                    color = Color.White.copy(alpha = 0.70f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -985,48 +989,63 @@ private fun QuickAccessBentoCard(
             // Right Side: Large 86.dp x 86.dp featured artwork or 2x2 mosaic
             val previewSongs = remember(songs) { songs.take(4) }
             Box(
-                modifier = Modifier
-                    .size(86.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Color.White.copy(alpha = 0.06f))
-                    .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(18.dp)),
+                modifier = Modifier.size(86.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                if (previewSongs.size >= 4) {
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        Row(modifier = Modifier.weight(1f)) {
-                            MosaicTile(previewSongs[0], Modifier.weight(1f))
-                            MosaicTile(previewSongs[1], Modifier.weight(1f))
+                // Stacked-card ambient shadow effect behind single cover
+                if (previewSongs.isNotEmpty() && previewSongs.size < 4) {
+                    Box(
+                        modifier = Modifier
+                            .size(78.dp)
+                            .offset(y = (-3).dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(accentGlow.copy(alpha = 0.25f)),
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(86.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color.White.copy(alpha = 0.06f))
+                        .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(18.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (previewSongs.size >= 4) {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            Row(modifier = Modifier.weight(1f)) {
+                                MosaicTile(previewSongs[0], Modifier.weight(1f))
+                                MosaicTile(previewSongs[1], Modifier.weight(1f))
+                            }
+                            Row(modifier = Modifier.weight(1f)) {
+                                MosaicTile(previewSongs[2], Modifier.weight(1f))
+                                MosaicTile(previewSongs[3], Modifier.weight(1f))
+                            }
                         }
-                        Row(modifier = Modifier.weight(1f)) {
-                            MosaicTile(previewSongs[2], Modifier.weight(1f))
-                            MosaicTile(previewSongs[3], Modifier.weight(1f))
+                    } else if (previewSongs.isNotEmpty()) {
+                        val firstArt = previewSongs.first().thumbnailUrl ?: previewSongs.first().artworkAt(CARD_ART_PX)
+                        if (!firstArt.isNullOrBlank()) {
+                            AsyncImage(
+                                model = firstArt,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.MusicNote,
+                                contentDescription = null,
+                                tint = accentGlow.copy(alpha = 0.75f),
+                                modifier = Modifier.size(36.dp),
+                            )
                         }
-                    }
-                } else if (previewSongs.isNotEmpty()) {
-                    val firstArt = previewSongs.first().thumbnailUrl ?: previewSongs.first().artworkAt(CARD_ART_PX)
-                    if (!firstArt.isNullOrBlank()) {
-                        AsyncImage(
-                            model = firstArt,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                        )
                     } else {
                         Icon(
                             imageVector = Icons.Rounded.MusicNote,
                             contentDescription = null,
-                            tint = accentGlow.copy(alpha = 0.75f),
-                            modifier = Modifier.size(36.dp),
+                            tint = Color.White.copy(alpha = 0.35f),
+                            modifier = Modifier.size(34.dp),
                         )
                     }
-                } else {
-                    Icon(
-                        imageVector = Icons.Rounded.MusicNote,
-                        contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.35f),
-                        modifier = Modifier.size(34.dp),
-                    )
                 }
             }
         }

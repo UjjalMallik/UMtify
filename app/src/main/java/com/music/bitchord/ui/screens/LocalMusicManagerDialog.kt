@@ -481,24 +481,28 @@ fun LocalMusicManagerDialog(
 
                         Spacer(Modifier.height(14.dp))
 
-                        // Actions: Add Custom Folder & Add Files
-                        Row(
+                        // Actions: Add Custom Storage Folder & Add Audio Files
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            Box(
+                            Row(
                                 modifier = Modifier
-                                    .weight(1f)
+                                    .fillMaxWidth()
                                     .clip(RoundedCornerShape(14.dp))
-                                    .background(Color.White.copy(alpha = 0.05f))
+                                    .background(Color.White.copy(alpha = 0.04f))
                                     .border(0.6.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
                                     .clickable { onAddFolder() }
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                contentAlignment = Alignment.Center,
+                                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                Box(
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)),
+                                    contentAlignment = Alignment.Center,
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.CreateNewFolder,
@@ -506,41 +510,46 @@ fun LocalMusicManagerDialog(
                                         tint = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(18.dp),
                                     )
-                                    Text(
-                                        text = if (isBn) "+ ফোল্ডার যোগ" else "+ Add folder",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.primary,
-                                    )
                                 }
+                                Text(
+                                    text = if (isBn) "+ পছন্দমতো সিস্টেম ফোল্ডার যোগ করুন..." else "+ Add custom storage folder...",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
                             }
-                            Box(
+
+                            Row(
                                 modifier = Modifier
-                                    .weight(1f)
+                                    .fillMaxWidth()
                                     .clip(RoundedCornerShape(14.dp))
-                                    .background(Color.White.copy(alpha = 0.05f))
-                                    .border(0.6.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
+                                    .background(Color.White.copy(alpha = 0.03f))
+                                    .border(0.6.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
                                     .clickable { onAddSongs() }
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                contentAlignment = Alignment.Center,
+                                    .padding(horizontal = 14.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.08f)),
+                                    contentAlignment = Alignment.Center,
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.MusicNote,
                                         contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                    Text(
-                                        text = if (isBn) "+ ফাইল যোগ" else "+ Add files",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.primary,
+                                        tint = Color.White.copy(alpha = 0.75f),
+                                        modifier = Modifier.size(16.dp),
                                     )
                                 }
+                                Text(
+                                    text = if (isBn) "+ নির্দিষ্ট অডিও ফাইল যোগ করুন..." else "+ Add individual audio files...",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color.White.copy(alpha = 0.75f),
+                                )
                             }
                         }
 
