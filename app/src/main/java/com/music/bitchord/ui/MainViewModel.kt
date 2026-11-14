@@ -1866,22 +1866,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     val (bengaliHits, bandSongs, rabindraSongs, bengaliPlaylists) = kotlinx.coroutines.coroutineScope {
                         val hitsDef = async {
                             runCatching {
-                                YtMusicRepository.searchPage("Bangla Hit Songs Essentials", SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
+                                YtMusicRepository.searchPage("বাংলা গান Bangla New Hit Songs", SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
                             }.getOrDefault(emptyList())
                         }
                         val bandDef = async {
                             runCatching {
-                                YtMusicRepository.searchPage("Bengali Band Songs Fossils Anupam Roy Chandrabindoo", SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
+                                YtMusicRepository.searchPage("Kolkata Bangla Movie & Modern Songs SVF", SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
                             }.getOrDefault(emptyList())
                         }
                         val rabindraDef = async {
                             runCatching {
-                                YtMusicRepository.searchPage("Rabindra Sangeet Nazrul Geeti Somlata", SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
+                                YtMusicRepository.searchPage("Bangladesh Band & Indie Bangla Songs", SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
                             }.getOrDefault(emptyList())
                         }
                         val playlistsDef = async {
                             runCatching {
-                                YtMusicRepository.searchPage("Bangla Hit Songs Playlist", SearchFilter.PLAYLISTS).getOrNull()?.rows.orEmpty()
+                                YtMusicRepository.searchPage("রবীন্দ্রসংগীত Rabindra Sangeet Bangla", SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
                             }.getOrDefault(emptyList())
                         }
                         listOf(hitsDef.await(), bandDef.await(), rabindraDef.await(), playlistsDef.await())

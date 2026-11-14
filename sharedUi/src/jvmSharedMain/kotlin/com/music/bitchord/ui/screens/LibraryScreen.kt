@@ -9,6 +9,9 @@ import com.music.bitchord.sharedui.resources.*
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
@@ -123,7 +126,6 @@ fun LibraryScreen(
     showTitle: Boolean = true,
 ) {
     val pinnedPlaylists by AppUi.host.pinnedPlaylists.collectAsStateWithLifecycle()
-    val onDevice = stringResource(Res.string.on_device)
     PullToRefresh(
         refreshing = refreshing,
         onRefresh = onRefresh,
@@ -148,17 +150,6 @@ fun LibraryScreen(
             item(key = "replay") { replay() }
             if (links.isNotEmpty()) {
                 item(key = "links") { LibraryLinkList(links = links, onClick = onShelfItemClick) }
-            }
-            if (deviceItems.isNotEmpty()) {
-                item(key = "shelf:$onDevice") {
-                    val onDeviceShelf = HomeShelf(title = onDevice, items = deviceItems)
-                    LibraryGridShelf(
-                        shelf = onDeviceShelf,
-                        onItemClick = onShelfItemClick,
-                        onItemLongPress = onShelfItemLongPress,
-                        onShowAll = { onShowAll(onDeviceShelf) },
-                    )
-                }
             }
             if (!signedIn) {
                 item(key = "shelf:$PLAYLISTS") {
@@ -239,79 +230,399 @@ fun LibraryScreen(
 data class LibraryLink(val item: ShelfItem, val icon: ImageVector, val logo: DrawableResource? = null)
 
 /**
- * The folders as a plain list — icon, name, chevron, hairlines between — the
- * way a music app's library has always opened, rather than as cards that all
- * look alike because none of them has artwork.
+ * Bento Layout for Library Collections:
+ * - Top Row: Side-by-side Downloads (left) and Local Music (right)
+ * - Below: Cached songs (compact card with dedicated Cache Music Symbol) and My Spotify (compact sleek card)
+ * - Any other configured storage connections (WebDAV, SMB, etc.)
  */
 @Composable
 private fun LibraryLinkList(links: List<LibraryLink>, onClick: (ShelfItem) -> Unit) {
-    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
-    val pillShape = RoundedCornerShape(18.dp)
-    val primary = MaterialTheme.colorScheme.primary
-    val secondary = MaterialTheme.colorScheme.secondary
+    val downloadsLink = links.find { it.item.browseId == "local:downloads" }
+    val localLink = links.find { it.item.browseId == "local:all" }
+    val cachedLink = links.find { it.item.browseId == "local:cache" }
+    val spotifyLink = links.find { it.item.browseId == "app:spotify" || it.logo != null }
+    val otherLinks = links.filter { it != downloadsLink && it != localLink && it != cachedLink && it != spotifyLink }
 
     Column(
         modifier = Modifier
+            .fillMaxWidth()
             .padding(horizontal = PAGE_GUTTER)
-            .padding(top = 6.dp, bottom = 22.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(top = 4.dp, bottom = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        links.forEach { link ->
-            val badgeColor = when {
-                link.logo != null -> Color(0xFF1DB954).copy(alpha = if (isLight) 0.12f else 0.18f)
-                link.item.browseId == "local:downloads" -> primary.copy(alpha = if (isLight) 0.12f else 0.18f)
-                else -> secondary.copy(alpha = if (isLight) 0.12f else 0.18f)
-            }
+        // Top Row: Downloads + Local Music side-by-side
+        if (downloadsLink != null && localLink != null) {
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 58.dp)
-                    .liquidGlassCard(shape = pillShape, isLight = isLight)
-                    .clickable { onClick(link.item) }
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(badgeColor)
-                        .border(0.8.dp, Color.White.copy(alpha = if (isLight) 0.15f else 0.22f), CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (link.logo != null) {
-                        Icon(
-                            painter = painterResource(link.logo),
-                            contentDescription = null,
-                            tint = if (isLight) Color(0xFF1DB954) else Color(0xFF1ED760),
-                            modifier = Modifier.size(20.dp),
-                        )
-                    } else {
-                        Icon(
-                            imageVector = link.icon,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
-                Spacer(Modifier.width(14.dp))
-                Text(
-                    text = link.item.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                LibraryBentoCard(
+                    link = downloadsLink,
+                    accent = Color(0xFF3880FF),
+                    onClick = { onClick(downloadsLink.item) },
                     modifier = Modifier.weight(1f),
                 )
-                Icon(
-                    imageVector = BitChordIcons.ChevronRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.size(20.dp),
+                LibraryBentoCard(
+                    link = localLink,
+                    accent = Color(0xFF10AC84),
+                    onClick = { onClick(localLink.item) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        } else {
+            downloadsLink?.let { dl ->
+                LibraryBentoCard(
+                    link = dl,
+                    accent = Color(0xFF3880FF),
+                    onClick = { onClick(dl.item) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            localLink?.let { ll ->
+                LibraryBentoCard(
+                    link = ll,
+                    accent = Color(0xFF10AC84),
+                    onClick = { onClick(ll.item) },
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
+
+        // Below Them: Cached songs compact card
+        if (cachedLink != null) {
+            LibraryCachedCard(
+                link = cachedLink,
+                onClick = { onClick(cachedLink.item) },
+            )
+        }
+
+        // Below Them: My Spotify compact sleek card
+        if (spotifyLink != null) {
+            LibrarySpotifyCard(
+                link = spotifyLink,
+                onClick = { onClick(spotifyLink.item) },
+            )
+        }
+
+        // Any other server links (WebDAV, SMB, etc.)
+        otherLinks.forEach { link ->
+            LibraryGenericLinkCard(
+                link = link,
+                onClick = { onClick(link.item) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun LibraryBentoCard(
+    link: LibraryLink,
+    accent: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val cardShape = RoundedCornerShape(22.dp)
+    val cardBg = Brush.linearGradient(
+        listOf(
+            Color(0xFF161C26).copy(alpha = 0.95f),
+            Color(0xFF0C1018).copy(alpha = 0.98f),
+        ),
+    )
+    val specularBorder = Brush.linearGradient(
+        listOf(
+            Color.White.copy(alpha = 0.35f),
+            accent.copy(alpha = 0.50f),
+            Color.White.copy(alpha = 0.10f),
+        ),
+    )
+
+    Box(
+        modifier = modifier
+            .heightIn(min = 116.dp)
+            .clip(cardShape)
+            .background(cardBg)
+            .border(1.2.dp, specularBorder, cardShape)
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(accent.copy(alpha = 0.18f))
+                    .border(0.8.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = link.icon,
+                    contentDescription = null,
+                    tint = accent,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+            Text(
+                text = link.item.title,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = link.item.subtitle,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                color = Color.White.copy(alpha = 0.65f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LibraryCachedCard(
+    link: LibraryLink,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val accent = Color(0xFF9B59B6)
+    val cardShape = RoundedCornerShape(20.dp)
+    val cardBg = Brush.linearGradient(
+        listOf(
+            Color(0xFF161C26).copy(alpha = 0.95f),
+            Color(0xFF0C1018).copy(alpha = 0.98f),
+        ),
+    )
+    val specularBorder = Brush.linearGradient(
+        listOf(
+            Color.White.copy(alpha = 0.35f),
+            accent.copy(alpha = 0.45f),
+            Color.White.copy(alpha = 0.10f),
+        ),
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 72.dp)
+            .clip(cardShape)
+            .background(cardBg)
+            .border(1.2.dp, specularBorder, cardShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    text = link.item.title,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = link.item.subtitle,
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    color = Color.White.copy(alpha = 0.65f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            // 52.dp dedicated Cache Music Symbol
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(accent.copy(alpha = 0.20f))
+                    .border(1.dp, accent.copy(alpha = 0.55f), RoundedCornerShape(14.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(accent.copy(alpha = 0.25f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = BitChordIcons.MusicNote,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibrarySpotifyCard(
+    link: LibraryLink,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val accent = Color(0xFF1DB954)
+    val cardShape = RoundedCornerShape(20.dp)
+    val cardBg = Brush.linearGradient(
+        listOf(
+            Color(0xFF161C26).copy(alpha = 0.95f),
+            Color(0xFF0C1018).copy(alpha = 0.98f),
+        ),
+    )
+    val specularBorder = Brush.linearGradient(
+        listOf(
+            Color.White.copy(alpha = 0.35f),
+            accent.copy(alpha = 0.45f),
+            Color.White.copy(alpha = 0.10f),
+        ),
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 72.dp)
+            .clip(cardShape)
+            .background(cardBg)
+            .border(1.2.dp, specularBorder, cardShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(accent.copy(alpha = 0.18f))
+                    .border(0.8.dp, accent.copy(alpha = 0.50f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (link.logo != null) {
+                    Icon(
+                        painter = painterResource(link.logo),
+                        contentDescription = null,
+                        tint = Color(0xFF1ED760),
+                        modifier = Modifier.size(22.dp),
+                    )
+                } else {
+                    Icon(
+                        imageVector = link.icon,
+                        contentDescription = null,
+                        tint = accent,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    text = "My Spotify",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = link.item.subtitle,
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    color = Color.White.copy(alpha = 0.65f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(
+                imageVector = BitChordIcons.ChevronRight,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.5f),
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun LibraryGenericLinkCard(
+    link: LibraryLink,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val cardShape = RoundedCornerShape(18.dp)
+    val cardBg = Brush.linearGradient(
+        listOf(
+            Color(0xFF161C26).copy(alpha = 0.94f),
+            Color(0xFF0E121A).copy(alpha = 0.98f),
+        ),
+    )
+    val secondary = MaterialTheme.colorScheme.secondary
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 58.dp)
+            .clip(cardShape)
+            .background(cardBg)
+            .border(0.8.dp, Color.White.copy(alpha = 0.15f), cardShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(secondary.copy(alpha = 0.18f))
+                .border(0.8.dp, Color.White.copy(alpha = 0.22f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = link.icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Spacer(Modifier.width(14.dp))
+        Text(
+            text = link.item.title,
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium),
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            imageVector = BitChordIcons.ChevronRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            modifier = Modifier.size(20.dp),
+        )
     }
 }
 

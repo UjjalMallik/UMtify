@@ -8,25 +8,41 @@ object LanguageTrackFilter {
     private val DEVANAGARI_SCRIPT = Regex("[\\u0900-\\u097F]")
     private val SOUTH_INDIAN_SCRIPTS = Regex("[\\u0B80-\\u0D7F]")
     private val GURMUKHI_SCRIPT = Regex("[\\u0A00-\\u0A7F]")
+    private val GUJARATI_SCRIPT = Regex("[\\u0A80-\\u0AFF]")
+    private val ODIA_SCRIPT = Regex("[\\u0B00-\\u0B7F]")
 
     private val NON_BENGALI_KEYWORDS = listOf(
         "hindi", "bollywood", "tamil", "telugu", "malayalam", "kannada",
         "punjabi", "bhojpuri", "haryanvi", "marathi", "urdu", "gujarati",
         "odia", "kollywood", "tollywood", "sandlewood", "mollywood",
-        "neha kakkar", "honey singh", "yo yo honey singh", "badshah",
-        "diljit", "darshan raval", "jubin nautiyal", "jasleen royal",
-        "khesari", "pawan singh", "karan aujla", "sidhu moose", "ap dhillon",
-        "sachin-jigar", "munjya", "nadiyon paar", "bhaag johnny", "banjaare",
+        "guru randhawa", "gurjit gill", "lavish dhiman", "yo yo honey singh", "honey singh",
+        "badshah", "neha kakkar", "tony kakkar", "diljit dosanjh", "diljit", "ap dhillon",
+        "karan aujla", "sidhu moose wala", "sidhu moose", "hardy sandhu", "b praak", "jaani",
+        "jubin nautiyal", "atif aslam", "rahat fateh ali khan", "darshan raval",
+        "vishal-shekhar", "salim-sulaiman", "shankar-ehsaan-loy", "amit trivedi",
+        "himesh reshammiya", "mika singh", "sunidhi chauhan", "udit narayan", "alka yagnik",
+        "mohabbatein", "aankhein khuli", "azul", "dunki", "animal", "pathaan", "jawan",
+        "kabir singh", "aashiqui", "t-series", "yrf", "yash raj", "sony music india",
+        "zee music company", "zee music", "tips official", "saregama hindi", "speed records",
+        "white hill music", "desi melodies", "sachin-jigar", "munjya", "nadiyon paar",
+        "bhaag johnny", "banjaare", "khesari", "pawan singh", "jasleen royal",
     )
 
     private val BENGALI_KEYWORDS = listOf(
-        "bangla", "bengali", "rabindra", "nazrul", "lalon", "kolkata",
-        "dhaka", "lagnajita", "arindom", "anupam roy", "fossils",
-        "chandrabindoo", "cactus", "miles", "warfaze", "ayub bachchu",
-        "james", "habib wahid", "tahsan", "somlata", "rupam islam",
-        "nachiketa", "hemanta", "manna dey", "sandhya", "svf",
-        "svf music", "bhalobasha", "valobasha", "valobashbo",
-        "hridoyer", "hridoy", "tomar khola hawa", "gaan", "bondhu",
+        "bangla", "bengali", "rabindra", "nazrul", "lalon", "kolkata", "dhaka",
+        "anupam roy", "rupam islam", "fossils", "chandrabindoo", "warfaze", "artcell",
+        "shironamhin", "tahsan", "habib wahid", "pritom hasan", "minar rahman", "arnob",
+        "james", "nagar baul", "ayub bachchu", "lrb", "miles", "aurthohin", "avoidrafa",
+        "asif akbar", "balam", "f a sumon", "imran mahmudul", "kona", "nancy",
+        "tanveer evan", "monomoy", "lagnajita", "iman chakraborty", "nachiketa",
+        "anjan dutt", "srikanto acharya", "subhamita", "lopamudra mitra", "somlata",
+        "sahana bajpaie", "bhoomi", "cactus", "lakkhichhara", "crosswinds",
+        "moheener ghoraguli", "hemanta mukherjee", "hemanta", "manna dey",
+        "kishore kumar bangla", "arijit singh bangla", "shreya ghoshal bangla",
+        "svf music", "svf", "g-series", "sangeeta", "laser vision", "soundtek",
+        "cd choice", "dhruba music", "coke studio bangla", "hoichoi", "chorki",
+        "saregama bengali", "bhalobasha", "valobasha", "valobashbo", "hridoyer",
+        "hridoy", "tomar khola hawa", "gaan", "bondhu", "arindom", "sandhya",
     )
 
     private val NON_HINDI_KEYWORDS = listOf(
@@ -46,10 +62,12 @@ object LanguageTrackFilter {
     fun isBengali(title: String, artist: String?, subtitle: String? = null): Boolean {
         val full = "$title ${artist.orEmpty()} ${subtitle.orEmpty()}".lowercase()
 
-        // 1. Any non-Bengali native scripts (Hindi/Devanagari, South Indian, Punjabi) are rejected
+        // 1. Any non-Bengali native scripts (Hindi/Devanagari, South Indian, Punjabi, Gujarati, Odia) are rejected
         if (DEVANAGARI_SCRIPT.containsMatchIn(full) ||
             SOUTH_INDIAN_SCRIPTS.containsMatchIn(full) ||
-            GURMUKHI_SCRIPT.containsMatchIn(full)
+            GURMUKHI_SCRIPT.containsMatchIn(full) ||
+            GUJARATI_SCRIPT.containsMatchIn(full) ||
+            ODIA_SCRIPT.containsMatchIn(full)
         ) {
             return false
         }
@@ -73,8 +91,8 @@ object LanguageTrackFilter {
             }
         }
 
-        // In a Bengali category context, if it didn't match foreign scripts/keywords, allow it
-        return true
+        // Strictly NO unverified tracks in Bengali category
+        return false
     }
 
     fun isHindi(title: String, artist: String?, subtitle: String? = null): Boolean {

@@ -278,7 +278,6 @@ fun OfflineHomeScreen(
                     ) {
                         CompactBentoCard(
                             label = downloadsLabel,
-                            badgeText = if (isBn) "ভল্ট · FLAC" else "Vault · FLAC",
                             count = snapshot.downloads.size,
                             browseId = "local:downloads",
                             songs = snapshot.downloads,
@@ -288,7 +287,6 @@ fun OfflineHomeScreen(
                         )
                         CompactBentoCard(
                             label = localLabel,
-                            badgeText = if (isBn) "লোকাল · Hi-Res" else "On-Device · Hi-Res",
                             count = snapshot.local.size,
                             browseId = "local:all",
                             songs = snapshot.local,
@@ -300,7 +298,7 @@ fun OfflineHomeScreen(
                 } else if (showDownloads) {
                     QuickAccessBentoCard(
                         label = downloadsLabel,
-                        badgeText = if (isBn) "অফলাইন ভল্ট · FLAC" else "Offline Vault · FLAC",
+                        badgeText = "",
                         count = snapshot.downloads.size,
                         browseId = "local:downloads",
                         songs = snapshot.downloads,
@@ -310,7 +308,7 @@ fun OfflineHomeScreen(
                 } else if (showLocal) {
                     QuickAccessBentoCard(
                         label = localLabel,
-                        badgeText = if (isBn) "FLAC · Hi-Res · লোকাল" else "FLAC · Hi-Res · On-Device",
+                        badgeText = "",
                         count = snapshot.local.size,
                         browseId = "local:all",
                         songs = snapshot.local,
@@ -322,7 +320,7 @@ fun OfflineHomeScreen(
                 if (activeFilter == "ALL" || activeFilter == "CACHED") {
                     QuickAccessBentoCard(
                         label = cachedLabel,
-                        badgeText = if (isBn) "জিরো ডেটা · ইনস্ট্যান্ট" else "Zero Data · Instant Play",
+                        badgeText = "",
                         count = snapshot.cached.size,
                         browseId = CACHE_FOLDER_BROWSE_ID,
                         songs = snapshot.cached,
@@ -770,42 +768,47 @@ private fun OfflineChip(
             Box(
                 modifier = Modifier
                     .padding(start = 8.dp)
+                    .height(44.dp)
                     .clip(CircleShape)
                     .background(
                         Brush.horizontalGradient(
                             listOf(
-                                primary.copy(alpha = 0.35f),
-                                primary.copy(alpha = 0.20f),
+                                primary.copy(alpha = 0.45f),
+                                primary.copy(alpha = 0.28f),
                             ),
                         ),
                     )
                     .border(
-                        1.2.dp,
+                        1.5.dp,
                         Brush.linearGradient(
                             listOf(
-                                Color.White.copy(alpha = 0.60f),
-                                primary.copy(alpha = 0.70f),
-                                Color.White.copy(alpha = 0.20f),
+                                Color.White.copy(alpha = 0.70f),
+                                primary.copy(alpha = 0.85f),
+                                Color.White.copy(alpha = 0.30f),
                             ),
                         ),
                         CircleShape,
                     )
                     .clickable(onClick = onExit)
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                contentAlignment = Alignment.Center,
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(8.dp)
+                            .size(10.dp)
                             .clip(CircleShape)
                             .background(Color(0xFF2ECC71)),
                     )
                     Text(
                         text = if (isBn) "বন্ধ করুন" else stringResource(R.string.offline_mode_turn_off),
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                        ),
                         color = Color.White,
                     )
                 }
@@ -861,7 +864,8 @@ private fun QuickAccessBentoCard(
     modifier: Modifier = Modifier,
 ) {
     val isBn = remember { Locale.getDefault().language == "bn" }
-    val cardShape = RoundedCornerShape(24.dp)
+    val isCachedCard = browseId == CACHE_FOLDER_BROWSE_ID
+    val cardShape = RoundedCornerShape(22.dp)
     val cardBackground = Brush.linearGradient(
         listOf(
             Color(0xFF161C26).copy(alpha = 0.94f),
@@ -894,12 +898,12 @@ private fun QuickAccessBentoCard(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 112.dp)
+            .heightIn(min = if (isCachedCard) 74.dp else 112.dp)
             .clip(cardShape)
             .background(cardBackground)
             .border(1.2.dp, specularBorder, cardShape)
             .clickable(onClick = onOpen)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 14.dp, vertical = if (isCachedCard) 8.dp else 14.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -910,8 +914,8 @@ private fun QuickAccessBentoCard(
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(end = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                    .padding(end = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(if (isCachedCard) 3.dp else 6.dp),
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -919,17 +923,17 @@ private fun QuickAccessBentoCard(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(11.dp))
+                            .size(if (isCachedCard) 32.dp else 40.dp)
+                            .clip(RoundedCornerShape(9.dp))
                             .background(accentGlow.copy(alpha = 0.22f))
-                            .border(0.8.dp, accentGlow.copy(alpha = 0.55f), RoundedCornerShape(11.dp)),
+                            .border(0.8.dp, accentGlow.copy(alpha = 0.55f), RoundedCornerShape(9.dp)),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             imageVector = deviceFolderIcon(browseId) ?: BitChordIcons.Download,
                             contentDescription = null,
                             tint = accentGlow,
-                            modifier = Modifier.size(22.dp),
+                            modifier = Modifier.size(if (isCachedCard) 18.dp else 22.dp),
                         )
                     }
                     Box(
@@ -937,36 +941,38 @@ private fun QuickAccessBentoCard(
                             .clip(CircleShape)
                             .background(Color.White.copy(alpha = 0.08f))
                             .border(0.6.dp, Color.White.copy(alpha = 0.20f), CircleShape)
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                            .padding(horizontal = 9.dp, vertical = 3.dp),
                     ) {
                         Text(
-                            text = "$count ${if (isBn) "টি গান" else "tracks"}",
+                            text = "$count ${if (isBn) "টি গান" else if (isCachedCard) "cached" else "tracks"}",
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = Color.White.copy(alpha = 0.90f),
                         )
                     }
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(accentGlow.copy(alpha = 0.15f))
-                            .border(0.6.dp, accentGlow.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
-                            .padding(horizontal = 7.dp, vertical = 3.dp),
-                    ) {
-                        Text(
-                            text = badgeText,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Medium,
-                            color = accentGlow,
-                            fontSize = 10.sp,
-                        )
+                    if (!isCachedCard && badgeText.isNotBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(accentGlow.copy(alpha = 0.15f))
+                                .border(0.6.dp, accentGlow.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 7.dp, vertical = 3.dp),
+                        ) {
+                            Text(
+                                text = badgeText,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Medium,
+                                color = accentGlow,
+                                fontSize = 10.sp,
+                            )
+                        }
                     }
                 }
 
                 Text(
                     text = label,
                     style = MaterialTheme.typography.headlineSmall.copy(
-                        fontSize = 21.sp,
+                        fontSize = if (isCachedCard) 17.sp else 21.sp,
                         fontWeight = FontWeight.Bold,
                     ),
                     color = Color.White,
@@ -977,7 +983,7 @@ private fun QuickAccessBentoCard(
                 Text(
                     text = liveTrackPreview,
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 14.sp,
+                        fontSize = if (isCachedCard) 12.sp else 14.sp,
                         fontWeight = FontWeight.Medium,
                     ),
                     color = Color.White.copy(alpha = 0.70f),
@@ -986,65 +992,90 @@ private fun QuickAccessBentoCard(
                 )
             }
 
-            // Right Side: Large 86.dp x 86.dp featured artwork or 2x2 mosaic
-            val previewSongs = remember(songs) { songs.take(4) }
-            Box(
-                modifier = Modifier.size(86.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                // Stacked-card ambient shadow effect behind single cover
-                if (previewSongs.isNotEmpty() && previewSongs.size < 4) {
-                    Box(
-                        modifier = Modifier
-                            .size(78.dp)
-                            .offset(y = (-3).dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(accentGlow.copy(alpha = 0.25f)),
-                    )
-                }
+            // Right Side: Dedicated 52.dp Cache Music Symbol or featured artwork
+            if (isCachedCard) {
                 Box(
                     modifier = Modifier
-                        .size(86.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(Color.White.copy(alpha = 0.06f))
-                        .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(18.dp)),
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(accentGlow.copy(alpha = 0.20f))
+                        .border(1.dp, accentGlow.copy(alpha = 0.55f), RoundedCornerShape(14.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (previewSongs.size >= 4) {
-                        Column(modifier = Modifier.fillMaxSize()) {
-                            Row(modifier = Modifier.weight(1f)) {
-                                MosaicTile(previewSongs[0], Modifier.weight(1f))
-                                MosaicTile(previewSongs[1], Modifier.weight(1f))
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(accentGlow.copy(alpha = 0.25f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Bolt,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+            } else {
+                val previewSongs = remember(songs) { songs.take(4) }
+                Box(
+                    modifier = Modifier.size(86.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (previewSongs.isNotEmpty() && previewSongs.size < 4) {
+                        Box(
+                            modifier = Modifier
+                                .size(78.dp)
+                                .offset(y = (-3).dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(accentGlow.copy(alpha = 0.25f)),
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(86.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color.White.copy(alpha = 0.06f))
+                            .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(18.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (previewSongs.size >= 4) {
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                Row(modifier = Modifier.weight(1f)) {
+                                    MosaicTile(previewSongs[0], Modifier.weight(1f))
+                                    MosaicTile(previewSongs[1], Modifier.weight(1f))
+                                }
+                                Row(modifier = Modifier.weight(1f)) {
+                                    MosaicTile(previewSongs[2], Modifier.weight(1f))
+                                    MosaicTile(previewSongs[3], Modifier.weight(1f))
+                                }
                             }
-                            Row(modifier = Modifier.weight(1f)) {
-                                MosaicTile(previewSongs[2], Modifier.weight(1f))
-                                MosaicTile(previewSongs[3], Modifier.weight(1f))
+                        } else if (previewSongs.isNotEmpty()) {
+                            val firstArt = previewSongs.first().thumbnailUrl ?: previewSongs.first().artworkAt(CARD_ART_PX)
+                            if (!firstArt.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = firstArt,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Rounded.MusicNote,
+                                    contentDescription = null,
+                                    tint = accentGlow.copy(alpha = 0.75f),
+                                    modifier = Modifier.size(36.dp),
+                                )
                             }
-                        }
-                    } else if (previewSongs.isNotEmpty()) {
-                        val firstArt = previewSongs.first().thumbnailUrl ?: previewSongs.first().artworkAt(CARD_ART_PX)
-                        if (!firstArt.isNullOrBlank()) {
-                            AsyncImage(
-                                model = firstArt,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize(),
-                            )
                         } else {
                             Icon(
                                 imageVector = Icons.Rounded.MusicNote,
                                 contentDescription = null,
-                                tint = accentGlow.copy(alpha = 0.75f),
-                                modifier = Modifier.size(36.dp),
+                                tint = Color.White.copy(alpha = 0.35f),
+                                modifier = Modifier.size(34.dp),
                             )
                         }
-                    } else {
-                        Icon(
-                            imageVector = Icons.Rounded.MusicNote,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.35f),
-                            modifier = Modifier.size(34.dp),
-                        )
                     }
                 }
             }
@@ -1059,7 +1090,6 @@ private fun QuickAccessBentoCard(
 @Composable
 private fun CompactBentoCard(
     label: String,
-    badgeText: String,
     count: Int,
     browseId: String,
     songs: List<Song>,
@@ -1196,13 +1226,6 @@ private fun CompactBentoCard(
                     fontWeight = FontWeight.Bold,
                 ),
                 color = Color.White,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = badgeText,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                color = accentGlow,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

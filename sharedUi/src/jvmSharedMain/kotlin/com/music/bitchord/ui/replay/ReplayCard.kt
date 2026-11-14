@@ -135,52 +135,46 @@ fun ReplayCreditCard(
     val colorScheme = MaterialTheme.colorScheme
     val isDynamic = glassTheme == ReplayGlassTheme.AUTO
     val primary = colorScheme.primary
-    val secondary = colorScheme.secondaryContainer
-    val container = colorScheme.primaryContainer
+    val seedColor = if (isDynamic) primary else glassTheme.stops.first()
+    val deepDarkBase = Color(0xFF0E1318)
+    val cardShape = RoundedCornerShape(24.dp)
 
-    val cardGradient = if (isDynamic) {
-        Brush.linearGradient(
-            colors = listOf(
-                primary.copy(alpha = 0.92f),
-                secondary.copy(alpha = 0.85f),
-                container.copy(alpha = 0.95f),
-            ),
-            start = Offset.Zero,
-            end = Offset.Infinite,
-        )
-    } else {
-        Brush.linearGradient(
-            colors = glassTheme.stops.map { it.copy(alpha = 0.90f) },
-            start = Offset.Zero,
-            end = Offset.Infinite,
-        )
-    }
-    val themeAccent = if (isDynamic) primary else glassTheme.stops.first()
+    val uniformCardGradient = Brush.radialGradient(
+        colors = listOf(
+            seedColor.copy(alpha = 0.22f),
+            seedColor.copy(alpha = 0.14f),
+            deepDarkBase,
+        ),
+        center = Offset.Unspecified,
+        radius = 900f,
+    )
 
     Box(
         modifier = modifier
             .aspectRatio(CARD_RATIO)
-            .shadow(16.dp, CardShape, clip = false)
-            .clip(CardShape)
+            .shadow(
+                elevation = 16.dp,
+                shape = cardShape,
+                clip = false,
+                ambientColor = seedColor.copy(alpha = 0.45f),
+                spotColor = Color.Black.copy(alpha = 0.8f),
+            )
+            .clip(cardShape)
+            .background(deepDarkBase)
+            .background(uniformCardGradient)
             .border(
                 1.2.dp,
                 Brush.verticalGradient(
                     listOf(
-                        Color.White.copy(alpha = 0.45f),
-                        themeAccent.copy(alpha = 0.35f),
-                        Color.White.copy(alpha = 0.15f),
+                        Color.White.copy(alpha = 0.35f),
+                        seedColor.copy(alpha = 0.40f),
+                        Color.White.copy(alpha = 0.10f),
                     ),
                 ),
-                CardShape,
+                cardShape,
             )
             .clickable(onClick = onClick),
     ) {
-        // Liquid glass dynamic theme gradient background
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(cardGradient),
-        )
         // Specular diagonal glass sheen overlay
         Box(
             Modifier
@@ -188,9 +182,9 @@ fun ReplayCreditCard(
                 .background(
                     Brush.linearGradient(
                         listOf(
-                            Color.White.copy(alpha = 0.20f),
+                            Color.White.copy(alpha = 0.12f),
                             Color.Transparent,
-                            Color.White.copy(alpha = 0.06f),
+                            Color.White.copy(alpha = 0.04f),
                         ),
                     ),
                 ),
@@ -202,8 +196,8 @@ fun ReplayCreditCard(
                 .background(
                     Brush.verticalGradient(
                         0.0f to Color.Black.copy(alpha = 0.08f),
-                        0.55f to Color.Black.copy(alpha = 0.22f),
-                        1.0f to Color.Black.copy(alpha = 0.45f),
+                        0.55f to Color.Black.copy(alpha = 0.20f),
+                        1.0f to Color.Black.copy(alpha = 0.42f),
                     ),
                 ),
         )
