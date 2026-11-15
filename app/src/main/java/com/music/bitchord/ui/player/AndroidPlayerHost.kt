@@ -296,6 +296,37 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     // desktop has no answer to it, so it never sees the pick mode at all.
     override val lyricsShareAvailable: Boolean get() = true
 
+    override val isVideoFrameRendered: StateFlow<Boolean>
+        get() = PlaybackService.isVideoFrameRendered
+
+    @Composable
+    override fun VideoPlayer(modifier: Modifier) {
+        AndroidView(
+            factory = { ctx ->
+                TextureView(ctx).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                    val p = PlaybackService.activeExoPlayer ?: activeController
+                    p?.setVideoTextureView(this)
+                }
+            },
+            update = { view ->
+                val p = PlaybackService.activeExoPlayer ?: activeController
+                p?.setVideoTextureView(view)
+                if (p?.videoSize?.let { it.width > 0 && it.height > 0 } == true) {
+                    PlaybackService.isVideoFrameRendered.value = true
+                }
+            },
+            onRelease = { view ->
+                val p = PlaybackService.activeExoPlayer ?: activeController
+                p?.clearVideoTextureView(view)
+            },
+            modifier = modifier,
+        )
+    }
+
     @Composable
     override fun LyricsShareSheet(
         hazeState: HazeState,

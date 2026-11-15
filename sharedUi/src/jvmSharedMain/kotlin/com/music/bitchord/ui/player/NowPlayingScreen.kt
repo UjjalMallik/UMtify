@@ -15,8 +15,12 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import com.music.bitchord.data.sponsorblock.SponsorBlockClient
+import com.music.bitchord.data.sponsorblock.SponsorSegment
 import androidx.compose.animation.core.Animatable
 import com.music.bitchord.ui.theme.rememberPlayerTint
 import com.music.bitchord.ui.theme.rememberPlayerTones
@@ -3279,6 +3283,16 @@ fun NowPlayingScreen(
                                         )
                                     }
                                 }
+
+                                VideoSkipOverlay(
+                                    videoId = song.videoId,
+                                    position = position,
+                                    durationMs = durationMs,
+                                    onSeek = onSeek,
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(bottom = 12.dp, end = 12.dp),
+                                )
                             }
                         }
 
@@ -4002,4 +4016,127 @@ private suspend fun AwaitPointerEventScope.dragQueueIn(
     }
     onHold(false)
     onSettle(open)
+}
+
+@Composable
+private fun VideoSkipOverlay(
+    videoId: String,
+    position: PlaybackPosition,
+    durationMs: Long,
+    onSeek: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var segments by remember(videoId) { mutableStateOf<List<SponsorSegment>>(emptyList()) }
+
+    LaunchedEffect(videoId) {
+        segments = runCatching {
+            SponsorBlockClient.getSegments(videoId)
+        }.getOrDefault(emptyList())
+    }
+
+    val currentPos = position.positionMs
+    val activeSegment = remember(currentPos, segments) {
+        segments.firstOrNull { seg ->
+            currentPos >= seg.startMs && currentPos < seg.endMs
+        }
+    }
+
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        AnimatedVisibility(
+            visible = activeSegment != null,
+            enter = fadeIn(tween(200)) + scaleIn(spring(dampingRatio = 0.72f, stiffness = 380f)),
+            exit = fadeOut(tween(150)) + scaleOut(),
+        ) {
+            activeSegment?.let { seg ->
+                Box(
+                    modifier = Modifier
+                        .shadow(
+                            elevation = 8.dp,
+                            shape = RoundedCornerShape(16.dp),
+                            ambientColor = Color.Black.copy(alpha = 0.5f),
+                            spotColor = Color.Black.copy(alpha = 0.5f),
+                        )
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.22f),
+                                    Color(0xFF2196F3).copy(alpha = 0.35f),
+                                    Color(0xFF9C27B0).copy(alpha = 0.25f),
+                                ),
+                            ),
+                        )
+                        .border(
+                            width = 1.dp,
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.6f),
+                                    Color.White.copy(alpha = 0.15f),
+                                ),
+                            ),
+                            shape = RoundedCornerShape(16.dp),
+                        )
+                        .clickable {
+                            onSeek(seg.endMs)
+                        }
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.FastForward,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(15.dp),
+                        )
+                        Text(
+                            text = "Skip ${seg.displayLabel}",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                            ),
+                            color = Color.White,
+                        )
+                    }
+                }
+            }
+        }
+
+        if (currentPos in 1_000L..30_000L || activeSegment != null) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .border(0.8.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                    .clickable {
+                        onSeek((currentPos + 10_000L).coerceAtMost(durationMs))
+                    }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.FastForward,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.9f),
+                        modifier = Modifier.size(12.dp),
+                    )
+                    Text(
+                        text = "+10s",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                        color = Color.White.copy(alpha = 0.9f),
+                    )
+                }
+            }
+        }
+    }
 }

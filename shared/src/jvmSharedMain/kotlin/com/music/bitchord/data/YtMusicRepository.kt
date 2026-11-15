@@ -431,8 +431,8 @@ object YtMusicRepository {
         val isValidYoutubeId = song.videoId.length == 11 &&
             song.videoId.all { it.isLetterOrDigit() || it == '-' || it == '_' }
 
-        // Check if podcast/long episode (> 8 minutes = 480 seconds = 480,000 ms) or explicitly video-origin
-        val isLongEpisodeOrPodcast = song.durationMillis() > 480_000L || song.isVideoOrigin
+        // Check if podcast/long episode (> 7 minutes = 420 seconds = 420,000 ms) or explicitly video-origin
+        val isLongEpisodeOrPodcast = song.durationMillis() > 420_000L || song.isVideoOrigin
 
         if (isValidYoutubeId) {
             // For podcasts / video episodes, the current track's videoId itself is the exact video
@@ -443,24 +443,12 @@ object YtMusicRepository {
                 return resolvedSong
             }
 
-            // Check if current ID has direct video streams
-            val hasVideoStreams = runCatching<Boolean> {
-                StreamResolver.hasDirectVideoStreams(song.videoId)
-            }.getOrDefault(false)
-
-            if (hasVideoStreams) {
-                val resolvedSong = song.copy(isVideo = true, isVideoOrigin = true)
-                Log.d(TAG, "video switch current ID has video streams: '${song.title}' ($song.videoId)")
-                videoVersionCache[song.videoId] = resolvedSong
-                return resolvedSong
-            }
-
-            // Check counterpart from next
+            // Check counterpart from next (InnerTube counterpart OMV)
             val counterpartId = runCatching {
                 InnertubeParser.parseCounterpartVideoId(Innertube.next(song.videoId), song.videoId)
             }.getOrNull()
 
-            if (!counterpartId.isNullOrBlank()) {
+            if (!counterpartId.isNullOrBlank() && counterpartId != song.videoId) {
                 val resolvedSong = runCatching { trackLinks(counterpartId).getOrNull() }.getOrNull()
                     ?.copy(isVideo = true, isVideoOrigin = true)
                     ?: song.copy(
@@ -475,8 +463,12 @@ object YtMusicRepository {
         }
 
         // 2. Search YouTube Videos for official music video
+        val cleanTitle = song.title.replace(Regex("""(?i)\b(audio|lyric|lyrics|official audio|full album|video song)\b"""), "").trim()
+        val cleanArtist = song.artist.trim()
         val target = TrackMatcher.targetOf(song)
         val queries = (listOf(
+            "$cleanTitle $cleanArtist official video song",
+            "$cleanTitle $cleanArtist official music video",
             "${song.title} ${song.artist} official music video",
             "${song.title} ${song.artist}",
         ) + TrackMatcher.queries(target)).distinct()
@@ -487,7 +479,15 @@ object YtMusicRepository {
                 ?.filterIsInstance<SearchResult.Track>()
                 ?.map { it.song }
                 .orEmpty()
-            val match = TrackMatcher.bestOfficialVideoForAudio(candidates, target)
+            val filtered = candidates.filter { candidate ->
+                candidate.videoId != song.videoId &&
+                !candidate.title.contains("Audio", ignoreCase = true) &&
+                !candidate.title.contains("Full Album", ignoreCase = true)
+            }
+            val match = TrackMatcher.bestOfficialVideoForAudio(filtered, target)
+                ?: TrackMatcher.best(filtered, target)?.copy(isVideo = true, isVideoOrigin = true)
+                ?: filtered.firstOrNull()?.copy(isVideo = true, isVideoOrigin = true)
+                ?: TrackMatcher.bestOfficialVideoForAudio(candidates, target)
                 ?: TrackMatcher.best(candidates, target)?.copy(isVideo = true, isVideoOrigin = true)
             if (match != null) {
                 Log.d(TAG, "video switch: '${song.title}' -> '${match.title}' ($query)")
