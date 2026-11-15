@@ -5,7 +5,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import androidx.core.content.ContextCompat
 import android.database.ContentObserver
 import android.media.AudioFormat
 import android.media.AudioManager
@@ -14,9 +13,11 @@ import android.os.Looper
 import android.provider.Settings
 import android.view.TextureView
 import android.view.ViewGroup
+import android.webkit.WebChromeClient
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Toast
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.session.MediaController
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -24,7 +25,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.session.MediaController
 import com.music.bitchord.data.SongEditStore
 import com.music.bitchord.data.canvas.CanvasArtwork
 import com.music.bitchord.data.canvas.CanvasRepository
@@ -261,30 +265,60 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
     @Composable
     override fun VideoPlayer(modifier: Modifier) {
-        AndroidView(
-            factory = { ctx ->
-                TextureView(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    )
+        val webViewFallbackId by PlaybackService.webViewFallbackVideoId.collectAsStateWithLifecycle()
+
+        if (webViewFallbackId != null) {
+            // WebView YouTube embed fallback: stream resolution failed, embed the YT player
+            val videoId = webViewFallbackId!!
+            AndroidView(
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                        settings.apply {
+                            javaScriptEnabled = true
+                            mediaPlaybackRequiresUserGesture = false
+                            cacheMode = WebSettings.LOAD_NO_CACHE
+                        }
+                        webChromeClient = WebChromeClient()
+                        webViewClient = WebViewClient()
+                        loadUrl(
+                            "https://www.youtube-nocookie.com/embed/$videoId" +
+                                "?autoplay=1&mute=0&controls=1&playsinline=1&rel=0&modestbranding=1",
+                        )
+                    }
+                },
+                modifier = modifier,
+            )
+        } else {
+            // Direct ExoPlayer TextureView: main player has a real video track
+            AndroidView(
+                factory = { ctx ->
+                    TextureView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                        val p = PlaybackService.activeExoPlayer ?: activeController
+                        p?.setVideoTextureView(this)
+                    }
+                },
+                update = { view ->
                     val p = PlaybackService.activeExoPlayer ?: activeController
-                    p?.setVideoTextureView(this)
-                }
-            },
-            update = { view ->
-                val p = PlaybackService.activeExoPlayer ?: activeController
-                p?.setVideoTextureView(view)
-                if (p?.videoSize?.let { it.width > 0 && it.height > 0 } == true) {
-                    PlaybackService.isVideoFrameRendered.value = true
-                }
-            },
-            onRelease = { view ->
-                val p = PlaybackService.activeExoPlayer ?: activeController
-                p?.clearVideoTextureView(view)
-            },
-            modifier = modifier,
-        )
+                    p?.setVideoTextureView(view)
+                    if (p?.videoSize?.let { it.width > 0 && it.height > 0 } == true) {
+                        PlaybackService.isVideoFrameRendered.value = true
+                    }
+                },
+                onRelease = { view ->
+                    val p = PlaybackService.activeExoPlayer ?: activeController
+                    p?.clearVideoTextureView(view)
+                },
+                modifier = modifier,
+            )
+        }
     }
 
     @Composable

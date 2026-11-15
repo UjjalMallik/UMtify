@@ -1056,6 +1056,7 @@ class PlaybackService : MediaLibraryService() {
                 isVideoMode = false
                 currentVideoTrackId = null
                 isVideoFrameRendered.value = false
+                webViewFallbackVideoId.value = null
                 (exoPlayer.trackSelector as? DefaultTrackSelector)?.let { selector ->
                     selector.setParameters(
                         selector.buildUponParameters()
@@ -2629,20 +2630,36 @@ class PlaybackService : MediaLibraryService() {
         isVideoMode = true
         currentVideoTrackId = targetSong.videoId
         isVideoFrameRendered.value = false
+        webViewFallbackVideoId.value = null
 
         scope.launch(Dispatchers.Main) {
-            val videoInfo = withContext(Dispatchers.IO) {
-                com.music.bitchord.data.innertube.StreamResolver.resolveVideoPlaybackInfo(targetSong.videoId)
+            // Step 1: Try resolving direct video streams for the current videoId
+            var resolvedVideoId = targetSong.videoId
+            var videoInfo = withContext(Dispatchers.IO) {
+                com.music.bitchord.data.innertube.StreamResolver.resolveVideoPlaybackInfo(resolvedVideoId)
             }
 
+            // Step 2: If no direct streams, try to find the OMV (official music video) via YtMusicRepository
             if (videoInfo == null) {
-                TrackLog.w("PlaybackService", "Failed to resolve video stream for ${targetSong.videoId}")
-                withContext(Dispatchers.Main) {
-                    android.widget.Toast.makeText(applicationContext, "Could not load video stream", android.widget.Toast.LENGTH_SHORT).show()
+                TrackLog.w("PlaybackService", "No direct video stream for ${targetSong.videoId}, trying OMV lookup")
+                val omvSong = withContext(Dispatchers.IO) {
+                    runCatching { YtMusicRepository.resolveVideo(targetSong) }.getOrNull()
                 }
-                isVideoMode = false
-                currentVideoTrackId = null
-                isVideoFrameRendered.value = false
+                if (omvSong != null && omvSong.videoId != targetSong.videoId) {
+                    resolvedVideoId = omvSong.videoId
+                    videoInfo = withContext(Dispatchers.IO) {
+                        com.music.bitchord.data.innertube.StreamResolver.resolveVideoPlaybackInfo(resolvedVideoId)
+                    }
+                    TrackLog.d("PlaybackService", "OMV lookup resolved ${targetSong.videoId} -> $resolvedVideoId, videoInfo=${videoInfo != null}")
+                }
+            }
+
+            // Step 3: If still no direct streams, fall back to WebView YouTube embed
+            if (videoInfo == null) {
+                TrackLog.w("PlaybackService", "All stream resolution failed for ${targetSong.videoId}/$resolvedVideoId — using WebView embed fallback")
+                webViewFallbackVideoId.value = resolvedVideoId
+                // Mark frame as rendered so spinner dismisses and WebView is shown
+                isVideoFrameRendered.value = true
                 return@launch
             }
 
@@ -2722,8 +2739,7 @@ class PlaybackService : MediaLibraryService() {
         isVideoMode = false
         currentVideoTrackId = null
         isVideoFrameRendered.value = false
-
-        // Disable video track selection
+        webViewFallbackVideoId.value = null
         (activePlayer.trackSelector as? DefaultTrackSelector)?.let { selector ->
             selector.setParameters(
                 selector.buildUponParameters()
@@ -9369,6 +9385,8 @@ class PlaybackService : MediaLibraryService() {
         var activeExoPlayer: ExoPlayer? = null
             internal set
         val isVideoFrameRendered = MutableStateFlow(false)
+        /** Non-null when video stream resolution failed and a WebView YouTube embed should be shown instead. */
+        val webViewFallbackVideoId = MutableStateFlow<String?>(null)
         const val MEDIA_ROOT_ID = "root"
         const val MEDIA_RECENTS_ID = "recents"
         const val MEDIA_QUICK_PICKS_ID = "quick_picks"
