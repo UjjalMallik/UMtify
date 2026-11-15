@@ -2685,19 +2685,6 @@ class PlaybackService : MediaLibraryService() {
         }
         refreshCustomLayouts()
     }
-        }
-
-        swappingMediaId = targetSong.videoId
-        val audioItem = targetSong.copy(isVideo = false).toMediaItem()
-        val mediaSources = (0 until activePlayer.mediaItemCount).map { i ->
-            val item = if (i == currentIndex) audioItem else activePlayer.getMediaItemAt(i)
-            requireNotNull(mediaSourceFactory).createMediaSource(item)
-        }
-        activePlayer.setMediaSources(mediaSources, currentIndex, pos)
-        activePlayer.prepare()
-        activePlayer.playWhenReady = true
-        refreshCustomLayouts()
-    }
 
     private fun toggleShuffleFromSession() {
         val window = boundedContextWindow
