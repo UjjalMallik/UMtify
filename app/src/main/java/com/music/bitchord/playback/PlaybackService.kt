@@ -1055,8 +1055,10 @@ class PlaybackService : MediaLibraryService() {
             if (isVideoMode && mediaItem?.mediaId != currentVideoTrackId) {
                 isVideoMode = false
                 currentVideoTrackId = null
-                isVideoFrameRendered.value = false
+                activeVideoTrackId.value = null
                 webViewFallbackVideoId.value = null
+                isVideoFrameRendered.value = false
+                exoPlayer.volume = 1f
                 (exoPlayer.trackSelector as? DefaultTrackSelector)?.let { selector ->
                     selector.setParameters(
                         selector.buildUponParameters()
@@ -2623,123 +2625,52 @@ class PlaybackService : MediaLibraryService() {
 
     private fun playVideoStreamForTrack(targetSong: Song) {
         val activePlayer = player ?: return
-        val pos = activePlayer.currentPosition
         val currentIndex = activePlayer.currentMediaItemIndex
         if (currentIndex !in 0 until activePlayer.mediaItemCount) return
 
         isVideoMode = true
         currentVideoTrackId = targetSong.videoId
-        isVideoFrameRendered.value = false
-        webViewFallbackVideoId.value = null
+        activeVideoTrackId.value = targetSong.videoId
+        webViewFallbackVideoId.value = targetSong.videoId
+        isVideoFrameRendered.value = true
 
-        scope.launch(Dispatchers.Main) {
-            // Step 1: Try resolving direct video streams for the current videoId
-            var resolvedVideoId = targetSong.videoId
-            var videoInfo = withContext(Dispatchers.IO) {
-                com.music.bitchord.data.innertube.StreamResolver.resolveVideoPlaybackInfo(resolvedVideoId)
-            }
+        // Mute active player audio so YouTube embedded video audio plays cleanly without echo
+        activePlayer.volume = 0f
+        activePlayer.play()
+        refreshCustomLayouts()
 
-            // Step 2: If no direct streams, try to find the OMV (official music video) via YtMusicRepository
-            if (videoInfo == null) {
-                TrackLog.w("PlaybackService", "No direct video stream for ${targetSong.videoId}, trying OMV lookup")
-                val omvSong = withContext(Dispatchers.IO) {
-                    runCatching { YtMusicRepository.resolveVideo(targetSong) }.getOrNull()
-                }
-                if (omvSong != null && omvSong.videoId != targetSong.videoId) {
-                    resolvedVideoId = omvSong.videoId
-                    videoInfo = withContext(Dispatchers.IO) {
-                        com.music.bitchord.data.innertube.StreamResolver.resolveVideoPlaybackInfo(resolvedVideoId)
+        // If targetSong.videoId is not already a valid 11-char YouTube ID, resolve OMV in background
+        val isValidYtId = targetSong.videoId.length == 11 &&
+            targetSong.videoId.all { it.isLetterOrDigit() || it == '-' || it == '_' }
+        if (!isValidYtId) {
+            scope.launch(Dispatchers.IO) {
+                val omv = runCatching { YtMusicRepository.resolveVideo(targetSong) }.getOrNull()
+                if (omv != null && omv.videoId.length == 11) {
+                    withContext(Dispatchers.Main) {
+                        if (isVideoMode) {
+                            currentVideoTrackId = omv.videoId
+                            activeVideoTrackId.value = omv.videoId
+                            webViewFallbackVideoId.value = omv.videoId
+                        }
                     }
-                    TrackLog.d("PlaybackService", "OMV lookup resolved ${targetSong.videoId} -> $resolvedVideoId, videoInfo=${videoInfo != null}")
                 }
             }
-
-            // Step 3: If still no direct streams, fall back to WebView YouTube embed
-            if (videoInfo == null) {
-                TrackLog.w("PlaybackService", "All stream resolution failed for ${targetSong.videoId}/$resolvedVideoId — using WebView embed fallback")
-                webViewFallbackVideoId.value = resolvedVideoId
-                // Mark frame as rendered so spinner dismisses and WebView is shown
-                isVideoFrameRendered.value = true
-                return@launch
-            }
-
-            val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-                .setUserAgent(videoInfo.userAgent)
-                .setAllowCrossProtocolRedirects(true)
-                .setConnectTimeoutMs(15_000)
-                .setReadTimeoutMs(20_000)
-
-            if (videoInfo.headers.isNotEmpty()) {
-                httpDataSourceFactory.setDefaultRequestProperties(videoInfo.headers)
-            }
-
-            val videoMediaItem = targetSong.toMediaItem().buildUpon()
-                .setUri(videoInfo.videoUri)
-                .build()
-
-            val videoMediaSource: MediaSource = when {
-                videoInfo.isHls -> {
-                    HlsMediaSource.Factory(httpDataSourceFactory)
-                        .createMediaSource(videoMediaItem)
-                }
-                videoInfo.audioUri != null -> {
-                    val audioMediaItem = targetSong.toMediaItem().buildUpon()
-                        .setUri(videoInfo.audioUri)
-                        .build()
-                    val videoSource = ProgressiveMediaSource.Factory(httpDataSourceFactory)
-                        .createMediaSource(videoMediaItem)
-                    val audioSource = ProgressiveMediaSource.Factory(httpDataSourceFactory)
-                        .createMediaSource(audioMediaItem)
-                    MergingMediaSource(videoSource, audioSource)
-                }
-                else -> {
-                    ProgressiveMediaSource.Factory(httpDataSourceFactory)
-                        .createMediaSource(videoMediaItem)
-                }
-            }
-
-            // Enable video track selection on active and standby player
-            (activePlayer.trackSelector as? DefaultTrackSelector)?.let { selector ->
-                selector.setParameters(
-                    selector.buildUponParameters()
-                        .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false)
-                        .clearVideoSizeConstraints()
-                )
-            }
-            (spare?.trackSelector as? DefaultTrackSelector)?.let { selector ->
-                selector.setParameters(
-                    selector.buildUponParameters()
-                        .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false)
-                        .clearVideoSizeConstraints()
-                )
-            }
-
-            swappingMediaId = targetSong.videoId
-            val seekPos = activePlayer.currentPosition.takeIf { it > 0 } ?: pos
-            val mediaSources = (0 until activePlayer.mediaItemCount).map { i ->
-                if (i == currentIndex) {
-                    videoMediaSource
-                } else {
-                    requireNotNull(mediaSourceFactory).createMediaSource(activePlayer.getMediaItemAt(i))
-                }
-            }
-            activePlayer.setMediaSources(mediaSources, currentIndex, seekPos)
-            activePlayer.prepare()
-            activePlayer.playWhenReady = true
-            refreshCustomLayouts()
         }
     }
 
     private fun restoreAudioStreamForTrack(targetSong: Song) {
         val activePlayer = player ?: return
-        val pos = activePlayer.currentPosition
         val currentIndex = activePlayer.currentMediaItemIndex
         if (currentIndex !in 0 until activePlayer.mediaItemCount) return
 
         isVideoMode = false
         currentVideoTrackId = null
-        isVideoFrameRendered.value = false
+        activeVideoTrackId.value = null
         webViewFallbackVideoId.value = null
+        isVideoFrameRendered.value = false
+
+        // Restore main player audio volume
+        activePlayer.volume = 1f
         (activePlayer.trackSelector as? DefaultTrackSelector)?.let { selector ->
             selector.setParameters(
                 selector.buildUponParameters()
@@ -2751,6 +2682,9 @@ class PlaybackService : MediaLibraryService() {
                 selector.buildUponParameters()
                     .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
             )
+        }
+        refreshCustomLayouts()
+    }
         }
 
         swappingMediaId = targetSong.videoId
@@ -9385,7 +9319,8 @@ class PlaybackService : MediaLibraryService() {
         var activeExoPlayer: ExoPlayer? = null
             internal set
         val isVideoFrameRendered = MutableStateFlow(false)
-        /** Non-null when video stream resolution failed and a WebView YouTube embed should be shown instead. */
+        /** Active videoId when in video mode. */
+        val activeVideoTrackId = MutableStateFlow<String?>(null)
         val webViewFallbackVideoId = MutableStateFlow<String?>(null)
         const val MEDIA_ROOT_ID = "root"
         const val MEDIA_RECENTS_ID = "recents"

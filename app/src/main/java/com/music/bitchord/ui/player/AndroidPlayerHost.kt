@@ -12,6 +12,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.view.TextureView
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -22,12 +23,16 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import com.music.bitchord.data.SongEditStore
 import com.music.bitchord.data.canvas.CanvasArtwork
@@ -265,60 +270,175 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
     @Composable
     override fun VideoPlayer(modifier: Modifier) {
-        val webViewFallbackId by PlaybackService.webViewFallbackVideoId.collectAsStateWithLifecycle()
+        val activeTrackId by PlaybackService.activeVideoTrackId.collectAsStateWithLifecycle()
+        val player = PlaybackService.activeExoPlayer ?: activeController
+        val videoId = activeTrackId
+            ?: player?.currentMediaItem?.mediaId
+            ?: return
 
-        if (webViewFallbackId != null) {
-            // WebView YouTube embed fallback: stream resolution failed, embed the YT player
-            val videoId = webViewFallbackId!!
-            AndroidView(
-                factory = { ctx ->
-                    WebView(ctx).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                        )
-                        settings.apply {
-                            javaScriptEnabled = true
-                            mediaPlaybackRequiresUserGesture = false
-                            cacheMode = WebSettings.LOAD_NO_CACHE
-                        }
-                        webChromeClient = WebChromeClient()
-                        webViewClient = WebViewClient()
-                        loadUrl(
-                            "https://www.youtube-nocookie.com/embed/$videoId" +
-                                "?autoplay=1&mute=0&controls=1&playsinline=1&rel=0&modestbranding=1",
-                        )
+        var webViewRef by remember { mutableStateOf<WebView?>(null) }
+
+        // Seamless sync: bridge play/pause and seeking between main audio player and YouTube WebView
+        DisposableEffect(player) {
+            if (player == null) return@DisposableEffect onDispose {}
+
+            val listener = object : Player.Listener {
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    val cmd = if (isPlaying) {
+                        """(function() {
+                            const v = document.querySelector('video');
+                            if (v && v.paused) v.play();
+                            window.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
+                        })();"""
+                    } else {
+                        """(function() {
+                            const v = document.querySelector('video');
+                            if (v && !v.paused) v.pause();
+                            window.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
+                        })();"""
                     }
-                },
-                modifier = modifier,
-            )
-        } else {
-            // Direct ExoPlayer TextureView: main player has a real video track
-            AndroidView(
-                factory = { ctx ->
-                    TextureView(ctx).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                        )
-                        val p = PlaybackService.activeExoPlayer ?: activeController
-                        p?.setVideoTextureView(this)
+                    webViewRef?.evaluateJavascript(cmd, null)
+                }
+
+                override fun onPositionDiscontinuity(
+                    oldPosition: Player.PositionInfo,
+                    newPosition: Player.PositionInfo,
+                    reason: Int,
+                ) {
+                    if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                        val targetSec = (newPosition.positionMs / 1000f).coerceAtLeast(0f)
+                        val cmd = """(function() {
+                            const v = document.querySelector('video');
+                            if (v) v.currentTime = $targetSec;
+                            window.postMessage('{"event":"command","func":"seekTo","args":[$targetSec, true]}', '*');
+                        })();"""
+                        webViewRef?.evaluateJavascript(cmd, null)
                     }
-                },
-                update = { view ->
-                    val p = PlaybackService.activeExoPlayer ?: activeController
-                    p?.setVideoTextureView(view)
-                    if (p?.videoSize?.let { it.width > 0 && it.height > 0 } == true) {
-                        PlaybackService.isVideoFrameRendered.value = true
-                    }
-                },
-                onRelease = { view ->
-                    val p = PlaybackService.activeExoPlayer ?: activeController
-                    p?.clearVideoTextureView(view)
-                },
-                modifier = modifier,
-            )
+                }
+            }
+
+            player.addListener(listener)
+            onDispose {
+                player.removeListener(listener)
+            }
         }
+
+        val startSec = ((player?.currentPosition ?: 0L) / 1000L).coerceAtLeast(0L)
+        val embedUrl = "https://www.youtube-nocookie.com/embed/$videoId" +
+            "?autoplay=1&mute=0&controls=0&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&playsinline=1&enablejsapi=1&start=$startSec"
+
+        AndroidView(
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                    setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                    setBackgroundColor(android.graphics.Color.BLACK)
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        mediaPlaybackRequiresUserGesture = false
+                        loadWithOverviewMode = true
+                        useWideViewPort = true
+                        setSupportZoom(false)
+                        displayZoomControls = false
+                        cacheMode = WebSettings.LOAD_DEFAULT
+                    }
+
+                    val adBlockAndCleanJs = """
+                        (function() {
+                            function injectStyle() {
+                                if (document.getElementById('umtify-video-clean-style')) return;
+                                const style = document.createElement('style');
+                                style.id = 'umtify-video-clean-style';
+                                style.textContent = `
+                                    .ytp-chrome-top, .ytp-chrome-bottom, .ytp-watermark,
+                                    .ytp-youtube-button, .ytp-pause-overlay, .ytp-ce-element,
+                                    .ytp-ce-covering-overlay, .ytp-ce-element-shadow,
+                                    .ytp-gradient-top, .ytp-gradient-bottom, .ytp-show-cards-title,
+                                    .ytp-contextmenu, .ytp-title-channel, .ytp-title,
+                                    .ytp-share-button, .ytp-watch-later-button, .branding-img,
+                                    .ytp-paid-content-overlay, .ytp-ad-overlay-container,
+                                    .video-ads, .ytp-ad-module, .ytp-ad-player-overlay,
+                                    .ytp-ad-image-overlay {
+                                        display: none !important;
+                                        opacity: 0 !important;
+                                        pointer-events: none !important;
+                                        visibility: hidden !important;
+                                    }
+                                    html, body {
+                                        margin: 0 !important;
+                                        padding: 0 !important;
+                                        overflow: hidden !important;
+                                        background-color: #000000 !important;
+                                        width: 100% !important;
+                                        height: 100% !important;
+                                    }
+                                    .html5-video-player {
+                                        background-color: #000000 !important;
+                                    }
+                                    video {
+                                        width: 100% !important;
+                                        height: 100% !important;
+                                        object-fit: cover !important;
+                                    }
+                                `;
+                                (document.head || document.documentElement).appendChild(style);
+                            }
+                            function cleanAndSkip() {
+                                injectStyle();
+                                const v = document.querySelector('video');
+                                const ad = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay');
+                                if (ad && v && isFinite(v.duration)) {
+                                    v.currentTime = v.duration;
+                                }
+                                const skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button');
+                                if (skipBtn) skipBtn.click();
+                            }
+                            injectStyle();
+                            cleanAndSkip();
+                            setInterval(cleanAndSkip, 300);
+                        })();
+                    """.trimIndent()
+
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                            super.onProgressChanged(view, newProgress)
+                            if (newProgress > 25) {
+                                PlaybackService.isVideoFrameRendered.value = true
+                                view?.evaluateJavascript(adBlockAndCleanJs, null)
+                            }
+                        }
+                    }
+
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            PlaybackService.isVideoFrameRendered.value = true
+                            view?.evaluateJavascript(adBlockAndCleanJs, null)
+                        }
+                    }
+
+                    loadUrl(embedUrl)
+                    webViewRef = this
+                }
+            },
+            update = { view ->
+                webViewRef = view
+                if (view.url?.contains(videoId) != true) {
+                    view.loadUrl(embedUrl)
+                }
+            },
+            onRelease = { view ->
+                if (webViewRef == view) webViewRef = null
+                view.stopLoading()
+                view.loadUrl("about:blank")
+                view.destroy()
+            },
+            modifier = modifier,
+        )
     }
 
     @Composable

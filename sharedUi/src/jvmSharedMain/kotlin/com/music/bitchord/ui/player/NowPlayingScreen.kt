@@ -3237,11 +3237,11 @@ fun NowPlayingScreen(
                             }
 
                             if (song.isVideo) {
-                                if (isLoading || !videoFrameRendered) {
+                                if (!videoFrameRendered) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .background(Color.Black.copy(alpha = if (videoFrameRendered) 0f else 0.25f)),
+                                            .background(Color.Black.copy(alpha = 0.25f)),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         CircularProgressIndicator(
