@@ -54,7 +54,7 @@ object MusicLink {
      * returning the link that launched it. Without this, rotating the phone an
      * hour later would replay the shared song over whatever is playing.
      */
-    private const val EXTRA_CONSUMED = "bitchord.linkConsumed"
+    private const val EXTRA_CONSUMED = "umtify.linkConsumed"
 
     private val _pending = MutableStateFlow<LinkRequest?>(null)
 

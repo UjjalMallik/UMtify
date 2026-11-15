@@ -660,7 +660,23 @@ object ListenTogether {
     private var socketJob: Job? = null
 
     fun init(context: Context) {
-        prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val legacy = context.applicationContext.getSharedPreferences("bitchord_listen_together", Context.MODE_PRIVATE)
+        val newPrefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (newPrefs.all.isEmpty() && legacy.all.isNotEmpty()) {
+            val editor = newPrefs.edit()
+            legacy.all.forEach { (k, v) ->
+                when (v) {
+                    is Boolean -> editor.putBoolean(k, v)
+                    is Int -> editor.putInt(k, v)
+                    is Long -> editor.putLong(k, v)
+                    is Float -> editor.putFloat(k, v)
+                    is String -> editor.putString(k, v)
+                    is Set<*> -> @Suppress("UNCHECKED_CAST") editor.putStringSet(k, v as Set<String>)
+                }
+            }
+            editor.apply()
+        }
+        prefs = newPrefs
         val rawSaved = prefs.getString(KEY_SERVER, null)?.trim().orEmpty()
         val normalizedSaved = when (val res = parseAndNormalizeServerUrl(rawSaved)) {
             is ServerUrlValidationResult.Valid -> res.normalizedUrl
@@ -1693,7 +1709,7 @@ object ListenTogether {
     const val CODE_LENGTH = 6
 
     private const val TAG = "ListenTogether"
-    private const val PREFS = "bitchord_listen_together"
+    private const val PREFS = "umtify_listen_together"
     private const val KEY_SERVER = "server_url"
 
     /** What a redacted address reads as. Not a hostname, so it cannot be resolved back. */

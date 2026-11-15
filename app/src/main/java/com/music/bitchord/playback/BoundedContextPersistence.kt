@@ -48,7 +48,21 @@ object BoundedContextPersistence {
 
     @Synchronized
     fun init(context: Context) {
-        prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val legacy = context.getSharedPreferences("bitchord_bounded_context", Context.MODE_PRIVATE)
+        val newPrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        if (newPrefs.all.isEmpty() && legacy.all.isNotEmpty()) {
+            val editor = newPrefs.edit()
+            legacy.all.forEach { (k, v) ->
+                when (v) {
+                    is String -> editor.putString(k, v)
+                    is Long -> editor.putLong(k, v)
+                    is Int -> editor.putInt(k, v)
+                    is Boolean -> editor.putBoolean(k, v)
+                }
+            }
+            editor.apply()
+        }
+        prefs = newPrefs
     }
 
     /** Test-only dependency injection; production uses [init]. */
@@ -639,7 +653,7 @@ object BoundedContextPersistence {
     private const val MAX_PHYSICAL_ENTRIES = 100_000
     private const val MAX_HISTORY = 25
     private const val MAX_CONTEXT_UPCOMING = 25
-    private const val PREFS_NAME = "bitchord_bounded_context"
+    private const val PREFS_NAME = "umtify_bounded_context"
     private const val KEY_STATE = "state"
     private const val KEY_CURRENT_ENTRY_ID = "current_entry_id"
     private const val KEY_POSITION = "position"

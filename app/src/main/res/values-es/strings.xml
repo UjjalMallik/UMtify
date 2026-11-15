@@ -709,6 +709,7 @@
     <string name="listen_together_code">Código de la fiesta</string>
     <string name="listen_together_code_footer">Dilo en voz alta o envíalo. La O y la I no se usan, así que una «o» siempre es un cero.</string>
     <string name="copy_code">Copiar código</string>
+    <string name="share_code">Compartir código</string>
     <string name="listen_together_share_text">Escucha conmigo en UMtify — código de fiesta %1$s</string>
     <string name="listen_together_now_playing">Reproduciendo</string>
     <string name="listen_together_nothing_playing">Todavía no suena nada</string>

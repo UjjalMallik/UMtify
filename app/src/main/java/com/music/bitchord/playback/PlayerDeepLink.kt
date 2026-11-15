@@ -21,7 +21,8 @@ import kotlinx.coroutines.flow.asStateFlow
 object PlayerDeepLink {
 
     /** Set on the widget's artwork intent. Nothing else sets it. */
-    const val EXTRA_OPEN_PLAYER = "bitchord.openPlayer"
+    const val EXTRA_OPEN_PLAYER = "umtify.openPlayer"
+    private const val LEGACY_EXTRA_OPEN_PLAYER = "bitchord.openPlayer"
 
     private val _pending = MutableStateFlow(false)
 
@@ -30,12 +31,13 @@ object PlayerDeepLink {
 
     /** Reads an incoming intent, and reports whether it asked for the player. */
     fun consume(intent: Intent?): Boolean {
-        if (intent == null || !intent.getBooleanExtra(EXTRA_OPEN_PLAYER, false)) return false
+        if (intent == null || (!intent.getBooleanExtra(EXTRA_OPEN_PLAYER, false) && !intent.getBooleanExtra(LEGACY_EXTRA_OPEN_PLAYER, false))) return false
         // Cleared off the intent as well. A singleTask activity keeps the intent
         // that launched it, and getIntent() returns the same one after every
         // configuration change — left in place, a widget tap would reopen the
         // sheet each time the device changed theme or font size.
         intent.removeExtra(EXTRA_OPEN_PLAYER)
+        intent.removeExtra(LEGACY_EXTRA_OPEN_PLAYER)
         _pending.value = true
         return true
     }

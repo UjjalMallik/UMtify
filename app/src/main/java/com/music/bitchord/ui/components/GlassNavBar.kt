@@ -13,6 +13,7 @@ import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -50,6 +51,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -188,7 +190,7 @@ fun GlassNavBar(
         colors = FloatingTabBarDefaults.colors(
             backgroundColor = Color.Transparent,
             accessoryBackgroundColor = Color.Transparent,
-            indicatorColor = glassIndicatorColor().copy(alpha = 0.5f),
+            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
         ),
         // Flat, because the glass is not. Every surface here already draws its
         // own [Shadow.Default] as part of the backdrop pass, and the library's
@@ -218,7 +220,17 @@ fun GlassNavBar(
     ) {
         tabs.forEachIndexed { index, tab ->
             val isSelected = index == selectedIndex
-            val tint = if (isSelected) selectedColor else unselectedColor
+            val tint = if (isSelected) Color.White else unselectedColor
+            val tabScale by animateFloatAsState(
+                targetValue = if (isSelected) 1.15f else 1f,
+                animationSpec = spring(dampingRatio = 0.72f, stiffness = 380f),
+                label = "tabScale_$index",
+            )
+            val tabFloatY by animateDpAsState(
+                targetValue = if (isSelected) (-1.5).dp else 0.dp,
+                animationSpec = spring(dampingRatio = 0.72f, stiffness = 380f),
+                label = "tabFloatY_$index",
+            )
             val onClick = {
                 if (!isSelected) haptics.play(Haptic.Select)
                 currentOnTabSelected(index)
@@ -242,19 +254,24 @@ fun GlassNavBar(
                             imageVector = tab.icon,
                             contentDescription = tab.label,
                             tint = tint,
-                            modifier = Modifier.size(25.dp),
+                            modifier = Modifier
+                                .size(25.dp)
+                                .graphicsLayer {
+                                    scaleX = tabScale
+                                    scaleY = tabScale
+                                    translationY = tabFloatY.toPx()
+                                },
                         )
                     },
                     title = {
                         Text(
                             text = tab.label,
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            ),
                             color = tint,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            // The library's Tab stacks the glyph and the label
-                            // with nothing between them; the plain bar spaces
-                            // them, and this is where that gap goes.
                             modifier = Modifier.padding(top = TAB_ICON_LABEL_GAP),
                         )
                     },

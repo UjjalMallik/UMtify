@@ -46,6 +46,8 @@ interface PlayerHost {
     @Composable
     fun VideoPlayer(modifier: Modifier = Modifier) = Unit
 
+    val isVideoFrameRendered: StateFlow<Boolean> get() = MutableStateFlow(false)
+
     /**
      * Artwork for [song], resolving covers that live inside a remote file
      * (WebDAV, SMB) where the platform can. Returns [Song.thumbnailUrl] otherwise.

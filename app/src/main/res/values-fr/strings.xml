@@ -680,6 +680,7 @@
     <string name="listen_together_code">Code de session</string>
     <string name="listen_together_code_footer">Lis-le à voix haute ou envoie-le. Les lettres O et I ne sont pas utilisées, un « o » est donc toujours un zéro.</string>
     <string name="copy_code">Copier le code</string>
+    <string name="share_code">Partager le code</string>
     <string name="listen_together_share_text">Écoute avec moi sur UMtify — code de session %1$s</string>
     <string name="listen_together_now_playing">Lecture en cours</string>
     <string name="listen_together_nothing_playing">Rien en lecture pour l’instant</string>

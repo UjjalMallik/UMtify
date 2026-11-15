@@ -659,6 +659,7 @@
     <string name="listen_together_code">派对代码</string>
     <string name="listen_together_code_footer">读出来或发出去。字母 O 和 I 不会用到，所以“欧”永远是零。</string>
     <string name="copy_code">复制代码</string>
+    <string name="share_code">分享代码</string>
     <string name="listen_together_share_text">在 UMtify 上和我一起听 — 派对代码 %1$s</string>
     <string name="listen_together_now_playing">正在播放</string>
     <string name="listen_together_nothing_playing">还没有播放任何内容</string>

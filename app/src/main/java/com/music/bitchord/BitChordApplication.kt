@@ -199,7 +199,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
                     chain.request().newBuilder()
                         .header(
                             "User-Agent",
-                            "BitChord/${BuildConfig.VERSION_NAME} (Android; +https://github.com/kushagrasinghx/BitChord)",
+                            "UMtify/${BuildConfig.VERSION_NAME} (Android; +https://github.com/UjjalMallik/UMtify)",
                         )
                         .build(),
                 )

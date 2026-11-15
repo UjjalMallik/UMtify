@@ -587,6 +587,7 @@ class PlaybackService : MediaLibraryService() {
         }
 
     private var isVideoMode: Boolean = false
+    private var currentVideoTrackId: String? = null
 
     /**
      * The idle player. Between transitions it holds nothing; to arm one,
@@ -1018,6 +1019,16 @@ class PlaybackService : MediaLibraryService() {
             }
         }
 
+        override fun onRenderedFirstFrame() {
+            isVideoFrameRendered.value = true
+        }
+
+        override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+            if (videoSize.width > 0 && videoSize.height > 0) {
+                isVideoFrameRendered.value = true
+            }
+        }
+
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             // The player this fired on, which is by definition the one the
             // session is currently pointed at.
@@ -1033,14 +1044,16 @@ class PlaybackService : MediaLibraryService() {
             // are invisible until someone reads their listening history.
             if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED &&
                 mediaItem?.mediaId != null &&
-                mediaItem.mediaId == swappingMediaId
+                (mediaItem.mediaId == swappingMediaId || (isVideoMode && mediaItem.mediaId == currentVideoTrackId))
             ) {
                 swappingMediaId = null
                 return
             }
 
-            if (isVideoMode) {
+            if (isVideoMode && mediaItem?.mediaId != currentVideoTrackId) {
                 isVideoMode = false
+                currentVideoTrackId = null
+                isVideoFrameRendered.value = false
                 (exoPlayer.trackSelector as? DefaultTrackSelector)?.let { selector ->
                     selector.setParameters(
                         selector.buildUponParameters()
@@ -1357,7 +1370,7 @@ class PlaybackService : MediaLibraryService() {
         QualityUpgrade.forgetLastSession()
 
         val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
-        playbackWakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BitChord:PlaybackWakeLock")?.apply {
+        playbackWakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "UMtify:PlaybackWakeLock")?.apply {
             setReferenceCounted(false)
         }
 
@@ -2612,6 +2625,9 @@ class PlaybackService : MediaLibraryService() {
         if (currentIndex !in 0 until activePlayer.mediaItemCount) return
 
         isVideoMode = true
+        currentVideoTrackId = targetSong.videoId
+        isVideoFrameRendered.value = false
+
         scope.launch(Dispatchers.Main) {
             val videoInfo = withContext(Dispatchers.IO) {
                 com.music.bitchord.data.innertube.StreamResolver.resolveVideoPlaybackInfo(targetSong.videoId)
@@ -2623,6 +2639,8 @@ class PlaybackService : MediaLibraryService() {
                     android.widget.Toast.makeText(applicationContext, "Could not load video stream", android.widget.Toast.LENGTH_SHORT).show()
                 }
                 isVideoMode = false
+                currentVideoTrackId = null
+                isVideoFrameRendered.value = false
                 return@launch
             }
 
@@ -2661,7 +2679,7 @@ class PlaybackService : MediaLibraryService() {
                 }
             }
 
-            // Enable video track selection on the active player
+            // Enable video track selection on active and standby player
             (activePlayer.trackSelector as? DefaultTrackSelector)?.let { selector ->
                 selector.setParameters(
                     selector.buildUponParameters()
@@ -2669,7 +2687,15 @@ class PlaybackService : MediaLibraryService() {
                         .clearVideoSizeConstraints()
                 )
             }
+            (spare?.trackSelector as? DefaultTrackSelector)?.let { selector ->
+                selector.setParameters(
+                    selector.buildUponParameters()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false)
+                        .clearVideoSizeConstraints()
+                )
+            }
 
+            swappingMediaId = targetSong.videoId
             val seekPos = activePlayer.currentPosition.takeIf { it > 0 } ?: pos
             val mediaSources = (0 until activePlayer.mediaItemCount).map { i ->
                 if (i == currentIndex) {
@@ -2692,6 +2718,8 @@ class PlaybackService : MediaLibraryService() {
         if (currentIndex !in 0 until activePlayer.mediaItemCount) return
 
         isVideoMode = false
+        currentVideoTrackId = null
+        isVideoFrameRendered.value = false
 
         // Disable video track selection
         (activePlayer.trackSelector as? DefaultTrackSelector)?.let { selector ->
@@ -2700,7 +2728,14 @@ class PlaybackService : MediaLibraryService() {
                     .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
             )
         }
+        (spare?.trackSelector as? DefaultTrackSelector)?.let { selector ->
+            selector.setParameters(
+                selector.buildUponParameters()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+            )
+        }
 
+        swappingMediaId = targetSong.videoId
         val audioItem = targetSong.copy(isVideo = false).toMediaItem()
         val mediaSources = (0 until activePlayer.mediaItemCount).map { i ->
             val item = if (i == currentIndex) audioItem else activePlayer.getMediaItemAt(i)
@@ -9331,6 +9366,7 @@ class PlaybackService : MediaLibraryService() {
         @Volatile
         var activeExoPlayer: ExoPlayer? = null
             internal set
+        val isVideoFrameRendered = MutableStateFlow(false)
         const val MEDIA_ROOT_ID = "root"
         const val MEDIA_RECENTS_ID = "recents"
         const val MEDIA_QUICK_PICKS_ID = "quick_picks"
@@ -9380,8 +9416,8 @@ class PlaybackService : MediaLibraryService() {
         /** Length of a FLAC STREAMINFO block, which the format fixes at 34 bytes. */
         const val STREAM_INFO_BYTES = 34
 
-        const val CHANNEL_ID = "bitchord_playback"
-        const val SESSION_ID = "BitChordPlayback"
+        const val CHANNEL_ID = "umtify_playback"
+        const val SESSION_ID = "UMtifyPlayback"
 
         /** How often played-seconds are sampled off the player. */
         const val PROGRESS_SAMPLE_MS = 5_000L

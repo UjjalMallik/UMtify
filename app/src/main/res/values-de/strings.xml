@@ -679,6 +679,7 @@
     <string name="listen_together_code">Party-Code</string>
     <string name="listen_together_code_footer">Lies ihn vor oder schick ihn. O und I kommen nicht vor, ein „O“ ist also immer eine Null.</string>
     <string name="copy_code">Code kopieren</string>
+    <string name="share_code">Code teilen</string>
     <string name="listen_together_share_text">Hör mit mir auf UMtify – Party-Code %1$s</string>
     <string name="listen_together_now_playing">Wird wiedergegeben</string>
     <string name="listen_together_nothing_playing">Noch nichts in Wiedergabe</string>

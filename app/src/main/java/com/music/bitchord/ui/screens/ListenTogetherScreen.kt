@@ -198,17 +198,15 @@ fun ListenTogetherScreen(
         }
     }
 
-    /** The system chooser, with the link and the spoken-aloud code together. */
+    /** The system chooser: shares ONLY the clean party code, hiding all links. */
     val shareInvite: () -> Unit = {
         state.code?.let { partyCode ->
-            val message = inviteLinkFor(partyCode) +
-                System.lineSeparator() + System.lineSeparator() +
-                context.getString(R.string.listen_together_share_text, partyCode)
             context.startActivity(
                 Intent.createChooser(
                     Intent(Intent.ACTION_SEND).apply {
                         type = "text/plain"
-                        putExtra(Intent.EXTRA_TEXT, message)
+                        putExtra(Intent.EXTRA_SUBJECT, "UMtify Party Code")
+                        putExtra(Intent.EXTRA_TEXT, partyCode)
                     },
                     null,
                 ),
@@ -383,13 +381,15 @@ fun ListenTogetherScreen(
                 PartySheet.JoinCode -> JoinPartySheet(
                     code = codeInput,
                     onCodeChange = { typed ->
-                        codeInput = typed.filter(Char::isLetterOrDigit)
-                            .uppercase()
-                            .take(ListenTogether.CODE_LENGTH)
+                        val extracted = extractPartyCode(typed)
+                        codeInput = extracted
                         // Typing is the retry. Keeping "no party with that
                         // code" on screen while the code is being corrected
                         // makes it read as a verdict on what is there now.
                         failure = null
+                        if (extracted.length == ListenTogether.CODE_LENGTH && typed.length > ListenTogether.CODE_LENGTH) {
+                            openPartyPreview(extracted, null)
+                        }
                     },
                     busy = busy,
                     enabled = signedIn && ListenTogether.hasServer,
@@ -453,7 +453,7 @@ fun ListenTogetherScreen(
 
                 PartySheet.Invite -> InviteSheet(
                     code = state.code.orEmpty(),
-                    link = inviteLinkFor(state.code.orEmpty()),
+                    link = state.code.orEmpty(),
                     onShareLink = {
                         sheet = null
                         shareInvite()
@@ -872,7 +872,7 @@ private fun InAParty(
         RowDivider()
         SettingsRow(
             icon = Icons.Rounded.Share,
-            title = stringResource(R.string.share),
+            title = stringResource(R.string.share_code),
             onClick = onShare,
         )
     }
@@ -1136,4 +1136,36 @@ private fun elapsed(ms: Long): String {
     val minutes = total / 60
     val seconds = total % 60
     return "%d:%02d".format(minutes, seconds)
+}
+
+internal fun extractPartyCode(input: String): String {
+    val trimmed = input.trim()
+    if (trimmed.isEmpty()) return ""
+
+    // 1. Try parsing via JamInviteLink (matches bitchord/umtify URLs, custom servers, deep links)
+    val parsed = JamInviteLink.parseInvite(trimmed)
+    if (parsed != null && parsed.code.isNotBlank()) {
+        return parsed.code.uppercase().take(ListenTogether.CODE_LENGTH)
+    }
+
+    // 2. URL paths containing invite/<code> or party/<code>
+    val urlMatch = Regex("""(?:invite|party)/([A-Za-z0-9]{6})""", RegexOption.IGNORE_CASE).find(trimmed)
+    if (urlMatch != null) {
+        return urlMatch.groupValues[1].uppercase()
+    }
+
+    // 3. Labels like "Code: 1XV6U1" or "Party Code: 1XV6U1"
+    val labelMatch = Regex("""code[:\s\-_]+([A-Za-z0-9]{6})\b""", RegexOption.IGNORE_CASE).find(trimmed)
+    if (labelMatch != null) {
+        return labelMatch.groupValues[1].uppercase()
+    }
+
+    // 4. Standalone 6-character alphanumeric word in the text
+    val wordMatch = Regex("""\b([A-Za-z0-9]{6})\b""").find(trimmed)
+    if (wordMatch != null) {
+        return wordMatch.groupValues[1].uppercase()
+    }
+
+    // 5. Raw input filtering alphanumeric characters
+    return trimmed.filter(Char::isLetterOrDigit).uppercase().take(ListenTogether.CODE_LENGTH)
 }

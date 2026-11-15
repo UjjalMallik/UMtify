@@ -118,6 +118,9 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     @Composable
     override fun CanvasVideo(spec: CanvasVideoSpec, modifier: Modifier) = AndroidCanvasVideo(spec, modifier)
 
+    override val isVideoFrameRendered: StateFlow<Boolean>
+        get() = PlaybackService.isVideoFrameRendered
+
     @Composable
     override fun VideoPlayer(modifier: Modifier) {
         val controller = activeController
@@ -131,17 +134,26 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
                     )
-                    exoPlayer?.setVideoTextureView(this)
-                    controller?.setVideoTextureView(this)
+                    if (exoPlayer != null) {
+                        exoPlayer.setVideoTextureView(this)
+                    } else {
+                        controller?.setVideoTextureView(this)
+                    }
                 }
             },
             update = { textureView ->
-                exoPlayer?.setVideoTextureView(textureView)
-                controller?.setVideoTextureView(textureView)
+                if (exoPlayer != null) {
+                    exoPlayer.setVideoTextureView(textureView)
+                } else {
+                    controller?.setVideoTextureView(textureView)
+                }
             },
             onRelease = { textureView ->
-                exoPlayer?.clearVideoTextureView(textureView)
-                controller?.clearVideoTextureView(textureView)
+                if (exoPlayer != null) {
+                    exoPlayer.clearVideoTextureView(textureView)
+                } else {
+                    controller?.clearVideoTextureView(textureView)
+                }
             },
         )
     }

@@ -941,6 +941,7 @@
     <string name="listen_together_code">Party code</string>
     <string name="listen_together_code_footer">Read it out or send it. O and I aren’t used, so an “oh” is always a zero.</string>
     <string name="copy_code">Copy code</string>
+    <string name="share_code">Share code</string>
     <string name="listen_together_share_text">Listen with me on UMtify — party code %1$s</string>
     <string name="listen_together_now_playing">Now playing</string>
     <string name="listen_together_nothing_playing">Nothing playing yet</string>

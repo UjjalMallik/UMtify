@@ -330,7 +330,33 @@ object StreamResolver {
                 return@withContext iosResult
             }
 
-            // 3. Fallback to NewPipe extraction
+            // 3. Try InnerTube ANDROID_TESTSUITE client
+            val testsuiteResult = queryInnerTubePlayerForVideo(
+                videoId = videoId,
+                clientName = "ANDROID_TESTSUITE",
+                clientVersion = "1.9",
+                clientNumber = "88",
+                userAgent = "com.google.android.youtube/1.9 (Linux; U; Android 12; en_US) gzip",
+            )
+            if (testsuiteResult != null) {
+                videoInfoCache[videoId] = testsuiteResult
+                return@withContext testsuiteResult
+            }
+
+            // 4. Try TVHTML5 embedded client
+            val tvResult = queryInnerTubePlayerForVideo(
+                videoId = videoId,
+                clientName = "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
+                clientVersion = "2.0",
+                clientNumber = "85",
+                userAgent = "Mozilla/5.0 (PlayStation; PlayStation 4/11.50) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/11.0 Safari/605.1.15",
+            )
+            if (tvResult != null) {
+                videoInfoCache[videoId] = tvResult
+                return@withContext tvResult
+            }
+
+            // 5. Fallback to NewPipe extraction
             val newPipeResult = runCatching {
                 extractionGate.withLock {
                     val extractor = ServiceList.YouTube.getStreamExtractor("https://www.youtube.com/watch?v=$videoId")
@@ -458,7 +484,7 @@ object StreamResolver {
                 val videoAdaptive = adaptive?.filter {
                     val url = it["url"]?.jsonPrimitive?.content
                     val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
-                    !url.isNullOrBlank() && mime.contains("video/mp4")
+                    !url.isNullOrBlank() && (mime.contains("video/mp4") || mime.contains("video/webm"))
                 }?.filter {
                     val height = it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
                     height in 360..720
@@ -467,7 +493,7 @@ object StreamResolver {
                 } ?: adaptive?.filter {
                     val url = it["url"]?.jsonPrimitive?.content
                     val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
-                    !url.isNullOrBlank() && mime.contains("video/mp4")
+                    !url.isNullOrBlank() && (mime.contains("video/mp4") || mime.contains("video/webm"))
                 }?.firstOrNull()
 
                 val audioAdaptive = adaptive?.filter {

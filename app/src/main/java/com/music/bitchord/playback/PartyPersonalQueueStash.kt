@@ -27,7 +27,16 @@ object PartyPersonalQueueStash {
     private val json = Json { ignoreUnknownKeys = true }
 
     fun init(context: Context) {
-        prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val legacy = context.applicationContext.getSharedPreferences("bitchord_party_queue_stash", Context.MODE_PRIVATE)
+        val newPrefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        if (newPrefs.all.isEmpty() && legacy.all.isNotEmpty()) {
+            val editor = newPrefs.edit()
+            legacy.all.forEach { (k, v) ->
+                if (v is String) editor.putString(k, v)
+            }
+            editor.apply()
+        }
+        prefs = newPrefs
     }
 
     fun initForTesting(testPrefs: SharedPreferences) {
@@ -184,6 +193,6 @@ object PartyPersonalQueueStash {
     private fun Song.isDeviceFile(): Boolean =
         videoId.startsWith("content://") || videoId.startsWith("file://")
 
-    private const val PREFS_NAME = "bitchord_party_queue_stash"
+    private const val PREFS_NAME = "umtify_party_queue_stash"
     private const val KEY_STASH = "stashed_queue"
 }

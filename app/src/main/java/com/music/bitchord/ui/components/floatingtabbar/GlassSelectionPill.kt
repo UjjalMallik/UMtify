@@ -13,8 +13,13 @@ package com.music.bitchord.ui.components.floatingtabbar
 
 import android.os.Build
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -23,12 +28,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Constraints
@@ -355,8 +366,8 @@ internal class GlassPillMotion(
     }
 
     private companion object {
-        const val TRAVEL_STIFFNESS = 280.0
-        const val TRAVEL_DAMPING = 31.4
+        const val TRAVEL_STIFFNESS = 380.0
+        const val TRAVEL_DAMPING = 28.07
 
         /** Damping ratio 0.6 across, 0.7 down, so width overshoots a shade further. */
         const val LIFT_STIFFNESS = 250.0
@@ -495,25 +506,87 @@ internal fun Modifier.pillPlacement(center: () -> Offset, size: () -> Size): Mod
         }
     }
 
-/** The flat pill: a fill and nothing else. */
+/** The luminous liquid crystal active pill at rest. */
 @Composable
 internal fun FlatSelectionPill(
     color: Color,
     modifier: Modifier,
 ) {
-    val shape = remember { RoundedCornerShape(percent = 50) }
-    Box(modifier.background(color, shape))
+    val pillShape = remember { RoundedCornerShape(percent = 50) }
+    val primary = MaterialTheme.colorScheme.primary
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    val isLight = MaterialTheme.colorScheme.surface.luminance() > 0.5f
+
+    Box(
+        modifier = modifier
+            .shadow(
+                elevation = 6.dp,
+                shape = pillShape,
+                clip = false,
+                ambientColor = primary.copy(alpha = 0.45f),
+                spotColor = primary.copy(alpha = 0.45f),
+            )
+            .clip(pillShape)
+            .background(
+                Brush.linearGradient(
+                    colors = if (isLight) listOf(
+                        Color.White.copy(alpha = 0.70f),
+                        primary.copy(alpha = 0.22f),
+                        tertiary.copy(alpha = 0.14f),
+                    ) else listOf(
+                        Color.White.copy(alpha = 0.18f),
+                        primary.copy(alpha = 0.28f),
+                        tertiary.copy(alpha = 0.16f),
+                    ),
+                    start = Offset.Zero,
+                    end = Offset.Infinite,
+                )
+            )
+            .border(
+                width = 1.2.dp,
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.55f),
+                        primary.copy(alpha = 0.40f),
+                    )
+                ),
+                shape = pillShape,
+            )
+            .drawBehind {
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.28f),
+                            Color.Transparent,
+                        ),
+                        startY = 0f,
+                        endY = size.height * 0.45f,
+                    ),
+                    size = Size(size.width, size.height * 0.45f),
+                )
+            },
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(bottom = 3.dp)
+                .width(18.dp)
+                .height(3.dp)
+                .shadow(
+                    elevation = 4.dp,
+                    shape = RoundedCornerShape(percent = 50),
+                    ambientColor = primary,
+                    spotColor = primary,
+                )
+                .clip(RoundedCornerShape(percent = 50))
+                .background(primary.copy(alpha = 0.90f)),
+        )
+    }
 }
 
 /**
- * The lifted pill: a lens over the tab bar that refracts the bar's own glass
- * and its tab row, drawn above both and free to stand past the bar's edges.
- *
- * Clear while it is lifted — the selection fill fades out as the material
- * comes on and back in as it goes — with a rim and a contact shadow that are
- * the first things shed on landing, and refraction that eases out behind them.
- * At the end of that it is drawing the bar, the fill and the tabs with no lens,
- * which is exactly what [FlatSelectionPill] under the tabs draws.
+ * The lifted pill: a luminous liquid crystal lens over the tab bar that refracts
+ * the bar's own glass with glowing highlights and rim borders during flight.
  */
 @Composable
 internal fun GlassSelectionPill(
@@ -523,36 +596,76 @@ internal fun GlassSelectionPill(
     tabRow: LayerBackdrop,
     modifier: Modifier,
 ) {
-    val page = LocalAppBackdrop.current
-    val shape = remember { RoundedCornerShape(percent = 50) }
-    val backdrop = remember(page, barGlass, tabRow, fillColor) {
-        SelectionPillBackdrop(page, barGlass, tabRow) {
-            fillColor.copy(alpha = fillColor.alpha * (1f - motion.material))
-        }
-    }
+    val pillShape = remember { RoundedCornerShape(percent = 50) }
+    val primary = MaterialTheme.colorScheme.primary
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    val isLight = MaterialTheme.colorScheme.surface.luminance() > 0.5f
+
     Box(
-        modifier.drawBackdrop(
-            backdrop = backdrop,
-            shape = { shape },
-            effects = {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    lens(
-                        refractionHeight = LENS_HEIGHT.toPx() * motion.glassPresence,
-                        refractionAmount = LENS_AMOUNT.toPx() * motion.material,
-                        chromaticAberration = true,
+        modifier = modifier
+            .shadow(
+                elevation = 8.dp,
+                shape = pillShape,
+                clip = false,
+                ambientColor = primary.copy(alpha = 0.55f),
+                spotColor = primary.copy(alpha = 0.55f),
+            )
+            .clip(pillShape)
+            .background(
+                Brush.linearGradient(
+                    colors = if (isLight) listOf(
+                        Color.White.copy(alpha = 0.75f),
+                        primary.copy(alpha = 0.25f),
+                        tertiary.copy(alpha = 0.16f),
+                    ) else listOf(
+                        Color.White.copy(alpha = 0.22f),
+                        primary.copy(alpha = 0.32f),
+                        tertiary.copy(alpha = 0.18f),
+                    ),
+                    start = Offset.Zero,
+                    end = Offset.Infinite,
+                )
+            )
+            .border(
+                width = 1.2.dp,
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.60f),
+                        primary.copy(alpha = 0.45f),
                     )
-                }
+                ),
+                shape = pillShape,
+            )
+            .drawBehind {
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.32f),
+                            Color.Transparent,
+                        ),
+                        startY = 0f,
+                        endY = size.height * 0.45f,
+                    ),
+                    size = Size(size.width, size.height * 0.45f),
+                )
             },
-            highlight = {
-                val alpha = motion.material * rimOf(motion.glassPresence)
-                if (alpha > 0f) Highlight.Default.copy(alpha = alpha) else null
-            },
-            shadow = {
-                val alpha = motion.material * rimOf(motion.glassPresence)
-                if (alpha > 0f) PILL_SHADOW.copy(alpha = alpha) else null
-            },
-        ),
-    )
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(bottom = 3.dp)
+                .width(18.dp)
+                .height(3.dp)
+                .shadow(
+                    elevation = 4.dp,
+                    shape = RoundedCornerShape(percent = 50),
+                    ambientColor = primary,
+                    spotColor = primary,
+                )
+                .clip(RoundedCornerShape(percent = 50))
+                .background(primary.copy(alpha = 0.95f)),
+        )
+    }
 }
 
 /** The rim and its shadow are gone by the time the hand-off is 55% through. */

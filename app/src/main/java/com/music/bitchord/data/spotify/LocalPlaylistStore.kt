@@ -17,7 +17,7 @@ data class LocalPlaylist(
 }
 
 object LocalPlaylistStore {
-    private const val PREF_NAME = "bitchord_local_playlists"
+    private const val PREF_NAME = "umtify_local_playlists"
     private const val KEY_PLAYLISTS = "playlists_json"
 
     private lateinit var prefs: SharedPreferences
@@ -26,7 +26,16 @@ object LocalPlaylistStore {
     val playlists = _playlists.asStateFlow()
 
     fun init(context: Context) {
-        prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val legacy = context.getSharedPreferences("bitchord_local_playlists", Context.MODE_PRIVATE)
+        val newPrefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        if (newPrefs.all.isEmpty() && legacy.all.isNotEmpty()) {
+            val editor = newPrefs.edit()
+            legacy.all.forEach { (k, v) ->
+                if (v is String) editor.putString(k, v)
+            }
+            editor.apply()
+        }
+        prefs = newPrefs
         load()
     }
 

@@ -94,7 +94,7 @@ object Backup {
                 ?: error("Couldn't open that file")
             val file = runCatching { json.decodeFromString(BackupFile.serializer(), text) }
                 .getOrElse { error("That doesn't look like a UMtify backup") }
-            require(file.app == APP_TAG) { "That backup is from another app" }
+            require(file.app == APP_TAG || file.app == "bitchord") { "That backup is from another app" }
             require(file.version <= SCHEMA_VERSION) {
                 "That backup was written by a newer version of UMtify"
             }
@@ -121,7 +121,7 @@ object Backup {
         val at: String,
     )
 
-    private const val APP_TAG = "bitchord"
+    private const val APP_TAG = "umtify"
 
     /**
      * Bump when the shape below stops being readable by an older build. A file

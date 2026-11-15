@@ -27,10 +27,15 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -2849,7 +2854,21 @@ private fun BitChordApp(
                         val libraryTabKey = "$TAB_KEY$TAB_LIBRARY"
                         val libraryShowAllSwap = (initialState == "library_show_all" && targetState == libraryTabKey) ||
                             (targetState == "library_show_all" && initialState == libraryTabKey)
-                        if (tabSwap || libraryShowAllSwap) {
+                        if (tabSwap) {
+                            val fromIndex = initialState.removePrefix(TAB_KEY).toIntOrNull() ?: 0
+                            val toIndex = targetState.removePrefix(TAB_KEY).toIntOrNull() ?: 0
+                            val sign = if (toIndex >= fromIndex) 1 else -1
+                            (slideInHorizontally(
+                                animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
+                                initialOffsetX = { (it * 0.12f * sign).toInt() }
+                            ) + fadeIn(animationSpec = tween(220)) + scaleIn(
+                                initialScale = 0.96f,
+                                animationSpec = tween(240)
+                            )) togetherWith (slideOutHorizontally(
+                                animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
+                                targetOffsetX = { (-it * 0.12f * sign).toInt() }
+                            ) + fadeOut(animationSpec = tween(180)))
+                        } else if (libraryShowAllSwap) {
                             EnterTransition.None togetherWith ExitTransition.None
                         } else {
                             fadeIn(tween(180)) togetherWith fadeOut(tween(180))

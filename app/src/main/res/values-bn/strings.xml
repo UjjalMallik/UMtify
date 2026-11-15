@@ -937,6 +937,7 @@
     <string name="listen_together_code">পার্টি কোড</string>
     <string name="listen_together_code_footer">এটি পড়ুন বা পাঠান. ও এবং আমি ব্যবহার করা হয় না, তাই একটি "ওহ" সর্বদা একটি শূন্য.</string>
     <string name="copy_code">কোড কপি করুন</string>
+    <string name="share_code">কোড শেয়ার করুন</string>
     <string name="listen_together_share_text">UMtify - পার্টি কোড%1$s-এ আমার সাথে শুনুন</string>
     <string name="listen_together_now_playing">এখন বাজছে</string>
     <string name="listen_together_nothing_playing">এখনো কিছুই বাজছে না</string>

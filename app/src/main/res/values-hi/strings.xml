@@ -679,6 +679,7 @@
     <string name="listen_together_code">पार्टी कोड</string>
     <string name="listen_together_code_footer">इसे बोलकर बताएँ या भेज दें। O और I इस्तेमाल नहीं होते, इसलिए “ओ” हमेशा शून्य है।</string>
     <string name="copy_code">कोड कॉपी करें</string>
+    <string name="share_code">कोड शेयर करें</string>
     <string name="listen_together_share_text">UMtify पर मेरे साथ सुनो — पार्टी कोड %1$s</string>
     <string name="listen_together_now_playing">अभी चल रहा है</string>
     <string name="listen_together_nothing_playing">अभी कुछ नहीं चल रहा</string>

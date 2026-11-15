@@ -2,6 +2,7 @@ package com.music.bitchord.ui.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
@@ -44,7 +45,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
@@ -54,6 +59,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -130,7 +136,7 @@ internal val TAB_ICON_LABEL_GAP = 2.dp
  * Stiffness 320 puts the whole movement at roughly a third of a second, quick
  * enough that the tap and the arrival feel like one event.
  */
-internal val GlassSpring = spring<Float>(dampingRatio = 0.72f, stiffness = 320f)
+internal val GlassSpring = spring<Float>(dampingRatio = 0.72f, stiffness = 380f)
 
 /**
  * How far the indicator elongates along its travel, at full stride.
@@ -143,10 +149,10 @@ internal val GlassSpring = spring<Float>(dampingRatio = 0.72f, stiffness = 320f)
  * falls out of a drag for free, since dragging is nothing but a long way still
  * to go.
  *
- * Sixteen percent is enough to be felt and not enough to be caught at: past
+ * Fourteen percent is enough to be felt and not enough to be caught at: past
  * about a fifth the pill starts reading as a stretched image of itself.
  */
-internal const val STRETCH = 0.16f
+internal const val STRETCH = 0.14f
 
 /**
  * How much of the stretch is taken back out of the indicator's height.
@@ -281,26 +287,80 @@ fun FloatingBottomBar(
                 .padding(horizontal = PILL_INSET, vertical = PILL_INSET),
         ) {
             if (tabWidthPx > 0f && selectedIndex in pillTabs.indices) {
+                val primary = MaterialTheme.colorScheme.primary
+                val tertiary = MaterialTheme.colorScheme.tertiary
                 Box(
                     modifier = Modifier
                         .width(with(density) { tabWidthPx.toDp() })
                         .height(with(density) { rowSize.height.toDp() })
                         .graphicsLayer {
                             translationX = animatedPillOffset
-                            // Around its own centre, so the indicator draws out
-                            // both ways rather than growing a tail off one edge —
-                            // a leading edge that ran ahead of the glyph it is
-                            // meant to be behind would read as two things moving,
-                            // not one thing stretching.
                             scaleX = 1f + lag * STRETCH
                             scaleY = 1f - lag * STRETCH * SQUASH
                         }
+                        .shadow(
+                            elevation = 6.dp,
+                            shape = pillShape,
+                            clip = false,
+                            ambientColor = primary.copy(alpha = 0.45f),
+                            spotColor = primary.copy(alpha = 0.45f),
+                        )
                         .clip(pillShape)
                         .background(
-                            if (isLight) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
-                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-                        ),
-                )
+                            Brush.linearGradient(
+                                colors = if (isLight) listOf(
+                                    Color.White.copy(alpha = 0.70f),
+                                    primary.copy(alpha = 0.22f),
+                                    tertiary.copy(alpha = 0.14f),
+                                ) else listOf(
+                                    Color.White.copy(alpha = 0.18f),
+                                    primary.copy(alpha = 0.28f),
+                                    tertiary.copy(alpha = 0.16f),
+                                ),
+                                start = Offset.Zero,
+                                end = Offset.Infinite,
+                            )
+                        )
+                        .border(
+                            width = 1.2.dp,
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.55f),
+                                    primary.copy(alpha = 0.40f),
+                                )
+                            ),
+                            shape = pillShape,
+                        )
+                        .drawBehind {
+                            drawRect(
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.White.copy(alpha = 0.28f),
+                                        Color.Transparent,
+                                    ),
+                                    startY = 0f,
+                                    endY = size.height * 0.45f,
+                                ),
+                                size = Size(size.width, size.height * 0.45f),
+                            )
+                        },
+                    contentAlignment = Alignment.BottomCenter,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .padding(bottom = 3.dp)
+                            .width(18.dp)
+                            .height(3.dp)
+                            .shadow(
+                                elevation = 4.dp,
+                                shape = RoundedCornerShape(percent = 50),
+                                ambientColor = primary,
+                                spotColor = primary,
+                            )
+                            .clip(RoundedCornerShape(percent = 50))
+                            .background(primary.copy(alpha = 0.90f)),
+                    )
+                }
             }
 
             Row(
@@ -436,9 +496,14 @@ private fun BottomBarItem(
     // The same spring the indicator rides, so the glyph arriving and the glass
     // arriving are one movement rather than two that nearly agree.
     val scale by animateFloatAsState(
-        targetValue = if (selected) 1.08f else 1f,
+        targetValue = if (selected) 1.15f else 1f,
         animationSpec = glassSpec,
         label = "tabScale",
+    )
+    val floatY by animateDpAsState(
+        targetValue = if (selected) (-1.5).dp else 0.dp,
+        animationSpec = glassSpec,
+        label = "tabFloatY",
     )
     val haptics = rememberHaptics()
     val tint by animateColorAsState(
@@ -473,12 +538,15 @@ private fun BottomBarItem(
                 .graphicsLayer {
                     scaleX = scale
                     scaleY = scale
+                    translationY = floatY.toPx()
                 },
         )
         Spacer(Modifier.height(TAB_ICON_LABEL_GAP))
         Text(
             text = tab.label,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            ),
             color = tint,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

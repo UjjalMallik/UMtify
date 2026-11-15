@@ -435,24 +435,6 @@ object YtMusicRepository {
         val isLongEpisodeOrPodcast = song.durationMillis() > 480_000L || song.isVideoOrigin
 
         if (isValidYoutubeId) {
-            // Check counterpart from next first
-            val counterpartId = runCatching {
-                InnertubeParser.parseCounterpartVideoId(Innertube.next(song.videoId), song.videoId)
-            }.getOrNull()
-
-            if (!counterpartId.isNullOrBlank()) {
-                val resolvedSong = runCatching { trackLinks(counterpartId).getOrNull() }.getOrNull()
-                    ?.copy(isVideo = true, isVideoOrigin = true)
-                    ?: song.copy(
-                        videoId = counterpartId,
-                        isVideo = true,
-                        isVideoOrigin = true,
-                    )
-                Log.d(TAG, "video switch counterpart: '${song.title}' -> '${resolvedSong.title}' ($counterpartId)")
-                videoVersionCache[song.videoId] = resolvedSong
-                return resolvedSong
-            }
-
             // For podcasts / video episodes, the current track's videoId itself is the exact video
             if (isLongEpisodeOrPodcast) {
                 val resolvedSong = song.copy(isVideo = true, isVideoOrigin = true)
@@ -469,6 +451,24 @@ object YtMusicRepository {
             if (hasVideoStreams) {
                 val resolvedSong = song.copy(isVideo = true, isVideoOrigin = true)
                 Log.d(TAG, "video switch current ID has video streams: '${song.title}' ($song.videoId)")
+                videoVersionCache[song.videoId] = resolvedSong
+                return resolvedSong
+            }
+
+            // Check counterpart from next
+            val counterpartId = runCatching {
+                InnertubeParser.parseCounterpartVideoId(Innertube.next(song.videoId), song.videoId)
+            }.getOrNull()
+
+            if (!counterpartId.isNullOrBlank()) {
+                val resolvedSong = runCatching { trackLinks(counterpartId).getOrNull() }.getOrNull()
+                    ?.copy(isVideo = true, isVideoOrigin = true)
+                    ?: song.copy(
+                        videoId = counterpartId,
+                        isVideo = true,
+                        isVideoOrigin = true,
+                    )
+                Log.d(TAG, "video switch counterpart: '${song.title}' -> '${resolvedSong.title}' ($counterpartId)")
                 videoVersionCache[song.videoId] = resolvedSong
                 return resolvedSong
             }

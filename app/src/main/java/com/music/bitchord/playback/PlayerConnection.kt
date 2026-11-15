@@ -253,6 +253,12 @@ fun Song.toSongBundle(): Bundle = bundleOf(
 }
 
 fun songFromBundle(b: Bundle): Song {
+    if (!b.containsKey("videoId")) {
+        val fromMediaItem = runCatching { MediaItem.fromBundle(b).toSong() }.getOrNull()
+        if (fromMediaItem != null && fromMediaItem.videoId.isNotBlank()) {
+            return fromMediaItem
+        }
+    }
     val queueTier = b.getString("queueTier")?.let {
         runCatching { QueueTier.valueOf(it) }.getOrNull()
     } ?: if (b.getBoolean("fromAutoplay")) QueueTier.AUTOPLAY else QueueTier.CONTEXT
