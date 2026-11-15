@@ -118,46 +118,6 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     @Composable
     override fun CanvasVideo(spec: CanvasVideoSpec, modifier: Modifier) = AndroidCanvasVideo(spec, modifier)
 
-    override val isVideoFrameRendered: StateFlow<Boolean>
-        get() = PlaybackService.isVideoFrameRendered
-
-    @Composable
-    override fun VideoPlayer(modifier: Modifier) {
-        val controller = activeController
-        val exoPlayer = PlaybackService.activeExoPlayer
-        if (controller == null && exoPlayer == null) return
-        AndroidView(
-            modifier = modifier,
-            factory = { ctx ->
-                TextureView(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    )
-                    if (exoPlayer != null) {
-                        exoPlayer.setVideoTextureView(this)
-                    } else {
-                        controller?.setVideoTextureView(this)
-                    }
-                }
-            },
-            update = { textureView ->
-                if (exoPlayer != null) {
-                    exoPlayer.setVideoTextureView(textureView)
-                } else {
-                    controller?.setVideoTextureView(textureView)
-                }
-            },
-            onRelease = { textureView ->
-                if (exoPlayer != null) {
-                    exoPlayer.clearVideoTextureView(textureView)
-                } else {
-                    controller?.clearVideoTextureView(textureView)
-                }
-            },
-        )
-    }
-
     @Composable
     override fun rememberRemoteArtworkUrl(song: Song?): String? =
         com.music.bitchord.ui.components.rememberRemoteArtworkUrl(song)
