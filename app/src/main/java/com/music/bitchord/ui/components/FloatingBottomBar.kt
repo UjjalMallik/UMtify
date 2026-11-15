@@ -502,7 +502,7 @@ private fun BottomBarItem(
     )
     val floatY by animateDpAsState(
         targetValue = if (selected) (-1.5).dp else 0.dp,
-        animationSpec = glassSpec,
+        animationSpec = spring(dampingRatio = 0.72f, stiffness = 380f),
         label = "tabFloatY",
     )
     val haptics = rememberHaptics()

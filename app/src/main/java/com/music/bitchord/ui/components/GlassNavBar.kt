@@ -221,16 +221,6 @@ fun GlassNavBar(
         tabs.forEachIndexed { index, tab ->
             val isSelected = index == selectedIndex
             val tint = if (isSelected) Color.White else unselectedColor
-            val tabScale by animateFloatAsState(
-                targetValue = if (isSelected) 1.15f else 1f,
-                animationSpec = spring(dampingRatio = 0.72f, stiffness = 380f),
-                label = "tabScale_$index",
-            )
-            val tabFloatY by animateDpAsState(
-                targetValue = if (isSelected) (-1.5).dp else 0.dp,
-                animationSpec = spring(dampingRatio = 0.72f, stiffness = 380f),
-                label = "tabFloatY_$index",
-            )
             val onClick = {
                 if (!isSelected) haptics.play(Haptic.Select)
                 currentOnTabSelected(index)
@@ -250,6 +240,16 @@ fun GlassNavBar(
                 tab(
                     key = index,
                     icon = {
+                        val tabScale by animateFloatAsState(
+                            targetValue = if (isSelected) 1.15f else 1f,
+                            animationSpec = spring(dampingRatio = 0.72f, stiffness = 380f),
+                            label = "tabScale_$index",
+                        )
+                        val tabFloatY by animateDpAsState(
+                            targetValue = if (isSelected) (-1.5).dp else 0.dp,
+                            animationSpec = spring(dampingRatio = 0.72f, stiffness = 380f),
+                            label = "tabFloatY_$index",
+                        )
                         Icon(
                             imageVector = tab.icon,
                             contentDescription = tab.label,
