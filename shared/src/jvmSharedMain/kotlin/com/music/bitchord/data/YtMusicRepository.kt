@@ -3,6 +3,7 @@ package com.music.bitchord.data
 import com.music.bitchord.data.DebugLog as Log
 import com.music.bitchord.data.innertube.Innertube
 import com.music.bitchord.data.innertube.InnertubeParser
+import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.Account
 import com.music.bitchord.data.model.AccountChannel
 import com.music.bitchord.data.model.isExactArtistMatch
@@ -23,6 +24,7 @@ import com.music.bitchord.data.model.ShelfItem
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.SongMenu
 import com.music.bitchord.data.model.UserPlaylist
+import com.music.bitchord.data.model.durationMillis
 import com.music.bitchord.data.sources.TrackMatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -429,8 +431,8 @@ object YtMusicRepository {
         val isValidYoutubeId = song.videoId.length == 11 &&
             song.videoId.all { it.isLetterOrDigit() || it == '-' || it == '_' }
 
-        // Check if podcast/long episode (> 8 minutes = 480 seconds) or explicitly video-origin
-        val isLongEpisodeOrPodcast = (song.durationSec ?: 0L) > 480L || song.isVideoOrigin
+        // Check if podcast/long episode (> 8 minutes = 480 seconds = 480,000 ms) or explicitly video-origin
+        val isLongEpisodeOrPodcast = song.durationMillis() > 480_000L || song.isVideoOrigin
 
         if (isValidYoutubeId) {
             // Check counterpart from next first
@@ -460,7 +462,7 @@ object YtMusicRepository {
             }
 
             // Check if current ID has direct video streams
-            val hasVideoStreams = runCatching {
+            val hasVideoStreams = runCatching<Boolean> {
                 StreamResolver.hasDirectVideoStreams(song.videoId)
             }.getOrDefault(false)
 
