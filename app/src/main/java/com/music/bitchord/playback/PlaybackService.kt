@@ -1022,13 +1022,11 @@ class PlaybackService : MediaLibraryService() {
         }
 
         override fun onRenderedFirstFrame() {
-            isVideoFrameRendered.value = true
+            // Video rendering is handled on TextureView in AndroidPlayerHost
         }
 
         override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
-            if (videoSize.width > 0 && videoSize.height > 0) {
-                isVideoFrameRendered.value = true
-            }
+            // Video rendering is handled on TextureView in AndroidPlayerHost
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -1056,9 +1054,9 @@ class PlaybackService : MediaLibraryService() {
                 isVideoMode = false
                 currentVideoTrackId = null
                 activeVideoTrackId.value = null
+                activeVideoSong.value = null
                 webViewFallbackVideoId.value = null
                 isVideoFrameRendered.value = false
-                exoPlayer.volume = 1f
                 (exoPlayer.trackSelector as? DefaultTrackSelector)?.let { selector ->
                     selector.setParameters(
                         selector.buildUponParameters()
@@ -2631,12 +2629,14 @@ class PlaybackService : MediaLibraryService() {
         isVideoMode = true
         currentVideoTrackId = targetSong.videoId
         activeVideoTrackId.value = targetSong.videoId
+        activeVideoSong.value = targetSong
         webViewFallbackVideoId.value = targetSong.videoId
-        isVideoFrameRendered.value = true
+        isVideoFrameRendered.value = false
 
-        // Mute active player audio so YouTube embedded video audio plays cleanly without echo
-        activePlayer.volume = 0f
-        activePlayer.play()
+        // NEVER mute active player audio! Main ExoPlayer keeps playing audio stream at full volume.
+        if (!activePlayer.isPlaying && activePlayer.playWhenReady) {
+            activePlayer.play()
+        }
         refreshCustomLayouts()
 
         // If targetSong.videoId is not already a valid 11-char YouTube ID, resolve OMV in background
@@ -2650,6 +2650,7 @@ class PlaybackService : MediaLibraryService() {
                         if (isVideoMode) {
                             currentVideoTrackId = omv.videoId
                             activeVideoTrackId.value = omv.videoId
+                            activeVideoSong.value = omv
                             webViewFallbackVideoId.value = omv.videoId
                         }
                     }
@@ -2666,11 +2667,11 @@ class PlaybackService : MediaLibraryService() {
         isVideoMode = false
         currentVideoTrackId = null
         activeVideoTrackId.value = null
+        activeVideoSong.value = null
         webViewFallbackVideoId.value = null
         isVideoFrameRendered.value = false
 
-        // Restore main player audio volume
-        activePlayer.volume = 1f
+        // Main player audio remains active and unmuted
         (activePlayer.trackSelector as? DefaultTrackSelector)?.let { selector ->
             selector.setParameters(
                 selector.buildUponParameters()
@@ -9308,6 +9309,7 @@ class PlaybackService : MediaLibraryService() {
         val isVideoFrameRendered = MutableStateFlow(false)
         /** Active videoId when in video mode. */
         val activeVideoTrackId = MutableStateFlow<String?>(null)
+        val activeVideoSong = MutableStateFlow<Song?>(null)
         val webViewFallbackVideoId = MutableStateFlow<String?>(null)
         const val MEDIA_ROOT_ID = "root"
         const val MEDIA_RECENTS_ID = "recents"

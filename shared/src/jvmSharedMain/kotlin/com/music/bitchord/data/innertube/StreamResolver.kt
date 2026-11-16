@@ -194,6 +194,10 @@ object StreamResolver {
 
     private val init by lazy { NewPipe.init(OkHttpDownloader()) }
 
+    internal fun ensureInit() {
+        init
+    }
+
     /**
      * The extractor's own leash on [Http.client].
      *
@@ -533,6 +537,18 @@ object StreamResolver {
         val info = resolveVideoPlaybackInfo(videoId)
         return info?.videoUri ?: resolve(videoId)
     }
+
+    suspend fun resolveAnonymousVideoStream(
+        trackTitle: String,
+        trackArtist: String,
+        currentMediaId: String,
+        durationSec: Int,
+    ): ResolvedVideoStream? = PipePipeVideoExtractor.resolveAnonymousVideoStream(
+        trackTitle = trackTitle,
+        trackArtist = trackArtist,
+        currentMediaId = currentMediaId,
+        durationSec = durationSec,
+    )
 
     /** Per-track loudness, read once and kept for as long as the process runs. */
     private val loudness = ConcurrentHashMap<String, Double>()

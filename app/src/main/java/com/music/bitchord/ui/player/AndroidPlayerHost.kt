@@ -14,25 +14,36 @@ import android.provider.Settings
 import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
-import android.webkit.WebChromeClient
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import com.music.bitchord.data.innertube.PipePipeVideoExtractor
+import com.music.bitchord.data.innertube.ResolvedVideoStream
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import androidx.media3.session.MediaController
 import com.music.bitchord.data.SongEditStore
 import com.music.bitchord.data.canvas.CanvasArtwork
@@ -271,33 +282,79 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     @Composable
     override fun VideoPlayer(modifier: Modifier) {
         val activeTrackId by PlaybackService.activeVideoTrackId.collectAsStateWithLifecycle()
-        val player = PlaybackService.activeExoPlayer ?: activeController
-        val videoId = activeTrackId
-            ?: player?.currentMediaItem?.mediaId
+        val activeSong by PlaybackService.activeVideoSong.collectAsStateWithLifecycle()
+        val mainPlayer = PlaybackService.activeExoPlayer ?: activeController
+
+        val currentMediaItem = mainPlayer?.currentMediaItem
+        val mediaId = activeTrackId
+            ?: activeSong?.videoId
+            ?: currentMediaItem?.mediaId
             ?: return
 
-        var webViewRef by remember { mutableStateOf<WebView?>(null) }
+        val title = activeSong?.title
+            ?: currentMediaItem?.mediaMetadata?.title?.toString().orEmpty()
+        val artist = activeSong?.artist
+            ?: currentMediaItem?.mediaMetadata?.artist?.toString().orEmpty()
+        val durationSec = activeSong?.durationSec
+            ?: ((mainPlayer?.duration?.takeIf { it > 0 } ?: 0L) / 1000L).toInt()
 
-        // Seamless sync: bridge play/pause and seeking between main audio player and YouTube WebView
-        DisposableEffect(player) {
-            if (player == null) return@DisposableEffect onDispose {}
+        val context = LocalContext.current
 
+        // Dedicated ExoPlayer for video with volume = 0f to NEVER mute main audio player
+        val videoExoPlayer = remember(context) {
+            ExoPlayer.Builder(
+                context,
+                DefaultRenderersFactory(context).setEnableDecoderFallback(true),
+            ).build().apply {
+                volume = 0f
+                videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
+            }
+        }
+
+        // Clean up video player on dispose
+        DisposableEffect(videoExoPlayer) {
+            onDispose {
+                PlaybackService.isVideoFrameRendered.value = false
+                videoExoPlayer.stop()
+                videoExoPlayer.clearMediaItems()
+                videoExoPlayer.release()
+            }
+        }
+
+        // Listen for rendered first frame or video size to notify UI that video is ready
+        DisposableEffect(videoExoPlayer) {
             val listener = object : Player.Listener {
-                override fun onIsPlayingChanged(isPlaying: Boolean) {
-                    val cmd = if (isPlaying) {
-                        """(function() {
-                            const v = document.querySelector('video');
-                            if (v && v.paused) v.play();
-                            window.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
-                        })();"""
-                    } else {
-                        """(function() {
-                            const v = document.querySelector('video');
-                            if (v && !v.paused) v.pause();
-                            window.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
-                        })();"""
+                override fun onRenderedFirstFrame() {
+                    PlaybackService.isVideoFrameRendered.value = true
+                }
+
+                override fun onVideoSizeChanged(videoSize: VideoSize) {
+                    if (videoSize.width > 0 && videoSize.height > 0) {
+                        PlaybackService.isVideoFrameRendered.value = true
                     }
-                    webViewRef?.evaluateJavascript(cmd, null)
+                }
+            }
+            videoExoPlayer.addListener(listener)
+            onDispose {
+                videoExoPlayer.removeListener(listener)
+            }
+        }
+
+        // Synchronize play/pause and seeks from main player
+        DisposableEffect(mainPlayer, videoExoPlayer) {
+            if (mainPlayer == null) return@DisposableEffect onDispose {}
+
+            val syncListener = object : Player.Listener {
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    if (isPlaying) {
+                        if (!videoExoPlayer.isPlaying && videoExoPlayer.playbackState != Player.STATE_ENDED) {
+                            videoExoPlayer.play()
+                        }
+                    } else {
+                        if (videoExoPlayer.isPlaying) {
+                            videoExoPlayer.pause()
+                        }
+                    }
                 }
 
                 override fun onPositionDiscontinuity(
@@ -306,136 +363,96 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     reason: Int,
                 ) {
                     if (reason == Player.DISCONTINUITY_REASON_SEEK) {
-                        val targetSec = (newPosition.positionMs / 1000f).coerceAtLeast(0f)
-                        val cmd = """(function() {
-                            const v = document.querySelector('video');
-                            if (v) v.currentTime = $targetSec;
-                            window.postMessage('{"event":"command","func":"seekTo","args":[$targetSec, true]}', '*');
-                        })();"""
-                        webViewRef?.evaluateJavascript(cmd, null)
+                        val dur = videoExoPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
+                        videoExoPlayer.seekTo(newPosition.positionMs.coerceAtMost(dur))
                     }
                 }
             }
 
-            player.addListener(listener)
+            mainPlayer.addListener(syncListener)
+            if (mainPlayer.isPlaying) {
+                videoExoPlayer.play()
+            } else {
+                videoExoPlayer.pause()
+            }
+
             onDispose {
-                player.removeListener(listener)
+                mainPlayer.removeListener(syncListener)
             }
         }
 
-        val startSec = ((player?.currentPosition ?: 0L) / 1000L).coerceAtLeast(0L)
-        val embedUrl = "https://www.youtube-nocookie.com/embed/$videoId" +
-            "?autoplay=1&mute=0&controls=0&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&playsinline=1&enablejsapi=1&start=$startSec"
+        var resolvedStream by remember(mediaId) { mutableStateOf<ResolvedVideoStream?>(null) }
+
+        // Resolve anonymous video stream via PipePipe multi-tier pipeline
+        LaunchedEffect(mediaId, title, artist, durationSec) {
+            PlaybackService.isVideoFrameRendered.value = false
+            val stream = PipePipeVideoExtractor.resolveAnonymousVideoStream(
+                trackTitle = title,
+                trackArtist = artist,
+                currentMediaId = mediaId,
+                durationSec = durationSec,
+            )
+            resolvedStream = stream
+
+            if (stream != null) {
+                val dataSourceFactory = DefaultHttpDataSource.Factory()
+                    .setUserAgent(stream.userAgent)
+                    .setAllowCrossProtocolRedirects(true)
+                    .setConnectTimeoutMs(8000)
+                    .setReadTimeoutMs(8000)
+
+                val mediaSource = if (stream.isHls) {
+                    HlsMediaSource.Factory(dataSourceFactory)
+                        .createMediaSource(MediaItem.fromUri(stream.url))
+                } else {
+                    ProgressiveMediaSource.Factory(dataSourceFactory)
+                        .createMediaSource(MediaItem.fromUri(stream.url))
+                }
+
+                val currentPos = mainPlayer?.currentPosition ?: 0L
+                val currentDur = mainPlayer?.duration?.takeIf { it > 0 } ?: Long.MAX_VALUE
+                videoExoPlayer.setMediaSource(mediaSource)
+                videoExoPlayer.prepare()
+                if (currentPos > 0L) {
+                    videoExoPlayer.seekTo(currentPos.coerceAtMost(currentDur))
+                }
+                videoExoPlayer.playWhenReady = mainPlayer?.isPlaying ?: true
+            }
+        }
+
+        // Tightly sync drift for long podcasts / episodes (>10 min) where video ID matches
+        LaunchedEffect(mainPlayer, videoExoPlayer, durationSec, mediaId, resolvedStream?.videoId) {
+            val isExactEpisode = (resolvedStream?.videoId == mediaId) && durationSec > 600
+            if (isExactEpisode && mainPlayer != null) {
+                while (isActive) {
+                    delay(1000L)
+                    if (mainPlayer.isPlaying && videoExoPlayer.isPlaying) {
+                        val audioPos = mainPlayer.currentPosition
+                        val videoPos = videoExoPlayer.currentPosition
+                        if (kotlin.math.abs(videoPos - audioPos) > 400L) {
+                            val dur = videoExoPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
+                            videoExoPlayer.seekTo(audioPos.coerceAtMost(dur))
+                        }
+                    }
+                }
+            }
+        }
 
         AndroidView(
             factory = { ctx ->
-                WebView(ctx).apply {
+                TextureView(ctx).apply {
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
                     )
-                    setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                    setBackgroundColor(android.graphics.Color.BLACK)
-                    settings.apply {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        mediaPlaybackRequiresUserGesture = false
-                        loadWithOverviewMode = true
-                        useWideViewPort = true
-                        setSupportZoom(false)
-                        displayZoomControls = false
-                        cacheMode = WebSettings.LOAD_DEFAULT
-                    }
-
-                    val adBlockAndCleanJs = """
-                        (function() {
-                            function injectStyle() {
-                                if (document.getElementById('umtify-video-clean-style')) return;
-                                const style = document.createElement('style');
-                                style.id = 'umtify-video-clean-style';
-                                style.textContent = `
-                                    .ytp-chrome-top, .ytp-chrome-bottom, .ytp-watermark,
-                                    .ytp-youtube-button, .ytp-pause-overlay, .ytp-ce-element,
-                                    .ytp-ce-covering-overlay, .ytp-ce-element-shadow,
-                                    .ytp-gradient-top, .ytp-gradient-bottom, .ytp-show-cards-title,
-                                    .ytp-contextmenu, .ytp-title-channel, .ytp-title,
-                                    .ytp-share-button, .ytp-watch-later-button, .branding-img,
-                                    .ytp-paid-content-overlay, .ytp-ad-overlay-container,
-                                    .video-ads, .ytp-ad-module, .ytp-ad-player-overlay,
-                                    .ytp-ad-image-overlay {
-                                        display: none !important;
-                                        opacity: 0 !important;
-                                        pointer-events: none !important;
-                                        visibility: hidden !important;
-                                    }
-                                    html, body {
-                                        margin: 0 !important;
-                                        padding: 0 !important;
-                                        overflow: hidden !important;
-                                        background-color: #000000 !important;
-                                        width: 100% !important;
-                                        height: 100% !important;
-                                    }
-                                    .html5-video-player {
-                                        background-color: #000000 !important;
-                                    }
-                                    video {
-                                        width: 100% !important;
-                                        height: 100% !important;
-                                        object-fit: cover !important;
-                                    }
-                                `;
-                                (document.head || document.documentElement).appendChild(style);
-                            }
-                            function cleanAndSkip() {
-                                injectStyle();
-                                const v = document.querySelector('video');
-                                const ad = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay');
-                                if (ad && v && isFinite(v.duration)) {
-                                    v.currentTime = v.duration;
-                                }
-                                const skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button');
-                                if (skipBtn) skipBtn.click();
-                            }
-                            injectStyle();
-                            cleanAndSkip();
-                            setInterval(cleanAndSkip, 300);
-                        })();
-                    """.trimIndent()
-
-                    webChromeClient = object : WebChromeClient() {
-                        override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                            super.onProgressChanged(view, newProgress)
-                            if (newProgress > 25) {
-                                PlaybackService.isVideoFrameRendered.value = true
-                                view?.evaluateJavascript(adBlockAndCleanJs, null)
-                            }
-                        }
-                    }
-
-                    webViewClient = object : WebViewClient() {
-                        override fun onPageFinished(view: WebView?, url: String?) {
-                            super.onPageFinished(view, url)
-                            PlaybackService.isVideoFrameRendered.value = true
-                            view?.evaluateJavascript(adBlockAndCleanJs, null)
-                        }
-                    }
-
-                    loadUrl(embedUrl)
-                    webViewRef = this
+                    videoExoPlayer.setVideoTextureView(this)
                 }
             },
-            update = { view ->
-                webViewRef = view
-                if (view.url?.contains(videoId) != true) {
-                    view.loadUrl(embedUrl)
-                }
+            update = { textureView ->
+                videoExoPlayer.setVideoTextureView(textureView)
             },
-            onRelease = { view ->
-                if (webViewRef == view) webViewRef = null
-                view.stopLoading()
-                view.loadUrl("about:blank")
-                view.destroy()
+            onRelease = { textureView ->
+                videoExoPlayer.clearVideoTextureView(textureView)
             },
             modifier = modifier,
         )
