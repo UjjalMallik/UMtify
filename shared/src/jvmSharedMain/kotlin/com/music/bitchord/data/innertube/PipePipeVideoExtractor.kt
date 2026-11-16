@@ -125,7 +125,7 @@ object PipePipeVideoExtractor {
         }
     }
 
-    fun searchVideoCandidates(
+    suspend fun searchVideoCandidates(
         trackTitle: String,
         trackArtist: String,
     ): List<String> {
