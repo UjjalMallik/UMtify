@@ -15,6 +15,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.ConnectionPool
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
@@ -582,7 +583,9 @@ object StreamResolver {
         val shouldSearch = !isYtId || candidateOffset > 0
         if (shouldSearch) {
             onStatusUpdate?.invoke("Searching video candidates...")
-            val omvCandidates = PipePipeVideoExtractor.searchVideoCandidates(title, artist)
+            val omvCandidates = withTimeoutOrNull(2000L) {
+                PipePipeVideoExtractor.searchVideoCandidates(title, artist)
+            }.orEmpty()
             candidateIds.addAll(omvCandidates.filter { it != videoId })
         }
 
@@ -611,7 +614,7 @@ object StreamResolver {
 
             // Method 1: StreamResolver's InnerTube & NewPipe engine
             onStatusUpdate?.invoke("Extracting video stream...")
-            val directInfo = resolveVideoPlaybackInfo(candidateId)
+            val directInfo = withTimeoutOrNull(1800L) { resolveVideoPlaybackInfo(candidateId) }
             if (directInfo != null && directInfo.videoUri.isNotBlank()) {
                 val headers = mediaHeadersFor(directInfo.videoUri)
                 val ua = directInfo.userAgent.ifBlank {
@@ -628,7 +631,9 @@ object StreamResolver {
 
             // Method 2: Direct NewPipeExtractor
             onStatusUpdate?.invoke("Extracting via NewPipe...")
-            val newPipe = runCatching { PipePipeVideoExtractor.extractFromNewPipe(candidateId) }.getOrNull()
+            val newPipe = withTimeoutOrNull(1800L) {
+                runCatching { PipePipeVideoExtractor.extractFromNewPipe(candidateId) }.getOrNull()
+            }
             if (newPipe != null && newPipe.url.isNotBlank()) {
                 TrackLog.d(TAG, "Method 2 (NewPipe) succeeded for $candidateId")
                 return@withContext newPipe
@@ -636,7 +641,9 @@ object StreamResolver {
 
             // Method 3: Public Piped & Invidious mirrors
             onStatusUpdate?.invoke("Extracting via fallback mirror...")
-            val pipedOrInvidious = runCatching { PipePipeVideoExtractor.extractFromPipedOrInvidious(candidateId) }.getOrNull()
+            val pipedOrInvidious = withTimeoutOrNull(1800L) {
+                runCatching { PipePipeVideoExtractor.extractFromPipedOrInvidious(candidateId) }.getOrNull()
+            }
             if (pipedOrInvidious != null && pipedOrInvidious.url.isNotBlank()) {
                 TrackLog.d(TAG, "Method 3 (Piped/Invidious) succeeded for $candidateId")
                 return@withContext pipedOrInvidious
@@ -647,10 +654,12 @@ object StreamResolver {
         if (!shouldSearch) {
             TrackLog.d(TAG, "Direct video ID $videoId failed, falling back to OMV search...")
             onStatusUpdate?.invoke("Searching official video...")
-            val omvCandidates = PipePipeVideoExtractor.searchVideoCandidates(title, artist)
+            val omvCandidates = withTimeoutOrNull(2000L) {
+                PipePipeVideoExtractor.searchVideoCandidates(title, artist)
+            }.orEmpty()
             for (candidateId in omvCandidates.filter { it != videoId }) {
                 onStatusUpdate?.invoke("Extracting video stream...")
-                val directInfo = resolveVideoPlaybackInfo(candidateId)
+                val directInfo = withTimeoutOrNull(1800L) { resolveVideoPlaybackInfo(candidateId) }
                 if (directInfo != null && directInfo.videoUri.isNotBlank()) {
                     val headers = mediaHeadersFor(directInfo.videoUri)
                     val ua = directInfo.userAgent.ifBlank {
@@ -665,13 +674,17 @@ object StreamResolver {
                     )
                 }
 
-                val newPipe = runCatching { PipePipeVideoExtractor.extractFromNewPipe(candidateId) }.getOrNull()
+                val newPipe = withTimeoutOrNull(1800L) {
+                    runCatching { PipePipeVideoExtractor.extractFromNewPipe(candidateId) }.getOrNull()
+                }
                 if (newPipe != null && newPipe.url.isNotBlank()) {
                     TrackLog.d(TAG, "OMV NewPipe candidate succeeded for $candidateId")
                     return@withContext newPipe
                 }
 
-                val pipedOrInvidious = runCatching { PipePipeVideoExtractor.extractFromPipedOrInvidious(candidateId) }.getOrNull()
+                val pipedOrInvidious = withTimeoutOrNull(1800L) {
+                    runCatching { PipePipeVideoExtractor.extractFromPipedOrInvidious(candidateId) }.getOrNull()
+                }
                 if (pipedOrInvidious != null && pipedOrInvidious.url.isNotBlank()) {
                     TrackLog.d(TAG, "OMV Piped/Invidious candidate succeeded for $candidateId")
                     return@withContext pipedOrInvidious

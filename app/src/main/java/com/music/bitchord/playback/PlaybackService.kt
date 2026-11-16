@@ -9315,6 +9315,13 @@ class PlaybackService : MediaLibraryService() {
         val activeVideoTrackId = MutableStateFlow<String?>(null)
         val activeVideoSong = MutableStateFlow<Song?>(null)
         val webViewFallbackVideoId = MutableStateFlow<String?>(null)
+
+        fun dismissVideoLoading() {
+            activeVideoTrackId.value = null
+            activeVideoSong.value = null
+            isVideoFrameRendered.value = true
+            videoStatusText.value = ""
+        }
         const val MEDIA_ROOT_ID = "root"
         const val MEDIA_RECENTS_ID = "recents"
         const val MEDIA_QUICK_PICKS_ID = "quick_picks"

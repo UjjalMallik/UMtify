@@ -46,6 +46,9 @@ import com.music.bitchord.data.innertube.StreamResolver
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import com.music.bitchord.playback.swapToVersion
+import com.music.bitchord.playback.toSong
 import androidx.media3.session.MediaController
 import com.music.bitchord.data.SongEditStore
 import com.music.bitchord.data.canvas.CanvasArtwork
@@ -419,16 +422,42 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         LaunchedEffect(mediaId, retryCount) {
             PlaybackService.isVideoFrameRendered.value = false
             PlaybackService.videoStatusText.value = "Finding video..."
-            val stream = StreamResolver.resolveVideoStreamForTrack(
-                videoId = mediaId,
-                title = title,
-                artist = artist,
-                durationSec = durationSec,
-                candidateOffset = retryCount,
-                onStatusUpdate = { status ->
-                    PlaybackService.videoStatusText.value = status
-                },
-            )
+
+            // 1. Strict 3-second timeout on video search and resolution
+            var stream = withTimeoutOrNull(3000L) {
+                StreamResolver.resolveVideoStreamForTrack(
+                    videoId = mediaId,
+                    title = title,
+                    artist = artist,
+                    durationSec = durationSec,
+                    candidateOffset = retryCount,
+                    onStatusUpdate = { status ->
+                        PlaybackService.videoStatusText.value = status
+                    },
+                )
+            }
+
+            // 2. If search took longer than 3s or returned null, instantly fallback to direct mediaId or Piped API
+            if (stream == null) {
+                PlaybackService.videoStatusText.value = "Connecting stream..."
+                stream = withTimeoutOrNull(2500L) {
+                    val direct = StreamResolver.resolveVideoPlaybackInfo(mediaId)
+                    if (direct != null && direct.videoUri.isNotBlank()) {
+                        val ua = direct.userAgent.ifBlank {
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+                        }
+                        ResolvedVideoStream(
+                            url = direct.videoUri,
+                            isHls = direct.isHls,
+                            userAgent = ua,
+                            videoId = mediaId,
+                        )
+                    } else {
+                        PipePipeVideoExtractor.extractFromPipedApi(mediaId)
+                    }
+                }
+            }
+
             resolvedStream = stream
 
             if (stream != null) {
@@ -469,7 +498,14 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                 videoExoPlayer.playWhenReady = true
             } else {
                 TrackLog.w("VideoPlayer", "Failed to resolve video stream for $mediaId ($title - $artist, retry=$retryCount)")
-                PlaybackService.videoStatusText.value = "Video unavailable"
+                // Stream extraction failed or timed out after fallback:
+                // Auto-dismiss spinner and fallback cleanly to audio
+                PlaybackService.dismissVideoLoading()
+                val currentSong = activeSong ?: currentMediaItem?.toSong()
+                if (currentSong != null) {
+                    activeController?.swapToVersion(currentSong.copy(isVideo = false))
+                }
+                Toast.makeText(context, "Video stream unavailable, playing audio", Toast.LENGTH_SHORT).show()
             }
         }
 

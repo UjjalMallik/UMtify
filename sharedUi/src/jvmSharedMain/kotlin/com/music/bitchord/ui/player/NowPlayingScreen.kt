@@ -917,6 +917,16 @@ fun NowPlayingScreen(
     val canvas = rememberCanvasArtwork(song)
     val videoFrameRendered by PlayerPlatform.host.isVideoFrameRendered.collectAsStateWithLifecycle()
     val videoStatusText by PlayerPlatform.host.videoStatusText.collectAsStateWithLifecycle()
+
+    // Guard against infinite video loading: if video frames fail to render within 5 seconds, fallback to audio
+    LaunchedEffect(song.videoId, song.isVideo, videoFrameRendered) {
+        if (song.isVideo && !videoFrameRendered) {
+            delay(5000L)
+            if (!videoFrameRendered) {
+                onSwitchToAudio?.invoke()
+            }
+        }
+    }
     // What the credits say. The canvas above, the palette, the album link and
     // everything else addressed by id keep the original track: a renamed song
     // is the same song, only wearing a different label.
