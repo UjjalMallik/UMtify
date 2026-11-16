@@ -53,6 +53,7 @@ import com.music.bitchord.data.lyrics.LyricLine
 import com.music.bitchord.data.lyrics.LyricsTranslation
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.SongEdit
+import com.music.bitchord.data.model.durationMillis
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.LastPlayerScreen
 import com.music.bitchord.playback.AudioOutputStatus
@@ -295,8 +296,11 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             ?: currentMediaItem?.mediaMetadata?.title?.toString().orEmpty()
         val artist = activeSong?.artist
             ?: currentMediaItem?.mediaMetadata?.artist?.toString().orEmpty()
-        val durationSec = activeSong?.durationSec
-            ?: ((mainPlayer?.duration?.takeIf { it > 0 } ?: 0L) / 1000L).toInt()
+        val durationSec = (
+            (activeSong?.durationMillis()?.takeIf { it > 0L }
+                ?: mainPlayer?.duration?.takeIf { it > 0L }
+                ?: 0L) / 1000L
+        ).toInt()
 
         val context = LocalContext.current
 
