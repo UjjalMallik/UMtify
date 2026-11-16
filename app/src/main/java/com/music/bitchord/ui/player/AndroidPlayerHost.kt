@@ -39,8 +39,10 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import com.music.bitchord.data.TrackLog
 import com.music.bitchord.data.innertube.PipePipeVideoExtractor
 import com.music.bitchord.data.innertube.ResolvedVideoStream
+import com.music.bitchord.data.innertube.StreamResolver
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -325,6 +327,8 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             }
         }
 
+        var retryCount by remember(mediaId) { mutableStateOf(0) }
+
         // Listen for rendered first frame or video size to notify UI that video is ready
         DisposableEffect(videoExoPlayer) {
             val listener = object : Player.Listener {
@@ -339,8 +343,15 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
-                    if (playbackState == Player.STATE_READY && videoExoPlayer.videoSize.width > 0) {
+                    if (playbackState == Player.STATE_READY) {
                         PlaybackService.isVideoFrameRendered.value = true
+                    }
+                }
+
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    TrackLog.w("VideoPlayer", "videoExoPlayer error: ${error.message}, errorCode: ${error.errorCodeName}")
+                    if (retryCount < 2) {
+                        retryCount++
                     }
                 }
             }
@@ -393,29 +404,45 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
         var resolvedStream by remember(mediaId) { mutableStateOf<ResolvedVideoStream?>(null) }
 
-        // Resolve anonymous video stream via PipePipe multi-tier pipeline
-        LaunchedEffect(mediaId, title, artist, durationSec) {
+        // Resolve video stream via StreamResolver working YouTube pipeline
+        LaunchedEffect(mediaId, title, artist, durationSec, retryCount) {
             PlaybackService.isVideoFrameRendered.value = false
-            val stream = PipePipeVideoExtractor.resolveAnonymousVideoStream(
-                trackTitle = title,
-                trackArtist = artist,
-                currentMediaId = mediaId,
-                durationSec = durationSec,
-            )
+            val stream = if (retryCount == 0) {
+                StreamResolver.resolveVideoStreamForTrack(
+                    videoId = mediaId,
+                    title = title,
+                    artist = artist,
+                    durationSec = durationSec,
+                )
+            } else {
+                PipePipeVideoExtractor.extractFromPipedApi(mediaId)
+                    ?: PipePipeVideoExtractor.resolveAnonymousVideoStream(
+                        trackTitle = title,
+                        trackArtist = artist,
+                        currentMediaId = mediaId,
+                        durationSec = durationSec,
+                    )
+            }
             resolvedStream = stream
 
             if (stream != null) {
+                val headers = StreamResolver.mediaHeadersFor(stream.url)
+                val ua = stream.userAgent.ifBlank {
+                    headers["User-Agent"] ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+                }
+
+                val reqHeaders = HashMap<String, String>().apply {
+                    put("Referer", "https://www.youtube.com/")
+                    put("Origin", "https://www.youtube.com")
+                    headers.forEach { (k, v) -> put(k, v) }
+                }
+
                 val dataSourceFactory = DefaultHttpDataSource.Factory()
-                    .setUserAgent(stream.userAgent.ifBlank { "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" })
-                    .setDefaultRequestProperties(
-                        mapOf(
-                            "Referer" to "https://www.youtube.com/",
-                            "Origin" to "https://www.youtube.com",
-                        )
-                    )
+                    .setUserAgent(ua)
+                    .setDefaultRequestProperties(reqHeaders)
                     .setAllowCrossProtocolRedirects(true)
-                    .setConnectTimeoutMs(8000)
-                    .setReadTimeoutMs(8000)
+                    .setConnectTimeoutMs(10000)
+                    .setReadTimeoutMs(10000)
 
                 val mediaSource = if (stream.isHls) {
                     HlsMediaSource.Factory(dataSourceFactory)
@@ -433,6 +460,8 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                 }
                 videoExoPlayer.prepare()
                 videoExoPlayer.playWhenReady = mainPlayer?.playWhenReady ?: true
+            } else {
+                TrackLog.w("VideoPlayer", "Failed to resolve video stream for $mediaId ($title - $artist)")
             }
         }
 
@@ -464,7 +493,9 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     videoExoPlayer.setVideoTextureView(this)
                 }
             },
-            update = { /* Surface is bound in factory and released in onRelease */ },
+            update = { textureView ->
+                videoExoPlayer.setVideoTextureView(textureView)
+            },
             onRelease = { textureView ->
                 videoExoPlayer.clearVideoTextureView(textureView)
             },

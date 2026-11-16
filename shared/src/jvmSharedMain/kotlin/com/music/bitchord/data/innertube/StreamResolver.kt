@@ -397,10 +397,10 @@ object StreamResolver {
                     val bestAudio = audioOnly.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.bitrate }
                         ?: audioOnly.maxByOrNull { it.bitrate }
 
-                    if (bestVideo != null && bestAudio != null && !bestVideo.content.isNullOrBlank() && !bestAudio.content.isNullOrBlank()) {
+                    if (bestVideo != null && !bestVideo.content.isNullOrBlank()) {
                         return@withLock VideoPlaybackInfo(
                             videoUri = bestVideo.content,
-                            audioUri = bestAudio.content,
+                            audioUri = bestAudio?.content,
                             isHls = false,
                             userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
                         )
@@ -510,7 +510,7 @@ object StreamResolver {
 
                 val vidUrl = videoAdaptive?.get("url")?.jsonPrimitive?.content
                 val audUrl = audioAdaptive?.get("url")?.jsonPrimitive?.content
-                if (!vidUrl.isNullOrBlank() && !audUrl.isNullOrBlank()) {
+                if (!vidUrl.isNullOrBlank()) {
                     return VideoPlaybackInfo(
                         videoUri = vidUrl,
                         audioUri = audUrl,
@@ -549,6 +549,53 @@ object StreamResolver {
         currentMediaId = currentMediaId,
         durationSec = durationSec,
     )
+
+    /**
+     * Resolves an anonymous video stream for the given track using the working
+     * StreamResolver pipeline (InnerTube ANDROID_VR/IOS + NewPipe extractor + Piped fallback).
+     */
+    suspend fun resolveVideoStreamForTrack(
+        videoId: String,
+        title: String,
+        artist: String,
+        durationSec: Int,
+    ): ResolvedVideoStream? = withContext(Dispatchers.IO) {
+        ensureInit()
+        val isYtId = videoId.length == 11 && videoId.all { it.isLetterOrDigit() || it == '-' || it == '_' }
+
+        if (isYtId) {
+            TrackLog.d(TAG, "Resolving video stream directly for videoId: $videoId")
+            val directInfo = resolveVideoPlaybackInfo(videoId)
+            if (directInfo != null && directInfo.videoUri.isNotBlank()) {
+                val headers = mediaHeadersFor(directInfo.videoUri)
+                val ua = directInfo.userAgent.ifBlank {
+                    headers["User-Agent"] ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+                }
+                return@withContext ResolvedVideoStream(
+                    url = directInfo.videoUri,
+                    isHls = directInfo.isHls,
+                    userAgent = ua,
+                    videoId = videoId,
+                )
+            }
+
+            // Fallback to Piped API
+            val piped = PipePipeVideoExtractor.extractFromPipedApi(videoId)
+            if (piped != null) {
+                TrackLog.d(TAG, "Piped API direct fallback succeeded for $videoId")
+                return@withContext piped
+            }
+        }
+
+        // Fallback to searching video for title & artist
+        TrackLog.d(TAG, "Searching video stream for track: $title - $artist")
+        PipePipeVideoExtractor.resolveAnonymousVideoStream(
+            trackTitle = title,
+            trackArtist = artist,
+            currentMediaId = videoId,
+            durationSec = durationSec,
+        )
+    }
 
     /** Per-track loudness, read once and kept for as long as the process runs. */
     private val loudness = ConcurrentHashMap<String, Double>()

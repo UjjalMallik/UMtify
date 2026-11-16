@@ -51,6 +51,31 @@ object PipePipeVideoExtractor {
         currentMediaId: String,
         durationSec: Int,
     ): ResolvedVideoStream? = withContext(Dispatchers.IO) {
+        if (isValidYoutubeId(currentMediaId)) {
+            streamCache[currentMediaId]?.let { return@withContext it }
+
+            val directA = runCatching { extractFromNewPipe(currentMediaId) }.getOrNull()
+            if (directA != null) {
+                streamCache[currentMediaId] = directA
+                TrackLog.d(TAG, "Direct Tier A (NewPipe) succeeded for $currentMediaId")
+                return@withContext directA
+            }
+
+            val directPiped = runCatching { extractFromPipedApi(currentMediaId) }.getOrNull()
+            if (directPiped != null) {
+                streamCache[currentMediaId] = directPiped
+                TrackLog.d(TAG, "Direct Tier B (Piped) succeeded for $currentMediaId")
+                return@withContext directPiped
+            }
+
+            val directC = runCatching { extractFromInnerTube(currentMediaId) }.getOrNull()
+            if (directC != null) {
+                streamCache[currentMediaId] = directC
+                TrackLog.d(TAG, "Direct Tier C (InnerTube) succeeded for $currentMediaId")
+                return@withContext directC
+            }
+        }
+
         val targetVideoId = resolveTargetVideoId(trackTitle, trackArtist, currentMediaId, durationSec)
         if (targetVideoId == null) {
             TrackLog.w(TAG, "Could not resolve valid YouTube video ID for '$trackTitle' by '$trackArtist'")
@@ -187,7 +212,7 @@ object PipePipeVideoExtractor {
     }
 
     // Tier A: NewPipeExtractor
-    private fun extractFromNewPipe(targetVideoId: String): ResolvedVideoStream? {
+    internal fun extractFromNewPipe(targetVideoId: String): ResolvedVideoStream? {
         StreamResolver.ensureInit()
         val extractor = ServiceList.YouTube.getStreamExtractor("https://www.youtube.com/watch?v=$targetVideoId")
         extractor.fetchPage()
@@ -249,7 +274,7 @@ object PipePipeVideoExtractor {
     }
 
     // Tier B: InnerTube ANDROID_VR & IOS Anonymous Client Extraction
-    private fun extractFromInnerTube(targetVideoId: String): ResolvedVideoStream? {
+    internal fun extractFromInnerTube(targetVideoId: String): ResolvedVideoStream? {
         val vrResult = queryInnerTubePlayer(
             videoId = targetVideoId,
             clientName = "ANDROID_VR",
@@ -381,7 +406,7 @@ object PipePipeVideoExtractor {
     }
 
     // Tier B: Instant Piped API Fallback
-    private fun extractFromPipedApi(targetVideoId: String): ResolvedVideoStream? {
+    internal fun extractFromPipedApi(targetVideoId: String): ResolvedVideoStream? {
         val pipedInstances = listOf(
             "https://pipedapi.kavin.rocks",
             "https://pipedapi.tokhmi.xyz",
