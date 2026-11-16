@@ -20,6 +20,7 @@ import org.schabi.newpipe.extractor.MediaFormat
 import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.services.youtube.linkHandler.YoutubeSearchQueryHandlerFactory
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 data class ResolvedVideoStream(
     val url: String,
@@ -66,19 +67,19 @@ object PipePipeVideoExtractor {
             return@withContext tierA
         }
 
-        // Tier B: InnerTube ANDROID_VR & IOS Anonymous Extraction
-        val tierB = extractFromInnerTube(targetVideoId)
-        if (tierB != null) {
-            streamCache[targetVideoId] = tierB
-            TrackLog.d(TAG, "Tier B (InnerTube) succeeded for $targetVideoId")
-            return@withContext tierB
+        // Tier B: Instant Piped API Fallback
+        val pipedResult = runCatching { extractFromPipedApi(targetVideoId) }.getOrNull()
+        if (pipedResult != null) {
+            streamCache[targetVideoId] = pipedResult
+            TrackLog.d(TAG, "Tier B (Piped API) succeeded for $targetVideoId")
+            return@withContext pipedResult
         }
 
-        // Tier C: Anonymous Piped API Fallback
-        val tierC = extractFromPipedApi(targetVideoId)
+        // Tier C: InnerTube ANDROID_VR & IOS Anonymous Extraction
+        val tierC = runCatching { extractFromInnerTube(targetVideoId) }.getOrNull()
         if (tierC != null) {
             streamCache[targetVideoId] = tierC
-            TrackLog.d(TAG, "Tier C (Piped API) succeeded for $targetVideoId")
+            TrackLog.d(TAG, "Tier C (InnerTube) succeeded for $targetVideoId")
             return@withContext tierC
         }
 
@@ -191,32 +192,39 @@ object PipePipeVideoExtractor {
         val extractor = ServiceList.YouTube.getStreamExtractor("https://www.youtube.com/watch?v=$targetVideoId")
         extractor.fetchPage()
 
-        // 1. Muxed progressive MP4 (360p - 720p)
+        // 1. Prioritize Muxed Streams for Speed & Reliability: itag 18 (360p MP4) or itag 22 (720p MP4)
         val muxedStreams = extractor.videoStreams?.filter { s ->
             !s.content.isNullOrBlank() &&
                 (s.format == MediaFormat.MPEG_4 || (s.format?.name ?: "").contains("MP4", ignoreCase = true))
         }.orEmpty()
-        val pickedMuxed = muxedStreams.firstOrNull { it.height in 360..720 }
-            ?: muxedStreams.maxByOrNull { it.height }
-        if (pickedMuxed != null && !pickedMuxed.content.isNullOrBlank()) {
+
+        val itagMatch = muxedStreams.firstOrNull { it.itag == 18 }
+            ?: muxedStreams.firstOrNull { it.itag == 22 }
+            ?: muxedStreams.firstOrNull { it.height in 360..720 }
+            ?: muxedStreams.firstOrNull()
+
+        if (itagMatch != null && !itagMatch.content.isNullOrBlank()) {
             return ResolvedVideoStream(
-                url = pickedMuxed.content,
+                url = itagMatch.content,
                 isHls = false,
                 userAgent = CHROME_UA,
                 videoId = targetVideoId,
             )
         }
 
-        // 2. Adaptive MP4 avc1 (480p / 360p / 720p) - video-only streams work natively since main audio is playing
+        // 2. Fallback to videoOnlyStreams (filtering for avc1 / video/mp4 at 360p or 480p)
         val videoOnlyStreams = extractor.videoOnlyStreams?.filter { s ->
             !s.content.isNullOrBlank() &&
                 (s.codec?.contains("avc1", ignoreCase = true) == true ||
                     s.format == MediaFormat.MPEG_4 ||
                     (s.format?.name ?: "").contains("MP4", ignoreCase = true))
         }.orEmpty()
-        val pickedVideoOnly = videoOnlyStreams.filter { it.height in 360..720 }
-            .maxByOrNull { it.height }
+
+        val pickedVideoOnly = videoOnlyStreams.firstOrNull { it.height == 360 }
+            ?: videoOnlyStreams.firstOrNull { it.height == 480 }
+            ?: videoOnlyStreams.firstOrNull { it.height in 360..720 }
             ?: videoOnlyStreams.firstOrNull()
+
         if (pickedVideoOnly != null && !pickedVideoOnly.content.isNullOrBlank()) {
             return ResolvedVideoStream(
                 url = pickedVideoOnly.content,
@@ -226,7 +234,7 @@ object PipePipeVideoExtractor {
             )
         }
 
-        // 3. HLS URL
+        // 3. Fallback to hlsUrl
         val hls = extractor.hlsUrl
         if (!hls.isNullOrBlank()) {
             return ResolvedVideoStream(
@@ -372,13 +380,19 @@ object PipePipeVideoExtractor {
         }
     }
 
-    // Tier C: Anonymous Piped API Fallback
+    // Tier B: Instant Piped API Fallback
     private fun extractFromPipedApi(targetVideoId: String): ResolvedVideoStream? {
         val pipedInstances = listOf(
             "https://pipedapi.kavin.rocks",
             "https://pipedapi.tokhmi.xyz",
             "https://pipedapi.moomoo.me",
         )
+
+        val client = Http.client.newBuilder()
+            .callTimeout(4000, TimeUnit.MILLISECONDS)
+            .connectTimeout(3000, TimeUnit.MILLISECONDS)
+            .readTimeout(3000, TimeUnit.MILLISECONDS)
+            .build()
 
         for (instance in pipedInstances) {
             try {
@@ -389,7 +403,7 @@ object PipePipeVideoExtractor {
                     .get()
                     .build()
 
-                Http.client.newCall(request).execute().use { response ->
+                client.newCall(request).execute().use { response ->
                     if (response.isSuccessful) {
                         val body = response.body?.string()
                         if (!body.isNullOrBlank()) {

@@ -337,6 +337,12 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                         PlaybackService.isVideoFrameRendered.value = true
                     }
                 }
+
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == Player.STATE_READY && videoExoPlayer.videoSize.width > 0) {
+                        PlaybackService.isVideoFrameRendered.value = true
+                    }
+                }
             }
             videoExoPlayer.addListener(listener)
             onDispose {
@@ -400,7 +406,13 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
             if (stream != null) {
                 val dataSourceFactory = DefaultHttpDataSource.Factory()
-                    .setUserAgent(stream.userAgent)
+                    .setUserAgent(stream.userAgent.ifBlank { "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" })
+                    .setDefaultRequestProperties(
+                        mapOf(
+                            "Referer" to "https://www.youtube.com/",
+                            "Origin" to "https://www.youtube.com",
+                        )
+                    )
                     .setAllowCrossProtocolRedirects(true)
                     .setConnectTimeoutMs(8000)
                     .setReadTimeoutMs(8000)
@@ -416,11 +428,11 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                 val currentPos = mainPlayer?.currentPosition ?: 0L
                 val currentDur = mainPlayer?.duration?.takeIf { it > 0 } ?: Long.MAX_VALUE
                 videoExoPlayer.setMediaSource(mediaSource)
-                videoExoPlayer.prepare()
                 if (currentPos > 0L) {
                     videoExoPlayer.seekTo(currentPos.coerceAtMost(currentDur))
                 }
-                videoExoPlayer.playWhenReady = mainPlayer?.isPlaying ?: true
+                videoExoPlayer.prepare()
+                videoExoPlayer.playWhenReady = mainPlayer?.playWhenReady ?: true
             }
         }
 
@@ -452,9 +464,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     videoExoPlayer.setVideoTextureView(this)
                 }
             },
-            update = { textureView ->
-                videoExoPlayer.setVideoTextureView(textureView)
-            },
+            update = { /* Surface is bound in factory and released in onRelease */ },
             onRelease = { textureView ->
                 videoExoPlayer.clearVideoTextureView(textureView)
             },
