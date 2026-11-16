@@ -50,79 +50,85 @@ object PipePipeVideoExtractor {
         trackArtist: String,
         currentMediaId: String,
         durationSec: Int,
-    ): ResolvedVideoStream? = withContext(Dispatchers.IO) {
-        if (isValidYoutubeId(currentMediaId)) {
-            streamCache[currentMediaId]?.let { return@withContext it }
+    ): ResolvedVideoStream? = StreamResolver.resolveVideoStreamForTrack(
+        videoId = currentMediaId,
+        title = trackTitle,
+        artist = trackArtist,
+        durationSec = durationSec,
+    )
 
-            val directA = runCatching { extractFromNewPipe(currentMediaId) }.getOrNull()
-            if (directA != null) {
-                streamCache[currentMediaId] = directA
-                TrackLog.d(TAG, "Direct Tier A (NewPipe) succeeded for $currentMediaId")
-                return@withContext directA
+    fun searchYouTubeVideos(query: String): List<String> {
+        return try {
+            val payload = buildJsonObject {
+                putJsonObject("context") {
+                    putJsonObject("client") {
+                        put("clientName", "WEB")
+                        put("clientVersion", "2.20240101.00.00")
+                        put("hl", "en")
+                        put("gl", "US")
+                    }
+                }
+                put("query", query)
+                put("params", "EgIQAQ%3D%3D")
+            }.toString().toRequestBody("application/json".toMediaType())
+
+            val request = okhttp3.Request.Builder()
+                .url("https://www.youtube.com/youtubei/v1/search")
+                .header("User-Agent", CHROME_UA)
+                .header("Content-Type", "application/json")
+                .post(payload)
+                .build()
+
+            Http.client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return emptyList()
+                val body = response.body?.string() ?: return emptyList()
+                val results = mutableListOf<String>()
+
+                try {
+                    val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
+                    val sectionContents = root["contents"]?.jsonObject
+                        ?.get("twoColumnSearchResultsRenderer")?.jsonObject
+                        ?.get("primaryContents")?.jsonObject
+                        ?.get("sectionListRenderer")?.jsonObject
+                        ?.get("contents")?.jsonArray
+
+                    sectionContents?.forEach { sec ->
+                        val items = sec.jsonObject["itemSectionRenderer"]?.jsonObject?.get("contents")?.jsonArray
+                        items?.forEach { item ->
+                            val vRenderer = item.jsonObject["videoRenderer"]?.jsonObject
+                            val vid = vRenderer?.get("videoId")?.jsonPrimitive?.content
+                            val title = vRenderer?.get("title")?.jsonObject?.get("runs")?.jsonArray
+                                ?.firstOrNull()?.jsonObject?.get("text")?.jsonPrimitive?.content.orEmpty()
+                            if (!vid.isNullOrBlank() && isValidYoutubeId(vid) && !isExcludedVideoTitle(title)) {
+                                results.add(vid)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Fall back to regex
+                }
+
+                if (results.isEmpty()) {
+                    val regex = Regex(""""videoId":"([a-zA-Z0-9_-]{11})"""")
+                    regex.findAll(body).forEach { match ->
+                        val vid = match.groupValues[1]
+                        if (isValidYoutubeId(vid) && !results.contains(vid)) {
+                            results.add(vid)
+                        }
+                    }
+                }
+                results
             }
-
-            val directPiped = runCatching { extractFromPipedApi(currentMediaId) }.getOrNull()
-            if (directPiped != null) {
-                streamCache[currentMediaId] = directPiped
-                TrackLog.d(TAG, "Direct Tier B (Piped) succeeded for $currentMediaId")
-                return@withContext directPiped
-            }
-
-            val directC = runCatching { extractFromInnerTube(currentMediaId) }.getOrNull()
-            if (directC != null) {
-                streamCache[currentMediaId] = directC
-                TrackLog.d(TAG, "Direct Tier C (InnerTube) succeeded for $currentMediaId")
-                return@withContext directC
-            }
+        } catch (e: Exception) {
+            TrackLog.w(TAG, "searchYouTubeVideos failed for '$query': ${e.message}")
+            emptyList()
         }
-
-        val targetVideoId = resolveTargetVideoId(trackTitle, trackArtist, currentMediaId, durationSec)
-        if (targetVideoId == null) {
-            TrackLog.w(TAG, "Could not resolve valid YouTube video ID for '$trackTitle' by '$trackArtist'")
-            return@withContext null
-        }
-
-        streamCache[targetVideoId]?.let { return@withContext it }
-
-        // Tier A: NewPipeExtractor
-        val tierA = runCatching { extractFromNewPipe(targetVideoId) }.getOrNull()
-        if (tierA != null) {
-            streamCache[targetVideoId] = tierA
-            TrackLog.d(TAG, "Tier A (NewPipe) succeeded for $targetVideoId")
-            return@withContext tierA
-        }
-
-        // Tier B: Instant Piped API Fallback
-        val pipedResult = runCatching { extractFromPipedApi(targetVideoId) }.getOrNull()
-        if (pipedResult != null) {
-            streamCache[targetVideoId] = pipedResult
-            TrackLog.d(TAG, "Tier B (Piped API) succeeded for $targetVideoId")
-            return@withContext pipedResult
-        }
-
-        // Tier C: InnerTube ANDROID_VR & IOS Anonymous Extraction
-        val tierC = runCatching { extractFromInnerTube(targetVideoId) }.getOrNull()
-        if (tierC != null) {
-            streamCache[targetVideoId] = tierC
-            TrackLog.d(TAG, "Tier C (InnerTube) succeeded for $targetVideoId")
-            return@withContext tierC
-        }
-
-        TrackLog.w(TAG, "All 3 video extraction tiers failed for $targetVideoId ($trackTitle - $trackArtist)")
-        null
     }
 
-    private suspend fun resolveTargetVideoId(
+    fun searchVideoCandidates(
         trackTitle: String,
         trackArtist: String,
-        currentMediaId: String,
-        durationSec: Int,
-    ): String? {
-        // Step 1: Podcasts / Long episodes (>8 min) with an existing 11-char YouTube ID
-        if (durationSec > 480 && isValidYoutubeId(currentMediaId)) {
-            return currentMediaId
-        }
-
+    ): List<String> {
         val cleanTitle = trackTitle.replace(
             Regex("""(?i)\b(official audio|audio|lyrics|lyric|full album|topic|visualizer)\b"""),
             "",
@@ -130,62 +136,59 @@ object PipePipeVideoExtractor {
         val cleanArtist = trackArtist.trim()
         val searchQuery = "$cleanTitle $cleanArtist official video"
 
-        // Step 1.1: NewPipeExtractor Search
-        try {
-            StreamResolver.ensureInit()
-            val searchExtractor = ServiceList.YouTube.getSearchExtractor(
-                searchQuery,
-                listOf(YoutubeSearchQueryHandlerFactory.VIDEOS),
-                null,
-            )
-            searchExtractor.fetchPage()
-            val items = searchExtractor.initialPage?.items.orEmpty()
-            for (item in items) {
-                val title = item.name.orEmpty()
-                if (isExcludedVideoTitle(title)) continue
-                val vid = extractVideoId(item.url.orEmpty())
-                if (vid != null && isValidYoutubeId(vid)) {
-                    return vid
+        val candidates = mutableListOf<String>()
+
+        // 1. Fast YouTube Web Search with filter=Videos
+        val webResults = searchYouTubeVideos(searchQuery)
+        candidates.addAll(webResults)
+
+        // 2. NewPipe Search Fallback
+        if (candidates.isEmpty()) {
+            try {
+                StreamResolver.ensureInit()
+                val searchExtractor = ServiceList.YouTube.getSearchExtractor(
+                    searchQuery,
+                    listOf(YoutubeSearchQueryHandlerFactory.VIDEOS),
+                    null,
+                )
+                searchExtractor.fetchPage()
+                val items = searchExtractor.initialPage?.items.orEmpty()
+                for (item in items) {
+                    val title = item.name.orEmpty()
+                    if (isExcludedVideoTitle(title)) continue
+                    val vid = extractVideoId(item.url.orEmpty())
+                    if (vid != null && isValidYoutubeId(vid) && !candidates.contains(vid)) {
+                        candidates.add(vid)
+                    }
                 }
+            } catch (e: Exception) {
+                TrackLog.w(TAG, "NewPipe search for '$searchQuery' failed: ${e.message}")
             }
-        } catch (e: Exception) {
-            TrackLog.w(TAG, "NewPipe search for '$searchQuery' failed: ${e.message}")
         }
 
-        // Step 1.2: InnerTube WEB Search Fallback (filter = VIDEOS)
-        try {
-            val candidates = YtMusicRepository.search("$cleanTitle $cleanArtist official video", SearchFilter.VIDEOS)
-                .getOrNull()
-                ?.filterIsInstance<SearchResult.Track>()
-                ?.map { it.song }
-                .orEmpty()
-                .ifEmpty {
-                    YtMusicRepository.search("$cleanTitle $cleanArtist", SearchFilter.VIDEOS)
-                        .getOrNull()
-                        ?.filterIsInstance<SearchResult.Track>()
-                        ?.map { it.song }
-                        .orEmpty()
+        // 3. YtMusicRepository Search Fallback
+        if (candidates.isEmpty()) {
+            try {
+                val tracks = YtMusicRepository.search(searchQuery, SearchFilter.VIDEOS)
+                    .getOrNull()
+                    ?.filterIsInstance<SearchResult.Track>()
+                    ?.map { it.song }
+                    .orEmpty()
+                for (t in tracks) {
+                    if (isExcludedVideoTitle(t.title)) continue
+                    if (isValidYoutubeId(t.videoId) && !candidates.contains(t.videoId)) {
+                        candidates.add(t.videoId)
+                    }
                 }
-
-            for (candidate in candidates) {
-                if (isExcludedVideoTitle(candidate.title)) continue
-                if (isValidYoutubeId(candidate.videoId)) {
-                    return candidate.videoId
-                }
+            } catch (e: Exception) {
+                TrackLog.w(TAG, "YtMusic search fallback failed: ${e.message}")
             }
-        } catch (e: Exception) {
-            TrackLog.w(TAG, "InnerTube search fallback failed: ${e.message}")
         }
 
-        // Step 1.3: Fallback to currentMediaId if valid 11-char ID
-        if (isValidYoutubeId(currentMediaId)) {
-            return currentMediaId
-        }
-
-        return null
+        return candidates.distinct()
     }
 
-    private fun isExcludedVideoTitle(title: String): Boolean {
+    fun isExcludedVideoTitle(title: String): Boolean {
         val lower = title.lowercase()
         return lower.contains("audio") ||
             lower.contains("lyric") ||
@@ -193,10 +196,10 @@ object PipePipeVideoExtractor {
             lower.contains("full album")
     }
 
-    private fun isValidYoutubeId(id: String): Boolean =
+    fun isValidYoutubeId(id: String): Boolean =
         id.length == 11 && id.all { it.isLetterOrDigit() || it == '-' || it == '_' }
 
-    private fun extractVideoId(url: String): String? {
+    fun extractVideoId(url: String): String? {
         if (url.length == 11 && isValidYoutubeId(url)) return url
         val vParam = Regex("""[?&]v=([a-zA-Z0-9_-]{11})""").find(url)?.groupValues?.get(1)
         if (vParam != null) return vParam
@@ -405,34 +408,36 @@ object PipePipeVideoExtractor {
         }
     }
 
-    // Tier B: Instant Piped API Fallback
-    fun extractFromPipedApi(targetVideoId: String): ResolvedVideoStream? {
-        val pipedInstances = listOf(
-            "https://pipedapi.kavin.rocks",
-            "https://pipedapi.tokhmi.xyz",
-            "https://pipedapi.moomoo.me",
+    // Tier B: Active Piped & Invidious Public API Mirrors
+    fun extractFromPipedOrInvidious(targetVideoId: String): ResolvedVideoStream? {
+        val instances = listOf(
+            "https://pipedapi.kavin.rocks/streams/$targetVideoId" to false,
+            "https://api.piped.private.coffee/streams/$targetVideoId" to false,
+            "https://pipedapi.tokhmi.xyz/streams/$targetVideoId" to false,
+            "https://inv.nadeko.net/api/v1/videos/$targetVideoId" to true,
+            "https://yewtu.be/api/v1/videos/$targetVideoId" to true,
         )
 
         val client = Http.client.newBuilder()
-            .callTimeout(4000, TimeUnit.MILLISECONDS)
-            .connectTimeout(3000, TimeUnit.MILLISECONDS)
-            .readTimeout(3000, TimeUnit.MILLISECONDS)
+            .callTimeout(3500, TimeUnit.MILLISECONDS)
+            .connectTimeout(2500, TimeUnit.MILLISECONDS)
+            .readTimeout(2500, TimeUnit.MILLISECONDS)
             .build()
 
-        for (instance in pipedInstances) {
+        for ((url, isInvidious) in instances) {
             try {
-                val pipedUrl = "$instance/streams/$targetVideoId"
                 val request = okhttp3.Request.Builder()
-                    .url(pipedUrl)
+                    .url(url)
                     .header("User-Agent", CHROME_UA)
                     .get()
                     .build()
 
                 client.newCall(request).execute().use { response ->
                     if (response.isSuccessful) {
-                        val body = response.body?.string()
-                        if (!body.isNullOrBlank()) {
-                            val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
+                        val body = response.body?.string() ?: return@use
+                        val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
+
+                        if (!isInvidious) {
                             val hlsUrl = root["hls"]?.jsonPrimitive?.content
                             if (!hlsUrl.isNullOrBlank()) {
                                 return ResolvedVideoStream(
@@ -442,19 +447,41 @@ object PipePipeVideoExtractor {
                                     videoId = targetVideoId,
                                 )
                             }
-
                             val videoStreams = root["videoStreams"]?.jsonArray?.mapNotNull { it.jsonObject }
-                            val mp4Stream = videoStreams?.firstOrNull {
+                            val picked = videoStreams?.firstOrNull {
                                 val u = it["url"]?.jsonPrimitive?.content
                                 val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
                                 val format = it["format"]?.jsonPrimitive?.content.orEmpty()
                                 !u.isNullOrBlank() && (mime.contains("video/mp4") || format.contains("mp4", ignoreCase = true))
-                            } ?: videoStreams?.firstOrNull {
-                                val u = it["url"]?.jsonPrimitive?.content
-                                !u.isNullOrBlank()
-                            }
+                            } ?: videoStreams?.firstOrNull { !it["url"]?.jsonPrimitive?.content.isNullOrBlank() }
 
-                            val streamUrl = mp4Stream?.get("url")?.jsonPrimitive?.content
+                            val streamUrl = picked?.get("url")?.jsonPrimitive?.content
+                            if (!streamUrl.isNullOrBlank()) {
+                                return ResolvedVideoStream(
+                                    url = streamUrl,
+                                    isHls = false,
+                                    userAgent = CHROME_UA,
+                                    videoId = targetVideoId,
+                                )
+                            }
+                        } else {
+                            val hlsUrl = root["hlsUrl"]?.jsonPrimitive?.content
+                            if (!hlsUrl.isNullOrBlank()) {
+                                return ResolvedVideoStream(
+                                    url = hlsUrl,
+                                    isHls = true,
+                                    userAgent = CHROME_UA,
+                                    videoId = targetVideoId,
+                                )
+                            }
+                            val formatStreams = root["formatStreams"]?.jsonArray?.mapNotNull { it.jsonObject }
+                            val picked = formatStreams?.firstOrNull {
+                                val u = it["url"]?.jsonPrimitive?.content
+                                val container = it["container"]?.jsonPrimitive?.content.orEmpty()
+                                !u.isNullOrBlank() && container.contains("mp4", ignoreCase = true)
+                            } ?: formatStreams?.firstOrNull { !it["url"]?.jsonPrimitive?.content.isNullOrBlank() }
+
+                            val streamUrl = picked?.get("url")?.jsonPrimitive?.content
                             if (!streamUrl.isNullOrBlank()) {
                                 return ResolvedVideoStream(
                                     url = streamUrl,
@@ -467,9 +494,12 @@ object PipePipeVideoExtractor {
                     }
                 }
             } catch (e: Exception) {
-                TrackLog.w(TAG, "Piped instance $instance failed for $targetVideoId: ${e.message}")
+                // Continue to next mirror
             }
         }
         return null
     }
+
+    fun extractFromPipedApi(targetVideoId: String): ResolvedVideoStream? =
+        extractFromPipedOrInvidious(targetVideoId)
 }

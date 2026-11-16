@@ -350,7 +350,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                     TrackLog.w("VideoPlayer", "videoExoPlayer error: ${error.message}, errorCode: ${error.errorCodeName}")
-                    if (retryCount < 2) {
+                    if (retryCount < 3) {
                         retryCount++
                     }
                 }
@@ -407,22 +407,13 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         // Resolve video stream via StreamResolver working YouTube pipeline
         LaunchedEffect(mediaId, title, artist, durationSec, retryCount) {
             PlaybackService.isVideoFrameRendered.value = false
-            val stream = if (retryCount == 0) {
-                StreamResolver.resolveVideoStreamForTrack(
-                    videoId = mediaId,
-                    title = title,
-                    artist = artist,
-                    durationSec = durationSec,
-                )
-            } else {
-                PipePipeVideoExtractor.extractFromPipedApi(mediaId)
-                    ?: PipePipeVideoExtractor.resolveAnonymousVideoStream(
-                        trackTitle = title,
-                        trackArtist = artist,
-                        currentMediaId = mediaId,
-                        durationSec = durationSec,
-                    )
-            }
+            val stream = StreamResolver.resolveVideoStreamForTrack(
+                videoId = mediaId,
+                title = title,
+                artist = artist,
+                durationSec = durationSec,
+                candidateOffset = retryCount,
+            )
             resolvedStream = stream
 
             if (stream != null) {
@@ -459,9 +450,9 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     videoExoPlayer.seekTo(currentPos.coerceAtMost(currentDur))
                 }
                 videoExoPlayer.prepare()
-                videoExoPlayer.playWhenReady = mainPlayer?.playWhenReady ?: true
+                videoExoPlayer.playWhenReady = true
             } else {
-                TrackLog.w("VideoPlayer", "Failed to resolve video stream for $mediaId ($title - $artist)")
+                TrackLog.w("VideoPlayer", "Failed to resolve video stream for $mediaId ($title - $artist, retry=$retryCount)")
             }
         }
 
@@ -493,9 +484,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     videoExoPlayer.setVideoTextureView(this)
                 }
             },
-            update = { textureView ->
-                videoExoPlayer.setVideoTextureView(textureView)
-            },
+            update = { /* Surface attached once in factory. Do NOT setVideoTextureView here to avoid resetting playback */ },
             onRelease = { textureView ->
                 videoExoPlayer.clearVideoTextureView(textureView)
             },

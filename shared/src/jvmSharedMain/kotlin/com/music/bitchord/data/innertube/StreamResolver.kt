@@ -552,49 +552,97 @@ object StreamResolver {
 
     /**
      * Resolves an anonymous video stream for the given track using the working
-     * StreamResolver pipeline (InnerTube ANDROID_VR/IOS + NewPipe extractor + Piped fallback).
+     * StreamResolver pipeline (InnerTube ANDROID_VR/TESTSUITE/IOS/TVHTML5 + NewPipe extractor + Piped/Invidious fallback).
+     * For songs (duration <= 480s), ALWAYS searches for the real Official Music Video (OMV) first,
+     * with fallback to the track's own ID.
+     * For long podcasts/episodes (duration > 480s), tries the track's own ID first.
      */
     suspend fun resolveVideoStreamForTrack(
         videoId: String,
         title: String,
         artist: String,
         durationSec: Int,
+        candidateOffset: Int = 0,
     ): ResolvedVideoStream? = withContext(Dispatchers.IO) {
         ensureInit()
         val isYtId = videoId.length == 11 && videoId.all { it.isLetterOrDigit() || it == '-' || it == '_' }
+        val isSong = durationSec in 1..480
 
-        if (isYtId) {
-            TrackLog.d(TAG, "Resolving video stream directly for videoId: $videoId")
-            val directInfo = resolveVideoPlaybackInfo(videoId)
+        val candidateIds = mutableListOf<String>()
+
+        if (isSong) {
+            // Step 1: ALWAYS search YouTube Videos for the real Official Music Video (OMV) first
+            TrackLog.d(TAG, "Searching OMV candidates for song: $title - $artist")
+            val omvCandidates = PipePipeVideoExtractor.searchVideoCandidates(title, artist)
+            candidateIds.addAll(omvCandidates)
+            // Current audio track ID as fallback after OMV
+            if (isYtId && !candidateIds.contains(videoId)) {
+                candidateIds.add(videoId)
+            }
+        } else {
+            // For podcasts/long episodes (>8 min), current video ID is preferred
+            if (isYtId) {
+                candidateIds.add(videoId)
+            }
+            val omvCandidates = PipePipeVideoExtractor.searchVideoCandidates(title, artist)
+            candidateIds.addAll(omvCandidates.filter { it != videoId })
+        }
+
+        val allCandidates = candidateIds.distinct()
+        val uniqueCandidates = if (candidateOffset in 1 until allCandidates.size) {
+            allCandidates.drop(candidateOffset)
+        } else {
+            allCandidates
+        }
+
+        TrackLog.d(TAG, "Video candidates for '$title' ($durationSec s, offset=$candidateOffset): $uniqueCandidates")
+
+        for (candidateId in uniqueCandidates) {
+            // Check cache
+            videoInfoCache[candidateId]?.let { cached ->
+                return@withContext ResolvedVideoStream(
+                    url = cached.videoUri,
+                    isHls = cached.isHls,
+                    userAgent = cached.userAgent.ifBlank {
+                        mediaHeadersFor(cached.videoUri)["User-Agent"] ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+                    },
+                    videoId = candidateId,
+                )
+            }
+
+            // Method 1: StreamResolver's InnerTube & NewPipe engine
+            val directInfo = resolveVideoPlaybackInfo(candidateId)
             if (directInfo != null && directInfo.videoUri.isNotBlank()) {
                 val headers = mediaHeadersFor(directInfo.videoUri)
                 val ua = directInfo.userAgent.ifBlank {
                     headers["User-Agent"] ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
                 }
+                TrackLog.d(TAG, "Method 1 (StreamResolver) succeeded for $candidateId")
                 return@withContext ResolvedVideoStream(
                     url = directInfo.videoUri,
                     isHls = directInfo.isHls,
                     userAgent = ua,
-                    videoId = videoId,
+                    videoId = candidateId,
                 )
             }
 
-            // Fallback to Piped API
-            val piped = PipePipeVideoExtractor.extractFromPipedApi(videoId)
-            if (piped != null) {
-                TrackLog.d(TAG, "Piped API direct fallback succeeded for $videoId")
-                return@withContext piped
+            // Method 2: Direct NewPipeExtractor
+            val newPipe = runCatching { PipePipeVideoExtractor.extractFromNewPipe(candidateId) }.getOrNull()
+            if (newPipe != null && newPipe.url.isNotBlank()) {
+                TrackLog.d(TAG, "Method 2 (NewPipe) succeeded for $candidateId")
+                return@withContext newPipe
+            }
+
+            // Method 3: Public Piped & Invidious mirrors
+            val pipedOrInvidious = runCatching { PipePipeVideoExtractor.extractFromPipedOrInvidious(candidateId) }.getOrNull()
+            if (pipedOrInvidious != null && pipedOrInvidious.url.isNotBlank()) {
+                TrackLog.d(TAG, "Method 3 (Piped/Invidious) succeeded for $candidateId")
+                return@withContext pipedOrInvidious
             }
         }
 
-        // Fallback to searching video for title & artist
-        TrackLog.d(TAG, "Searching video stream for track: $title - $artist")
-        PipePipeVideoExtractor.resolveAnonymousVideoStream(
-            trackTitle = title,
-            trackArtist = artist,
-            currentMediaId = videoId,
-            durationSec = durationSec,
-        )
+        TrackLog.w(TAG, "All video candidates failed for '$title' - '$artist'")
+        null
     }
 
     /** Per-track loudness, read once and kept for as long as the process runs. */
