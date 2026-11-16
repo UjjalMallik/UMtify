@@ -212,7 +212,7 @@ object PipePipeVideoExtractor {
     }
 
     // Tier A: NewPipeExtractor
-    internal fun extractFromNewPipe(targetVideoId: String): ResolvedVideoStream? {
+    fun extractFromNewPipe(targetVideoId: String): ResolvedVideoStream? {
         StreamResolver.ensureInit()
         val extractor = ServiceList.YouTube.getStreamExtractor("https://www.youtube.com/watch?v=$targetVideoId")
         extractor.fetchPage()
@@ -274,7 +274,7 @@ object PipePipeVideoExtractor {
     }
 
     // Tier B: InnerTube ANDROID_VR & IOS Anonymous Client Extraction
-    internal fun extractFromInnerTube(targetVideoId: String): ResolvedVideoStream? {
+    fun extractFromInnerTube(targetVideoId: String): ResolvedVideoStream? {
         val vrResult = queryInnerTubePlayer(
             videoId = targetVideoId,
             clientName = "ANDROID_VR",
@@ -406,7 +406,7 @@ object PipePipeVideoExtractor {
     }
 
     // Tier B: Instant Piped API Fallback
-    internal fun extractFromPipedApi(targetVideoId: String): ResolvedVideoStream? {
+    fun extractFromPipedApi(targetVideoId: String): ResolvedVideoStream? {
         val pipedInstances = listOf(
             "https://pipedapi.kavin.rocks",
             "https://pipedapi.tokhmi.xyz",
