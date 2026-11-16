@@ -48,6 +48,8 @@ interface PlayerHost {
 
     val isVideoFrameRendered: StateFlow<Boolean> get() = MutableStateFlow(false)
 
+    val videoStatusText: StateFlow<String> get() = MutableStateFlow("")
+
     /**
      * Artwork for [song], resolving covers that live inside a remote file
      * (WebDAV, SMB) where the platform can. Returns [Song.thumbnailUrl] otherwise.

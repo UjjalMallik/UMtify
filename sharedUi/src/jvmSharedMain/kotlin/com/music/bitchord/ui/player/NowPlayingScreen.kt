@@ -916,6 +916,7 @@ fun NowPlayingScreen(
     val mixing by PlayerSettings.smartMixInProgress.collectAsStateWithLifecycle()
     val canvas = rememberCanvasArtwork(song)
     val videoFrameRendered by PlayerPlatform.host.isVideoFrameRendered.collectAsStateWithLifecycle()
+    val videoStatusText by PlayerPlatform.host.videoStatusText.collectAsStateWithLifecycle()
     // What the credits say. The canvas above, the palette, the album link and
     // everything else addressed by id keep the original track: a renamed song
     // is the same song, only wearing a different label.
@@ -3241,14 +3242,27 @@ fun NowPlayingScreen(
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .background(Color.Black.copy(alpha = 0.25f)),
+                                            .background(Color.Black.copy(alpha = 0.35f)),
                                         contentAlignment = Alignment.Center,
                                     ) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(36.dp),
-                                            color = Color.White.copy(alpha = 0.85f),
-                                            strokeWidth = 3.dp,
-                                        )
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(36.dp),
+                                                color = Color.White.copy(alpha = 0.85f),
+                                                strokeWidth = 3.dp,
+                                            )
+                                            if (videoStatusText.isNotBlank()) {
+                                                Text(
+                                                    text = videoStatusText,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = Color.White.copy(alpha = 0.85f),
+                                                    maxLines = 1,
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                                 Box(

@@ -1057,6 +1057,7 @@ class PlaybackService : MediaLibraryService() {
                 activeVideoSong.value = null
                 webViewFallbackVideoId.value = null
                 isVideoFrameRendered.value = false
+                videoStatusText.value = ""
                 (exoPlayer.trackSelector as? DefaultTrackSelector)?.let { selector ->
                     selector.setParameters(
                         selector.buildUponParameters()
@@ -2632,6 +2633,7 @@ class PlaybackService : MediaLibraryService() {
         activeVideoSong.value = targetSong
         webViewFallbackVideoId.value = targetSong.videoId
         isVideoFrameRendered.value = false
+        videoStatusText.value = "Finding video..."
 
         // NEVER mute active player audio! Main ExoPlayer keeps playing audio stream at full volume.
         if (!activePlayer.isPlaying && activePlayer.playWhenReady) {
@@ -2670,6 +2672,7 @@ class PlaybackService : MediaLibraryService() {
         activeVideoSong.value = null
         webViewFallbackVideoId.value = null
         isVideoFrameRendered.value = false
+        videoStatusText.value = ""
 
         // Main player audio remains active and unmuted
         (activePlayer.trackSelector as? DefaultTrackSelector)?.let { selector ->
@@ -9307,6 +9310,7 @@ class PlaybackService : MediaLibraryService() {
         var activeExoPlayer: ExoPlayer? = null
             internal set
         val isVideoFrameRendered = MutableStateFlow(false)
+        val videoStatusText = MutableStateFlow("")
         /** Active videoId when in video mode. */
         val activeVideoTrackId = MutableStateFlow<String?>(null)
         val activeVideoSong = MutableStateFlow<Song?>(null)

@@ -282,6 +282,9 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     override val isVideoFrameRendered: StateFlow<Boolean>
         get() = PlaybackService.isVideoFrameRendered
 
+    override val videoStatusText: StateFlow<String>
+        get() = PlaybackService.videoStatusText
+
     @Composable
     override fun VideoPlayer(modifier: Modifier) {
         val activeTrackId by PlaybackService.activeVideoTrackId.collectAsStateWithLifecycle()
@@ -321,6 +324,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         DisposableEffect(videoExoPlayer) {
             onDispose {
                 PlaybackService.isVideoFrameRendered.value = false
+                PlaybackService.videoStatusText.value = ""
                 videoExoPlayer.stop()
                 videoExoPlayer.clearMediaItems()
                 videoExoPlayer.release()
@@ -334,24 +338,30 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             val listener = object : Player.Listener {
                 override fun onRenderedFirstFrame() {
                     PlaybackService.isVideoFrameRendered.value = true
+                    PlaybackService.videoStatusText.value = ""
                 }
 
                 override fun onVideoSizeChanged(videoSize: VideoSize) {
                     if (videoSize.width > 0 && videoSize.height > 0) {
                         PlaybackService.isVideoFrameRendered.value = true
+                        PlaybackService.videoStatusText.value = ""
                     }
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_READY) {
                         PlaybackService.isVideoFrameRendered.value = true
+                        PlaybackService.videoStatusText.value = ""
                     }
                 }
 
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                     TrackLog.w("VideoPlayer", "videoExoPlayer error: ${error.message}, errorCode: ${error.errorCodeName}")
                     if (retryCount < 3) {
+                        PlaybackService.videoStatusText.value = "Retrying video (${retryCount + 1}/3)..."
                         retryCount++
+                    } else {
+                        PlaybackService.videoStatusText.value = "Video playback failed"
                     }
                 }
             }
@@ -405,18 +415,24 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         var resolvedStream by remember(mediaId) { mutableStateOf<ResolvedVideoStream?>(null) }
 
         // Resolve video stream via StreamResolver working YouTube pipeline
-        LaunchedEffect(mediaId, title, artist, durationSec, retryCount) {
+        // Keyed ONLY on (mediaId, retryCount) to avoid coroutine cancellation when durationSec/title/artist updates
+        LaunchedEffect(mediaId, retryCount) {
             PlaybackService.isVideoFrameRendered.value = false
+            PlaybackService.videoStatusText.value = "Finding video..."
             val stream = StreamResolver.resolveVideoStreamForTrack(
                 videoId = mediaId,
                 title = title,
                 artist = artist,
                 durationSec = durationSec,
                 candidateOffset = retryCount,
+                onStatusUpdate = { status ->
+                    PlaybackService.videoStatusText.value = status
+                },
             )
             resolvedStream = stream
 
             if (stream != null) {
+                PlaybackService.videoStatusText.value = "Buffering video..."
                 val headers = StreamResolver.mediaHeadersFor(stream.url)
                 val ua = stream.userAgent.ifBlank {
                     headers["User-Agent"] ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
@@ -453,6 +469,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                 videoExoPlayer.playWhenReady = true
             } else {
                 TrackLog.w("VideoPlayer", "Failed to resolve video stream for $mediaId ($title - $artist, retry=$retryCount)")
+                PlaybackService.videoStatusText.value = "Video unavailable"
             }
         }
 

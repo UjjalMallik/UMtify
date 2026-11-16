@@ -128,7 +128,7 @@ object PipePipeVideoExtractor {
     suspend fun searchVideoCandidates(
         trackTitle: String,
         trackArtist: String,
-    ): List<String> {
+    ): List<String> = withContext(Dispatchers.IO) {
         val cleanTitle = trackTitle.replace(
             Regex("""(?i)\b(official audio|audio|lyrics|lyric|full album|topic|visualizer)\b"""),
             "",
@@ -185,7 +185,7 @@ object PipePipeVideoExtractor {
             }
         }
 
-        return candidates.distinct()
+        candidates.distinct()
     }
 
     fun isExcludedVideoTitle(title: String): Boolean {

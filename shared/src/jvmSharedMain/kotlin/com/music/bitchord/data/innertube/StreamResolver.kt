@@ -563,27 +563,25 @@ object StreamResolver {
         artist: String,
         durationSec: Int,
         candidateOffset: Int = 0,
+        onStatusUpdate: ((String) -> Unit)? = null,
     ): ResolvedVideoStream? = withContext(Dispatchers.IO) {
         ensureInit()
         val isYtId = videoId.length == 11 && videoId.all { it.isLetterOrDigit() || it == '-' || it == '_' }
-        val isSong = durationSec in 1..480
 
         val candidateIds = mutableListOf<String>()
 
-        if (isSong) {
-            // Step 1: ALWAYS search YouTube Videos for the real Official Music Video (OMV) first
-            TrackLog.d(TAG, "Searching OMV candidates for song: $title - $artist")
-            val omvCandidates = PipePipeVideoExtractor.searchVideoCandidates(title, artist)
-            candidateIds.addAll(omvCandidates)
-            // Current audio track ID as fallback after OMV
-            if (isYtId && !candidateIds.contains(videoId)) {
-                candidateIds.add(videoId)
-            }
-        } else {
-            // For podcasts/long episodes (>8 min), current video ID is preferred
-            if (isYtId) {
-                candidateIds.add(videoId)
-            }
+        // 1. Primary candidate: If videoId is an 11-char YouTube ID, it's either already the
+        // resolved OMV ID (from YtMusicRepository.resolveVideo) or the current playable track ID.
+        // Putting it first allows instant playback in < 500ms without wasting 15s on failing web searches!
+        if (isYtId) {
+            candidateIds.add(videoId)
+        }
+
+        // 2. Secondary candidates: If videoId is not a valid YouTube ID (e.g. JioSaavn / local),
+        // or if candidateOffset > 0 (retry after primary failed), search for OMV candidates.
+        val shouldSearch = !isYtId || candidateOffset > 0
+        if (shouldSearch) {
+            onStatusUpdate?.invoke("Searching video candidates...")
             val omvCandidates = PipePipeVideoExtractor.searchVideoCandidates(title, artist)
             candidateIds.addAll(omvCandidates.filter { it != videoId })
         }
@@ -600,6 +598,7 @@ object StreamResolver {
         for (candidateId in uniqueCandidates) {
             // Check cache
             videoInfoCache[candidateId]?.let { cached ->
+                onStatusUpdate?.invoke("Loading cached stream...")
                 return@withContext ResolvedVideoStream(
                     url = cached.videoUri,
                     isHls = cached.isHls,
@@ -611,6 +610,7 @@ object StreamResolver {
             }
 
             // Method 1: StreamResolver's InnerTube & NewPipe engine
+            onStatusUpdate?.invoke("Extracting video stream...")
             val directInfo = resolveVideoPlaybackInfo(candidateId)
             if (directInfo != null && directInfo.videoUri.isNotBlank()) {
                 val headers = mediaHeadersFor(directInfo.videoUri)
@@ -627,6 +627,7 @@ object StreamResolver {
             }
 
             // Method 2: Direct NewPipeExtractor
+            onStatusUpdate?.invoke("Extracting via NewPipe...")
             val newPipe = runCatching { PipePipeVideoExtractor.extractFromNewPipe(candidateId) }.getOrNull()
             if (newPipe != null && newPipe.url.isNotBlank()) {
                 TrackLog.d(TAG, "Method 2 (NewPipe) succeeded for $candidateId")
@@ -634,6 +635,7 @@ object StreamResolver {
             }
 
             // Method 3: Public Piped & Invidious mirrors
+            onStatusUpdate?.invoke("Extracting via fallback mirror...")
             val pipedOrInvidious = runCatching { PipePipeVideoExtractor.extractFromPipedOrInvidious(candidateId) }.getOrNull()
             if (pipedOrInvidious != null && pipedOrInvidious.url.isNotBlank()) {
                 TrackLog.d(TAG, "Method 3 (Piped/Invidious) succeeded for $candidateId")
@@ -641,7 +643,43 @@ object StreamResolver {
             }
         }
 
-        TrackLog.w(TAG, "All video candidates failed for '$title' - '$artist'")
+        // If direct candidate failed and we haven't searched yet, do the search fallback now!
+        if (!shouldSearch) {
+            TrackLog.d(TAG, "Direct video ID $videoId failed, falling back to OMV search...")
+            onStatusUpdate?.invoke("Searching official video...")
+            val omvCandidates = PipePipeVideoExtractor.searchVideoCandidates(title, artist)
+            for (candidateId in omvCandidates.filter { it != videoId }) {
+                onStatusUpdate?.invoke("Extracting video stream...")
+                val directInfo = resolveVideoPlaybackInfo(candidateId)
+                if (directInfo != null && directInfo.videoUri.isNotBlank()) {
+                    val headers = mediaHeadersFor(directInfo.videoUri)
+                    val ua = directInfo.userAgent.ifBlank {
+                        headers["User-Agent"] ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+                    }
+                    TrackLog.d(TAG, "OMV search candidate succeeded for $candidateId")
+                    return@withContext ResolvedVideoStream(
+                        url = directInfo.videoUri,
+                        isHls = directInfo.isHls,
+                        userAgent = ua,
+                        videoId = candidateId,
+                    )
+                }
+
+                val newPipe = runCatching { PipePipeVideoExtractor.extractFromNewPipe(candidateId) }.getOrNull()
+                if (newPipe != null && newPipe.url.isNotBlank()) {
+                    TrackLog.d(TAG, "OMV NewPipe candidate succeeded for $candidateId")
+                    return@withContext newPipe
+                }
+
+                val pipedOrInvidious = runCatching { PipePipeVideoExtractor.extractFromPipedOrInvidious(candidateId) }.getOrNull()
+                if (pipedOrInvidious != null && pipedOrInvidious.url.isNotBlank()) {
+                    TrackLog.d(TAG, "OMV Piped/Invidious candidate succeeded for $candidateId")
+                    return@withContext pipedOrInvidious
+                }
+            }
+        }
+
+        TrackLog.w(TAG, "All video resolution methods failed for '$title' - '$artist'")
         null
     }
 
