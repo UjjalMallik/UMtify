@@ -1728,7 +1728,7 @@ fun NowPlayingScreen(
     // gesture exist to let one tall column be the player, the lyrics and the
     // queue in turn, and in landscape none of them has anything to do — the
     // sleeve never has to get out of anything's way.
-    val landscape = landscapePlayerAvailable(windowWidth, windowHeight)
+    val landscape = !song.isVideo && landscapePlayerAvailable(windowWidth, windowHeight)
     // Short portrait windows get the tight rhythm — see [DENSE_PLAYER_HEIGHT].
     val densePortrait = !landscape && windowHeight < DENSE_PLAYER_HEIGHT
     // Tablet-sized players use the full-cover blur in all three states. On a
@@ -3930,6 +3930,37 @@ fun NowPlayingScreen(
                     }
 
                     playerActions()
+
+                    if (song.isVideo && onSwitchToAudio != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.CenterHorizontally)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
+                                .clickable { onSwitchToAudio() }
+                                .padding(horizontal = 14.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.PlayArrow,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Text(
+                                    text = "Switch to audio",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                    }
                     Spacer(
                         Modifier.height(
                             if (densePortrait) 10.dp else 18.dp,

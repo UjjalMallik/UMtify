@@ -1472,6 +1472,20 @@ private fun BitChordApp(
 
     DisposableEffect(controller) {
         com.music.bitchord.playback.PlaybackService.onRequestSwitchToAudio = {
+            val vp = com.music.bitchord.playback.PlaybackService.activeVideoExoPlayer
+            val syncPos = vp?.currentPosition?.takeIf { it > 0L } ?: com.music.bitchord.playback.PlaybackService.videoPositionMs.value
+            vp?.pause()
+            controller?.let { c ->
+                if (syncPos > 0L) {
+                    c.seekTo(syncPos)
+                }
+                c.play()
+            }
+            com.music.bitchord.playback.PlaybackService.dismissVideoLoading()
+            optimisticVersionSong = null
+            convertedVideoId = null
+            convertedFromAudio = null
+            keepVideoId = null
             scope.launch {
                 val s = controller?.currentMediaItem?.toSong()
                 if (s != null && s.isVideo) {
@@ -2434,22 +2448,24 @@ private fun BitChordApp(
             }
         val handleSwitchToAudio = remember(displayedSong) {
             {
-                val vp = PlaybackService.activeVideoExoPlayer
-                val syncPos = vp?.currentPosition?.takeIf { it > 0L } ?: PlaybackService.videoPositionMs.value
-                vp?.pause()
-                controller?.let { c ->
-                    if (syncPos > 0L) {
-                        c.seekTo(syncPos)
+                PlaybackService.onRequestSwitchToAudio?.invoke() ?: run {
+                    val vp = PlaybackService.activeVideoExoPlayer
+                    val syncPos = vp?.currentPosition?.takeIf { it > 0L } ?: PlaybackService.videoPositionMs.value
+                    vp?.pause()
+                    controller?.let { c ->
+                        if (syncPos > 0L) {
+                            c.seekTo(syncPos)
+                        }
+                        c.play()
                     }
-                    c.play()
-                }
-                PlaybackService.dismissVideoLoading()
-                optimisticVersionSong = null
-                convertedVideoId = null
-                convertedFromAudio = null
-                keepVideoId = null
-                scope.launch {
-                    switchToMusicOnly(displayedSong, pauseWhileResolving = false)
+                    PlaybackService.dismissVideoLoading()
+                    optimisticVersionSong = null
+                    convertedVideoId = null
+                    convertedFromAudio = null
+                    keepVideoId = null
+                    scope.launch {
+                        switchToMusicOnly(displayedSong, pauseWhileResolving = false)
+                    }
                 }
                 Unit
             }
