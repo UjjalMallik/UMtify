@@ -1498,7 +1498,7 @@ class PlaybackService : MediaLibraryService() {
                     )
                     .build()
             }
-            if (videoId.isNullOrBlank()) return@Resolver dataSpec
+            val videoId = dataSpec.uri.getQueryParameter("v") ?: return@Resolver dataSpec
 
             // An explicit rollback is not a preference for a different
             // candidate: it means this exact YouTube rendition, immediately.
