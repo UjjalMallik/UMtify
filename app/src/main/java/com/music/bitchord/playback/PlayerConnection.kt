@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.core.os.bundleOf
@@ -430,11 +431,40 @@ fun rememberPlayerState(controller: MediaController?): PlayerState {
     // Nothing is lost by stopping: `sync` above runs on the controller's own
     // events, and the first thing that happens on the way back is a fresh read.
     val foreground = rememberIsForeground()
-    LaunchedEffect(controller, state.isPlaying, foreground) {
-        while (controller != null && state.isPlaying && foreground) {
-            position.report(controller.currentPosition.coerceAtLeast(0L))
-            val duration = controller.duration.coerceAtLeast(0L)
-            if (duration != state.durationMs) state = state.copy(durationMs = duration)
+    val videoPlayer by PlaybackService.activeVideoExoPlayerFlow.collectAsStateWithLifecycle()
+
+    DisposableEffect(videoPlayer) {
+        val vp = videoPlayer ?: return@DisposableEffect onDispose {}
+        val videoListener = object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                state = state.copy(isPlaying = isPlaying)
+            }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                val dur = vp.duration
+                if (dur > 0L && dur != state.durationMs) {
+                    state = state.copy(durationMs = dur)
+                }
+            }
+            override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+                position.seeks++
+            }
+        }
+        vp.addListener(videoListener)
+        state = state.copy(
+            isPlaying = vp.isPlaying,
+            durationMs = vp.duration.takeIf { it > 0L } ?: state.durationMs,
+        )
+        onDispose {
+            vp.removeListener(videoListener)
+        }
+    }
+
+    LaunchedEffect(controller, videoPlayer, state.isPlaying, foreground) {
+        while (foreground && ((videoPlayer != null && (videoPlayer?.isPlaying == true || state.isPlaying)) || (controller != null && state.isPlaying))) {
+            val curPos = videoPlayer?.currentPosition ?: controller?.currentPosition ?: 0L
+            val curDur = videoPlayer?.duration?.takeIf { it > 0 } ?: controller?.duration ?: 0L
+            position.report(curPos.coerceAtLeast(0L))
+            if (curDur > 0L && curDur != state.durationMs) state = state.copy(durationMs = curDur)
             delay(500)
         }
     }

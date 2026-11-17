@@ -52,6 +52,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.BlurredEdgeTreatment
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 import androidx.compose.foundation.layout.Spacer
@@ -3150,20 +3152,38 @@ fun NowPlayingScreen(
                                 }
                             }
 
+                            // Ambient blurred artwork backdrop for video mode
+                            if (song.isVideo && !art.url.isNullOrBlank() && !com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url)) {
+                                AsyncImage(
+                                    model = art.request,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    onState = art::onState,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .blur(28.dp, BlurredEdgeTreatment.Unbounded)
+                                        .drawWithContent {
+                                            drawContent()
+                                            drawRect(Color.Black.copy(alpha = 0.55f))
+                                        },
+                                )
+                            }
+
                             if (song.isVideo) {
                                 WhileShown({ !collapsePastHalf }) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .aspectRatio(16f / 9f)
-                                            .clip(RoundedCornerShape(20.dp))
+                                            .align(Alignment.Center)
+                                            .clip(RoundedCornerShape(16.dp))
                                             .background(Color.Black),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         PlayerPlatform.host.VideoPlayer(
                                             modifier = Modifier
                                                 .fillMaxSize()
-                                                .clip(RoundedCornerShape(20.dp)),
+                                                .clip(RoundedCornerShape(16.dp)),
                                         )
                                     }
                                 }
@@ -3244,9 +3264,11 @@ fun NowPlayingScreen(
                                 if (!videoFrameRendered) {
                                     Box(
                                         modifier = Modifier
-                                            .fillMaxSize()
-                                            .clip(RoundedCornerShape(24.dp))
-                                            .background(Color.Black.copy(alpha = 0.5f)),
+                                            .fillMaxWidth()
+                                            .aspectRatio(16f / 9f)
+                                            .align(Alignment.Center)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(Color.Black.copy(alpha = 0.6f)),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         Column(
@@ -3271,17 +3293,17 @@ fun NowPlayingScreen(
                                 }
                                 Box(
                                     modifier = Modifier
-                                        .align(Alignment.TopCenter)
-                                        .padding(top = 12.dp)
+                                        .align(Alignment.BottomCenter)
+                                        .padding(bottom = 12.dp)
                                         .clip(RoundedCornerShape(16.dp))
-                                        .background(Color.Black.copy(alpha = 0.55f))
+                                        .background(Color.Black.copy(alpha = 0.65f))
                                         .border(
                                             width = 0.8.dp,
                                             color = Color.White.copy(alpha = 0.25f),
                                             shape = RoundedCornerShape(16.dp),
                                         )
                                         .clickable { onSwitchToAudio?.invoke() ?: onOpenMenu() }
-                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                        .padding(horizontal = 14.dp, vertical = 6.dp),
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,

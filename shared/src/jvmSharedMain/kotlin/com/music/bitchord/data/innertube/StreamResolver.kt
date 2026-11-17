@@ -1310,15 +1310,18 @@ object StreamResolver {
         for (targetId in candidateIds) {
             // A. InnerTubeX Resolver (with deciphering and PO token support)
             try {
-                val xStream = InnerTubeXResolver.extractVideo(targetId, 1080)
+                val xStream = InnerTubeXResolver.extractVideo(targetId, 480)
+                    ?: InnerTubeXResolver.extractVideo(targetId, 1080)
                     ?: InnerTubeXResolver.extractVideo(targetId, 1080, ageRestricted = true)
                 if (xStream != null && xStream.url.isNotBlank()) {
+                    val xAudio = runCatching { InnerTubeXResolver.extract(targetId, 320) }.getOrNull()
+                    val audioUrl = xAudio?.url
                     TrackLog.d(TAG, "Video stream resolved via InnerTubeX for $targetId: ${xStream.width}x${xStream.height}")
                     val xQualities = xStream.heights.map { h ->
-                        VideoQualityOption(label = if (h >= 720) "HD · ${h}p" else "${h}p", height = h, url = xStream.url, isHls = false)
+                        VideoQualityOption(label = if (h >= 720) "HD · ${h}p" else "${h}p", height = h, url = xStream.url, isHls = false, audioUrl = audioUrl)
                     }.ifEmpty {
                         val h = xStream.height
-                        listOf(VideoQualityOption(label = if (h >= 720) "HD · ${h}p" else if (h > 0) "${h}p" else "Auto", height = h, url = xStream.url, isHls = false))
+                        listOf(VideoQualityOption(label = if (h >= 720) "HD · ${h}p" else if (h > 0) "${h}p" else "Auto", height = h, url = xStream.url, isHls = false, audioUrl = audioUrl))
                     }
                     return@withContext ResolvedVideoStream(
                         url = xStream.url,
@@ -1328,6 +1331,7 @@ object StreamResolver {
                         hasEmbeddedAudio = false,
                         headers = xStream.headers,
                         availableQualities = xQualities,
+                        audioStreamUrl = audioUrl,
                     )
                 }
             } catch (e: Exception) {
@@ -1336,23 +1340,35 @@ object StreamResolver {
             }
 
             // B. Multi-client InnerTube Direct (ANDROID_VR, IOS, ANDROID_TESTSUITE, TVHTML5)
-            val innerTubeStream = extractVideoStreamViaInnerTube(targetId)
+            var innerTubeStream = extractVideoStreamViaInnerTube(targetId)
             if (innerTubeStream != null && innerTubeStream.url.isNotBlank()) {
                 TrackLog.d(TAG, "Video stream resolved via InnerTube clients for $targetId: ${innerTubeStream.url}")
+                if (!innerTubeStream.hasEmbeddedAudio && innerTubeStream.audioStreamUrl.isNullOrBlank()) {
+                    val fallbackAudio = runCatching { resolve(targetId) }.getOrNull()
+                    innerTubeStream = innerTubeStream.copy(audioStreamUrl = fallbackAudio)
+                }
                 return@withContext innerTubeStream
             }
 
             // C. NewPipe Extractor (deciphers signature & n-parameter)
-            val newPipeStream = extractVideoStreamViaNewPipe(targetId)
+            var newPipeStream = extractVideoStreamViaNewPipe(targetId)
             if (newPipeStream != null && newPipeStream.url.isNotBlank()) {
                 TrackLog.d(TAG, "Video stream resolved via NewPipe for $targetId")
+                if (!newPipeStream.hasEmbeddedAudio && newPipeStream.audioStreamUrl.isNullOrBlank()) {
+                    val fallbackAudio = runCatching { resolve(targetId) }.getOrNull()
+                    newPipeStream = newPipeStream.copy(audioStreamUrl = fallbackAudio)
+                }
                 return@withContext newPipeStream
             }
 
             // D. Piped Instances Fallback
-            val pipedStream = extractVideoStreamViaPiped(targetId)
+            var pipedStream = extractVideoStreamViaPiped(targetId)
             if (pipedStream != null && pipedStream.url.isNotBlank()) {
                 TrackLog.d(TAG, "Video stream resolved via Piped for $targetId")
+                if (!pipedStream.hasEmbeddedAudio && pipedStream.audioStreamUrl.isNullOrBlank()) {
+                    val fallbackAudio = runCatching { resolve(targetId) }.getOrNull()
+                    pipedStream = pipedStream.copy(audioStreamUrl = fallbackAudio)
+                }
                 return@withContext pipedStream
             }
         }
@@ -1430,17 +1446,26 @@ object StreamResolver {
                 val qualityOptions = mutableListOf<VideoQualityOption>()
                 val hls = streamingData["hlsManifestUrl"]?.jsonPrimitive?.content
                 if (!hls.isNullOrBlank()) {
-                    qualityOptions.add(VideoQualityOption("Auto (HLS)", 0, hls, true))
+                    qualityOptions.add(VideoQualityOption("Auto (HLS)", 0, hls, true, null))
                 }
                 val formats = streamingData["formats"]?.jsonArray?.mapNotNull { it.jsonObject }
                 formats?.forEach { fmt ->
                     val u = fmt["url"]?.jsonPrimitive?.content
                     val h = fmt["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
                     if (!u.isNullOrBlank() && h > 0) {
-                        qualityOptions.add(VideoQualityOption(if (h >= 720) "HD · ${h}p" else "${h}p", h, u, false))
+                        qualityOptions.add(VideoQualityOption(if (h >= 720) "HD · ${h}p" else "${h}p", h, u, false, null))
                     }
                 }
                 val adaptive = streamingData["adaptiveFormats"]?.jsonArray?.mapNotNull { it.jsonObject }
+                val audioAdaptive = adaptive?.filter {
+                    val u = it["url"]?.jsonPrimitive?.content
+                    val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
+                    !u.isNullOrBlank() && mime.contains("audio/")
+                }
+                val bestAudioUrl = audioAdaptive?.maxByOrNull {
+                    it["bitrate"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                }?.get("url")?.jsonPrimitive?.content
+
                 val videoAdaptive = adaptive?.filter {
                     val u = it["url"]?.jsonPrimitive?.content
                     val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
@@ -1450,7 +1475,7 @@ object StreamResolver {
                     val u = fmt["url"]?.jsonPrimitive?.content
                     val h = fmt["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
                     if (!u.isNullOrBlank() && h in 144..1080) {
-                        qualityOptions.add(VideoQualityOption(if (h >= 720) "HD · ${h}p" else "${h}p", h, u, false))
+                        qualityOptions.add(VideoQualityOption(if (h >= 720) "HD · ${h}p" else "${h}p", h, u, false, bestAudioUrl))
                     }
                 }
                 val availableQualities = qualityOptions.distinctBy { it.height }.sortedByDescending { it.height }
@@ -1491,13 +1516,16 @@ object StreamResolver {
                     )
                 }
 
-                // 3. Priority 3: Video URL from adaptiveFormats (MP4 and WebM)
+                // 3. Priority 3: Video URL from adaptiveFormats (MP4 and WebM) - default to fast 360p/480p to prevent freeze
                 val pickedAdaptive = videoAdaptive?.filter {
                     val h = it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                    h in 360..1080
+                    h in 360..480
                 }?.maxByOrNull {
                     it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                } ?: videoAdaptive?.maxByOrNull {
+                } ?: videoAdaptive?.filter {
+                    val h = it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                    h in 360..720
+                }?.minByOrNull {
                     it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
                 } ?: videoAdaptive?.firstOrNull()
 
@@ -1511,6 +1539,7 @@ object StreamResolver {
                         hasEmbeddedAudio = false,
                         headers = mapOf("User-Agent" to userAgent),
                         availableQualities = availableQualities,
+                        audioStreamUrl = bestAudioUrl,
                     )
                 }
 
@@ -1532,20 +1561,21 @@ object StreamResolver {
                 extractor.fetchPage()
 
                 val npQualities = mutableListOf<VideoQualityOption>()
+                val bestNpAudio = extractor.audioStreams?.maxByOrNull { it.averageBitrate }?.content
                 val hls = extractor.hlsUrl
                 if (!hls.isNullOrBlank()) {
-                    npQualities.add(VideoQualityOption("Auto (HLS)", 0, hls, true))
+                    npQualities.add(VideoQualityOption("Auto (HLS)", 0, hls, true, null))
                 }
                 extractor.videoStreams?.filter { !it.content.isNullOrBlank() }?.forEach { vs ->
                     val h = vs.resolution?.filter { it.isDigit() }?.toIntOrNull() ?: 0
                     if (h > 0) {
-                        npQualities.add(VideoQualityOption(if (h >= 720) "HD · ${h}p" else "${h}p", h, vs.content, false))
+                        npQualities.add(VideoQualityOption(if (h >= 720) "HD · ${h}p" else "${h}p", h, vs.content, false, null))
                     }
                 }
                 extractor.videoOnlyStreams?.filter { !it.content.isNullOrBlank() }?.forEach { vs ->
                     val h = vs.resolution?.filter { it.isDigit() }?.toIntOrNull() ?: 0
                     if (h > 0) {
-                        npQualities.add(VideoQualityOption(if (h >= 720) "HD · ${h}p" else "${h}p", h, vs.content, false))
+                        npQualities.add(VideoQualityOption(if (h >= 720) "HD · ${h}p" else "${h}p", h, vs.content, false, bestNpAudio))
                     }
                 }
                 val availableNp = npQualities.distinctBy { it.height }.sortedByDescending { it.height }
@@ -1577,23 +1607,27 @@ object StreamResolver {
                 }
 
                 val videoOnly = extractor.videoOnlyStreams?.filter { !it.content.isNullOrBlank() }
-                val bestVideoOnly = videoOnly?.filter { stream ->
+                val bestFastVideoOnly = videoOnly?.filter { stream ->
                     val res = stream.resolution?.filter { it.isDigit() }?.toIntOrNull() ?: 0
-                    res in 360..1080
+                    res in 360..480
                 }?.maxByOrNull { stream ->
                     stream.resolution?.filter { it.isDigit() }?.toIntOrNull() ?: 0
-                } ?: videoOnly?.maxByOrNull { stream ->
+                } ?: videoOnly?.filter { stream ->
+                    val res = stream.resolution?.filter { it.isDigit() }?.toIntOrNull() ?: 0
+                    res in 360..720
+                }?.minByOrNull { stream ->
                     stream.resolution?.filter { it.isDigit() }?.toIntOrNull() ?: 0
-                }
+                } ?: videoOnly?.firstOrNull()
 
-                if (bestVideoOnly != null && !bestVideoOnly.content.isNullOrBlank()) {
+                if (bestFastVideoOnly != null && !bestFastVideoOnly.content.isNullOrBlank()) {
                     return@withContext ResolvedVideoStream(
-                        url = bestVideoOnly.content,
+                        url = bestFastVideoOnly.content,
                         isHls = false,
                         userAgent = "",
                         videoId = targetVideoId,
                         hasEmbeddedAudio = false,
                         availableQualities = availableNp,
+                        audioStreamUrl = bestNpAudio,
                     )
                 }
 
@@ -1634,6 +1668,11 @@ object StreamResolver {
                         )
                     }
 
+                    val aStreams = root["audioStreams"]?.jsonArray?.mapNotNull { it.jsonObject }
+                    val bestPipedAudio = aStreams?.maxByOrNull {
+                        it["bitrate"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                    }?.get("url")?.jsonPrimitive?.content
+
                     val vStreams = root["videoStreams"]?.jsonArray?.mapNotNull { it.jsonObject }
                     val muxed = vStreams?.filter {
                         val u = it["url"]?.jsonPrimitive?.content
@@ -1657,7 +1696,12 @@ object StreamResolver {
                         val u = it["url"]?.jsonPrimitive?.content
                         !u.isNullOrBlank()
                     }
-                    val bestVo = videoOnly?.maxByOrNull {
+                    val bestVo = videoOnly?.filter {
+                        val q = it["quality"]?.jsonPrimitive?.content?.filter { c -> c.isDigit() }?.toIntOrNull() ?: 0
+                        q in 360..480
+                    }?.maxByOrNull {
+                        it["quality"]?.jsonPrimitive?.content?.filter { c -> c.isDigit() }?.toIntOrNull() ?: 0
+                    } ?: videoOnly?.maxByOrNull {
                         it["quality"]?.jsonPrimitive?.content?.filter { c -> c.isDigit() }?.toIntOrNull() ?: 0
                     }
                     val voUrl = bestVo?.get("url")?.jsonPrimitive?.content
@@ -1667,6 +1711,7 @@ object StreamResolver {
                             isHls = false,
                             videoId = targetVideoId,
                             hasEmbeddedAudio = false,
+                            audioStreamUrl = bestPipedAudio,
                         )
                     }
                     null
@@ -1685,6 +1730,7 @@ data class VideoQualityOption(
     val height: Int,
     val url: String,
     val isHls: Boolean = false,
+    val audioUrl: String? = null,
 )
 
 data class ResolvedVideoStream(
@@ -1695,4 +1741,5 @@ data class ResolvedVideoStream(
     val hasEmbeddedAudio: Boolean = false,
     val headers: Map<String, String> = emptyMap(),
     val availableQualities: List<VideoQualityOption> = emptyList(),
+    val audioStreamUrl: String? = null,
 )

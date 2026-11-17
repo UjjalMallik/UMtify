@@ -9235,6 +9235,9 @@ class PlaybackService : MediaLibraryService() {
         @Volatile
         var activeExoPlayer: ExoPlayer? = null
             internal set
+        @Volatile
+        var activeVideoExoPlayer: ExoPlayer? = null
+        val activeVideoExoPlayerFlow = MutableStateFlow<ExoPlayer?>(null)
         val isVideoFrameRendered = MutableStateFlow(false)
         val videoStatusText = MutableStateFlow("")
         val activeVideoTrackId = MutableStateFlow<String?>(null)
@@ -9248,6 +9251,8 @@ class PlaybackService : MediaLibraryService() {
             isVideoFrameRendered.value = false
             videoStatusText.value = ""
             isVideoMode.value = false
+            activeVideoExoPlayer = null
+            activeVideoExoPlayerFlow.value = null
             onRequestSwitchToAudio?.invoke()
         }
         const val MEDIA_ROOT_ID = "root"

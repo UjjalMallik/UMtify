@@ -2458,50 +2458,82 @@ private fun BitChordApp(
             qualityUpgraded = player.isQualityUpgraded,
             onSwitchToAudio = handleSwitchToAudio,
             onPlayPause = {
-                togglePlayPause()
+                val videoPlayer = PlaybackService.activeVideoExoPlayer
+                if (displayedSong.isVideo && videoPlayer != null) {
+                    if (videoPlayer.isPlaying) {
+                        videoPlayer.pause()
+                    } else {
+                        videoPlayer.play()
+                    }
+                } else {
+                    togglePlayPause()
+                }
             },
             onNext = { controller?.seekToNextMediaItem() },
             onPrevious = { controller?.seekToPrevious() },
             onBlockedControl = showHostOnlyNotice,
             onSeekFraction = { fraction ->
-                controller?.let { player ->
-                    // Read at the moment of the seek, not from the
-                    // polled snapshot the screen draws with: a track
-                    // change updates the current item before it updates
-                    // the duration, so a fraction dropped seconds after
-                    // a transition would otherwise be scaled by the
-                    // previous song's length.
-                    val duration = player.duration
+                val videoPlayer = PlaybackService.activeVideoExoPlayer
+                if (displayedSong.isVideo && videoPlayer != null) {
+                    val duration = videoPlayer.duration
                     if (duration > 0) {
-                        player.seekTo(
+                        videoPlayer.seekTo(
                             (fraction * duration).toLong()
                                 .coerceIn(0L, (duration - SEEK_END_GUARD_MS).coerceAtLeast(0L)),
                         )
                     }
+                } else {
+                    controller?.let { player ->
+                        // Read at the moment of the seek, not from the
+                        // polled snapshot the screen draws with: a track
+                        // change updates the current item before it updates
+                        // the duration, so a fraction dropped seconds after
+                        // a transition would otherwise be scaled by the
+                        // previous song's length.
+                        val duration = player.duration
+                        if (duration > 0) {
+                            player.seekTo(
+                                (fraction * duration).toLong()
+                                    .coerceIn(0L, (duration - SEEK_END_GUARD_MS).coerceAtLeast(0L)),
+                            )
+                        }
+                    }
                 }
             },
             onSeek = { target ->
-                controller?.let { player ->
-                    // Clamped here rather than at each caller because
-                    // not every caller can clamp. The scrubber's target
-                    // is a fraction of the duration and cannot overrun,
-                    // but a tapped lyric line seeks to a timestamp from
-                    // whichever transcription matched on title, artist
-                    // and duration — and a match against a slightly
-                    // longer master puts every line late, so a tap near
-                    // the end asks for a position past the end of this
-                    // stream. Media3 answers that by clamping to the
-                    // final millisecond, which ends the track and starts
-                    // the next one: tapping the last line of a song
-                    // skipped it.
-                    val duration = player.duration
-                    player.seekTo(
+                val videoPlayer = PlaybackService.activeVideoExoPlayer
+                if (displayedSong.isVideo && videoPlayer != null) {
+                    val duration = videoPlayer.duration
+                    videoPlayer.seekTo(
                         if (duration > 0) {
                             target.coerceIn(0L, (duration - SEEK_END_GUARD_MS).coerceAtLeast(0L))
                         } else {
                             target.coerceAtLeast(0L)
                         },
                     )
+                } else {
+                    controller?.let { player ->
+                        // Clamped here rather than at each caller because
+                        // not every caller can clamp. The scrubber's target
+                        // is a fraction of the duration and cannot overrun,
+                        // but a tapped lyric line seeks to a timestamp from
+                        // whichever transcription matched on title, artist
+                        // and duration — and a match against a slightly
+                        // longer master puts every line late, so a tap near
+                        // the end asks for a position past the end of this
+                        // stream. Media3 answers that by clamping to the
+                        // final millisecond, which ends the track and starts
+                        // the next one: tapping the last line of a song
+                        // skipped it.
+                        val duration = player.duration
+                        player.seekTo(
+                            if (duration > 0) {
+                                target.coerceIn(0L, (duration - SEEK_END_GUARD_MS).coerceAtLeast(0L))
+                            } else {
+                                target.coerceAtLeast(0L)
+                            },
+                        )
+                    }
                 }
             },
             queue = player.queue,

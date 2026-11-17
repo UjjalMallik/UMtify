@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -76,6 +78,7 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.session.MediaController
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -328,6 +331,12 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     override val videoStatusText: StateFlow<String>
         get() = PlaybackService.videoStatusText
 
+    private tailrec fun Context.findActivity(): Activity? = when (this) {
+        is Activity -> this
+        is android.content.ContextWrapper -> baseContext.findActivity()
+        else -> null
+    }
+
     @Composable
     override fun VideoPlayer(modifier: Modifier) {
         val activeTrackId by PlaybackService.activeVideoTrackId.collectAsStateWithLifecycle()
@@ -352,7 +361,6 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         ).toInt()
 
         val context = LocalContext.current
-        val activity = context as? Activity
 
         var isFullscreen by remember { mutableStateOf(false) }
         var showControls by remember { mutableStateOf(true) }
@@ -360,35 +368,39 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
         var availableQualities by remember { mutableStateOf<List<VideoQualityOption>>(emptyList()) }
         var selectedQuality by remember { mutableStateOf<VideoQualityOption?>(null) }
+        var currentAudioUrl by remember { mutableStateOf<String?>(null) }
+        var currentHasEmbeddedAudio by remember { mutableStateOf(false) }
         var currentHeaders by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
         var currentUa by remember { mutableStateOf("") }
 
         val inlineTextureRef = remember { mutableStateOf<TextureView?>(null) }
         val fullscreenTextureRef = remember { mutableStateOf<TextureView?>(null) }
 
-        // Dedicated ExoPlayer for video rendering (volume = 0f; audio remains on mainPlayer)
+        // Dedicated ExoPlayer for video+audio rendering (plays the YT video's own audio+video)
         val videoExoPlayer = remember(context) {
             ExoPlayer.Builder(
                 context,
                 DefaultRenderersFactory(context).setEnableDecoderFallback(true),
             )
-                .setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus = */ false)
-                .setHandleAudioBecomingNoisy(false)
+                .setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus = */ true)
+                .setHandleAudioBecomingNoisy(true)
                 .build().apply {
                     videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
-                    volume = 0f
+                    volume = 1f
                     repeatMode = Player.REPEAT_MODE_ONE
-                    trackSelectionParameters = trackSelectionParameters.buildUpon()
-                        .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
-                        .build()
                 }
         }
 
-        // Clean up video player on dispose
+        // Register active video player and clean up on dispose
         DisposableEffect(videoExoPlayer) {
+            PlaybackService.activeVideoExoPlayer = videoExoPlayer
+            PlaybackService.activeVideoExoPlayerFlow.value = videoExoPlayer
             onDispose {
                 PlaybackService.isVideoFrameRendered.value = false
                 PlaybackService.videoStatusText.value = ""
+                PlaybackService.activeVideoExoPlayer = null
+                PlaybackService.activeVideoExoPlayerFlow.value = null
+                val exitPosition = videoExoPlayer.currentPosition
                 inlineTextureRef.value?.let { videoExoPlayer.clearVideoTextureView(it) }
                 fullscreenTextureRef.value?.let { videoExoPlayer.clearVideoTextureView(it) }
                 inlineTextureRef.value = null
@@ -396,60 +408,12 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                 videoExoPlayer.stop()
                 videoExoPlayer.clearMediaItems()
                 videoExoPlayer.release()
-            }
-        }
-
-        // Synchronize play/pause and user seeks from mainPlayer to videoExoPlayer
-        DisposableEffect(videoExoPlayer, mainPlayer) {
-            val player = mainPlayer
-            if (player == null) return@DisposableEffect onDispose {}
-
-            val syncListener = object : Player.Listener {
-                override fun onIsPlayingChanged(isPlaying: Boolean) {
-                    videoExoPlayer.playWhenReady = isPlaying
-                    if (isPlaying) {
-                        if (videoExoPlayer.playbackState == Player.STATE_READY) {
-                            videoExoPlayer.play()
-                        }
-                    } else {
-                        videoExoPlayer.pause()
+                // Resume mainPlayer at the video's exit position
+                mainPlayer?.let { mp ->
+                    if (exitPosition > 0L) {
+                        mp.seekTo(exitPosition)
                     }
-                }
-
-                override fun onPositionDiscontinuity(
-                    oldPosition: Player.PositionInfo,
-                    newPosition: Player.PositionInfo,
-                    reason: Int,
-                ) {
-                    if (reason == Player.DISCONTINUITY_REASON_SEEK) {
-                        videoExoPlayer.seekTo(newPosition.positionMs)
-                    }
-                }
-
-                override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
-                    videoExoPlayer.playbackParameters = playbackParameters
-                }
-            }
-            player.addListener(syncListener)
-            onDispose {
-                player.removeListener(syncListener)
-            }
-        }
-
-        // Periodic drift correction - relaxed to 2500ms interval and 3000ms drift to prevent seek thrashing
-        LaunchedEffect(videoExoPlayer, mainPlayer) {
-            while (isActive) {
-                delay(2500)
-                val mPlayer = mainPlayer ?: continue
-                val mainPos = mPlayer.currentPosition
-                if (mPlayer.isPlaying && videoExoPlayer.playbackState == Player.STATE_READY) {
-                    if (!videoExoPlayer.isPlaying && videoExoPlayer.playWhenReady) {
-                        videoExoPlayer.play()
-                    }
-                    val drift = kotlin.math.abs(videoExoPlayer.currentPosition - mainPos)
-                    if (!videoExoPlayer.isLoading && drift > 3000L) {
-                        videoExoPlayer.seekTo(mainPos)
-                    }
+                    mp.play()
                 }
             }
         }
@@ -460,18 +424,16 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                 override fun onRenderedFirstFrame() {
                     PlaybackService.isVideoFrameRendered.value = true
                     PlaybackService.videoStatusText.value = ""
-                    if (mainPlayer?.isPlaying == true) {
-                        videoExoPlayer.play()
-                    }
+                    videoExoPlayer.play()
+                    mainPlayer?.pause()
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_READY) {
                         PlaybackService.isVideoFrameRendered.value = true
                         PlaybackService.videoStatusText.value = ""
-                        if (mainPlayer?.isPlaying == true) {
-                            videoExoPlayer.play()
-                        }
+                        videoExoPlayer.play()
+                        mainPlayer?.pause()
                     }
                 }
 
@@ -489,7 +451,14 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         }
 
         // Helper to load or switch video stream quality
-        fun playStream(url: String, isHls: Boolean, headers: Map<String, String>, ua: String) {
+        fun playStream(
+            videoUrl: String,
+            audioUrl: String?,
+            hasEmbeddedAudio: Boolean,
+            isHls: Boolean,
+            headers: Map<String, String>,
+            ua: String,
+        ) {
             val reqHeaders = HashMap<String, String>().apply {
                 put("Referer", "https://www.youtube.com/")
                 put("Origin", "https://www.youtube.com")
@@ -503,26 +472,34 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                 .setConnectTimeoutMs(10000)
                 .setReadTimeoutMs(15000)
 
-            val mediaSource = if (isHls) {
+            val videoSource = if (isHls) {
                 HlsMediaSource.Factory(dataSourceFactory)
-                    .createMediaSource(MediaItem.fromUri(url))
+                    .createMediaSource(MediaItem.fromUri(videoUrl))
             } else {
                 ProgressiveMediaSource.Factory(dataSourceFactory)
-                    .createMediaSource(MediaItem.fromUri(url))
+                    .createMediaSource(MediaItem.fromUri(videoUrl))
             }
 
-            val currentPos = mainPlayer?.currentPosition ?: 0L
-            val currentDur = mainPlayer?.duration?.takeIf { it > 0 } ?: Long.MAX_VALUE
+            val finalSource = if (!audioUrl.isNullOrBlank() && !hasEmbeddedAudio && !isHls) {
+                val audioSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+                    .createMediaSource(MediaItem.fromUri(audioUrl))
+                MergingMediaSource(videoSource, audioSource)
+            } else {
+                videoSource
+            }
 
-            videoExoPlayer.setMediaSource(mediaSource)
+            val currentPos = if (videoExoPlayer.currentPosition > 0L) {
+                videoExoPlayer.currentPosition
+            } else {
+                mainPlayer?.currentPosition ?: 0L
+            }
+
+            videoExoPlayer.setMediaSource(finalSource)
             if (currentPos > 0L) {
-                videoExoPlayer.seekTo(currentPos.coerceAtMost(currentDur))
+                videoExoPlayer.seekTo(currentPos)
             }
             videoExoPlayer.prepare()
-            videoExoPlayer.playWhenReady = mainPlayer?.isPlaying ?: true
-            if (mainPlayer?.isPlaying == true) {
-                videoExoPlayer.play()
-            }
+            videoExoPlayer.playWhenReady = true
         }
 
         // Initial resolution on mediaId change
@@ -556,17 +533,22 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     }
                     currentHeaders = headers
                     currentUa = ua
+                    currentAudioUrl = stream.audioStreamUrl
+                    currentHasEmbeddedAudio = stream.hasEmbeddedAudio
 
                     availableQualities = stream.availableQualities
                     selectedQuality = stream.availableQualities.firstOrNull { it.url == stream.url }
                         ?: stream.availableQualities.firstOrNull()
-                        ?: VideoQualityOption(label = "720p", height = 720, url = stream.url, isHls = stream.isHls)
+                        ?: VideoQualityOption(label = "480p", height = 480, url = stream.url, isHls = stream.isHls, audioUrl = stream.audioStreamUrl)
 
-                    playStream(stream.url, stream.isHls, headers, ua)
-
-                    if (mainPlayer != null && !mainPlayer.isPlaying && mainPlayer.playWhenReady) {
-                        mainPlayer.play()
-                    }
+                    playStream(
+                        videoUrl = stream.url,
+                        audioUrl = stream.audioStreamUrl,
+                        hasEmbeddedAudio = stream.hasEmbeddedAudio,
+                        isHls = stream.isHls,
+                        headers = headers,
+                        ua = ua,
+                    )
                 } else {
                     TrackLog.w("VideoPlayer", "Failed to resolve video stream for $mediaId ($title - $artist)")
                     Toast.makeText(context, "Video unavailable", Toast.LENGTH_SHORT).show()
@@ -650,7 +632,15 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                                     qualityMenuOpen = false
                                     if (selectedQuality != option) {
                                         selectedQuality = option
-                                        playStream(option.url, option.isHls, currentHeaders, currentUa)
+                                        val optAudio = option.audioUrl ?: currentAudioUrl
+                                        playStream(
+                                            videoUrl = option.url,
+                                            audioUrl = optAudio,
+                                            hasEmbeddedAudio = currentHasEmbeddedAudio,
+                                            isHls = option.isHls,
+                                            headers = currentHeaders,
+                                            ua = currentUa,
+                                        )
                                     }
                                 },
                             )
@@ -689,19 +679,20 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                 BackHandler { isFullscreen = false }
 
                 DisposableEffect(Unit) {
-                    activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                    activity?.let { act ->
-                        WindowCompat.setDecorFitsSystemWindows(act.window, false)
-                        WindowInsetsControllerCompat(act.window, act.window.decorView).apply {
+                    val act = context.findActivity()
+                    act?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    act?.let { a ->
+                        WindowCompat.setDecorFitsSystemWindows(a.window, false)
+                        WindowInsetsControllerCompat(a.window, a.window.decorView).apply {
                             hide(WindowInsetsCompat.Type.systemBars())
                             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                         }
                     }
                     onDispose {
-                        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                        activity?.let { act ->
-                            WindowCompat.setDecorFitsSystemWindows(act.window, true)
-                            WindowInsetsControllerCompat(act.window, act.window.decorView).show(WindowInsetsCompat.Type.systemBars())
+                        act?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        act?.let { a ->
+                            WindowCompat.setDecorFitsSystemWindows(a.window, true)
+                            WindowInsetsControllerCompat(a.window, a.window.decorView).show(WindowInsetsCompat.Type.systemBars())
                         }
                         // Re-attach to inline TextureView when exiting fullscreen
                         inlineTextureRef.value?.let { videoExoPlayer.setVideoTextureView(it) }
@@ -710,19 +701,19 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
                 // Auto-hide controls after 4 seconds of inactivity while playing
                 LaunchedEffect(showControls) {
-                    if (showControls && mainPlayer?.isPlaying == true) {
+                    if (showControls && videoExoPlayer.isPlaying) {
                         delay(4000)
                         showControls = false
                     }
                 }
 
-                var currentPositionMs by remember { mutableStateOf(mainPlayer?.currentPosition ?: 0L) }
-                val durationMs = mainPlayer?.duration?.takeIf { it > 0 } ?: 1L
-                val isPlaying = mainPlayer?.isPlaying == true
+                var currentPositionMs by remember { mutableStateOf(videoExoPlayer.currentPosition) }
+                val durationMs = videoExoPlayer.duration.takeIf { it > 0 } ?: (mainPlayer?.duration?.takeIf { it > 0 } ?: 1L)
+                val isPlaying = videoExoPlayer.isPlaying
 
                 LaunchedEffect(Unit) {
                     while (isActive) {
-                        currentPositionMs = mainPlayer?.currentPosition ?: 0L
+                        currentPositionMs = videoExoPlayer.currentPosition
                         delay(200)
                     }
                 }
@@ -734,7 +725,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                         .clickable { showControls = !showControls },
                     contentAlignment = Alignment.Center,
                 ) {
-                    // Fullscreen TextureView
+                    // Fullscreen TextureView - 16:9 centered in landscape, no stretching!
                     AndroidView(
                         factory = { ctx ->
                             TextureView(ctx).apply {
@@ -747,7 +738,10 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                                 fullscreenTextureRef.value = this
                             }
                         },
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .aspectRatio(16f / 9f)
+                            .align(Alignment.Center),
                     )
 
                     // Overlay Controls
@@ -829,7 +823,15 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                                                         qualityMenuOpen = false
                                                         if (selectedQuality != option) {
                                                             selectedQuality = option
-                                                            playStream(option.url, option.isHls, currentHeaders, currentUa)
+                                                            val optAudio = option.audioUrl ?: currentAudioUrl
+                                                            playStream(
+                                                                videoUrl = option.url,
+                                                                audioUrl = optAudio,
+                                                                hasEmbeddedAudio = currentHasEmbeddedAudio,
+                                                                isHls = option.isHls,
+                                                                headers = currentHeaders,
+                                                                ua = currentUa,
+                                                            )
                                                         }
                                                     },
                                                 )
@@ -842,11 +844,9 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                             // Center Play/Pause button
                             IconButton(
                                 onClick = {
-                                    if (isPlaying) {
-                                        mainPlayer?.pause()
+                                    if (videoExoPlayer.isPlaying) {
                                         videoExoPlayer.pause()
                                     } else {
-                                        mainPlayer?.play()
                                         videoExoPlayer.play()
                                     }
                                 },
@@ -856,8 +856,8 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                                     .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(32.dp)),
                             ) {
                                 Icon(
-                                    imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                    contentDescription = if (isPlaying) "Pause" else "Play",
+                                    imageVector = if (videoExoPlayer.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                    contentDescription = if (videoExoPlayer.isPlaying) "Pause" else "Play",
                                     tint = Color.White,
                                     modifier = Modifier.size(36.dp),
                                 )
@@ -874,7 +874,6 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                                     value = currentPositionMs.toFloat().coerceIn(0f, durationMs.toFloat()),
                                     onValueChange = { newPos ->
                                         currentPositionMs = newPos.toLong()
-                                        mainPlayer?.seekTo(newPos.toLong())
                                         videoExoPlayer.seekTo(newPos.toLong())
                                     },
                                     valueRange = 0f..durationMs.toFloat(),
