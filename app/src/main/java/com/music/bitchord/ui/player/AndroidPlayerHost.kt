@@ -43,6 +43,8 @@ import androidx.media3.ui.PlayerView
 import com.music.bitchord.data.TrackLog
 import com.music.bitchord.data.innertube.StreamResolver
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import com.music.bitchord.playback.MusicOnlyPlayback
 import com.music.bitchord.data.SongEditStore
@@ -310,31 +312,75 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
         val context = LocalContext.current
 
-        // Dedicated ExoPlayer for direct muxed Video+Audio stream (do NOT mute: volume stays default 1f)
+        // Dedicated ExoPlayer for video rendering (volume = 0f; audio remains on mainPlayer)
         val videoExoPlayer = remember(context) {
             ExoPlayer.Builder(
                 context,
                 DefaultRenderersFactory(context).setEnableDecoderFallback(true),
             ).build().apply {
                 videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
+                volume = 0f
+                trackSelectionParameters = trackSelectionParameters.buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                    .build()
             }
         }
 
-        // Clean up video player on dispose, sync position back to main audio player, and resume
+        // Clean up video player on dispose
         DisposableEffect(videoExoPlayer) {
             onDispose {
                 PlaybackService.isVideoFrameRendered.value = false
                 PlaybackService.videoStatusText.value = ""
-                val pos = videoExoPlayer.currentPosition
                 videoExoPlayer.stop()
                 videoExoPlayer.clearMediaItems()
                 videoExoPlayer.release()
-                mainPlayer?.let { player ->
-                    if (pos > 0L) {
-                        val dur = player.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
-                        player.seekTo(pos.coerceAtMost(dur))
+            }
+        }
+
+        // Synchronize play/pause and seeks from mainPlayer to videoExoPlayer
+        DisposableEffect(videoExoPlayer, mainPlayer) {
+            val player = mainPlayer
+            if (player == null) return@DisposableEffect onDispose {}
+
+            val syncListener = object : Player.Listener {
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    videoExoPlayer.playWhenReady = isPlaying
+                    if (isPlaying && videoExoPlayer.playbackState == Player.STATE_READY) {
+                        videoExoPlayer.play()
                     }
-                    player.play()
+                }
+
+                override fun onPositionDiscontinuity(
+                    oldPosition: Player.PositionInfo,
+                    newPosition: Player.PositionInfo,
+                    reason: Int,
+                ) {
+                    videoExoPlayer.seekTo(newPosition.positionMs)
+                }
+
+                override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
+                    videoExoPlayer.playbackParameters = playbackParameters
+                }
+            }
+            player.addListener(syncListener)
+            onDispose {
+                player.removeListener(syncListener)
+            }
+        }
+
+        // Periodic drift correction to ensure video stays synchronized with audio
+        LaunchedEffect(videoExoPlayer, mainPlayer) {
+            while (isActive) {
+                delay(500)
+                val mPlayer = mainPlayer ?: continue
+                if (mPlayer.isPlaying && videoExoPlayer.playbackState == Player.STATE_READY) {
+                    val drift = kotlin.math.abs(videoExoPlayer.currentPosition - mPlayer.currentPosition)
+                    if (drift > 600L) {
+                        videoExoPlayer.seekTo(mPlayer.currentPosition)
+                    }
+                    if (!videoExoPlayer.isPlaying && videoExoPlayer.playWhenReady) {
+                        videoExoPlayer.play()
+                    }
                 }
             }
         }
@@ -374,10 +420,12 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             }
         }
 
-        // Fetch direct muxed MP4 stream (itag 18 or 22 - contains BOTH video and audio)
+        // Fetch video stream (supporting adaptiveFormats MP4/WebM, HLS, and deciphered streams)
         LaunchedEffect(mediaId) {
             PlaybackService.isVideoFrameRendered.value = false
             PlaybackService.videoStatusText.value = "Finding video..."
+            videoExoPlayer.stop()
+            videoExoPlayer.clearMediaItems()
 
             try {
                 val stream = withContext(Dispatchers.IO) {
@@ -395,7 +443,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
                 if (stream != null) {
                     PlaybackService.videoStatusText.value = "Buffering video..."
-                    val headers = StreamResolver.mediaHeadersFor(stream.url)
+                    val headers = if (stream.headers.isNotEmpty()) stream.headers else StreamResolver.mediaHeadersFor(stream.url)
                     val ua = stream.userAgent.ifBlank {
                         headers["User-Agent"] ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
                     }
@@ -424,15 +472,17 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     val currentPos = mainPlayer?.currentPosition ?: 0L
                     val currentDur = mainPlayer?.duration?.takeIf { it > 0 } ?: Long.MAX_VALUE
 
-                    // Pause main background audio player
-                    mainPlayer?.pause()
-
                     videoExoPlayer.setMediaSource(mediaSource)
                     if (currentPos > 0L) {
                         videoExoPlayer.seekTo(currentPos.coerceAtMost(currentDur))
                     }
                     videoExoPlayer.prepare()
-                    videoExoPlayer.playWhenReady = true
+                    videoExoPlayer.playWhenReady = mainPlayer?.isPlaying ?: true
+
+                    // Ensure main audio player continues playing seamless audio
+                    if (mainPlayer != null && !mainPlayer.isPlaying && mainPlayer.playWhenReady) {
+                        mainPlayer.play()
+                    }
                 } else {
                     TrackLog.w("VideoPlayer", "Failed to resolve video stream for $mediaId ($title - $artist)")
                     Toast.makeText(context, "Video unavailable", Toast.LENGTH_SHORT).show()

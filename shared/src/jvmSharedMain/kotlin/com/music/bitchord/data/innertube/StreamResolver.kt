@@ -1256,7 +1256,7 @@ object StreamResolver {
         val isYtId = videoId.length == 11 && videoId.all { it.isLetterOrDigit() || it == '-' || it == '_' }
 
         // 1. Fast Native YouTubei Search
-        val targetVideoId = try {
+        val searchedVideoId = try {
             val query = "$cleanTitle $cleanArtist official video".trim()
             val payload = buildJsonObject {
                 putJsonObject("context") {
@@ -1283,61 +1283,99 @@ object StreamResolver {
                 .readTimeout(5000, TimeUnit.MILLISECONDS)
                 .build()
 
-            val matchedId = client.newCall(searchReq).execute().use { resp ->
+            client.newCall(searchReq).execute().use { resp ->
                 if (!resp.isSuccessful) return@use null
                 val body = resp.body?.string() ?: return@use null
                 val regex = Regex(""""videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"""")
                 regex.find(body)?.groupValues?.get(1)
             }
-            matchedId ?: if (isYtId) videoId else null
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             TrackLog.w(TAG, "Native YouTubei search failed: ${e.message}")
-            if (isYtId) videoId else null
+            null
         }
 
-        if (targetVideoId.isNullOrBlank()) {
-            TrackLog.w(TAG, "No video ID found for '$title' - '$artist'")
+        val candidateIds = listOfNotNull(
+            searchedVideoId,
+            videoId.takeIf { isYtId }
+        ).distinct()
+
+        if (candidateIds.isEmpty()) {
+            TrackLog.w(TAG, "No video ID candidate found for '$title' - '$artist'")
             return@withContext null
         }
 
-        // 2. Reliable Extraction via InnerTube (ANDROID_VR / IOS)
         onStatusUpdate?.invoke("Extracting stream...")
-        val resolved = extractVideoStreamViaInnerTube(targetVideoId)
-        if (resolved != null && resolved.url.isNotBlank()) {
-            return@withContext resolved
-        }
 
-        // Fallback: If targetVideoId was from search and failed, try direct videoId if valid
-        if (isYtId && targetVideoId != videoId) {
-            val fallback = extractVideoStreamViaInnerTube(videoId)
-            if (fallback != null && fallback.url.isNotBlank()) {
-                return@withContext fallback
+        for (targetId in candidateIds) {
+            // A. InnerTubeX Resolver (with deciphering and PO token support)
+            try {
+                val xStream = InnerTubeXResolver.extractVideo(targetId, 1080)
+                    ?: InnerTubeXResolver.extractVideo(targetId, 1080, ageRestricted = true)
+                if (xStream != null && xStream.url.isNotBlank()) {
+                    TrackLog.d(TAG, "Video stream resolved via InnerTubeX for $targetId: ${xStream.width}x${xStream.height}")
+                    return@withContext ResolvedVideoStream(
+                        url = xStream.url,
+                        isHls = false,
+                        userAgent = xStream.headers["User-Agent"].orEmpty(),
+                        videoId = targetId,
+                        hasEmbeddedAudio = false,
+                        headers = xStream.headers,
+                    )
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                TrackLog.w(TAG, "InnerTubeX video extraction failed for $targetId: ${e.message}")
+            }
+
+            // B. Multi-client InnerTube Direct (ANDROID_VR, IOS, ANDROID_TESTSUITE, TVHTML5)
+            val innerTubeStream = extractVideoStreamViaInnerTube(targetId)
+            if (innerTubeStream != null && innerTubeStream.url.isNotBlank()) {
+                TrackLog.d(TAG, "Video stream resolved via InnerTube clients for $targetId: ${innerTubeStream.url}")
+                return@withContext innerTubeStream
+            }
+
+            // C. NewPipe Extractor (deciphers signature & n-parameter)
+            val newPipeStream = extractVideoStreamViaNewPipe(targetId)
+            if (newPipeStream != null && newPipeStream.url.isNotBlank()) {
+                TrackLog.d(TAG, "Video stream resolved via NewPipe for $targetId")
+                return@withContext newPipeStream
+            }
+
+            // D. Piped Instances Fallback
+            val pipedStream = extractVideoStreamViaPiped(targetId)
+            if (pipedStream != null && pipedStream.url.isNotBlank()) {
+                TrackLog.d(TAG, "Video stream resolved via Piped for $targetId")
+                return@withContext pipedStream
             }
         }
 
-        TrackLog.w(TAG, "InnerTube stream extraction failed for target $targetVideoId")
+        TrackLog.w(TAG, "All video stream extraction strategies failed for candidates: $candidateIds")
         null
     }
 
     private fun extractVideoStreamViaInnerTube(targetVideoId: String): ResolvedVideoStream? {
-        val vrResult = queryInnerTubeVideoPlayer(
-            targetVideoId = targetVideoId,
-            clientName = "ANDROID_VR",
-            clientVersion = "1.60.19",
-            clientNumber = "28",
-            userAgent = "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+        val clients = listOf(
+            Triple("ANDROID_VR", "1.60.19", "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip") to "28",
+            Triple("IOS", "19.45.4", "com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)") to "5",
+            Triple("ANDROID_TESTSUITE", "1.9", "google/coral/coral:12/SQ3A.220705.003.A1/8672226:user/release-keys") to "85",
+            Triple("TVHTML5_SIMPLY_EMBEDDED_PLAYER", "2.0", "Mozilla/5.0 (PlayStation; PlayStation 4/10.01) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15") to "85",
         )
-        if (vrResult != null) return vrResult
 
-        val iosResult = queryInnerTubeVideoPlayer(
-            targetVideoId = targetVideoId,
-            clientName = "IOS",
-            clientVersion = "19.45.4",
-            clientNumber = "5",
-            userAgent = "com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)",
-        )
-        return iosResult
+        for ((clientInfo, clientNumber) in clients) {
+            val (name, version, ua) = clientInfo
+            val result = queryInnerTubeVideoPlayer(
+                targetVideoId = targetVideoId,
+                clientName = name,
+                clientVersion = version,
+                clientNumber = clientNumber,
+                userAgent = ua,
+            )
+            if (result != null && result.url.isNotBlank()) {
+                return result
+            }
+        }
+        return null
     }
 
     private fun queryInnerTubeVideoPlayer(
@@ -1400,26 +1438,22 @@ object StreamResolver {
                         isHls = false,
                         userAgent = userAgent,
                         videoId = targetVideoId,
+                        hasEmbeddedAudio = true,
+                        headers = mapOf("User-Agent" to userAgent),
                     )
                 }
 
-                // 2. Grab the best video/mp4 URL from adaptiveFormats
+                // 2. Grab the best video URL from adaptiveFormats (MP4 and WebM)
                 val adaptive = streamingData["adaptiveFormats"]?.jsonArray?.mapNotNull { it.jsonObject }
                 val videoAdaptive = adaptive?.filter {
                     val u = it["url"]?.jsonPrimitive?.content
                     val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
-                    !u.isNullOrBlank() && mime.contains("video/mp4")
+                    !u.isNullOrBlank() && mime.contains("video/")
                 }
-                val avc1Matches = videoAdaptive?.filter {
-                    val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
-                    mime.contains("avc1", ignoreCase = true)
-                }
-                val pickedAdaptive = avc1Matches?.filter {
+                val pickedAdaptive = videoAdaptive?.filter {
                     val h = it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                    h in 360..720
+                    h in 360..1080
                 }?.maxByOrNull {
-                    it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                } ?: avc1Matches?.maxByOrNull {
                     it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
                 } ?: videoAdaptive?.maxByOrNull {
                     it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
@@ -1432,6 +1466,8 @@ object StreamResolver {
                         isHls = false,
                         userAgent = userAgent,
                         videoId = targetVideoId,
+                        hasEmbeddedAudio = false,
+                        headers = mapOf("User-Agent" to userAgent),
                     )
                 }
 
@@ -1443,6 +1479,8 @@ object StreamResolver {
                         isHls = true,
                         userAgent = userAgent,
                         videoId = targetVideoId,
+                        hasEmbeddedAudio = true,
+                        headers = mapOf("User-Agent" to userAgent),
                     )
                 }
 
@@ -1453,6 +1491,142 @@ object StreamResolver {
             null
         }
     }
+
+    private suspend fun extractVideoStreamViaNewPipe(targetVideoId: String): ResolvedVideoStream? = runCatching {
+        extractionGate.withLock {
+            withContext(Dispatchers.IO) {
+                init
+                val extractor = ServiceList.YouTube.getStreamExtractor(
+                    "https://www.youtube.com/watch?v=$targetVideoId"
+                )
+                extractor.fetchPage()
+
+                val hls = extractor.hlsUrl
+                if (!hls.isNullOrBlank()) {
+                    return@withContext ResolvedVideoStream(
+                        url = hls,
+                        isHls = true,
+                        userAgent = "",
+                        videoId = targetVideoId,
+                        hasEmbeddedAudio = true,
+                    )
+                }
+
+                val muxed = extractor.videoStreams?.filter { !it.content.isNullOrBlank() }
+                val bestMuxed = muxed?.maxByOrNull { stream ->
+                    stream.resolution?.filter { it.isDigit() }?.toIntOrNull() ?: 0
+                }
+                if (bestMuxed != null && !bestMuxed.content.isNullOrBlank()) {
+                    return@withContext ResolvedVideoStream(
+                        url = bestMuxed.content,
+                        isHls = false,
+                        userAgent = "",
+                        videoId = targetVideoId,
+                        hasEmbeddedAudio = true,
+                    )
+                }
+
+                val videoOnly = extractor.videoOnlyStreams?.filter { !it.content.isNullOrBlank() }
+                val bestVideoOnly = videoOnly?.filter { stream ->
+                    val res = stream.resolution?.filter { it.isDigit() }?.toIntOrNull() ?: 0
+                    res in 360..1080
+                }?.maxByOrNull { stream ->
+                    stream.resolution?.filter { it.isDigit() }?.toIntOrNull() ?: 0
+                } ?: videoOnly?.maxByOrNull { stream ->
+                    stream.resolution?.filter { it.isDigit() }?.toIntOrNull() ?: 0
+                }
+
+                if (bestVideoOnly != null && !bestVideoOnly.content.isNullOrBlank()) {
+                    return@withContext ResolvedVideoStream(
+                        url = bestVideoOnly.content,
+                        isHls = false,
+                        userAgent = "",
+                        videoId = targetVideoId,
+                        hasEmbeddedAudio = false,
+                    )
+                }
+
+                null
+            }
+        }
+    }.getOrNull()
+
+    private suspend fun extractVideoStreamViaPiped(targetVideoId: String): ResolvedVideoStream? = withContext(Dispatchers.IO) {
+        val instances = listOf(
+            "https://pipedapi.kavin.rocks",
+            "https://api.piped.private.coffee",
+            "https://pipedapi.tokhmi.xyz"
+        )
+        val client = Http.client.newBuilder()
+            .connectTimeout(4000, TimeUnit.MILLISECONDS)
+            .readTimeout(4000, TimeUnit.MILLISECONDS)
+            .build()
+
+        for (base in instances) {
+            try {
+                val req = okhttp3.Request.Builder()
+                    .url("$base/streams/$targetVideoId")
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                    .build()
+                val stream = client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use null
+                    val body = resp.body?.string() ?: return@use null
+                    val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
+
+                    val hls = root["hls"]?.jsonPrimitive?.content
+                    if (!hls.isNullOrBlank()) {
+                        return@use ResolvedVideoStream(
+                            url = hls,
+                            isHls = true,
+                            videoId = targetVideoId,
+                            hasEmbeddedAudio = true,
+                        )
+                    }
+
+                    val vStreams = root["videoStreams"]?.jsonArray?.mapNotNull { it.jsonObject }
+                    val muxed = vStreams?.filter {
+                        val u = it["url"]?.jsonPrimitive?.content
+                        val vo = it["videoOnly"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false
+                        !u.isNullOrBlank() && !vo
+                    }
+                    val bestMuxed = muxed?.maxByOrNull {
+                        it["quality"]?.jsonPrimitive?.content?.filter { c -> c.isDigit() }?.toIntOrNull() ?: 0
+                    }
+                    val muxedUrl = bestMuxed?.get("url")?.jsonPrimitive?.content
+                    if (!muxedUrl.isNullOrBlank()) {
+                        return@use ResolvedVideoStream(
+                            url = muxedUrl,
+                            isHls = false,
+                            videoId = targetVideoId,
+                            hasEmbeddedAudio = true,
+                        )
+                    }
+
+                    val videoOnly = vStreams?.filter {
+                        val u = it["url"]?.jsonPrimitive?.content
+                        !u.isNullOrBlank()
+                    }
+                    val bestVo = videoOnly?.maxByOrNull {
+                        it["quality"]?.jsonPrimitive?.content?.filter { c -> c.isDigit() }?.toIntOrNull() ?: 0
+                    }
+                    val voUrl = bestVo?.get("url")?.jsonPrimitive?.content
+                    if (!voUrl.isNullOrBlank()) {
+                        return@use ResolvedVideoStream(
+                            url = voUrl,
+                            isHls = false,
+                            videoId = targetVideoId,
+                            hasEmbeddedAudio = false,
+                        )
+                    }
+                    null
+                }
+                if (stream != null) return@withContext stream
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+            }
+        }
+        null
+    }
 }
 
 data class ResolvedVideoStream(
@@ -1460,4 +1634,6 @@ data class ResolvedVideoStream(
     val isHls: Boolean = false,
     val userAgent: String = "",
     val videoId: String = "",
+    val hasEmbeddedAudio: Boolean = false,
+    val headers: Map<String, String> = emptyMap(),
 )
