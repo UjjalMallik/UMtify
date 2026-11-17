@@ -2833,10 +2833,16 @@ fun NowPlayingScreen(
                         // The card's paused shrink, let go of as it collapses.
                         fun cardScale(): Float = artScale + (1f - artScale) * p()
                         fun cardRect(): Rect = with(density) {
-                            val side = artSize().roundToPx().toFloat()
+                            val width = artSize().roundToPx().toFloat()
+                            val height = if (song.isVideo) width * (9f / 16f) else width
+                            val top = if (song.isVideo) {
+                                artTop().roundToPx().toFloat() + (width - height) / 2f
+                            } else {
+                                artTop().roundToPx().toFloat()
+                            }
                             Rect(
-                                offset = Offset(artStart().roundToPx().toFloat(), artTop().roundToPx().toFloat()),
-                                size = Size(side, side),
+                                offset = Offset(artStart().roundToPx().toFloat(), top),
+                                size = Size(width, height),
                             )
                         }
                         fun sleeveRect(): Rect {
@@ -3003,22 +3009,22 @@ fun NowPlayingScreen(
                                     // The card floats: a deeper shadow while the
                                     // music runs, a shallower one at rest, both
                                     // letting go as the sleeve docks away.
-                                    shadowElevation = if (art.loaded) {
+                                    shadowElevation = if (!song.isVideo && art.loaded) {
                                         (if (isPlaying) 24.dp else 12.dp).toPx() *
                                             (1f - 2f * shown).coerceAtLeast(0f) * dockT() *
                                             (1f - bannerShare())
                                     } else {
                                         0f
                                     }
-                                    shape = dockFrame.cornerShape(sleeveChromeCorner())
+                                    shape = if (song.isVideo) RoundedCornerShape(12.dp) else dockFrame.cornerShape(sleeveChromeCorner())
                                     // What `.shadow` did: it clips only when it casts.
-                                    clip = art.loaded
+                                    clip = !song.isVideo && art.loaded
                                 }
                                 .graphicsLayer {
                                     // Clipped a second time, as `.shadow` and then
                                     // `.clip` always did: a card's anti-aliased corners
                                     // come out as they did before the banner moved in.
-                                    shape = dockFrame.cornerShape(sleeveChromeCorner())
+                                    shape = if (song.isVideo) RoundedCornerShape(12.dp) else dockFrame.cornerShape(sleeveChromeCorner())
                                     clip = true
                                     // The mask below erases part of what this layer
                                     // drew, which it can only do in a buffer of its own.
@@ -3037,22 +3043,24 @@ fun NowPlayingScreen(
                                 // the card still being there.
                                 .drawWithContent {
                                     drawContent()
-                                    val edge = 0.16f * (1f - p()).coerceIn(0f, 1f) *
-                                        (1f - bannerShare())
-                                    if (edge > 0.001f) {
-                                        val line = 1.dp.toPx()
-                                        drawRoundRect(
-                                            color = Color.White.copy(alpha = edge),
-                                            topLeft = Offset(line / 2f, line / 2f),
-                                            size = Size(
-                                                width = size.width - line,
-                                                height = size.height - line,
-                                            ),
-                                            cornerRadius = CornerRadius(
-                                                with(density) { sleeveCorner().toPx() } - line / 2f,
-                                            ),
-                                            style = Stroke(width = line),
-                                        )
+                                    if (!song.isVideo) {
+                                        val edge = 0.16f * (1f - p()).coerceIn(0f, 1f) *
+                                            (1f - bannerShare())
+                                        if (edge > 0.001f) {
+                                            val line = 1.dp.toPx()
+                                            drawRoundRect(
+                                                color = Color.White.copy(alpha = edge),
+                                                topLeft = Offset(line / 2f, line / 2f),
+                                                size = Size(
+                                                    width = size.width - line,
+                                                    height = size.height - line,
+                                                ),
+                                                cornerRadius = CornerRadius(
+                                                    with(density) { sleeveCorner().toPx() } - line / 2f,
+                                                ),
+                                                style = Stroke(width = line),
+                                            )
+                                        }
                                     }
                                 }
                                 // The banner dissolves into the backdrop where the
@@ -3060,16 +3068,18 @@ fun NowPlayingScreen(
                                 // up into that edge as it collapses.
                                 .drawWithContent {
                                     drawContent()
-                                    val shown = sleeveShown()
-                                    if (shown > 0f) {
-                                        drawRect(
-                                            brush = Brush.verticalGradient(
-                                                colors = listOf(Color.Black, Color.Black.copy(alpha = 1f - shown)),
-                                                startY = size.height * (1f - HERO_FADE_FRACTION),
-                                                endY = size.height,
-                                            ),
-                                            blendMode = BlendMode.DstIn,
-                                        )
+                                    if (!song.isVideo) {
+                                        val shown = sleeveShown()
+                                        if (shown > 0f) {
+                                            drawRect(
+                                                brush = Brush.verticalGradient(
+                                                    colors = listOf(Color.Black, Color.Black.copy(alpha = 1f - shown)),
+                                                    startY = size.height * (1f - HERO_FADE_FRACTION),
+                                                    endY = size.height,
+                                                ),
+                                                blendMode = BlendMode.DstIn,
+                                            )
+                                        }
                                     }
                                 },
                         ) {
@@ -3083,107 +3093,88 @@ fun NowPlayingScreen(
                             // card or it is nothing, and blown out to the banner it
                             // would only tint the top third of the screen. Under the
                             // cover, which hides it the moment there is one.
-                            Box(
-                                modifier = Modifier
-                                    .layout { measurable, _ ->
-                                        val card = towardsDock(cardRect(), dockFrame.miniInBox)
-                                        val sleeve = dockFrame.sleeve
-                                        val placeable = measurable.measure(
-                                            Constraints.fixed(card.width.roundToInt(), card.height.roundToInt()),
-                                        )
-                                        layout(0, 0) {
-                                            placeable.place(
-                                                (card.left - sleeve.left).roundToInt(),
-                                                (card.top - sleeve.top).roundToInt(),
+                            if (!song.isVideo) {
+                                Box(
+                                    modifier = Modifier
+                                        .layout { measurable, _ ->
+                                            val card = towardsDock(cardRect(), dockFrame.miniInBox)
+                                            val sleeve = dockFrame.sleeve
+                                            val placeable = measurable.measure(
+                                                Constraints.fixed(card.width.roundToInt(), card.height.roundToInt()),
                                             )
+                                            layout(0, 0) {
+                                                placeable.place(
+                                                    (card.left - sleeve.left).roundToInt(),
+                                                    (card.top - sleeve.top).roundToInt(),
+                                                )
+                                            }
                                         }
-                                    }
-                                    .graphicsLayer {
-                                        // The card's own shrink and nudge, where the
-                                        // sleeve around it is not taking them.
-                                        val share = bannerShare()
-                                        val idle = cardScale()
-                                        val t = dockT()
-                                        val scale = if (t >= 1f) {
-                                            idle / (idle + (1f - idle) * share)
-                                        } else {
-                                            (1f + (idle - 1f) * t) / (1f + (idle + (1f - idle) * share - 1f) * t)
-                                        }
-                                        scaleX = scale
-                                        scaleY = scale
-                                        translationX = swipeSettle.value * (1f - p()) * share * t
-                                        // Its own corners only once it is smaller than
-                                        // the sleeve; as the whole card it takes the
-                                        // sleeve's clip, as it always did.
-                                        shape = TileShape
-                                        clip = share > 0f
-                                    }
-                                    // The empty-state tile's tinted square, not a
-                                    // container for the cover. It is only visible
-                                    // where the still image steps aside for a
-                                    // full-bleed Canvas, and there it must leave
-                                    // with the card: a translucent square over the
-                                    // banner is exactly the ghost this mode is
-                                    // meant not to have.
-                                    .drawBehind {
-                                        val scrim = 0.18f * (1f - bannerShare())
-                                        if (scrim > 0.001f) {
-                                            drawRect(Color.Black.copy(alpha = scrim))
-                                        }
-                                    },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                // Absence, not loading. `!art.loaded` is true for
-                                // every track whose cover is still on its way, so
-                                // the sleeve flashed over the real artwork on
-                                // every one of them; it shows now only when the
-                                // URL was never there, or the retries used it up.
-                                val artIsGone = art.url.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url) ||
-                                    (art.failed && art.attempt >= ART_RETRIES)
-                                if (!song.isVideo && artIsGone && !canvasRendered) {
-                                    DefaultCoverTile(
-                                        modifier = Modifier.graphicsLayer {
-                                            val scale = 1f - 0.5f * p()
+                                        .graphicsLayer {
+                                            // The card's own shrink and nudge, where the
+                                            // sleeve around it is not taking them.
+                                            val share = bannerShare()
+                                            val idle = cardScale()
+                                            val t = dockT()
+                                            val scale = if (t >= 1f) {
+                                                idle / (idle + (1f - idle) * share)
+                                            } else {
+                                                (1f + (idle - 1f) * t) / (1f + (idle + (1f - idle) * share - 1f) * t)
+                                            }
                                             scaleX = scale
                                             scaleY = scale
+                                            translationX = swipeSettle.value * (1f - p()) * share * t
+                                            // Its own corners only once it is smaller than
+                                            // the sleeve; as the whole card it takes the
+                                            // sleeve's clip, as it always did.
+                                            shape = TileShape
+                                            clip = share > 0f
+                                        }
+                                        // The empty-state tile's tinted square, not a
+                                        // container for the cover. It is only visible
+                                        // where the still image steps aside for a
+                                        // full-bleed Canvas, and there it must leave
+                                        // with the card: a translucent square over the
+                                        // banner is exactly the ghost this mode is
+                                        // meant not to have.
+                                        .drawBehind {
+                                            val scrim = 0.18f * (1f - bannerShare())
+                                            if (scrim > 0.001f) {
+                                                drawRect(Color.Black.copy(alpha = scrim))
+                                            }
                                         },
-                                        contentScale = ContentScale.Crop,
-                                    )
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    // Absence, not loading. `!art.loaded` is true for
+                                    // every track whose cover is still on its way, so
+                                    // the sleeve flashed over the real artwork on
+                                    // every one of them; it shows now only when the
+                                    // URL was never there, or the retries used it up.
+                                    val artIsGone = art.url.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url) ||
+                                        (art.failed && art.attempt >= ART_RETRIES)
+                                    if (artIsGone && !canvasRendered) {
+                                        DefaultCoverTile(
+                                            modifier = Modifier.graphicsLayer {
+                                                val scale = 1f - 0.5f * p()
+                                                scaleX = scale
+                                                scaleY = scale
+                                            },
+                                            contentScale = ContentScale.Crop,
+                                        )
+                                    }
                                 }
-                            }
-
-                            // Ambient blurred artwork backdrop for video mode
-                            if (song.isVideo && !art.url.isNullOrBlank() && !com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url)) {
-                                AsyncImage(
-                                    model = art.request,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    onState = art::onState,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .blur(28.dp, BlurredEdgeTreatment.Unbounded)
-                                        .drawWithContent {
-                                            drawContent()
-                                            drawRect(Color.Black.copy(alpha = 0.55f))
-                                        },
-                                )
                             }
 
                             if (song.isVideo) {
                                 WhileShown({ !collapsePastHalf }) {
                                     Box(
                                         modifier = Modifier
-                                            .fillMaxWidth()
-                                            .aspectRatio(16f / 9f)
-                                            .align(Alignment.Center)
-                                            .clip(RoundedCornerShape(16.dp))
+                                            .fillMaxSize()
+                                            .clip(RoundedCornerShape(12.dp))
                                             .background(Color.Black),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         PlayerPlatform.host.VideoPlayer(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .clip(RoundedCornerShape(16.dp)),
+                                            modifier = Modifier.fillMaxSize(),
                                         )
                                     }
                                 }
@@ -3261,69 +3252,6 @@ fun NowPlayingScreen(
                             }
 
                             if (song.isVideo) {
-                                if (!videoFrameRendered) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .aspectRatio(16f / 9f)
-                                            .align(Alignment.Center)
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .background(Color.Black.copy(alpha = 0.6f)),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Column(
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                                        ) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(36.dp),
-                                                color = Color.White.copy(alpha = 0.85f),
-                                                strokeWidth = 3.dp,
-                                            )
-                                            if (videoStatusText.isNotBlank()) {
-                                                Text(
-                                                    text = videoStatusText,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = Color.White.copy(alpha = 0.85f),
-                                                    maxLines = 1,
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.BottomCenter)
-                                        .padding(bottom = 12.dp)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(Color.Black.copy(alpha = 0.65f))
-                                        .border(
-                                            width = 0.8.dp,
-                                            color = Color.White.copy(alpha = 0.25f),
-                                            shape = RoundedCornerShape(16.dp),
-                                        )
-                                        .clickable { onSwitchToAudio?.invoke() ?: onOpenMenu() }
-                                        .padding(horizontal = 14.dp, vertical = 6.dp),
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.PlayArrow,
-                                            contentDescription = null,
-                                            tint = Color.White,
-                                            modifier = Modifier.size(13.dp),
-                                        )
-                                        Text(
-                                            text = "Switch to audio",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = Color.White,
-                                            fontWeight = FontWeight.SemiBold,
-                                        )
-                                    }
-                                }
-
                                 VideoSkipOverlay(
                                     videoId = song.videoId,
                                     position = position,
@@ -3331,7 +3259,7 @@ fun NowPlayingScreen(
                                     onSeek = onSeek,
                                     modifier = Modifier
                                         .align(Alignment.BottomEnd)
-                                        .padding(bottom = 12.dp, end = 12.dp),
+                                        .padding(bottom = 8.dp, end = 8.dp),
                                 )
                             }
                         }

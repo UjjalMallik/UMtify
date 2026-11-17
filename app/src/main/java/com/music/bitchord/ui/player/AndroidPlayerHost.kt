@@ -22,6 +22,8 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,11 +36,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.FastForward
+import androidx.compose.material.icons.rounded.FastRewind
 import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.FullscreenExit
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.HighQuality
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -73,6 +80,8 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -80,6 +89,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.session.MediaController
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -337,6 +347,13 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         else -> null
     }
 
+    data class VideoAudioTrack(
+        val groupIndex: Int,
+        val trackIndex: Int,
+        val name: String,
+        val isSelected: Boolean,
+    )
+
     @Composable
     override fun VideoPlayer(modifier: Modifier) {
         val activeTrackId by PlaybackService.activeVideoTrackId.collectAsStateWithLifecycle()
@@ -365,23 +382,40 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         var isFullscreen by remember { mutableStateOf(false) }
         var showControls by remember { mutableStateOf(true) }
         var qualityMenuOpen by remember { mutableStateOf(false) }
+        var audioMenuOpen by remember { mutableStateOf(false) }
 
         var availableQualities by remember { mutableStateOf<List<VideoQualityOption>>(emptyList()) }
-        var selectedQuality by remember { mutableStateOf<VideoQualityOption?>(null) }
+        var selectedQualityLabel by remember { mutableStateOf("Auto") }
         var currentAudioUrl by remember { mutableStateOf<String?>(null) }
         var currentHasEmbeddedAudio by remember { mutableStateOf(false) }
         var currentHeaders by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
         var currentUa by remember { mutableStateOf("") }
+        var audioTracks by remember { mutableStateOf<List<VideoAudioTrack>>(emptyList()) }
+
+        var seekNoticeLeft by remember { mutableStateOf(false) }
+        var seekNoticeRight by remember { mutableStateOf(false) }
 
         val inlineTextureRef = remember { mutableStateOf<TextureView?>(null) }
         val fullscreenTextureRef = remember { mutableStateOf<TextureView?>(null) }
 
+        // Adaptive Bitrate DefaultTrackSelector with Mixed MIME and non-seamless adaptiveness
+        val trackSelector = remember(context) {
+            DefaultTrackSelector(context).apply {
+                setParameters(
+                    buildUponParameters()
+                        .setAllowVideoMixedMimeTypeAdaptiveness(true)
+                        .setAllowVideoNonSeamlessAdaptiveness(true)
+                )
+            }
+        }
+
         // Dedicated ExoPlayer for video+audio rendering (plays the YT video's own audio+video)
-        val videoExoPlayer = remember(context) {
+        val videoExoPlayer = remember(context, trackSelector) {
             ExoPlayer.Builder(
                 context,
                 DefaultRenderersFactory(context).setEnableDecoderFallback(true),
             )
+                .setTrackSelector(trackSelector)
                 .setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus = */ true)
                 .setHandleAudioBecomingNoisy(true)
                 .build().apply {
@@ -418,7 +452,53 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             }
         }
 
-        // Listen for rendered first frame, STATE_READY, and onPlayerError
+        // Auto-dismiss seek visual feedback notices after 650ms
+        LaunchedEffect(seekNoticeLeft) {
+            if (seekNoticeLeft) {
+                delay(650)
+                seekNoticeLeft = false
+            }
+        }
+        LaunchedEffect(seekNoticeRight) {
+            if (seekNoticeRight) {
+                delay(650)
+                seekNoticeRight = false
+            }
+        }
+
+        // Auto-hide controls after 3.5s of playback
+        LaunchedEffect(showControls, videoExoPlayer.isPlaying) {
+            if (showControls && videoExoPlayer.isPlaying) {
+                delay(3500)
+                showControls = false
+            }
+        }
+
+        fun updateAudioTracksList(tracks: Tracks) {
+            val list = mutableListOf<VideoAudioTrack>()
+            for ((gIdx, group) in tracks.groups.withIndex()) {
+                if (group.type == C.TRACK_TYPE_AUDIO) {
+                    for (tIdx in 0 until group.length) {
+                        val format = group.getTrackFormat(tIdx)
+                        val lang = format.language?.uppercase()?.takeIf { it.isNotBlank() && it != "UND" }
+                        val label = format.label?.takeIf { it.isNotBlank() }
+                        val bitrate = if (format.bitrate > 0) "${format.bitrate / 1000} kbps" else null
+                        val name = listOfNotNull(label, lang, bitrate).joinToString(" · ").ifBlank { "Track ${list.size + 1}" }
+                        list.add(
+                            VideoAudioTrack(
+                                groupIndex = gIdx,
+                                trackIndex = tIdx,
+                                name = name,
+                                isSelected = group.isTrackSelected(tIdx),
+                            )
+                        )
+                    }
+                }
+            }
+            audioTracks = list
+        }
+
+        // Listen for rendered first frame, STATE_READY, track changes, and onPlayerError
         DisposableEffect(videoExoPlayer) {
             val listener = object : Player.Listener {
                 override fun onRenderedFirstFrame() {
@@ -435,6 +515,10 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                         videoExoPlayer.play()
                         mainPlayer?.pause()
                     }
+                }
+
+                override fun onTracksChanged(tracks: Tracks) {
+                    updateAudioTracksList(tracks)
                 }
 
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -502,6 +586,19 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             videoExoPlayer.playWhenReady = true
         }
 
+        // Helper to select audio track
+        fun selectAudioTrack(track: VideoAudioTrack) {
+            val group = videoExoPlayer.currentTracks.groups.getOrNull(track.groupIndex) ?: return
+            trackSelector.parameters = trackSelector.buildUponParameters()
+                .setOverrideForType(
+                    TrackSelectionOverride(
+                        group.mediaTrackGroup,
+                        listOf(track.trackIndex),
+                    )
+                )
+                .build()
+        }
+
         // Initial resolution on mediaId change
         LaunchedEffect(mediaId) {
             PlaybackService.isVideoFrameRendered.value = false
@@ -509,7 +606,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             videoExoPlayer.stop()
             videoExoPlayer.clearMediaItems()
             availableQualities = emptyList()
-            selectedQuality = null
+            selectedQualityLabel = "Auto"
 
             try {
                 val stream = withContext(Dispatchers.IO) {
@@ -535,17 +632,23 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     currentUa = ua
                     currentAudioUrl = stream.audioStreamUrl
                     currentHasEmbeddedAudio = stream.hasEmbeddedAudio
-
                     availableQualities = stream.availableQualities
-                    selectedQuality = stream.availableQualities.firstOrNull { it.url == stream.url }
+
+                    // ABR Auto: default to highest available quality or HLS
+                    val highestStream = stream.availableQualities.firstOrNull { it.isHls }
+                        ?: stream.availableQualities.firstOrNull { it.height >= 720 }
+                        ?: stream.availableQualities.maxByOrNull { it.height }
                         ?: stream.availableQualities.firstOrNull()
-                        ?: VideoQualityOption(label = "480p", height = 480, url = stream.url, isHls = stream.isHls, audioUrl = stream.audioStreamUrl)
+
+                    val targetUrl = highestStream?.url ?: stream.url
+                    val targetIsHls = highestStream?.isHls ?: stream.isHls
+                    val targetAudio = highestStream?.audioUrl ?: stream.audioStreamUrl
 
                     playStream(
-                        videoUrl = stream.url,
-                        audioUrl = stream.audioStreamUrl,
+                        videoUrl = targetUrl,
+                        audioUrl = targetAudio,
                         hasEmbeddedAudio = stream.hasEmbeddedAudio,
-                        isHls = stream.isHls,
+                        isHls = targetIsHls,
                         headers = headers,
                         ua = ua,
                     )
@@ -562,11 +665,90 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             }
         }
 
+        val qualityOptions = remember(availableQualities) {
+            val list = mutableListOf<VideoQualityOption>()
+            list.add(VideoQualityOption(label = "Auto", height = 0, url = ""))
+            list.addAll(availableQualities.distinctBy { it.height }.sortedByDescending { it.height })
+            list
+        }
+
+        fun onSelectQuality(option: VideoQualityOption) {
+            selectedQualityLabel = option.label
+            if (option.label == "Auto") {
+                trackSelector.parameters = trackSelector.buildUponParameters()
+                    .clearVideoSizeConstraints()
+                    .build()
+                val autoStream = availableQualities.firstOrNull { it.isHls }
+                    ?: availableQualities.firstOrNull { it.height >= 720 }
+                    ?: availableQualities.firstOrNull()
+                if (autoStream != null) {
+                    playStream(
+                        videoUrl = autoStream.url,
+                        audioUrl = autoStream.audioUrl ?: currentAudioUrl,
+                        hasEmbeddedAudio = currentHasEmbeddedAudio,
+                        isHls = autoStream.isHls,
+                        headers = currentHeaders,
+                        ua = currentUa,
+                    )
+                }
+            } else {
+                trackSelector.parameters = trackSelector.buildUponParameters()
+                    .setMaxVideoSize(1920, option.height)
+                    .build()
+                if (option.url.isNotBlank()) {
+                    playStream(
+                        videoUrl = option.url,
+                        audioUrl = option.audioUrl ?: currentAudioUrl,
+                        hasEmbeddedAudio = currentHasEmbeddedAudio,
+                        isHls = option.isHls,
+                        headers = currentHeaders,
+                        ua = currentUa,
+                    )
+                }
+            }
+        }
+
+        var currentPositionMs by remember { mutableStateOf(videoExoPlayer.currentPosition) }
+        val durationMs = videoExoPlayer.duration.takeIf { it > 0 } ?: (mainPlayer?.duration?.takeIf { it > 0 } ?: 1L)
+        val isVideoPlaying = videoExoPlayer.isPlaying
+        val isBuffering = !PlaybackService.isVideoFrameRendered.value || videoExoPlayer.playbackState == Player.STATE_BUFFERING
+
+        LaunchedEffect(Unit) {
+            while (isActive) {
+                currentPositionMs = videoExoPlayer.currentPosition
+                delay(200)
+            }
+        }
+
+        // Inline Video Container (16:9 Clean Frame)
         Box(
-            modifier = modifier.fillMaxSize(),
+            modifier = modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .clip(RoundedCornerShape(12.dp))
+                .pointerInput(videoExoPlayer) {
+                    detectTapGestures(
+                        onTap = {
+                            showControls = !showControls
+                        },
+                        onDoubleTap = { offset ->
+                            val isRight = offset.x > size.width / 2
+                            val dur = videoExoPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
+                            if (isRight) {
+                                val target = (videoExoPlayer.currentPosition + 10_000L).coerceAtMost(dur)
+                                videoExoPlayer.seekTo(target)
+                                seekNoticeRight = true
+                            } else {
+                                val target = (videoExoPlayer.currentPosition - 10_000L).coerceAtLeast(0L)
+                                videoExoPlayer.seekTo(target)
+                                seekNoticeLeft = true
+                            }
+                        }
+                    )
+                },
             contentAlignment = Alignment.Center,
         ) {
-            // Direct clean TextureView without broken Matrix transforms
+            // TextureView
             AndroidView(
                 factory = { ctx ->
                     TextureView(ctx).apply {
@@ -582,88 +764,335 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                 modifier = Modifier.fillMaxSize(),
             )
 
-            // Quality selector pill (top-right corner)
-            if (availableQualities.isNotEmpty()) {
+            // Buffering Indicator
+            if (isBuffering) {
                 Box(
                     modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 10.dp, end = 10.dp),
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.5f)),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color.Black.copy(alpha = 0.65f))
-                            .clickable { qualityMenuOpen = true }
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        contentAlignment = Alignment.Center,
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.HighQuality,
-                                contentDescription = "Quality",
-                                tint = Color.White.copy(alpha = 0.9f),
-                                modifier = Modifier.size(14.dp),
-                            )
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(36.dp),
+                            color = Color.White.copy(alpha = 0.85f),
+                            strokeWidth = 3.dp,
+                        )
+                        val status = PlaybackService.videoStatusText.value
+                        if (status.isNotBlank()) {
                             Text(
-                                text = selectedQuality?.label ?: "Quality",
-                                color = Color.White.copy(alpha = 0.9f),
+                                text = status,
+                                color = Color.White.copy(alpha = 0.85f),
                                 fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                    }
-
-                    DropdownMenu(
-                        expanded = qualityMenuOpen,
-                        onDismissRequest = { qualityMenuOpen = false },
-                    ) {
-                        availableQualities.forEach { option ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = option.label,
-                                        fontWeight = if (selectedQuality == option) FontWeight.Bold else FontWeight.Normal,
-                                    )
-                                },
-                                onClick = {
-                                    qualityMenuOpen = false
-                                    if (selectedQuality != option) {
-                                        selectedQuality = option
-                                        val optAudio = option.audioUrl ?: currentAudioUrl
-                                        playStream(
-                                            videoUrl = option.url,
-                                            audioUrl = optAudio,
-                                            hasEmbeddedAudio = currentHasEmbeddedAudio,
-                                            isHls = option.isHls,
-                                            headers = currentHeaders,
-                                            ua = currentUa,
-                                        )
-                                    }
-                                },
                             )
                         }
                     }
                 }
             }
 
-            // Fullscreen toggle button (bottom-right corner)
-            IconButton(
-                onClick = { isFullscreen = true },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 8.dp, bottom = 8.dp)
-                    .size(36.dp)
-                    .background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(10.dp)),
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Fullscreen,
-                    contentDescription = "Fullscreen",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp),
-                )
+            // Double Tap Visual Notice (Left: -10s)
+            if (seekNoticeLeft) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(0.45f)
+                        .align(Alignment.CenterStart)
+                        .background(
+                            Color.White.copy(alpha = 0.2f),
+                            RoundedCornerShape(topEndPercent = 50, bottomEndPercent = 50),
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Rounded.FastRewind,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp),
+                        )
+                        Text(
+                            text = "-10s",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            }
+
+            // Double Tap Visual Notice (Right: +10s)
+            if (seekNoticeRight) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(0.45f)
+                        .align(Alignment.CenterEnd)
+                        .background(
+                            Color.White.copy(alpha = 0.2f),
+                            RoundedCornerShape(topStartPercent = 50, bottomStartPercent = 50),
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Rounded.FastForward,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp),
+                        )
+                        Text(
+                            text = "+10s",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            }
+
+            // Inline Controls Overlay
+            if (showControls) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.45f)),
+                ) {
+                    // Top Bar (Switch to audio + Audio tracks + Quality)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.TopCenter)
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        // Switch to Audio pill
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.Black.copy(alpha = 0.6f))
+                                .clickable { PlaybackService.dismissVideoLoading() }
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(13.dp),
+                                )
+                                Text(
+                                    text = "Audio",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            // Audio Track Selector
+                            if (audioTracks.isNotEmpty()) {
+                                Box {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(Color.Black.copy(alpha = 0.6f))
+                                            .clickable { audioMenuOpen = true }
+                                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.GraphicEq,
+                                            contentDescription = "Audio Track",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(15.dp),
+                                        )
+                                    }
+                                    DropdownMenu(
+                                        expanded = audioMenuOpen,
+                                        onDismissRequest = { audioMenuOpen = false },
+                                    ) {
+                                        audioTracks.forEach { track ->
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = track.name,
+                                                        fontWeight = if (track.isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                    )
+                                                },
+                                                onClick = {
+                                                    audioMenuOpen = false
+                                                    selectAudioTrack(track)
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Quality Selector
+                            if (qualityOptions.isNotEmpty()) {
+                                Box {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(Color.Black.copy(alpha = 0.6f))
+                                            .clickable { qualityMenuOpen = true }
+                                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Settings,
+                                                contentDescription = "Quality",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(13.dp),
+                                            )
+                                            Text(
+                                                text = selectedQualityLabel,
+                                                color = Color.White,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                            )
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = qualityMenuOpen,
+                                        onDismissRequest = { qualityMenuOpen = false },
+                                    ) {
+                                        qualityOptions.forEach { option ->
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = option.label,
+                                                        fontWeight = if (selectedQualityLabel == option.label) FontWeight.Bold else FontWeight.Normal,
+                                                    )
+                                                },
+                                                onClick = {
+                                                    qualityMenuOpen = false
+                                                    onSelectQuality(option)
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Center Transport Controls (Rewind 10s, Play/Pause, Forward 10s)
+                    Row(
+                        modifier = Modifier.align(Alignment.Center),
+                        horizontalArrangement = Arrangement.spacedBy(28.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(
+                            onClick = {
+                                val target = (videoExoPlayer.currentPosition - 10_000L).coerceAtLeast(0L)
+                                videoExoPlayer.seekTo(target)
+                                seekNoticeLeft = true
+                            },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(20.dp)),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.FastRewind,
+                                contentDescription = "Rewind 10s",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+
+                        IconButton(
+                            onClick = {
+                                if (isVideoPlaying) {
+                                    videoExoPlayer.pause()
+                                } else {
+                                    videoExoPlayer.play()
+                                }
+                            },
+                            modifier = Modifier
+                                .size(52.dp)
+                                .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(26.dp)),
+                        ) {
+                            Icon(
+                                imageVector = if (isVideoPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                contentDescription = if (isVideoPlaying) "Pause" else "Play",
+                                tint = Color.White,
+                                modifier = Modifier.size(32.dp),
+                            )
+                        }
+
+                        IconButton(
+                            onClick = {
+                                val dur = videoExoPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
+                                val target = (videoExoPlayer.currentPosition + 10_000L).coerceAtMost(dur)
+                                videoExoPlayer.seekTo(target)
+                                seekNoticeRight = true
+                            },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(20.dp)),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.FastForward,
+                                contentDescription = "Forward 10s",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    }
+
+                    // Bottom Bar (Timestamp + Fullscreen)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.BottomCenter)
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        val curMin = (currentPositionMs / 1000) / 60
+                        val curSec = (currentPositionMs / 1000) % 60
+                        val durMin = (durationMs / 1000) / 60
+                        val durSec = (durationMs / 1000) % 60
+                        Text(
+                            text = "%d:%02d / %d:%02d".format(curMin, curSec, durMin, durSec),
+                            color = Color.White.copy(alpha = 0.9f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+
+                        IconButton(
+                            onClick = { isFullscreen = true },
+                            modifier = Modifier
+                                .size(32.dp)
+                                .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp)),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Fullscreen,
+                                contentDescription = "Fullscreen",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -694,27 +1123,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                             WindowCompat.setDecorFitsSystemWindows(a.window, true)
                             WindowInsetsControllerCompat(a.window, a.window.decorView).show(WindowInsetsCompat.Type.systemBars())
                         }
-                        // Re-attach to inline TextureView when exiting fullscreen
                         inlineTextureRef.value?.let { videoExoPlayer.setVideoTextureView(it) }
-                    }
-                }
-
-                // Auto-hide controls after 4 seconds of inactivity while playing
-                LaunchedEffect(showControls) {
-                    if (showControls && videoExoPlayer.isPlaying) {
-                        delay(4000)
-                        showControls = false
-                    }
-                }
-
-                var currentPositionMs by remember { mutableStateOf(videoExoPlayer.currentPosition) }
-                val durationMs = videoExoPlayer.duration.takeIf { it > 0 } ?: (mainPlayer?.duration?.takeIf { it > 0 } ?: 1L)
-                val isPlaying = videoExoPlayer.isPlaying
-
-                LaunchedEffect(Unit) {
-                    while (isActive) {
-                        currentPositionMs = videoExoPlayer.currentPosition
-                        delay(200)
                     }
                 }
 
@@ -722,10 +1131,29 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     modifier = Modifier
                         .fillMaxSize()
                         .background(Color.Black)
-                        .clickable { showControls = !showControls },
+                        .pointerInput(videoExoPlayer) {
+                            detectTapGestures(
+                                onTap = {
+                                    showControls = !showControls
+                                },
+                                onDoubleTap = { offset ->
+                                    val isRight = offset.x > size.width / 2
+                                    val dur = videoExoPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
+                                    if (isRight) {
+                                        val target = (videoExoPlayer.currentPosition + 10_000L).coerceAtMost(dur)
+                                        videoExoPlayer.seekTo(target)
+                                        seekNoticeRight = true
+                                    } else {
+                                        val target = (videoExoPlayer.currentPosition - 10_000L).coerceAtLeast(0L)
+                                        videoExoPlayer.seekTo(target)
+                                        seekNoticeLeft = true
+                                    }
+                                }
+                            )
+                        },
                     contentAlignment = Alignment.Center,
                 ) {
-                    // Fullscreen TextureView - 16:9 centered in landscape, no stretching!
+                    // Fullscreen TextureView - 16:9 centered in landscape, zero stretching
                     AndroidView(
                         factory = { ctx ->
                             TextureView(ctx).apply {
@@ -744,14 +1172,74 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                             .align(Alignment.Center),
                     )
 
-                    // Overlay Controls
+                    // Double Tap Visual Notice (Left: -10s)
+                    if (seekNoticeLeft) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(0.35f)
+                                .align(Alignment.CenterStart)
+                                .background(
+                                    Color.White.copy(alpha = 0.2f),
+                                    RoundedCornerShape(topEndPercent = 50, bottomEndPercent = 50),
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = Icons.Rounded.FastRewind,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(42.dp),
+                                )
+                                Text(
+                                    text = "-10 seconds",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                    }
+
+                    // Double Tap Visual Notice (Right: +10s)
+                    if (seekNoticeRight) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(0.35f)
+                                .align(Alignment.CenterEnd)
+                                .background(
+                                    Color.White.copy(alpha = 0.2f),
+                                    RoundedCornerShape(topStartPercent = 50, bottomStartPercent = 50),
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = Icons.Rounded.FastForward,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(42.dp),
+                                )
+                                Text(
+                                    text = "+10 seconds",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                    }
+
+                    // Fullscreen Controls Overlay
                     if (showControls) {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(Color.Black.copy(alpha = 0.45f)),
+                                .background(Color.Black.copy(alpha = 0.5f)),
                         ) {
-                            // Top bar: title, artist, quality selector
+                            // Top Bar: title, artist, audio tracks, quality, exit fullscreen
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -778,92 +1266,179 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                                     }
                                 }
 
-                                if (availableQualities.isNotEmpty()) {
-                                    Box {
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(12.dp))
-                                                .background(Color.White.copy(alpha = 0.2f))
-                                                .clickable { qualityMenuOpen = true }
-                                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    // Audio Track Selector
+                                    if (audioTracks.isNotEmpty()) {
+                                        Box {
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(Color.White.copy(alpha = 0.2f))
+                                                    .clickable { audioMenuOpen = true }
+                                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                                contentAlignment = Alignment.Center,
                                             ) {
-                                                Icon(
-                                                    imageVector = Icons.Rounded.HighQuality,
-                                                    contentDescription = "Quality",
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(16.dp),
-                                                )
-                                                Text(
-                                                    text = selectedQuality?.label ?: "Quality",
-                                                    color = Color.White,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                )
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.GraphicEq,
+                                                        contentDescription = "Audio Track",
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(16.dp),
+                                                    )
+                                                    Text(
+                                                        text = "Audio",
+                                                        color = Color.White,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                    )
+                                                }
+                                            }
+                                            DropdownMenu(
+                                                expanded = audioMenuOpen,
+                                                onDismissRequest = { audioMenuOpen = false },
+                                            ) {
+                                                audioTracks.forEach { track ->
+                                                    DropdownMenuItem(
+                                                        text = {
+                                                            Text(
+                                                                text = track.name,
+                                                                fontWeight = if (track.isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                            )
+                                                        },
+                                                        onClick = {
+                                                            audioMenuOpen = false
+                                                            selectAudioTrack(track)
+                                                        },
+                                                    )
+                                                }
                                             }
                                         }
+                                    }
 
-                                        DropdownMenu(
-                                            expanded = qualityMenuOpen,
-                                            onDismissRequest = { qualityMenuOpen = false },
-                                        ) {
-                                            availableQualities.forEach { option ->
-                                                DropdownMenuItem(
-                                                    text = {
-                                                        Text(
-                                                            text = option.label,
-                                                            fontWeight = if (selectedQuality == option) FontWeight.Bold else FontWeight.Normal,
-                                                        )
-                                                    },
-                                                    onClick = {
-                                                        qualityMenuOpen = false
-                                                        if (selectedQuality != option) {
-                                                            selectedQuality = option
-                                                            val optAudio = option.audioUrl ?: currentAudioUrl
-                                                            playStream(
-                                                                videoUrl = option.url,
-                                                                audioUrl = optAudio,
-                                                                hasEmbeddedAudio = currentHasEmbeddedAudio,
-                                                                isHls = option.isHls,
-                                                                headers = currentHeaders,
-                                                                ua = currentUa,
+                                    // Quality Selector
+                                    if (qualityOptions.isNotEmpty()) {
+                                        Box {
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(Color.White.copy(alpha = 0.2f))
+                                                    .clickable { qualityMenuOpen = true }
+                                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.Settings,
+                                                        contentDescription = "Quality",
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(16.dp),
+                                                    )
+                                                    Text(
+                                                        text = selectedQualityLabel,
+                                                        color = Color.White,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                    )
+                                                }
+                                            }
+                                            DropdownMenu(
+                                                expanded = qualityMenuOpen,
+                                                onDismissRequest = { qualityMenuOpen = false },
+                                            ) {
+                                                qualityOptions.forEach { option ->
+                                                    DropdownMenuItem(
+                                                        text = {
+                                                            Text(
+                                                                text = option.label,
+                                                                fontWeight = if (selectedQualityLabel == option.label) FontWeight.Bold else FontWeight.Normal,
                                                             )
-                                                        }
-                                                    },
-                                                )
+                                                        },
+                                                        onClick = {
+                                                            qualityMenuOpen = false
+                                                            onSelectQuality(option)
+                                                        },
+                                                    )
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
 
-                            // Center Play/Pause button
-                            IconButton(
-                                onClick = {
-                                    if (videoExoPlayer.isPlaying) {
-                                        videoExoPlayer.pause()
-                                    } else {
-                                        videoExoPlayer.play()
-                                    }
-                                },
-                                modifier = Modifier
-                                    .align(Alignment.Center)
-                                    .size(64.dp)
-                                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(32.dp)),
+                            // Center Play/Pause & 10s Skips
+                            Row(
+                                modifier = Modifier.align(Alignment.Center),
+                                horizontalArrangement = Arrangement.spacedBy(40.dp),
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Icon(
-                                    imageVector = if (videoExoPlayer.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                    contentDescription = if (videoExoPlayer.isPlaying) "Pause" else "Play",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(36.dp),
-                                )
+                                IconButton(
+                                    onClick = {
+                                        val target = (videoExoPlayer.currentPosition - 10_000L).coerceAtLeast(0L)
+                                        videoExoPlayer.seekTo(target)
+                                        seekNoticeLeft = true
+                                    },
+                                    modifier = Modifier
+                                        .size(52.dp)
+                                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(26.dp)),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.FastRewind,
+                                        contentDescription = "Rewind 10s",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(32.dp),
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        if (isVideoPlaying) {
+                                            videoExoPlayer.pause()
+                                        } else {
+                                            videoExoPlayer.play()
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .size(68.dp)
+                                        .background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(34.dp)),
+                                ) {
+                                    Icon(
+                                        imageVector = if (isVideoPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                        contentDescription = if (isVideoPlaying) "Pause" else "Play",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(40.dp),
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        val dur = videoExoPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
+                                        val target = (videoExoPlayer.currentPosition + 10_000L).coerceAtMost(dur)
+                                        videoExoPlayer.seekTo(target)
+                                        seekNoticeRight = true
+                                    },
+                                    modifier = Modifier
+                                        .size(52.dp)
+                                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(26.dp)),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.FastForward,
+                                        contentDescription = "Forward 10s",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(32.dp),
+                                    )
+                                }
                             }
 
-                            // Bottom bar: seekbar, time text, exit fullscreen button
+                            // Bottom Bar: seekbar, time, exit fullscreen
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
