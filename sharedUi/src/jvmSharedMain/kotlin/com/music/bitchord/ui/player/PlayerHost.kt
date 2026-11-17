@@ -50,6 +50,16 @@ interface PlayerHost {
 
     val videoStatusText: StateFlow<String> get() = MutableStateFlow("")
 
+    val isVideoPlaying: StateFlow<Boolean> get() = MutableStateFlow(false)
+
+    val videoPositionMs: StateFlow<Long> get() = MutableStateFlow(0L)
+
+    val videoDurationMs: StateFlow<Long> get() = MutableStateFlow(0L)
+
+    fun toggleVideoPlayPause() = Unit
+
+    fun seekVideo(positionMs: Long) = Unit
+
     /**
      * Whether this platform shows a music video's picture over the playing
      * audio. False keeps every video surface out of the player altogether.

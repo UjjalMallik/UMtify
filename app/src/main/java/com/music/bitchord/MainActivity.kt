@@ -2450,7 +2450,7 @@ private fun BitChordApp(
             accountName = account?.name,
             windowWidth = windowWidth,
             windowHeight = windowHeight,
-            isPlaying = player.isPlaying,
+            isPlaying = if (displayedSong.isVideo) (PlaybackService.activeVideoExoPlayer?.isPlaying == true || PlaybackService.isVideoPlaying.value) else player.isPlaying,
             isLoading = playPauseBusy,
             position = player.position,
             durationMs = player.durationMs,

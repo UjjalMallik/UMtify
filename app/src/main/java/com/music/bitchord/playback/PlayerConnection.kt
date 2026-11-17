@@ -355,15 +355,32 @@ fun rememberPlayerState(controller: MediaController?): PlayerState {
                     queueSnapshot = queueSnapshot.toMutableList().also { it[index] = item.toSong() }
                 }
             }
+            val activeVp = PlaybackService.activeVideoExoPlayer
+            val isVid = activeVp != null || PlaybackService.isVideoMode.value
+            val currentPos = if (isVid) {
+                activeVp?.currentPosition ?: PlaybackService.videoPositionMs.value
+            } else {
+                player.currentPosition
+            }
+            val currentDur = if (isVid) {
+                activeVp?.duration?.takeIf { it > 0L } ?: PlaybackService.videoDurationMs.value.takeIf { it > 0L } ?: player.duration
+            } else {
+                player.duration
+            }
+            val currentIsPlaying = if (isVid) {
+                activeVp?.isPlaying == true || PlaybackService.isVideoPlaying.value
+            } else {
+                player.isPlaying
+            }
             // Synced here too, so seeking while paused or buffering still moves
             // the scrubber (the poll loop only runs on play).
-            position.report(player.currentPosition.coerceAtLeast(0L))
+            position.report(currentPos.coerceAtLeast(0L))
             state = state.copy(
                 song = item?.toSong(),
-                isPlaying = player.isPlaying,
-                durationMs = player.duration.coerceAtLeast(0L),
+                isPlaying = currentIsPlaying,
+                durationMs = currentDur.coerceAtLeast(0L),
                 error = error,
-                isLoading = player.playbackState == Player.STATE_BUFFERING,
+                isLoading = if (isVid) !PlaybackService.isVideoFrameRendered.value else player.playbackState == Player.STATE_BUFFERING,
                 repeatMode = player.repeatMode,
                 queue = queueSnapshot,
                 queueIndex = player.currentMediaItemIndex,
@@ -432,6 +449,9 @@ fun rememberPlayerState(controller: MediaController?): PlayerState {
     // events, and the first thing that happens on the way back is a fresh read.
     val foreground = rememberIsForeground()
     val videoPlayer by PlaybackService.activeVideoExoPlayerFlow.collectAsStateWithLifecycle()
+    val isVideoPlayingState by PlaybackService.isVideoPlaying.collectAsStateWithLifecycle()
+    val videoPositionState by PlaybackService.videoPositionMs.collectAsStateWithLifecycle()
+    val videoDurationState by PlaybackService.videoDurationMs.collectAsStateWithLifecycle()
 
     DisposableEffect(videoPlayer) {
         val vp = videoPlayer ?: return@DisposableEffect onDispose {}
@@ -451,21 +471,37 @@ fun rememberPlayerState(controller: MediaController?): PlayerState {
         }
         vp.addListener(videoListener)
         state = state.copy(
-            isPlaying = vp.isPlaying,
-            durationMs = vp.duration.takeIf { it > 0L } ?: state.durationMs,
+            isPlaying = vp.isPlaying || isVideoPlayingState,
+            durationMs = vp.duration.takeIf { it > 0L } ?: videoDurationState.takeIf { it > 0L } ?: state.durationMs,
         )
         onDispose {
             vp.removeListener(videoListener)
         }
     }
 
-    LaunchedEffect(controller, videoPlayer, state.isPlaying, foreground) {
-        while (foreground && ((videoPlayer != null && (videoPlayer?.isPlaying == true || state.isPlaying)) || (controller != null && state.isPlaying))) {
-            val curPos = videoPlayer?.currentPosition ?: controller?.currentPosition ?: 0L
-            val curDur = videoPlayer?.duration?.takeIf { it > 0 } ?: controller?.duration ?: 0L
+    LaunchedEffect(controller, videoPlayer, isVideoPlayingState, foreground) {
+        while (foreground) {
+            val vp = videoPlayer
+            val isVidActive = vp != null || PlaybackService.isVideoMode.value
+            val curPos = if (isVidActive) {
+                vp?.currentPosition ?: PlaybackService.videoPositionMs.value
+            } else {
+                controller?.currentPosition ?: 0L
+            }
+            val curDur = if (isVidActive) {
+                vp?.duration?.takeIf { it > 0 } ?: PlaybackService.videoDurationMs.value.takeIf { it > 0 } ?: controller?.duration ?: 0L
+            } else {
+                controller?.duration ?: 0L
+            }
             position.report(curPos.coerceAtLeast(0L))
             if (curDur > 0L && curDur != state.durationMs) state = state.copy(durationMs = curDur)
-            delay(500)
+            val isNowPlaying = if (isVidActive) {
+                vp?.isPlaying == true || PlaybackService.isVideoPlaying.value
+            } else {
+                controller?.isPlaying == true
+            }
+            if (state.isPlaying != isNowPlaying) state = state.copy(isPlaying = isNowPlaying)
+            delay(250)
         }
     }
     return state

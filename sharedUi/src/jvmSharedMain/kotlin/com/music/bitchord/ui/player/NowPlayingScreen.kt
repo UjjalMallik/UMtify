@@ -919,7 +919,18 @@ fun NowPlayingScreen(
     val mixing by PlayerSettings.smartMixInProgress.collectAsStateWithLifecycle()
     val videoFrameRendered by PlayerPlatform.host.isVideoFrameRendered.collectAsStateWithLifecycle()
     val videoStatusText by PlayerPlatform.host.videoStatusText.collectAsStateWithLifecycle()
+    val videoPlaying by PlayerPlatform.host.isVideoPlaying.collectAsStateWithLifecycle()
+    val videoPositionMs by PlayerPlatform.host.videoPositionMs.collectAsStateWithLifecycle()
+    val videoDurationMs by PlayerPlatform.host.videoDurationMs.collectAsStateWithLifecycle()
     val videoMode = song.isVideo
+
+    val activeIsPlaying = if (videoMode) videoPlaying else isPlaying
+    val activeDurationMs = if (videoMode && videoDurationMs > 0L) videoDurationMs else durationMs
+    val activePlayPause: () -> Unit = if (videoMode) {
+        { PlayerPlatform.host.toggleVideoPlayPause() }
+    } else {
+        onPlayPause
+    }
     val canvas = rememberCanvasArtwork(song)?.takeUnless { videoMode }
     // What the credits say. The canvas above, the palette, the album link and
     // everything else addressed by id keep the original track: a renamed song
@@ -971,9 +982,30 @@ fun NowPlayingScreen(
     // rather than full-bleed, and is averaged on a stride off the main thread.
     val meshRefreshMs = MESH_REFRESH_MS
 
-    val scrub = rememberPlayerScrub(song.videoId, position, durationMs)
+    val scrub = rememberPlayerScrub(song.videoId, position, activeDurationMs)
     // Read by the scrubber itself — see [PlayerScrubber.shown].
-    val shown: () -> Float = { scrub.shown(position.positionMs, durationMs) }
+    val shown: () -> Float = {
+        if (videoMode && !scrub.scrubbing) {
+            val d = if (videoDurationMs > 0L) videoDurationMs else durationMs
+            val p = if (videoPositionMs > 0L) videoPositionMs else position.positionMs
+            if (d > 0L) (p.toFloat() / d.toFloat()).coerceIn(0f, 1f) else 0f
+        } else {
+            scrub.shown(position.positionMs, activeDurationMs)
+        }
+    }
+    val activeOnScrubFinished: (Float) -> Unit = if (videoMode) {
+        { fraction ->
+            scrub.scrubbing = false
+            val d = if (videoDurationMs > 0L) videoDurationMs else durationMs
+            if (d > 0L) {
+                val target = (fraction * d).toLong()
+                PlayerPlatform.host.seekVideo(target)
+                onSeek(target)
+            }
+        }
+    } else {
+        onScrubFinished
+    }
     // Back restarts the track rather than stepping back once it is a few
     // seconds in. Derived, so this scope hears about the playhead once, when
     // it crosses that point, rather than on every tick.
@@ -2038,15 +2070,15 @@ fun NowPlayingScreen(
                             scrubber = {
                                 PlayerScrubber(
                                     shown = shown,
-                                    durationMs = durationMs,
-                                    isPlaying = isPlaying && position.advancing,
+                                    durationMs = activeDurationMs,
+                                    isPlaying = activeIsPlaying && position.advancing,
                                     loading = versionAligning || audioVersionSwitching,
                                     mixing = mixing && !scrub.scrubbing,
                                     transitionWindow = transitionWindow
                                         ?.takeIf { !scrub.scrubbing && it.end > it.start }
                                         ?.let { it.start..it.end },
                                     onScrub = onScrub,
-                                    onScrubFinished = onScrubFinished,
+                                    onScrubFinished = activeOnScrubFinished,
                                 ) {
                                     PlaybackQualityLabel(
                                         song = song,
@@ -2059,13 +2091,13 @@ fun NowPlayingScreen(
                             },
                             transport = {
                                 TransportRow(
-                                    isPlaying = isPlaying,
+                                    isPlaying = activeIsPlaying,
                                     isLoading = isLoading || audioVersionSwitching,
                                     previousEnabled = !controlsLocked &&
                                         (hasPrevious || pastRestartPoint),
                                     nextEnabled = !controlsLocked && hasNext,
                                     onPrevious = onPrevious,
-                                    onPlayPause = onPlayPause,
+                                    onPlayPause = activePlayPause,
                                     onNext = onNext,
                                     compact = compact,
                                 )
@@ -3822,8 +3854,8 @@ fun NowPlayingScreen(
                     val transitionWindow by PlayerSettings.smartTransitionWindow.collectAsStateWithLifecycle()
                     PlayerScrubber(
                         shown = shown,
-                        durationMs = durationMs,
-                        isPlaying = isPlaying && position.advancing,
+                        durationMs = activeDurationMs,
+                        isPlaying = activeIsPlaying && position.advancing,
                         loading = versionSwitching,
                         mixing = mixing && !scrub.scrubbing,
                         // Hidden while scrubbing: the planner is still describing
@@ -3834,7 +3866,7 @@ fun NowPlayingScreen(
                             ?.takeIf { !scrub.scrubbing && it.end > it.start }
                             ?.let { it.start..it.end },
                         onScrub = onScrub,
-                        onScrubFinished = onScrubFinished,
+                        onScrubFinished = activeOnScrubFinished,
                     ) {
                         PlaybackQualityLabel(
                             song = song,
@@ -3860,13 +3892,13 @@ fun NowPlayingScreen(
                     )
 
                     TransportRow(
-                        isPlaying = isPlaying,
+                        isPlaying = activeIsPlaying,
                         isLoading = isLoading || audioVersionSwitching,
                         previousEnabled = !controlsLocked &&
                             (hasPrevious || pastRestartPoint),
                         nextEnabled = !controlsLocked && hasNext,
                         onPrevious = onPrevious,
-                        onPlayPause = onPlayPause,
+                        onPlayPause = activePlayPause,
                         onNext = onNext,
                         compact = densePortrait,
                     )
@@ -3877,7 +3909,7 @@ fun NowPlayingScreen(
                         ),
                     )
 
-                    TransportWaveVisualizer(isPlaying = isPlaying)
+                    TransportWaveVisualizer(isPlaying = activeIsPlaying)
 
                     if (!hideVolumeBar) {
                         Spacer(

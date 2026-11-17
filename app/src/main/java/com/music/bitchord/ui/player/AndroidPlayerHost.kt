@@ -65,12 +65,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -341,6 +343,29 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     override val videoStatusText: StateFlow<String>
         get() = PlaybackService.videoStatusText
 
+    override val isVideoPlaying: StateFlow<Boolean>
+        get() = PlaybackService.isVideoPlaying
+
+    override val videoPositionMs: StateFlow<Long>
+        get() = PlaybackService.videoPositionMs
+
+    override val videoDurationMs: StateFlow<Long>
+        get() = PlaybackService.videoDurationMs
+
+    override fun toggleVideoPlayPause() {
+        val vp = PlaybackService.activeVideoExoPlayer ?: return
+        if (vp.isPlaying) {
+            vp.pause()
+        } else {
+            vp.play()
+        }
+    }
+
+    override fun seekVideo(positionMs: Long) {
+        val vp = PlaybackService.activeVideoExoPlayer ?: return
+        vp.seekTo(positionMs)
+    }
+
     private tailrec fun Context.findActivity(): Activity? = when (this) {
         is Activity -> this
         is android.content.ContextWrapper -> baseContext.findActivity()
@@ -498,12 +523,29 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             audioTracks = list
         }
 
+        // Periodically sync video position, duration, and playing state to PlaybackService
+        LaunchedEffect(videoExoPlayer) {
+            while (true) {
+                PlaybackService.isVideoPlaying.value = videoExoPlayer.isPlaying
+                PlaybackService.videoPositionMs.value = videoExoPlayer.currentPosition.coerceAtLeast(0L)
+                val dur = videoExoPlayer.duration
+                if (dur > 0L) {
+                    PlaybackService.videoDurationMs.value = dur
+                }
+                delay(200)
+            }
+        }
+
         // Listen for rendered first frame, STATE_READY, track changes, and onPlayerError
         DisposableEffect(videoExoPlayer) {
             val listener = object : Player.Listener {
                 override fun onRenderedFirstFrame() {
                     PlaybackService.isVideoFrameRendered.value = true
                     PlaybackService.videoStatusText.value = ""
+                    val syncPos = mainPlayer?.currentPosition?.takeIf { it > 0L } ?: 0L
+                    if (videoExoPlayer.currentPosition <= 0L && syncPos > 0L) {
+                        videoExoPlayer.seekTo(syncPos)
+                    }
                     videoExoPlayer.play()
                     mainPlayer?.pause()
                 }
@@ -512,9 +554,17 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     if (playbackState == Player.STATE_READY) {
                         PlaybackService.isVideoFrameRendered.value = true
                         PlaybackService.videoStatusText.value = ""
+                        val syncPos = mainPlayer?.currentPosition?.takeIf { it > 0L } ?: 0L
+                        if (videoExoPlayer.currentPosition <= 0L && syncPos > 0L) {
+                            videoExoPlayer.seekTo(syncPos)
+                        }
                         videoExoPlayer.play()
                         mainPlayer?.pause()
                     }
+                }
+
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    PlaybackService.isVideoPlaying.value = isPlaying
                 }
 
                 override fun onTracksChanged(tracks: Tracks) {
@@ -874,7 +924,17 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                             modifier = Modifier
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(Color.Black.copy(alpha = 0.6f))
-                                .clickable { PlaybackService.dismissVideoLoading() }
+                                .clickable {
+                                    val syncPos = videoExoPlayer.currentPosition
+                                    videoExoPlayer.pause()
+                                    mainPlayer?.let { mp ->
+                                        if (syncPos > 0L) {
+                                            mp.seekTo(syncPos)
+                                        }
+                                        mp.play()
+                                    }
+                                    PlaybackService.dismissVideoLoading()
+                                }
                                 .padding(horizontal = 8.dp, vertical = 4.dp),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -1107,21 +1167,32 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             ) {
                 BackHandler { isFullscreen = false }
 
+                val dialogView = LocalView.current
                 DisposableEffect(Unit) {
-                    val act = context.findActivity()
-                    act?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                    act?.let { a ->
+                    val activity = context.findActivity()
+                    activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    activity?.let { a ->
                         WindowCompat.setDecorFitsSystemWindows(a.window, false)
-                        WindowInsetsControllerCompat(a.window, a.window.decorView).apply {
-                            hide(WindowInsetsCompat.Type.systemBars())
+                        WindowCompat.getInsetsController(a.window, a.window.decorView).apply {
                             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                            hide(WindowInsetsCompat.Type.systemBars())
+                        }
+                    }
+                    val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
+                    dialogWindow?.let { dw ->
+                        WindowCompat.setDecorFitsSystemWindows(dw, false)
+                        WindowCompat.getInsetsController(dw, dw.decorView).apply {
+                            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                            hide(WindowInsetsCompat.Type.systemBars())
                         }
                     }
                     onDispose {
-                        act?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                        act?.let { a ->
+                        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        activity?.let { a ->
                             WindowCompat.setDecorFitsSystemWindows(a.window, true)
-                            WindowInsetsControllerCompat(a.window, a.window.decorView).show(WindowInsetsCompat.Type.systemBars())
+                            WindowCompat.getInsetsController(a.window, a.window.decorView).apply {
+                                show(WindowInsetsCompat.Type.systemBars())
+                            }
                         }
                         inlineTextureRef.value?.let { videoExoPlayer.setVideoTextureView(it) }
                     }

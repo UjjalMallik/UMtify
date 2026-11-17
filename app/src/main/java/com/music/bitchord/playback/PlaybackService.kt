@@ -9243,6 +9243,9 @@ class PlaybackService : MediaLibraryService() {
         val activeVideoTrackId = MutableStateFlow<String?>(null)
         val activeVideoSong = MutableStateFlow<Song?>(null)
         val isVideoMode = MutableStateFlow(false)
+        val isVideoPlaying = MutableStateFlow(false)
+        val videoPositionMs = MutableStateFlow(0L)
+        val videoDurationMs = MutableStateFlow(0L)
         var onRequestSwitchToAudio: (() -> Unit)? = null
 
         fun dismissVideoLoading() {
@@ -9251,6 +9254,9 @@ class PlaybackService : MediaLibraryService() {
             isVideoFrameRendered.value = false
             videoStatusText.value = ""
             isVideoMode.value = false
+            isVideoPlaying.value = false
+            videoPositionMs.value = 0L
+            videoDurationMs.value = 0L
             activeVideoExoPlayer = null
             activeVideoExoPlayerFlow.value = null
             onRequestSwitchToAudio?.invoke()
