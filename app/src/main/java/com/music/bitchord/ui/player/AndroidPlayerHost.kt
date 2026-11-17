@@ -366,10 +366,13 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         vp.seekTo(positionMs)
     }
 
-    private tailrec fun Context.findActivity(): Activity? = when (this) {
-        is Activity -> this
-        is android.content.ContextWrapper -> baseContext.findActivity()
-        else -> null
+    private fun Context.findActivity(): Activity? {
+        var cur: Context? = this
+        while (cur is android.content.ContextWrapper) {
+            if (cur is Activity) return cur
+            cur = cur.baseContext
+        }
+        return cur as? Activity
     }
 
     data class VideoAudioTrack(
@@ -542,10 +545,6 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                 override fun onRenderedFirstFrame() {
                     PlaybackService.isVideoFrameRendered.value = true
                     PlaybackService.videoStatusText.value = ""
-                    val syncPos = mainPlayer?.currentPosition?.takeIf { it > 0L } ?: 0L
-                    if (videoExoPlayer.currentPosition <= 0L && syncPos > 0L) {
-                        videoExoPlayer.seekTo(syncPos)
-                    }
                     videoExoPlayer.play()
                     mainPlayer?.pause()
                 }
@@ -554,10 +553,6 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     if (playbackState == Player.STATE_READY) {
                         PlaybackService.isVideoFrameRendered.value = true
                         PlaybackService.videoStatusText.value = ""
-                        val syncPos = mainPlayer?.currentPosition?.takeIf { it > 0L } ?: 0L
-                        if (videoExoPlayer.currentPosition <= 0L && syncPos > 0L) {
-                            videoExoPlayer.seekTo(syncPos)
-                        }
                         videoExoPlayer.play()
                         mainPlayer?.pause()
                     }
@@ -625,15 +620,15 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             val currentPos = if (videoExoPlayer.currentPosition > 0L) {
                 videoExoPlayer.currentPosition
             } else {
-                mainPlayer?.currentPosition ?: 0L
+                mainPlayer?.currentPosition?.takeIf { it > 0L } ?: 0L
             }
 
             videoExoPlayer.setMediaSource(finalSource)
             if (currentPos > 0L) {
                 videoExoPlayer.seekTo(currentPos)
             }
-            videoExoPlayer.prepare()
             videoExoPlayer.playWhenReady = true
+            videoExoPlayer.prepare()
         }
 
         // Helper to select audio track
@@ -1169,8 +1164,8 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
                 val dialogView = LocalView.current
                 DisposableEffect(Unit) {
-                    val activity = context.findActivity()
-                    activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    val activity = context.findActivity() ?: dialogView.context.findActivity()
+                    activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
                     activity?.let { a ->
                         WindowCompat.setDecorFitsSystemWindows(a.window, false)
                         WindowCompat.getInsetsController(a.window, a.window.decorView).apply {
@@ -1180,6 +1175,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     }
                     val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
                     dialogWindow?.let { dw ->
+                        dw.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                         WindowCompat.setDecorFitsSystemWindows(dw, false)
                         WindowCompat.getInsetsController(dw, dw.decorView).apply {
                             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE

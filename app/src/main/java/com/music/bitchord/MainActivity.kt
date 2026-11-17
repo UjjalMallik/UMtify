@@ -2434,6 +2434,16 @@ private fun BitChordApp(
             }
         val handleSwitchToAudio = remember(displayedSong) {
             {
+                val vp = PlaybackService.activeVideoExoPlayer
+                val syncPos = vp?.currentPosition?.takeIf { it > 0L } ?: PlaybackService.videoPositionMs.value
+                vp?.pause()
+                controller?.let { c ->
+                    if (syncPos > 0L) {
+                        c.seekTo(syncPos)
+                    }
+                    c.play()
+                }
+                PlaybackService.dismissVideoLoading()
                 optimisticVersionSong = null
                 convertedVideoId = null
                 convertedFromAudio = null

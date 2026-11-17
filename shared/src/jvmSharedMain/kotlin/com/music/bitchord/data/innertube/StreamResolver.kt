@@ -15,6 +15,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.ConnectionPool
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
@@ -1255,50 +1256,57 @@ object StreamResolver {
         val cleanArtist = artist.trim()
         val isYtId = videoId.length == 11 && videoId.all { it.isLetterOrDigit() || it == '-' || it == '_' }
 
-        // 1. Fast Native YouTubei Search
-        val searchedVideoId = try {
-            val query = "$cleanTitle $cleanArtist official video".trim()
-            val payload = buildJsonObject {
-                putJsonObject("context") {
-                    putJsonObject("client") {
-                        put("clientName", "WEB")
-                        put("clientVersion", "2.20230728.00.00")
-                        put("hl", "en")
-                        put("gl", "US")
-                    }
-                }
-                put("query", query)
-                put("params", "EgIQAQ%3D%3D")
-            }.toString().toRequestBody("application/json".toMediaType())
-
-            val searchReq = okhttp3.Request.Builder()
-                .url("https://www.youtube.com/youtubei/v1/search?prettyPrint=false")
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")
-                .header("Content-Type", "application/json")
-                .post(payload)
-                .build()
-
-            val client = Http.client.newBuilder()
-                .connectTimeout(5000, TimeUnit.MILLISECONDS)
-                .readTimeout(5000, TimeUnit.MILLISECONDS)
-                .build()
-
-            client.newCall(searchReq).execute().use { resp ->
-                if (!resp.isSuccessful) return@use null
-                val body = resp.body?.string() ?: return@use null
-                val regex = Regex(""""videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"""")
-                regex.find(body)?.groupValues?.get(1)
-            }
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            TrackLog.w(TAG, "Native YouTubei search failed: ${e.message}")
-            null
+        // Candidate video IDs: If videoId is valid, prioritize it directly to avoid desync & lag!
+        val candidateIds = mutableListOf<String>()
+        if (isYtId) {
+            candidateIds.add(videoId)
         }
 
-        val candidateIds = listOfNotNull(
-            searchedVideoId,
-            videoId.takeIf { isYtId }
-        ).distinct()
+        // Fast Native YouTubei search as secondary candidate if needed
+        if (candidateIds.isEmpty()) {
+            val searchedVideoId = withTimeoutOrNull(2000L) {
+                try {
+                    val query = "$cleanTitle $cleanArtist official video".trim()
+                    val payload = buildJsonObject {
+                        putJsonObject("context") {
+                            putJsonObject("client") {
+                                put("clientName", "WEB")
+                                put("clientVersion", "2.20230728.00.00")
+                                put("hl", "en")
+                                put("gl", "US")
+                            }
+                        }
+                        put("query", query)
+                        put("params", "EgIQAQ%3D%3D")
+                    }.toString().toRequestBody("application/json".toMediaType())
+
+                    val searchReq = okhttp3.Request.Builder()
+                        .url("https://www.youtube.com/youtubei/v1/search?prettyPrint=false")
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                        .header("Content-Type", "application/json")
+                        .post(payload)
+                        .build()
+
+                    val client = Http.client.newBuilder()
+                        .connectTimeout(2000, TimeUnit.MILLISECONDS)
+                        .readTimeout(2000, TimeUnit.MILLISECONDS)
+                        .build()
+
+                    client.newCall(searchReq).execute().use { resp ->
+                        if (!resp.isSuccessful) return@use null
+                        val body = resp.body?.string() ?: return@use null
+                        val regex = Regex(""""videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"""")
+                        regex.find(body)?.groupValues?.get(1)
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    null
+                }
+            }
+            if (!searchedVideoId.isNullOrBlank()) {
+                candidateIds.add(searchedVideoId)
+            }
+        }
 
         if (candidateIds.isEmpty()) {
             TrackLog.w(TAG, "No video ID candidate found for '$title' - '$artist'")
@@ -1308,68 +1316,82 @@ object StreamResolver {
         onStatusUpdate?.invoke("Extracting stream...")
 
         for (targetId in candidateIds) {
-            // A. InnerTubeX Resolver (with deciphering and PO token support)
-            try {
-                val xStream = InnerTubeXResolver.extractVideo(targetId, 480)
-                    ?: InnerTubeXResolver.extractVideo(targetId, 1080)
-                    ?: InnerTubeXResolver.extractVideo(targetId, 1080, ageRestricted = true)
-                if (xStream != null && xStream.url.isNotBlank()) {
-                    val xAudio = runCatching { InnerTubeXResolver.extract(targetId, 320) }.getOrNull()
-                    val audioUrl = xAudio?.url
-                    TrackLog.d(TAG, "Video stream resolved via InnerTubeX for $targetId: ${xStream.width}x${xStream.height}")
-                    val xQualities = xStream.heights.map { h ->
-                        VideoQualityOption(label = if (h >= 720) "HD · ${h}p" else "${h}p", height = h, url = xStream.url, isHls = false, audioUrl = audioUrl)
-                    }.ifEmpty {
-                        val h = xStream.height
-                        listOf(VideoQualityOption(label = if (h >= 720) "HD · ${h}p" else if (h > 0) "${h}p" else "Auto", height = h, url = xStream.url, isHls = false, audioUrl = audioUrl))
-                    }
-                    return@withContext ResolvedVideoStream(
-                        url = xStream.url,
-                        isHls = false,
-                        userAgent = xStream.headers["User-Agent"].orEmpty(),
-                        videoId = targetId,
-                        hasEmbeddedAudio = false,
-                        headers = xStream.headers,
-                        availableQualities = xQualities,
-                        audioStreamUrl = audioUrl,
-                    )
+            // A. Primary: InnerTube Direct & InnerTubeX (Max 2s timeout)
+            val primaryStream = withTimeoutOrNull(2000L) {
+                try {
+                    // Fast Multi-client InnerTube Direct (ANDROID_VR, IOS)
+                    val direct = extractVideoStreamViaInnerTube(targetId)
+                    if (direct != null && direct.url.isNotBlank()) return@withTimeoutOrNull direct
+
+                    // InnerTubeX Resolver
+                    val xStream = InnerTubeXResolver.extractVideo(targetId, 480)
+                        ?: InnerTubeXResolver.extractVideo(targetId, 1080)
+                    if (xStream != null && xStream.url.isNotBlank()) {
+                        val xAudio = runCatching { InnerTubeXResolver.extract(targetId, 320) }.getOrNull()
+                        val audioUrl = xAudio?.url
+                        val xQualities = xStream.heights.map { h ->
+                            VideoQualityOption(label = if (h >= 720) "HD · ${h}p" else "${h}p", height = h, url = xStream.url, isHls = false, audioUrl = audioUrl)
+                        }.ifEmpty {
+                            listOf(VideoQualityOption(label = "Auto", height = xStream.height, url = xStream.url, isHls = false, audioUrl = audioUrl))
+                        }
+                        ResolvedVideoStream(
+                            url = xStream.url,
+                            isHls = false,
+                            userAgent = xStream.headers["User-Agent"].orEmpty(),
+                            videoId = targetId,
+                            hasEmbeddedAudio = false,
+                            headers = xStream.headers,
+                            availableQualities = xQualities,
+                            audioStreamUrl = audioUrl,
+                        )
+                    } else null
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    null
                 }
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                TrackLog.w(TAG, "InnerTubeX video extraction failed for $targetId: ${e.message}")
             }
 
-            // B. Multi-client InnerTube Direct (ANDROID_VR, IOS, ANDROID_TESTSUITE, TVHTML5)
-            var innerTubeStream = extractVideoStreamViaInnerTube(targetId)
-            if (innerTubeStream != null && innerTubeStream.url.isNotBlank()) {
-                TrackLog.d(TAG, "Video stream resolved via InnerTube clients for $targetId: ${innerTubeStream.url}")
-                if (!innerTubeStream.hasEmbeddedAudio && innerTubeStream.audioStreamUrl.isNullOrBlank()) {
+            if (primaryStream != null && primaryStream.url.isNotBlank()) {
+                var stream = primaryStream
+                if (!stream.hasEmbeddedAudio && stream.audioStreamUrl.isNullOrBlank()) {
                     val fallbackAudio = runCatching { resolve(targetId) }.getOrNull()
-                    innerTubeStream = innerTubeStream.copy(audioStreamUrl = fallbackAudio)
+                    stream = stream.copy(audioStreamUrl = fallbackAudio)
                 }
-                return@withContext innerTubeStream
+                return@withContext stream
             }
 
-            // C. NewPipe Extractor (deciphers signature & n-parameter)
-            var newPipeStream = extractVideoStreamViaNewPipe(targetId)
+            // B. Immediate Fast Fallback: Invidious & Piped (Max 2.5s timeout)
+            val fallbackStream = withTimeoutOrNull(2500L) {
+                extractVideoStreamViaInvidious(targetId)
+                    ?: extractVideoStreamViaPiped(targetId)
+            }
+
+            if (fallbackStream != null && fallbackStream.url.isNotBlank()) {
+                var stream = fallbackStream
+                if (!stream.hasEmbeddedAudio && stream.audioStreamUrl.isNullOrBlank()) {
+                    val fallbackAudio = runCatching { resolve(targetId) }.getOrNull()
+                    stream = stream.copy(audioStreamUrl = fallbackAudio)
+                }
+                return@withContext stream
+            }
+
+            // C. Final Fallback: NewPipe Extractor (Max 3s timeout)
+            val newPipeStream = withTimeoutOrNull(3000L) {
+                try {
+                    extractVideoStreamViaNewPipe(targetId)
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    null
+                }
+            }
+
             if (newPipeStream != null && newPipeStream.url.isNotBlank()) {
-                TrackLog.d(TAG, "Video stream resolved via NewPipe for $targetId")
-                if (!newPipeStream.hasEmbeddedAudio && newPipeStream.audioStreamUrl.isNullOrBlank()) {
+                var stream = newPipeStream
+                if (!stream.hasEmbeddedAudio && stream.audioStreamUrl.isNullOrBlank()) {
                     val fallbackAudio = runCatching { resolve(targetId) }.getOrNull()
-                    newPipeStream = newPipeStream.copy(audioStreamUrl = fallbackAudio)
+                    stream = stream.copy(audioStreamUrl = fallbackAudio)
                 }
-                return@withContext newPipeStream
-            }
-
-            // D. Piped Instances Fallback
-            var pipedStream = extractVideoStreamViaPiped(targetId)
-            if (pipedStream != null && pipedStream.url.isNotBlank()) {
-                TrackLog.d(TAG, "Video stream resolved via Piped for $targetId")
-                if (!pipedStream.hasEmbeddedAudio && pipedStream.audioStreamUrl.isNullOrBlank()) {
-                    val fallbackAudio = runCatching { resolve(targetId) }.getOrNull()
-                    pipedStream = pipedStream.copy(audioStreamUrl = fallbackAudio)
-                }
-                return@withContext pipedStream
+                return@withContext stream
             }
         }
 
@@ -1636,15 +1658,90 @@ object StreamResolver {
         }
     }.getOrNull()
 
-    private suspend fun extractVideoStreamViaPiped(targetVideoId: String): ResolvedVideoStream? = withContext(Dispatchers.IO) {
+    private suspend fun extractVideoStreamViaInvidious(targetVideoId: String): ResolvedVideoStream? = withContext(Dispatchers.IO) {
         val instances = listOf(
-            "https://pipedapi.kavin.rocks",
-            "https://api.piped.private.coffee",
-            "https://pipedapi.tokhmi.xyz"
+            "https://invidious.nerdvpn.de",
+            "https://inv.tux.pizza",
+            "https://yewtu.be",
+            "https://invidious.drgns.space"
         )
         val client = Http.client.newBuilder()
-            .connectTimeout(4000, TimeUnit.MILLISECONDS)
-            .readTimeout(4000, TimeUnit.MILLISECONDS)
+            .connectTimeout(2500, TimeUnit.MILLISECONDS)
+            .readTimeout(2500, TimeUnit.MILLISECONDS)
+            .build()
+
+        for (base in instances) {
+            try {
+                val req = okhttp3.Request.Builder()
+                    .url("$base/api/v1/videos/$targetVideoId")
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    .build()
+                val stream = client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use null
+                    val body = resp.body?.string() ?: return@use null
+                    val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
+
+                    // 1. Muxed formats (has embedded audio)
+                    val formatStreams = root["formatStreams"]?.jsonArray?.mapNotNull { it.jsonObject }
+                    val bestFormat = formatStreams?.maxByOrNull {
+                        it["resolution"]?.jsonPrimitive?.content?.filter { c -> c.isDigit() }?.toIntOrNull() ?: 0
+                    }
+                    val formatUrl = bestFormat?.get("url")?.jsonPrimitive?.content
+                    if (!formatUrl.isNullOrBlank()) {
+                        return@use ResolvedVideoStream(
+                            url = formatUrl,
+                            isHls = false,
+                            videoId = targetVideoId,
+                            hasEmbeddedAudio = true,
+                        )
+                    }
+
+                    // 2. Adaptive video + audio formats
+                    val adaptiveStreams = root["adaptiveFormats"]?.jsonArray?.mapNotNull { it.jsonObject }
+                    val vStreams = adaptiveStreams?.filter {
+                        val type = it["type"]?.jsonPrimitive?.content.orEmpty()
+                        type.startsWith("video/") && !it["url"]?.jsonPrimitive?.content.isNullOrBlank()
+                    }
+                    val aStreams = adaptiveStreams?.filter {
+                        val type = it["type"]?.jsonPrimitive?.content.orEmpty()
+                        type.startsWith("audio/") && !it["url"]?.jsonPrimitive?.content.isNullOrBlank()
+                    }
+                    val bestV = vStreams?.maxByOrNull {
+                        it["resolution"]?.jsonPrimitive?.content?.filter { c -> c.isDigit() }?.toIntOrNull() ?: 0
+                    }
+                    val bestA = aStreams?.maxByOrNull {
+                        it["bitrate"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                    }
+                    val vUrl = bestV?.get("url")?.jsonPrimitive?.content
+                    val aUrl = bestA?.get("url")?.jsonPrimitive?.content
+                    if (!vUrl.isNullOrBlank()) {
+                        return@use ResolvedVideoStream(
+                            url = vUrl,
+                            isHls = false,
+                            videoId = targetVideoId,
+                            hasEmbeddedAudio = false,
+                            audioStreamUrl = aUrl,
+                        )
+                    }
+                    null
+                }
+                if (stream != null) return@withContext stream
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+            }
+        }
+        null
+    }
+
+    private suspend fun extractVideoStreamViaPiped(targetVideoId: String): ResolvedVideoStream? = withContext(Dispatchers.IO) {
+        val instances = listOf(
+            "https://pipedapi.tokhmi.xyz",
+            "https://api.piped.private.coffee",
+            "https://piped.video"
+        )
+        val client = Http.client.newBuilder()
+            .connectTimeout(2500, TimeUnit.MILLISECONDS)
+            .readTimeout(2500, TimeUnit.MILLISECONDS)
             .build()
 
         for (base in instances) {
