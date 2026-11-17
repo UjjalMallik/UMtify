@@ -149,6 +149,11 @@
 -dontwarn jdk.dynalink.**
 -dontwarn org.ietf.jgss.**
 
+# ---- Video Stream Extraction & Media3 Keep Rules ----
+-keep class org.schabi.newpipe.extractor.** { *; }
+-keep class androidx.media3.** { *; }
+-keep class com.music.bitchord.data.innertube.** { *; }
+
 # ---- "BitChord for Wear OS": the ADB client that installs the watch app ----
 # libadb-android drives the pairing and transport through Conscrypt and SPAKE2,
 # both of which reach their native halves by name.

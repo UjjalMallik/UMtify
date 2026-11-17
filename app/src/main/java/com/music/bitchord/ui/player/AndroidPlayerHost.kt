@@ -443,6 +443,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     buildUponParameters()
                         .setAllowVideoMixedMimeTypeAdaptiveness(true)
                         .setAllowVideoNonSeamlessAdaptiveness(true)
+                        .setMaxVideoSize(854, 480)
                 )
             }
         }
@@ -756,7 +757,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             val currentPos = videoExoPlayer.currentPosition
             if (option.label == "Auto") {
                 trackSelector.parameters = trackSelector.buildUponParameters()
-                    .clearVideoSizeConstraints()
+                    .setMaxVideoSize(854, 480)
                     .build()
                 val autoStream = availableQualities.firstOrNull { it.height in 360..480 }
                     ?: availableQualities.firstOrNull { it.isHls }
@@ -963,11 +964,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(Color.Black.copy(alpha = 0.6f))
                                 .clickable {
-                                    val syncPos = if (currentHasEmbeddedAudio) {
-                                        videoExoPlayer.currentPosition
-                                    } else {
-                                        mainPlayer?.currentPosition ?: videoExoPlayer.currentPosition
-                                    }.coerceAtLeast(0L)
+                                    val syncPos = videoExoPlayer.currentPosition.coerceAtLeast(0L)
                                     videoExoPlayer.pause()
                                     mainPlayer?.let { mp ->
                                         if (syncPos > 0L) {
@@ -975,7 +972,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                                         }
                                         mp.play()
                                     }
-                                    PlaybackService.onRequestSwitchToAudio?.invoke() ?: PlaybackService.dismissVideoLoading()
+                                    PlaybackService.switchMode(toVideo = false)
                                 }
                                 .padding(horizontal = 8.dp, vertical = 4.dp),
                             contentAlignment = Alignment.Center,

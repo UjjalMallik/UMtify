@@ -9261,6 +9261,85 @@ class PlaybackService : MediaLibraryService() {
             activeVideoExoPlayerFlow.value = null
             onRequestSwitchToAudio?.invoke()
         }
+
+        fun switchMode(toVideo: Boolean) {
+            val mainPlayer = activeExoPlayer ?: com.music.bitchord.ui.player.AndroidPlayerHost.activeController
+            val videoPlayer = activeVideoExoPlayer
+            if (toVideo) {
+                isVideoMode.value = true
+                val pos = (mainPlayer?.currentPosition ?: 0L).coerceAtLeast(0L)
+                mainPlayer?.pause()
+                videoPlayer?.let { vp ->
+                    if (pos > 0L) vp.seekTo(pos)
+                    vp.prepare()
+                    vp.play()
+                }
+            } else {
+                isVideoMode.value = false
+                val pos = (videoPlayer?.currentPosition ?: videoPositionMs.value).coerceAtLeast(0L)
+                videoPlayer?.pause()
+                mainPlayer?.let { mp ->
+                    if (pos > 0L) mp.seekTo(pos)
+                    mp.play()
+                }
+                onRequestSwitchToAudio?.invoke()
+            }
+        }
+
+        fun play() {
+            if (isVideoMode.value) {
+                activeVideoExoPlayer?.play()
+                isVideoPlaying.value = true
+            } else {
+                (activeExoPlayer ?: com.music.bitchord.ui.player.AndroidPlayerHost.activeController)?.play()
+            }
+        }
+
+        fun pause() {
+            if (isVideoMode.value) {
+                activeVideoExoPlayer?.pause()
+                isVideoPlaying.value = false
+            } else {
+                (activeExoPlayer ?: com.music.bitchord.ui.player.AndroidPlayerHost.activeController)?.pause()
+            }
+        }
+
+        fun togglePlayPause() {
+            if (isVideoMode.value) {
+                val vp = activeVideoExoPlayer
+                if (vp != null) {
+                    if (vp.isPlaying) {
+                        vp.pause()
+                        isVideoPlaying.value = false
+                    } else {
+                        vp.play()
+                        isVideoPlaying.value = true
+                    }
+                }
+            } else {
+                val mp = activeExoPlayer ?: com.music.bitchord.ui.player.AndroidPlayerHost.activeController
+                if (mp != null) {
+                    if (mp.isPlaying) mp.pause() else mp.play()
+                }
+            }
+        }
+
+        fun seekTo(positionMs: Long) {
+            if (isVideoMode.value) {
+                activeVideoExoPlayer?.seekTo(positionMs)
+                videoPositionMs.value = positionMs
+            } else {
+                (activeExoPlayer ?: com.music.bitchord.ui.player.AndroidPlayerHost.activeController)?.seekTo(positionMs)
+            }
+        }
+
+        fun currentPosition(): Long {
+            return if (isVideoMode.value) {
+                activeVideoExoPlayer?.currentPosition ?: videoPositionMs.value
+            } else {
+                (activeExoPlayer ?: com.music.bitchord.ui.player.AndroidPlayerHost.activeController)?.currentPosition ?: 0L
+            }
+        }
         const val MEDIA_ROOT_ID = "root"
         const val MEDIA_RECENTS_ID = "recents"
         const val MEDIA_QUICK_PICKS_ID = "quick_picks"

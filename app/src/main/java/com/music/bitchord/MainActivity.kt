@@ -2476,7 +2476,7 @@ private fun BitChordApp(
             accountName = account?.name,
             windowWidth = windowWidth,
             windowHeight = windowHeight,
-            isPlaying = if (displayedSong.isVideo) (PlaybackService.activeVideoExoPlayer?.isPlaying == true || PlaybackService.isVideoPlaying.value) else player.isPlaying,
+            isPlaying = if (displayedSong.isVideo || PlaybackService.isVideoMode.value) (PlaybackService.activeVideoExoPlayer?.isPlaying == true || PlaybackService.isVideoPlaying.value) else player.isPlaying,
             isLoading = playPauseBusy,
             position = player.position,
             durationMs = player.durationMs,
@@ -2484,13 +2484,8 @@ private fun BitChordApp(
             qualityUpgraded = player.isQualityUpgraded,
             onSwitchToAudio = handleSwitchToAudio,
             onPlayPause = {
-                val videoPlayer = PlaybackService.activeVideoExoPlayer
-                if (displayedSong.isVideo && videoPlayer != null) {
-                    if (videoPlayer.isPlaying) {
-                        videoPlayer.pause()
-                    } else {
-                        videoPlayer.play()
-                    }
+                if (displayedSong.isVideo || PlaybackService.isVideoMode.value) {
+                    PlaybackService.togglePlayPause()
                 } else {
                     togglePlayPause()
                 }
@@ -2499,14 +2494,15 @@ private fun BitChordApp(
             onPrevious = { controller?.seekToPrevious() },
             onBlockedControl = showHostOnlyNotice,
             onSeekFraction = { fraction ->
-                val videoPlayer = PlaybackService.activeVideoExoPlayer
-                if (displayedSong.isVideo && videoPlayer != null) {
-                    val duration = videoPlayer.duration
-                    if (duration > 0) {
-                        videoPlayer.seekTo(
-                            (fraction * duration).toLong()
-                                .coerceIn(0L, (duration - SEEK_END_GUARD_MS).coerceAtLeast(0L)),
-                        )
+                if (displayedSong.isVideo || PlaybackService.isVideoMode.value) {
+                    val videoPlayer = PlaybackService.activeVideoExoPlayer
+                    if (videoPlayer != null) {
+                        val duration = videoPlayer.duration
+                        if (duration > 0) {
+                            val target = (fraction * duration).toLong()
+                                .coerceIn(0L, (duration - SEEK_END_GUARD_MS).coerceAtLeast(0L))
+                            PlaybackService.seekTo(target)
+                        }
                     }
                 } else {
                     controller?.let { player ->
@@ -2527,16 +2523,17 @@ private fun BitChordApp(
                 }
             },
             onSeek = { target ->
-                val videoPlayer = PlaybackService.activeVideoExoPlayer
-                if (displayedSong.isVideo && videoPlayer != null) {
-                    val duration = videoPlayer.duration
-                    videoPlayer.seekTo(
-                        if (duration > 0) {
+                if (displayedSong.isVideo || PlaybackService.isVideoMode.value) {
+                    val videoPlayer = PlaybackService.activeVideoExoPlayer
+                    if (videoPlayer != null) {
+                        val duration = videoPlayer.duration
+                        val boundedTarget = if (duration > 0) {
                             target.coerceIn(0L, (duration - SEEK_END_GUARD_MS).coerceAtLeast(0L))
                         } else {
                             target.coerceAtLeast(0L)
-                        },
-                    )
+                        }
+                        PlaybackService.seekTo(boundedTarget)
+                    }
                 } else {
                     controller?.let { player ->
                         // Clamped here rather than at each caller because
