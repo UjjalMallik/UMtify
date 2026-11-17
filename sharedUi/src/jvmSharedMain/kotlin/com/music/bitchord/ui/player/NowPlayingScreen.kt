@@ -987,8 +987,9 @@ fun NowPlayingScreen(
     val shown: () -> Float = {
         if (videoMode) {
             val d = if (videoDurationMs > 0L) videoDurationMs else activeDurationMs
-            val p = if (videoPositionMs > 0L) videoPositionMs else position.positionMs
-            scrub.shown(p, d)
+            val p = if (videoFrameRendered || videoPositionMs > 0L) videoPositionMs else position.positionMs
+            val fraction = if (d > 0) p.toFloat() / d else 0f
+            if (scrub.scrubbing) scrub.value else fraction.coerceIn(0f, 1f)
         } else {
             scrub.shown(position.positionMs, activeDurationMs)
         }
@@ -2067,7 +2068,7 @@ fun NowPlayingScreen(
                                 PlayerScrubber(
                                     shown = shown,
                                     durationMs = activeDurationMs,
-                                    isPlaying = activeIsPlaying && position.advancing,
+                                    isPlaying = if (videoMode) activeIsPlaying else (activeIsPlaying && position.advancing),
                                     loading = versionAligning || audioVersionSwitching,
                                     mixing = mixing && !scrub.scrubbing,
                                     transitionWindow = transitionWindow
@@ -3851,7 +3852,7 @@ fun NowPlayingScreen(
                     PlayerScrubber(
                         shown = shown,
                         durationMs = activeDurationMs,
-                        isPlaying = activeIsPlaying && position.advancing,
+                        isPlaying = if (videoMode) activeIsPlaying else (activeIsPlaying && position.advancing),
                         loading = versionSwitching,
                         mixing = mixing && !scrub.scrubbing,
                         // Hidden while scrubbing: the planner is still describing
@@ -3938,7 +3939,10 @@ fun NowPlayingScreen(
                                 .align(Alignment.CenterHorizontally)
                                 .clip(RoundedCornerShape(16.dp))
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
-                                .clickable { onSwitchToAudio() }
+                                .clickable {
+                                    PlayerPlatform.host.pauseVideo()
+                                    onSwitchToAudio()
+                                }
                                 .padding(horizontal = 14.dp, vertical = 6.dp),
                             contentAlignment = Alignment.Center,
                         ) {

@@ -361,6 +361,16 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         }
     }
 
+    override fun pauseVideo() {
+        val vp = PlaybackService.activeVideoExoPlayer ?: return
+        vp.pause()
+    }
+
+    override fun playVideo() {
+        val vp = PlaybackService.activeVideoExoPlayer ?: return
+        vp.play()
+    }
+
     override fun seekVideo(positionMs: Long) {
         val vp = PlaybackService.activeVideoExoPlayer ?: return
         vp.seekTo(positionMs)
@@ -531,7 +541,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         }
 
         // Periodically sync video position, duration, and playing state to PlaybackService
-        LaunchedEffect(videoExoPlayer, currentHasEmbeddedAudio) {
+        LaunchedEffect(videoExoPlayer) {
             while (true) {
                 PlaybackService.isVideoPlaying.value = videoExoPlayer.isPlaying
                 PlaybackService.videoPositionMs.value = videoExoPlayer.currentPosition.coerceAtLeast(0L)
@@ -539,31 +549,18 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                 if (dur > 0L) {
                     PlaybackService.videoDurationMs.value = dur
                 }
-                if (!currentHasEmbeddedAudio && videoExoPlayer.isPlaying && mainPlayer != null && mainPlayer.isPlaying) {
-                    val vPos = videoExoPlayer.currentPosition
-                    val aPos = mainPlayer.currentPosition
-                    if (kotlin.math.abs(vPos - aPos) > 400L) {
-                        videoExoPlayer.seekTo(aPos)
-                    }
-                }
                 delay(200)
             }
         }
 
         // Listen for rendered first frame, STATE_READY, track changes, and onPlayerError
-        DisposableEffect(videoExoPlayer, currentHasEmbeddedAudio) {
+        DisposableEffect(videoExoPlayer) {
             val listener = object : Player.Listener {
                 override fun onRenderedFirstFrame() {
                     PlaybackService.isVideoFrameRendered.value = true
                     PlaybackService.videoStatusText.value = ""
                     videoExoPlayer.play()
-                    if (currentHasEmbeddedAudio) {
-                        mainPlayer?.pause()
-                    } else {
-                        mainPlayer?.let { mp ->
-                            if (!mp.isPlaying) mp.play()
-                        }
-                    }
+                    mainPlayer?.pause()
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -571,35 +568,12 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                         PlaybackService.isVideoFrameRendered.value = true
                         PlaybackService.videoStatusText.value = ""
                         videoExoPlayer.play()
-                        if (currentHasEmbeddedAudio) {
-                            mainPlayer?.pause()
-                        } else {
-                            mainPlayer?.let { mp ->
-                                if (!mp.isPlaying) mp.play()
-                            }
-                        }
+                        mainPlayer?.pause()
                     }
                 }
 
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     PlaybackService.isVideoPlaying.value = isPlaying
-                    if (!currentHasEmbeddedAudio) {
-                        if (isPlaying && mainPlayer?.isPlaying == false) {
-                            mainPlayer.play()
-                        } else if (!isPlaying && mainPlayer?.isPlaying == true) {
-                            mainPlayer.pause()
-                        }
-                    }
-                }
-
-                override fun onPositionDiscontinuity(
-                    oldPosition: Player.PositionInfo,
-                    newPosition: Player.PositionInfo,
-                    reason: Int,
-                ) {
-                    if (!currentHasEmbeddedAudio && reason == Player.DISCONTINUITY_REASON_SEEK) {
-                        mainPlayer?.seekTo(newPosition.positionMs)
-                    }
                 }
 
                 override fun onTracksChanged(tracks: Tracks) {
@@ -622,6 +596,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         // Helper to load or switch video stream quality
         fun playStream(
             videoUrl: String,
+            audioUrl: String?,
             hasEmbeddedAudio: Boolean,
             isHls: Boolean,
             headers: Map<String, String>,
@@ -649,6 +624,14 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     .createMediaSource(MediaItem.fromUri(videoUrl))
             }
 
+            val finalSource = if (!hasEmbeddedAudio && !audioUrl.isNullOrBlank() && !isHls) {
+                val audioSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+                    .createMediaSource(MediaItem.fromUri(audioUrl))
+                MergingMediaSource(videoSource, audioSource)
+            } else {
+                videoSource
+            }
+
             val targetPos = if (syncTime > 0L) {
                 syncTime
             } else if (videoExoPlayer.currentPosition > 0L) {
@@ -657,23 +640,15 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                 mainPlayer?.currentPosition?.takeIf { it > 0L } ?: 0L
             }
 
-            if (hasEmbeddedAudio) {
-                videoExoPlayer.volume = 1f
-                mainPlayer?.pause()
-            } else {
-                videoExoPlayer.volume = 0f
-                mainPlayer?.let { mp ->
-                    if (targetPos > 0L) mp.seekTo(targetPos)
-                    mp.play()
-                }
-            }
+            videoExoPlayer.volume = 1f
+            mainPlayer?.pause()
 
-            videoExoPlayer.setMediaSource(videoSource)
+            videoExoPlayer.setMediaSource(finalSource)
             if (targetPos > 0L) {
                 videoExoPlayer.seekTo(targetPos)
             }
-            videoExoPlayer.playWhenReady = true
             videoExoPlayer.prepare()
+            videoExoPlayer.playWhenReady = true
         }
 
         // Helper to select audio track
@@ -727,17 +702,21 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     currentHasEmbeddedAudio = stream.hasEmbeddedAudio
                     availableQualities = stream.availableQualities
 
-                    // ABR Auto: default to highest available quality or HLS
-                    val highestStream = stream.availableQualities.firstOrNull { it.isHls }
-                        ?: stream.availableQualities.firstOrNull { it.height >= 720 }
-                        ?: stream.availableQualities.maxByOrNull { it.height }
+                    // Fast Startup: prefer 360p or 480p default resolution for sub-second startup
+                    val defaultStream = stream.availableQualities.firstOrNull { it.height in 360..480 }
+                        ?: stream.availableQualities.firstOrNull { it.isHls }
+                        ?: stream.availableQualities.firstOrNull { it.height in 144..720 }
                         ?: stream.availableQualities.firstOrNull()
 
-                    val targetUrl = highestStream?.url ?: stream.url
-                    val targetIsHls = highestStream?.isHls ?: stream.isHls
+                    val targetUrl = defaultStream?.url ?: stream.url
+                    val targetIsHls = defaultStream?.isHls ?: stream.isHls
+                    val targetAudio = defaultStream?.audioUrl ?: stream.audioStreamUrl
+
+                    selectedQualityLabel = defaultStream?.label ?: "Auto"
 
                     playStream(
                         videoUrl = targetUrl,
+                        audioUrl = targetAudio,
                         hasEmbeddedAudio = stream.hasEmbeddedAudio,
                         isHls = targetIsHls,
                         headers = headers,
@@ -779,12 +758,13 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                 trackSelector.parameters = trackSelector.buildUponParameters()
                     .clearVideoSizeConstraints()
                     .build()
-                val autoStream = availableQualities.firstOrNull { it.isHls }
-                    ?: availableQualities.firstOrNull { it.height >= 720 }
+                val autoStream = availableQualities.firstOrNull { it.height in 360..480 }
+                    ?: availableQualities.firstOrNull { it.isHls }
                     ?: availableQualities.firstOrNull()
                 if (autoStream != null) {
                     playStream(
                         videoUrl = autoStream.url,
+                        audioUrl = autoStream.audioUrl ?: currentAudioUrl,
                         hasEmbeddedAudio = currentHasEmbeddedAudio,
                         isHls = autoStream.isHls,
                         headers = currentHeaders,
@@ -799,6 +779,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                 if (option.url.isNotBlank()) {
                     playStream(
                         videoUrl = option.url,
+                        audioUrl = option.audioUrl ?: currentAudioUrl,
                         hasEmbeddedAudio = currentHasEmbeddedAudio,
                         isHls = option.isHls,
                         headers = currentHeaders,

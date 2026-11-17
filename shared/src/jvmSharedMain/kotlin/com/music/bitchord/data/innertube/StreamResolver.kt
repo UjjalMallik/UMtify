@@ -1323,11 +1323,14 @@ object StreamResolver {
                     val direct = extractVideoStreamViaInnerTube(targetId)
                     if (direct != null && direct.url.isNotBlank()) return@withTimeoutOrNull direct
 
-                    // InnerTubeX Resolver
-                    val xStream = InnerTubeXResolver.extractVideo(targetId, 480)
+                    // InnerTubeX Resolver: prefer 360p or 480p first for fast sub-second startup
+                    val xStream = InnerTubeXResolver.extractVideo(targetId, 360)
+                        ?: InnerTubeXResolver.extractVideo(targetId, 480)
+                        ?: InnerTubeXResolver.extractVideo(targetId, 720)
                         ?: InnerTubeXResolver.extractVideo(targetId, 1080)
                     if (xStream != null && xStream.url.isNotBlank()) {
                         val xAudio = runCatching { InnerTubeXResolver.extract(targetId, 320) }.getOrNull()
+                            ?: runCatching { InnerTubeXResolver.extract(targetId, 160) }.getOrNull()
                         val audioUrl = xAudio?.url
                         val xQualities = xStream.heights.map { h ->
                             VideoQualityOption(label = if (h >= 720) "HD · ${h}p" else "${h}p", height = h, url = xStream.url, isHls = false, audioUrl = audioUrl)
@@ -1542,7 +1545,7 @@ object StreamResolver {
                 val pickedAdaptive = videoAdaptive?.filter {
                     val h = it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
                     h in 360..480
-                }?.maxByOrNull {
+                }?.minByOrNull {
                     it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
                 } ?: videoAdaptive?.filter {
                     val h = it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0

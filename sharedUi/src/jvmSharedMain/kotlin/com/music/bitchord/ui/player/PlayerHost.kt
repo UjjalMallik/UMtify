@@ -58,6 +58,10 @@ interface PlayerHost {
 
     fun toggleVideoPlayPause() = Unit
 
+    fun pauseVideo() = Unit
+
+    fun playVideo() = Unit
+
     fun seekVideo(positionMs: Long) = Unit
 
     /**
