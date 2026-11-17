@@ -47,6 +47,7 @@ import org.schabi.newpipe.extractor.exceptions.YoutubeMusicPremiumContentExcepti
 import org.schabi.newpipe.extractor.services.youtube.YoutubeJavaScriptPlayerManager
 import org.schabi.newpipe.extractor.stream.AudioStream
 import org.schabi.newpipe.extractor.stream.DeliveryMethod
+import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -791,73 +792,117 @@ object StreamResolver {
     }
 
     /**
-     * Resolves an anonymous video stream for the given track using:
-     * 1. Direct YouTube ID extraction if already a valid YouTube ID (0ms search delay).
-     * 2. Fast InnerTube candidate search (<600ms).
-     * 3. Reliable Piped API search and stream extraction fallback.
+     * Resolves an anonymous video stream using direct NewPipeExtractor search and stream extraction:
+     * 1. Initialize NewPipe via [ensureInit].
+     * 2. Search using ServiceList.YouTube.getSearchExtractor.
+     * 3. Extract stream using ServiceList.YouTube.getStreamExtractor, prioritizing muxed streams.
      */
     suspend fun resolveVideoStreamForTrack(
         videoId: String,
         title: String,
         artist: String,
-        durationSec: Int,
+        durationSec: Int = 0,
         candidateOffset: Int = 0,
         onStatusUpdate: ((String) -> Unit)? = null,
     ): ResolvedVideoStream? = withContext(Dispatchers.IO) {
+        // 1. Initialize NewPipe
         ensureInit()
-        val isYtId = videoId.length == 11 && videoId.all { it.isLetterOrDigit() || it == '-' || it == '_' }
+        onStatusUpdate?.invoke("Finding video...")
 
-        // 1. If valid YouTube ID, attempt direct extraction first (0ms search delay)
-        if (isYtId) {
+        try {
+            val query = "$title $artist official video".trim()
+            val videoUrl = try {
+                val searchExtractor = ServiceList.YouTube.getSearchExtractor(query)
+                searchExtractor.fetchPage()
+                val items = searchExtractor.initialPage?.items.orEmpty()
+                val streamItem = items.firstOrNull { it is StreamInfoItem }
+                streamItem?.url
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                TrackLog.w(TAG, "NewPipe search failed for query '$query': ${e.message}")
+                null
+            } ?: if (PipePipeVideoExtractor.isValidYoutubeId(videoId)) {
+                "https://www.youtube.com/watch?v=$videoId"
+            } else {
+                null
+            }
+
+            if (videoUrl.isNullOrBlank()) {
+                TrackLog.w(TAG, "No video URL found for '$title' - '$artist'")
+                return@withContext null
+            }
+
+            // 2. Extract Stream
             onStatusUpdate?.invoke("Extracting stream...")
-            val directStream = extractVideoStreamSingle(videoId, onStatusUpdate)
-            if (directStream != null && directStream.url.isNotBlank()) {
-                TrackLog.d(TAG, "Resolved video via direct YouTube ID ($videoId)")
-                return@withContext directStream
+            val streamExtractor = ServiceList.YouTube.getStreamExtractor(videoUrl)
+            streamExtractor.fetchPage()
+
+            val chromeUa = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+            val vid = PipePipeVideoExtractor.extractVideoId(videoUrl) ?: videoId
+
+            // Prioritize muxed video streams (video + audio) over video-only streams or HLS
+            val muxedStreams = streamExtractor.videoStreams?.filter { s ->
+                !s.content.isNullOrBlank() &&
+                    (s.format == MediaFormat.MPEG_4 || (s.format?.name ?: "").contains("MP4", ignoreCase = true))
+            }.orEmpty()
+
+            val bestMuxed = muxedStreams.firstOrNull { it.itag == 18 }
+                ?: muxedStreams.firstOrNull { it.itag == 22 }
+                ?: muxedStreams.firstOrNull { it.height in 360..720 }
+                ?: muxedStreams.firstOrNull()
+
+            if (bestMuxed != null && !bestMuxed.content.isNullOrBlank()) {
+                TrackLog.d(TAG, "Resolved muxed video stream for $vid")
+                return@withContext ResolvedVideoStream(
+                    url = bestMuxed.content,
+                    isHls = false,
+                    userAgent = chromeUa,
+                    videoId = vid,
+                )
             }
-        }
 
-        // 2. Fast InnerTube candidate search
-        onStatusUpdate?.invoke("Finding video...")
-        val innerTubeCandidates = withTimeoutOrNull(3000L) {
-            PipePipeVideoExtractor.searchVideoCandidates(title, artist)
-        }.orEmpty()
+            // Fallback: video-only streams
+            val videoOnlyStreams = streamExtractor.videoOnlyStreams?.filter { s ->
+                !s.content.isNullOrBlank() &&
+                    (s.codec?.contains("avc1", ignoreCase = true) == true ||
+                        s.format == MediaFormat.MPEG_4 ||
+                        (s.format?.name ?: "").contains("MP4", ignoreCase = true))
+            }.orEmpty()
 
-        for (cid in innerTubeCandidates.take(2)) {
-            if (cid != videoId) {
-                val stream = withTimeoutOrNull(4000L) {
-                    extractVideoStreamSingle(cid, onStatusUpdate)
-                }
-                if (stream != null && stream.url.isNotBlank()) {
-                    TrackLog.d(TAG, "Resolved video via InnerTube candidate ($cid)")
-                    return@withContext stream
-                }
+            val bestVideoOnly = videoOnlyStreams.firstOrNull { it.height == 360 }
+                ?: videoOnlyStreams.firstOrNull { it.height == 480 }
+                ?: videoOnlyStreams.firstOrNull { it.height in 360..720 }
+                ?: videoOnlyStreams.firstOrNull()
+
+            if (bestVideoOnly != null && !bestVideoOnly.content.isNullOrBlank()) {
+                TrackLog.d(TAG, "Resolved video-only stream for $vid")
+                return@withContext ResolvedVideoStream(
+                    url = bestVideoOnly.content,
+                    isHls = false,
+                    userAgent = chromeUa,
+                    videoId = vid,
+                )
             }
-        }
 
-        // 3. Robust fallback: Piped API search & stream extraction
-        onStatusUpdate?.invoke("Finding video...")
-        val pipedStream = withTimeoutOrNull(7000L) {
-            searchAndExtractPipedVideoStream(title, artist, onStatusUpdate)
-        }
-        if (pipedStream != null && pipedStream.url.isNotBlank()) {
-            TrackLog.d(TAG, "Resolved video via Piped API search ($title - $artist)")
-            return@withContext pipedStream
-        }
-
-        // 4. Final attempt for valid YT IDs: try direct Piped by ID
-        if (isYtId) {
-            val pipedById = withTimeoutOrNull(4000L) {
-                extractPipedStreamById(videoId, onStatusUpdate)
+            // Fallback: HLS manifest
+            val hls = streamExtractor.hlsUrl
+            if (!hls.isNullOrBlank()) {
+                TrackLog.d(TAG, "Resolved HLS video stream for $vid")
+                return@withContext ResolvedVideoStream(
+                    url = hls,
+                    isHls = true,
+                    userAgent = chromeUa,
+                    videoId = vid,
+                )
             }
-            if (pipedById != null && pipedById.url.isNotBlank()) {
-                TrackLog.d(TAG, "Resolved video via direct Piped ID ($videoId)")
-                return@withContext pipedById
-            }
-        }
 
-        TrackLog.w(TAG, "All video resolution methods failed for '$title' - '$artist'")
-        null
+            TrackLog.w(TAG, "No playable video streams found for $videoUrl")
+            null
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            TrackLog.w(TAG, "resolveVideoStreamForTrack failed: ${e.message}")
+            null
+        }
     }
 
     /** Per-track loudness, read once and kept for as long as the process runs. */

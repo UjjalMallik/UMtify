@@ -423,11 +423,12 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         // Keyed ONLY on (mediaId, isVideoMode) to avoid premature coroutine cancellation
         LaunchedEffect(mediaId, isVideoMode) {
             if (!isVideoMode) return@LaunchedEffect
-            try {
-                PlaybackService.isVideoFrameRendered.value = false
-                PlaybackService.videoStatusText.value = "Finding video..."
+            PlaybackService.isVideoFrameRendered.value = false
+            PlaybackService.videoStatusText.value = "Finding video..."
 
-                val stream = withTimeoutOrNull(10000L) {
+            try {
+                // Crucially: Ensure search and extraction run on Dispatchers.IO
+                val stream = withContext(Dispatchers.IO) {
                     StreamResolver.resolveVideoStreamForTrack(
                         videoId = mediaId,
                         title = title,
@@ -440,9 +441,10 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     )
                 }
 
-                resolvedStream = stream
-
                 if (stream != null) {
+                    PlaybackService.videoStatusText.value = "Extracting stream..."
+                    resolvedStream = stream
+
                     PlaybackService.videoStatusText.value = "Buffering video..."
                     val headers = StreamResolver.mediaHeadersFor(stream.url)
                     val ua = stream.userAgent.ifBlank {
@@ -480,15 +482,17 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     videoExoPlayer.playWhenReady = true
                 } else {
                     TrackLog.w("VideoPlayer", "Failed to resolve video stream for $mediaId ($title - $artist)")
-                    PlaybackService.videoStatusText.value = "Error: Video not found"
-                    delay(3000L)
+                    PlaybackService.videoStatusText.value = "Video not found, reverting to audio"
+                    delay(2000L)
+                    PlaybackService.isVideoMode.value = false
                     PlaybackService.dismissVideoLoading()
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 TrackLog.w("VideoPlayer", "Exception resolving video for $mediaId: ${e.message}")
-                PlaybackService.videoStatusText.value = "Error: Video not found"
-                delay(3000L)
+                PlaybackService.videoStatusText.value = "Video not found, reverting to audio"
+                delay(2000L)
+                PlaybackService.isVideoMode.value = false
                 PlaybackService.dismissVideoLoading()
             }
         }
