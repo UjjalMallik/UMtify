@@ -160,6 +160,11 @@ object MusicVideoEngine {
     /** The surface the last frame was drawn to. */
     internal val frameOn: StateFlow<TextureView?> = _frameOn.asStateFlow()
 
+    private val _failedVideoId = MutableStateFlow<String?>(null)
+    internal val failedVideoId: StateFlow<String?> = _failedVideoId.asStateFlow()
+
+    fun hasPicture(videoId: String): Boolean = videoId !in noPicture && _failedVideoId.value != videoId
+
     private val _quality = MutableStateFlow(MusicVideoQualityUi())
 
     /** The heights the loaded video offers, the held one, and the one on screen. */
@@ -203,7 +208,8 @@ object MusicVideoEngine {
 
     private val playerListener = object : Player.Listener {
         override fun onRenderedFirstFrame() {
-            _frameOn.value = top()
+            val target = top() ?: surfaces.lastOrNull()?.view
+            _frameOn.value = target
             _shownVideoId.value = loadedId
         }
 
@@ -212,14 +218,28 @@ object MusicVideoEngine {
             if (width > 0f && videoSize.height > 0) {
                 _aspect.value = width / videoSize.height
                 _quality.value = _quality.value.copy(activeHeight = videoSize.height)
+                val target = top() ?: surfaces.lastOrNull()?.view
+                if (target != null && _frameOn.value == null) {
+                    _frameOn.value = target
+                    _shownVideoId.value = loadedId
+                }
             }
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_READY && seekStartedAt > 0L) {
-                val took = System.currentTimeMillis() - seekStartedAt
-                seekLeadMs = ((seekLeadMs + took) / 2).coerceIn(0L, 1_500L)
-                seekStartedAt = 0L
+            if (playbackState == Player.STATE_READY) {
+                val target = top() ?: surfaces.lastOrNull()?.view
+                if (target != null && _frameOn.value == null) {
+                    _frameOn.value = target
+                }
+                if (loadedId != null) {
+                    _shownVideoId.value = loadedId
+                }
+                if (seekStartedAt > 0L) {
+                    val took = System.currentTimeMillis() - seekStartedAt
+                    seekLeadMs = ((seekLeadMs + took) / 2).coerceIn(0L, 1_500L)
+                    seekStartedAt = 0L
+                }
             }
         }
 
@@ -246,6 +266,8 @@ object MusicVideoEngine {
                 return
             }
             noPicture += id
+            MusicOnlyPlayback.letGo(id)
+            _failedVideoId.value = id
             unload()
         }
     }
@@ -280,6 +302,10 @@ object MusicVideoEngine {
         if (top() === view) {
             _frameOn.value = null
             exo.setVideoTextureView(view)
+            if (exo.playbackState == Player.STATE_READY && loadedId != null) {
+                _frameOn.value = view
+                _shownVideoId.value = loadedId
+            }
             repaint()
         }
         refresh()
@@ -400,6 +426,7 @@ object MusicVideoEngine {
     private fun load(videoId: String) {
         unload()
         loadedId = videoId
+        _failedVideoId.value = null
         val cap = capFor(videoId)
         loadedCap = cap
         loadJob = scope.launch {
@@ -416,12 +443,19 @@ object MusicVideoEngine {
                 // (which clears [noPicture]), the rest not at all. A network
                 // failure is asked again on the next surface or track change.
                 if (e.reason != StreamResolveException.Reason.NETWORK) noPicture += videoId
+                MusicOnlyPlayback.letGo(videoId)
+                _failedVideoId.value = videoId
                 return@launch
             } catch (e: Exception) {
                 // Not remembered as pictureless: the next surface or track
                 // change asks again.
                 TrackLog.w(TAG, "video: couldn't resolve the picture: ${e.message}", about = videoId)
-                if (loadedId == videoId) loadedId = null
+                if (loadedId == videoId) {
+                    loadedId = null
+                    noPicture += videoId
+                    MusicOnlyPlayback.letGo(videoId)
+                    _failedVideoId.value = videoId
+                }
                 return@launch
             }
             if (loadedId != videoId) return@launch
@@ -429,6 +463,8 @@ object MusicVideoEngine {
             if (stream == null || stream.aspect < MIN_VIDEO_ASPECT) {
                 noPicture += videoId
                 loadedId = null
+                MusicOnlyPlayback.letGo(videoId)
+                _failedVideoId.value = videoId
                 return@launch
             }
             val exo = player ?: return@launch
@@ -575,13 +611,17 @@ internal fun AndroidMusicVideo(
 
     val shown by MusicVideoEngine.shownVideoId.collectAsStateWithLifecycle()
     val frameOn by MusicVideoEngine.frameOn.collectAsStateWithLifecycle()
+    val failedVideo by MusicVideoEngine.failedVideoId.collectAsStateWithLifecycle()
     val aspect by MusicVideoEngine.aspect.collectAsStateWithLifecycle()
-    val rendered = view != null && frameOn === view && shown == videoId
+
+    val isFailed = failedVideo == videoId
+    val isReady = view != null && shown == videoId && (frameOn === view || frameOn != null)
+    val rendered = isReady || isFailed
     val playing by MusicVideoEngine.playing.collectAsStateWithLifecycle()
 
     // A video being watched keeps the screen awake, as any video player does —
     // only while it plays, and only on the surface its frames are reaching.
-    val awake = rendered && playing
+    val awake = isReady && playing
     LaunchedEffect(view, awake) { view?.keepScreenOn = awake }
 
     val report by rememberUpdatedState(onRenderedChanged)
@@ -589,7 +629,7 @@ internal fun AndroidMusicVideo(
     DisposableEffect(Unit) { onDispose { report(false) } }
 
     val alpha by animateFloatAsState(
-        targetValue = if (rendered) 1f else 0f,
+        targetValue = if (isReady) 1f else 0f,
         animationSpec = tween(durationMillis = 320),
         label = "musicVideoAlpha",
     )

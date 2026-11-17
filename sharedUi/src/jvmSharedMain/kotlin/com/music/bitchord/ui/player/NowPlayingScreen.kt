@@ -3154,7 +3154,7 @@ fun NowPlayingScreen(
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .clip(RoundedCornerShape(24.dp))
-                                            .background(Color.Black),
+                                            .background(if (videoRendered) Color.Black else Color.Transparent),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         if (!videoRendered) {
@@ -3176,7 +3176,7 @@ fun NowPlayingScreen(
                                 }
                             }
 
-                            if (!videoMode && !art.url.isNullOrBlank() && !com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url)) {
+                            if ((!videoMode || !videoRendered) && !art.url.isNullOrBlank() && !com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url)) {
                                 AsyncImage(
                                 // Decode at the sleeve's *expanded* size, always.
                                 // Coil otherwise sizes the decode to however large
@@ -3216,7 +3216,7 @@ fun NowPlayingScreen(
                                 // [PlayerArtwork.loaded] still flips the moment it does.
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .drawWithContent { if (!videoMode && (art.loaded || !canvasRendered)) drawContent() },
+                                    .drawWithContent { if ((!videoMode || !videoRendered) && (art.loaded || !canvasRendered)) drawContent() },
                                 )
                             }
 

@@ -256,7 +256,8 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     override fun MusicVideo(videoId: String, fit: Boolean, onRenderedChanged: (Boolean) -> Unit, modifier: Modifier) =
         AndroidMusicVideo(videoId, fit, onRenderedChanged, modifier)
 
-    override fun showsMusicVideoPicture(videoId: String): Boolean = MusicOnlyPlayback.showsPicture(videoId)
+    override fun showsMusicVideoPicture(videoId: String): Boolean =
+        MusicOnlyPlayback.showsPicture(videoId) && MusicVideoEngine.hasPicture(videoId)
 
     override val musicVideoAspect: StateFlow<Float> get() = MusicVideoEngine.aspect
 
