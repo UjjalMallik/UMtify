@@ -43,6 +43,7 @@ import com.music.bitchord.data.TrackLog
 import com.music.bitchord.data.innertube.PipePipeVideoExtractor
 import com.music.bitchord.data.innertube.ResolvedVideoStream
 import com.music.bitchord.data.innertube.StreamResolver
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -364,7 +365,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                         PlaybackService.videoStatusText.value = "Retrying video (${retryCount + 1}/3)..."
                         retryCount++
                     } else {
-                        PlaybackService.videoStatusText.value = "Video playback failed"
+                        PlaybackService.videoStatusText.value = "Error: ${error.javaClass.simpleName}: ${error.message?.take(40)}"
                     }
                 }
             }
@@ -420,92 +421,94 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         // Resolve video stream via StreamResolver working YouTube pipeline
         // Keyed ONLY on (mediaId, retryCount) to avoid coroutine cancellation when durationSec/title/artist updates
         LaunchedEffect(mediaId, retryCount) {
-            PlaybackService.isVideoFrameRendered.value = false
-            PlaybackService.videoStatusText.value = "Finding video..."
+            try {
+                PlaybackService.isVideoFrameRendered.value = false
+                PlaybackService.videoStatusText.value = "Finding video..."
 
-            // 1. Strict 3-second timeout on video search and resolution
-            var stream = withTimeoutOrNull(3000L) {
-                StreamResolver.resolveVideoStreamForTrack(
-                    videoId = mediaId,
-                    title = title,
-                    artist = artist,
-                    durationSec = durationSec,
-                    candidateOffset = retryCount,
-                    onStatusUpdate = { status ->
-                        PlaybackService.videoStatusText.value = status
-                    },
-                )
-            }
+                // 1. 8-second timeout on video search and resolution
+                var stream = withTimeoutOrNull(8000L) {
+                    StreamResolver.resolveVideoStreamForTrack(
+                        videoId = mediaId,
+                        title = title,
+                        artist = artist,
+                        durationSec = durationSec,
+                        candidateOffset = retryCount,
+                        onStatusUpdate = { status ->
+                            PlaybackService.videoStatusText.value = status
+                        },
+                    )
+                }
 
-            // 2. If search took longer than 3s or returned null, instantly fallback to direct mediaId or Piped API
-            if (stream == null) {
-                PlaybackService.videoStatusText.value = "Connecting stream..."
-                stream = withTimeoutOrNull(2500L) {
-                    val direct = StreamResolver.resolveVideoPlaybackInfo(mediaId)
-                    if (direct != null && direct.videoUri.isNotBlank()) {
-                        val ua = direct.userAgent.ifBlank {
-                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+                // 2. If primary search took longer or returned null, fallback to direct mediaId or Piped API
+                if (stream == null) {
+                    PlaybackService.videoStatusText.value = "Connecting stream..."
+                    stream = withTimeoutOrNull(8000L) {
+                        val direct = StreamResolver.resolveVideoPlaybackInfo(mediaId)
+                        if (direct != null && direct.videoUri.isNotBlank()) {
+                            val ua = direct.userAgent.ifBlank {
+                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+                            }
+                            ResolvedVideoStream(
+                                url = direct.videoUri,
+                                isHls = direct.isHls,
+                                userAgent = ua,
+                                videoId = mediaId,
+                            )
+                        } else {
+                            PipePipeVideoExtractor.extractFromPipedApi(mediaId)
                         }
-                        ResolvedVideoStream(
-                            url = direct.videoUri,
-                            isHls = direct.isHls,
-                            userAgent = ua,
-                            videoId = mediaId,
-                        )
-                    } else {
-                        PipePipeVideoExtractor.extractFromPipedApi(mediaId)
                     }
                 }
-            }
 
-            resolvedStream = stream
+                resolvedStream = stream
 
-            if (stream != null) {
-                PlaybackService.videoStatusText.value = "Buffering video..."
-                val headers = StreamResolver.mediaHeadersFor(stream.url)
-                val ua = stream.userAgent.ifBlank {
-                    headers["User-Agent"] ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
-                }
+                if (stream != null) {
+                    PlaybackService.videoStatusText.value = "Buffering video..."
+                    val headers = StreamResolver.mediaHeadersFor(stream.url)
+                    val ua = stream.userAgent.ifBlank {
+                        headers["User-Agent"] ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+                    }
 
-                val reqHeaders = HashMap<String, String>().apply {
-                    put("Referer", "https://www.youtube.com/")
-                    put("Origin", "https://www.youtube.com")
-                    headers.forEach { (k, v) -> put(k, v) }
-                }
+                    val reqHeaders = HashMap<String, String>().apply {
+                        put("Referer", "https://www.youtube.com/")
+                        put("Origin", "https://www.youtube.com")
+                        headers.forEach { (k, v) -> put(k, v) }
+                    }
 
-                val dataSourceFactory = DefaultHttpDataSource.Factory()
-                    .setUserAgent(ua)
-                    .setDefaultRequestProperties(reqHeaders)
-                    .setAllowCrossProtocolRedirects(true)
-                    .setConnectTimeoutMs(10000)
-                    .setReadTimeoutMs(10000)
+                    val dataSourceFactory = DefaultHttpDataSource.Factory()
+                        .setUserAgent(ua)
+                        .setDefaultRequestProperties(reqHeaders)
+                        .setAllowCrossProtocolRedirects(true)
+                        .setConnectTimeoutMs(8000)
+                        .setReadTimeoutMs(8000)
 
-                val mediaSource = if (stream.isHls) {
-                    HlsMediaSource.Factory(dataSourceFactory)
-                        .createMediaSource(MediaItem.fromUri(stream.url))
+                    val mediaSource = if (stream.isHls) {
+                        HlsMediaSource.Factory(dataSourceFactory)
+                            .createMediaSource(MediaItem.fromUri(stream.url))
+                    } else {
+                        ProgressiveMediaSource.Factory(dataSourceFactory)
+                            .createMediaSource(MediaItem.fromUri(stream.url))
+                    }
+
+                    val currentPos = mainPlayer?.currentPosition ?: 0L
+                    val currentDur = mainPlayer?.duration?.takeIf { it > 0 } ?: Long.MAX_VALUE
+                    videoExoPlayer.setMediaSource(mediaSource)
+                    if (currentPos > 0L) {
+                        videoExoPlayer.seekTo(currentPos.coerceAtMost(currentDur))
+                    }
+                    videoExoPlayer.prepare()
+                    videoExoPlayer.playWhenReady = true
                 } else {
-                    ProgressiveMediaSource.Factory(dataSourceFactory)
-                        .createMediaSource(MediaItem.fromUri(stream.url))
+                    TrackLog.w("VideoPlayer", "Failed to resolve video stream for $mediaId ($title - $artist, retry=$retryCount)")
+                    PlaybackService.videoStatusText.value = "Error: Video stream unavailable"
+                    Toast.makeText(context, "Video stream unavailable", Toast.LENGTH_SHORT).show()
+                    delay(5000L)
                 }
-
-                val currentPos = mainPlayer?.currentPosition ?: 0L
-                val currentDur = mainPlayer?.duration?.takeIf { it > 0 } ?: Long.MAX_VALUE
-                videoExoPlayer.setMediaSource(mediaSource)
-                if (currentPos > 0L) {
-                    videoExoPlayer.seekTo(currentPos.coerceAtMost(currentDur))
-                }
-                videoExoPlayer.prepare()
-                videoExoPlayer.playWhenReady = true
-            } else {
-                TrackLog.w("VideoPlayer", "Failed to resolve video stream for $mediaId ($title - $artist, retry=$retryCount)")
-                // Stream extraction failed or timed out after fallback:
-                // Auto-dismiss spinner and fallback cleanly to audio
-                PlaybackService.dismissVideoLoading()
-                val currentSong = activeSong ?: currentMediaItem?.toSong()
-                if (currentSong != null) {
-                    activeController?.swapToVersion(currentSong.copy(isVideo = false))
-                }
-                Toast.makeText(context, "Video stream unavailable, playing audio", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                TrackLog.w("VideoPlayer", "Exception resolving video for $mediaId: ${e.message}")
+                PlaybackService.videoStatusText.value = "Error: ${e.javaClass.simpleName}: ${e.message?.take(40)}"
+                delay(5000L)
             }
         }
 

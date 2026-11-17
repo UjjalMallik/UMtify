@@ -73,7 +73,7 @@ object PipePipeVideoExtractor {
             }.toString().toRequestBody("application/json".toMediaType())
 
             val request = okhttp3.Request.Builder()
-                .url("https://www.youtube.com/youtubei/v1/search")
+                .url("https://www.youtube.com/youtubei/v1/search?prettyPrint=false")
                 .header("User-Agent", CHROME_UA)
                 .header("Content-Type", "application/json")
                 .post(payload)
@@ -82,39 +82,12 @@ object PipePipeVideoExtractor {
             Http.client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return emptyList()
                 val body = response.body?.string() ?: return emptyList()
+                val regex = Regex(""""videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"""")
                 val results = mutableListOf<String>()
-
-                try {
-                    val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
-                    val sectionContents = root["contents"]?.jsonObject
-                        ?.get("twoColumnSearchResultsRenderer")?.jsonObject
-                        ?.get("primaryContents")?.jsonObject
-                        ?.get("sectionListRenderer")?.jsonObject
-                        ?.get("contents")?.jsonArray
-
-                    sectionContents?.forEach { sec ->
-                        val items = sec.jsonObject["itemSectionRenderer"]?.jsonObject?.get("contents")?.jsonArray
-                        items?.forEach { item ->
-                            val vRenderer = item.jsonObject["videoRenderer"]?.jsonObject
-                            val vid = vRenderer?.get("videoId")?.jsonPrimitive?.content
-                            val title = vRenderer?.get("title")?.jsonObject?.get("runs")?.jsonArray
-                                ?.firstOrNull()?.jsonObject?.get("text")?.jsonPrimitive?.content.orEmpty()
-                            if (!vid.isNullOrBlank() && isValidYoutubeId(vid) && !isExcludedVideoTitle(title)) {
-                                results.add(vid)
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    // Fall back to regex
-                }
-
-                if (results.isEmpty()) {
-                    val regex = Regex(""""videoId":"([a-zA-Z0-9_-]{11})"""")
-                    regex.findAll(body).forEach { match ->
-                        val vid = match.groupValues[1]
-                        if (isValidYoutubeId(vid) && !results.contains(vid)) {
-                            results.add(vid)
-                        }
+                regex.findAll(body).forEach { match ->
+                    val vid = match.groupValues[1]
+                    if (isValidYoutubeId(vid) && !results.contains(vid)) {
+                        results.add(vid)
                     }
                 }
                 results
@@ -134,58 +107,40 @@ object PipePipeVideoExtractor {
             "",
         ).trim()
         val cleanArtist = trackArtist.trim()
-        val searchQuery = "$cleanTitle $cleanArtist official video"
+        val searchQuery = "$cleanTitle $cleanArtist official video".trim()
 
-        val candidates = mutableListOf<String>()
-
-        // 1. Fast YouTube Web Search with filter=Videos
+        // 1. Fast InnerTube JSON search (<600ms) with Videos filter
         val webResults = searchYouTubeVideos(searchQuery)
-        candidates.addAll(webResults)
-
-        // 2. NewPipe Search Fallback
-        if (candidates.isEmpty()) {
-            try {
-                StreamResolver.ensureInit()
-                val searchExtractor = ServiceList.YouTube.getSearchExtractor(
-                    searchQuery,
-                    listOf(YoutubeSearchQueryHandlerFactory.VIDEOS),
-                    null,
-                )
-                searchExtractor.fetchPage()
-                val items = searchExtractor.initialPage?.items.orEmpty()
-                for (item in items) {
-                    val title = item.name.orEmpty()
-                    if (isExcludedVideoTitle(title)) continue
-                    val vid = extractVideoId(item.url.orEmpty())
-                    if (vid != null && isValidYoutubeId(vid) && !candidates.contains(vid)) {
-                        candidates.add(vid)
-                    }
-                }
-            } catch (e: Exception) {
-                TrackLog.w(TAG, "NewPipe search for '$searchQuery' failed: ${e.message}")
-            }
+        if (webResults.isNotEmpty()) {
+            return@withContext webResults
         }
 
-        // 3. YtMusicRepository Search Fallback
-        if (candidates.isEmpty()) {
-            try {
-                val tracks = YtMusicRepository.search(searchQuery, SearchFilter.VIDEOS)
-                    .getOrNull()
-                    ?.filterIsInstance<SearchResult.Track>()
-                    ?.map { it.song }
-                    .orEmpty()
-                for (t in tracks) {
-                    if (isExcludedVideoTitle(t.title)) continue
-                    if (isValidYoutubeId(t.videoId) && !candidates.contains(t.videoId)) {
-                        candidates.add(t.videoId)
-                    }
-                }
-            } catch (e: Exception) {
-                TrackLog.w(TAG, "YtMusic search fallback failed: ${e.message}")
-            }
+        // 2. Fast fallback search without "official video"
+        val fallbackResults = searchYouTubeVideos("$cleanTitle $cleanArtist")
+        if (fallbackResults.isNotEmpty()) {
+            return@withContext fallbackResults
         }
 
-        candidates.distinct()
+        // 3. Fast InnerTube search fallback
+        try {
+            val tracks = YtMusicRepository.search(searchQuery, SearchFilter.VIDEOS)
+                .getOrNull()
+                ?.filterIsInstance<SearchResult.Track>()
+                ?.map { it.song }
+                .orEmpty()
+            val ytCandidates = mutableListOf<String>()
+            for (t in tracks) {
+                if (isExcludedVideoTitle(t.title)) continue
+                if (isValidYoutubeId(t.videoId) && !ytCandidates.contains(t.videoId)) {
+                    ytCandidates.add(t.videoId)
+                }
+            }
+            if (ytCandidates.isNotEmpty()) return@withContext ytCandidates
+        } catch (e: Exception) {
+            TrackLog.w(TAG, "YtMusic search fallback failed: ${e.message}")
+        }
+
+        emptyList()
     }
 
     fun isExcludedVideoTitle(title: String): Boolean {
@@ -419,9 +374,9 @@ object PipePipeVideoExtractor {
         )
 
         val client = Http.client.newBuilder()
-            .callTimeout(3500, TimeUnit.MILLISECONDS)
-            .connectTimeout(2500, TimeUnit.MILLISECONDS)
-            .readTimeout(2500, TimeUnit.MILLISECONDS)
+            .callTimeout(8000, TimeUnit.MILLISECONDS)
+            .connectTimeout(5000, TimeUnit.MILLISECONDS)
+            .readTimeout(5000, TimeUnit.MILLISECONDS)
             .build()
 
         for ((url, isInvidious) in instances) {
@@ -435,61 +390,77 @@ object PipePipeVideoExtractor {
                 client.newCall(request).execute().use { response ->
                     if (response.isSuccessful) {
                         val body = response.body?.string() ?: return@use
-                        val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
+                        try {
+                            val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
 
-                        if (!isInvidious) {
-                            val hlsUrl = root["hls"]?.jsonPrimitive?.content
-                            if (!hlsUrl.isNullOrBlank()) {
-                                return ResolvedVideoStream(
-                                    url = hlsUrl,
-                                    isHls = true,
-                                    userAgent = CHROME_UA,
-                                    videoId = targetVideoId,
-                                )
-                            }
-                            val videoStreams = root["videoStreams"]?.jsonArray?.mapNotNull { it.jsonObject }
-                            val picked = videoStreams?.firstOrNull {
-                                val u = it["url"]?.jsonPrimitive?.content
-                                val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
-                                val format = it["format"]?.jsonPrimitive?.content.orEmpty()
-                                !u.isNullOrBlank() && (mime.contains("video/mp4") || format.contains("mp4", ignoreCase = true))
-                            } ?: videoStreams?.firstOrNull { !it["url"]?.jsonPrimitive?.content.isNullOrBlank() }
+                            if (!isInvidious) {
+                                val hlsUrl = root["hls"]?.jsonPrimitive?.content
+                                if (!hlsUrl.isNullOrBlank()) {
+                                    return ResolvedVideoStream(
+                                        url = hlsUrl,
+                                        isHls = true,
+                                        userAgent = CHROME_UA,
+                                        videoId = targetVideoId,
+                                    )
+                                }
+                                val videoStreams = root["videoStreams"]?.jsonArray?.mapNotNull { it.jsonObject }
+                                val picked = videoStreams?.firstOrNull {
+                                    val u = it["url"]?.jsonPrimitive?.content
+                                    val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
+                                    val format = it["format"]?.jsonPrimitive?.content.orEmpty()
+                                    !u.isNullOrBlank() && (mime.contains("video/mp4") || format.contains("mp4", ignoreCase = true))
+                                } ?: videoStreams?.firstOrNull { !it["url"]?.jsonPrimitive?.content.isNullOrBlank() }
 
-                            val streamUrl = picked?.get("url")?.jsonPrimitive?.content
-                            if (!streamUrl.isNullOrBlank()) {
-                                return ResolvedVideoStream(
-                                    url = streamUrl,
-                                    isHls = false,
-                                    userAgent = CHROME_UA,
-                                    videoId = targetVideoId,
-                                )
-                            }
-                        } else {
-                            val hlsUrl = root["hlsUrl"]?.jsonPrimitive?.content
-                            if (!hlsUrl.isNullOrBlank()) {
-                                return ResolvedVideoStream(
-                                    url = hlsUrl,
-                                    isHls = true,
-                                    userAgent = CHROME_UA,
-                                    videoId = targetVideoId,
-                                )
-                            }
-                            val formatStreams = root["formatStreams"]?.jsonArray?.mapNotNull { it.jsonObject }
-                            val picked = formatStreams?.firstOrNull {
-                                val u = it["url"]?.jsonPrimitive?.content
-                                val container = it["container"]?.jsonPrimitive?.content.orEmpty()
-                                !u.isNullOrBlank() && container.contains("mp4", ignoreCase = true)
-                            } ?: formatStreams?.firstOrNull { !it["url"]?.jsonPrimitive?.content.isNullOrBlank() }
+                                val streamUrl = picked?.get("url")?.jsonPrimitive?.content
+                                if (!streamUrl.isNullOrBlank()) {
+                                    return ResolvedVideoStream(
+                                        url = streamUrl,
+                                        isHls = false,
+                                        userAgent = CHROME_UA,
+                                        videoId = targetVideoId,
+                                    )
+                                }
+                            } else {
+                                val hlsUrl = root["hlsUrl"]?.jsonPrimitive?.content
+                                if (!hlsUrl.isNullOrBlank()) {
+                                    return ResolvedVideoStream(
+                                        url = hlsUrl,
+                                        isHls = true,
+                                        userAgent = CHROME_UA,
+                                        videoId = targetVideoId,
+                                    )
+                                }
+                                val formatStreams = root["formatStreams"]?.jsonArray?.mapNotNull { it.jsonObject }
+                                val picked = formatStreams?.firstOrNull {
+                                    val u = it["url"]?.jsonPrimitive?.content
+                                    val container = it["container"]?.jsonPrimitive?.content.orEmpty()
+                                    !u.isNullOrBlank() && container.contains("mp4", ignoreCase = true)
+                                } ?: formatStreams?.firstOrNull { !it["url"]?.jsonPrimitive?.content.isNullOrBlank() }
 
-                            val streamUrl = picked?.get("url")?.jsonPrimitive?.content
-                            if (!streamUrl.isNullOrBlank()) {
-                                return ResolvedVideoStream(
-                                    url = streamUrl,
-                                    isHls = false,
-                                    userAgent = CHROME_UA,
-                                    videoId = targetVideoId,
-                                )
+                                val streamUrl = picked?.get("url")?.jsonPrimitive?.content
+                                if (!streamUrl.isNullOrBlank()) {
+                                    return ResolvedVideoStream(
+                                        url = streamUrl,
+                                        isHls = false,
+                                        userAgent = CHROME_UA,
+                                        videoId = targetVideoId,
+                                    )
+                                }
                             }
+                        } catch (e: Exception) {
+                            // JSON parsing failed, try raw regex fallback
+                        }
+
+                        // Raw regex fallback for direct stream URLs
+                        val urlRegex = Regex("""https://[a-zA-Z0-9.\-_/:]*videoplayback[a-zA-Z0-9.\-_~:/?#\[\]@!$&'()*+,;=%]*""")
+                        val match = urlRegex.find(body)?.value
+                        if (!match.isNullOrBlank()) {
+                            return ResolvedVideoStream(
+                                url = match,
+                                isHls = match.contains(".m3u8"),
+                                userAgent = CHROME_UA,
+                                videoId = targetVideoId,
+                            )
                         }
                     }
                 }
