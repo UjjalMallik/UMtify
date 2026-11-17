@@ -398,17 +398,8 @@ class MainActivity : AppCompatActivity() {
             val controller = rememberMediaController()
             DisposableEffect(controller) {
                 com.music.bitchord.ui.player.AndroidPlayerHost.activeController = controller
-                com.music.bitchord.playback.PlaybackService.onRequestSwitchToAudio = {
-                    scope.launch {
-                        val s = controller?.currentMediaItem?.toSong()
-                        if (s != null && s.isVideo) {
-                            switchToMusicOnly(s, pauseWhileResolving = false)
-                        }
-                    }
-                }
                 onDispose {
                     com.music.bitchord.ui.player.AndroidPlayerHost.activeController = null
-                    com.music.bitchord.playback.PlaybackService.onRequestSwitchToAudio = null
                 }
             }
             val player = rememberPlayerState(controller)
@@ -1476,6 +1467,20 @@ private fun BitChordApp(
         } finally {
             if (holdUntilAligned) AppSettings.versionAlignmentInProgress.value = false
             switchingAudioVersion = false
+        }
+    }
+
+    DisposableEffect(controller) {
+        com.music.bitchord.playback.PlaybackService.onRequestSwitchToAudio = {
+            scope.launch {
+                val s = controller?.currentMediaItem?.toSong()
+                if (s != null && s.isVideo) {
+                    switchToMusicOnly(s, pauseWhileResolving = false)
+                }
+            }
+        }
+        onDispose {
+            com.music.bitchord.playback.PlaybackService.onRequestSwitchToAudio = null
         }
     }
 
