@@ -792,10 +792,10 @@ object StreamResolver {
     }
 
     /**
-     * Resolves an anonymous video stream using direct NewPipeExtractor search and stream extraction:
-     * 1. Initialize NewPipe via [ensureInit].
-     * 2. Search using ServiceList.YouTube.getSearchExtractor.
-     * 3. Extract stream using ServiceList.YouTube.getStreamExtractor, prioritizing muxed streams.
+     * Resolves an anonymous video stream using direct InnerTube native APIs:
+     * 1. Fast JSON POST to youtubei/v1/search (filtered by params=EgIQAQ%3D%3D for videos) with regex parsing.
+     * 2. Direct JSON POST to youtubei/v1/player using ANDROID_VR / IOS client context.
+     * 3. Prioritizes muxed MP4 formats (itag 18/22), followed by adaptive video/mp4 formats.
      */
     suspend fun resolveVideoStreamForTrack(
         videoId: String,
@@ -805,102 +805,206 @@ object StreamResolver {
         candidateOffset: Int = 0,
         onStatusUpdate: ((String) -> Unit)? = null,
     ): ResolvedVideoStream? = withContext(Dispatchers.IO) {
-        // 1. Initialize NewPipe
-        ensureInit()
         onStatusUpdate?.invoke("Finding video...")
+        val cleanTitle = title.trim()
+        val cleanArtist = artist.trim()
+        val isYtId = videoId.length == 11 && videoId.all { it.isLetterOrDigit() || it == '-' || it == '_' }
 
-        try {
-            val query = "$title $artist official video".trim()
-            val videoUrl = try {
-                val searchExtractor = ServiceList.YouTube.getSearchExtractor(query)
-                searchExtractor.fetchPage()
-                val items = searchExtractor.initialPage?.items.orEmpty()
-                val streamItem = items.firstOrNull { it is StreamInfoItem }
-                streamItem?.url
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                TrackLog.w(TAG, "NewPipe search failed for query '$query': ${e.message}")
-                null
-            } ?: if (PipePipeVideoExtractor.isValidYoutubeId(videoId)) {
-                "https://www.youtube.com/watch?v=$videoId"
-            } else {
-                null
+        // 1. Lightning-Fast Native YouTubei Search
+        val targetVideoId = try {
+            val query = "$cleanTitle $cleanArtist official video".trim()
+            val payload = buildJsonObject {
+                putJsonObject("context") {
+                    putJsonObject("client") {
+                        put("clientName", "WEB")
+                        put("clientVersion", "2.20230728.00.00")
+                        put("hl", "en")
+                        put("gl", "US")
+                    }
+                }
+                put("query", query)
+                put("params", "EgIQAQ%3D%3D")
+            }.toString().toRequestBody("application/json".toMediaType())
+
+            val searchReq = okhttp3.Request.Builder()
+                .url("https://www.youtube.com/youtubei/v1/search?prettyPrint=false")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")
+                .header("Content-Type", "application/json")
+                .post(payload)
+                .build()
+
+            val client = Http.client.newBuilder()
+                .connectTimeout(5000, TimeUnit.MILLISECONDS)
+                .readTimeout(5000, TimeUnit.MILLISECONDS)
+                .build()
+
+            val matchedId = client.newCall(searchReq).execute().use { resp ->
+                if (!resp.isSuccessful) return@use null
+                val body = resp.body?.string() ?: return@use null
+                val regex = Regex(""""videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"""")
+                regex.find(body)?.groupValues?.get(1)
             }
-
-            if (videoUrl.isNullOrBlank()) {
-                TrackLog.w(TAG, "No video URL found for '$title' - '$artist'")
-                return@withContext null
-            }
-
-            // 2. Extract Stream
-            onStatusUpdate?.invoke("Extracting stream...")
-            val streamExtractor = ServiceList.YouTube.getStreamExtractor(videoUrl)
-            streamExtractor.fetchPage()
-
-            val chromeUa = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
-            val vid = PipePipeVideoExtractor.extractVideoId(videoUrl) ?: videoId
-
-            // Prioritize muxed video streams (video + audio) over video-only streams or HLS
-            val muxedStreams = streamExtractor.videoStreams?.filter { s ->
-                !s.content.isNullOrBlank() &&
-                    (s.format == MediaFormat.MPEG_4 || (s.format?.name ?: "").contains("MP4", ignoreCase = true))
-            }.orEmpty()
-
-            val bestMuxed = muxedStreams.firstOrNull { it.itag == 18 }
-                ?: muxedStreams.firstOrNull { it.itag == 22 }
-                ?: muxedStreams.firstOrNull { it.height in 360..720 }
-                ?: muxedStreams.firstOrNull()
-
-            if (bestMuxed != null && !bestMuxed.content.isNullOrBlank()) {
-                TrackLog.d(TAG, "Resolved muxed video stream for $vid")
-                return@withContext ResolvedVideoStream(
-                    url = bestMuxed.content,
-                    isHls = false,
-                    userAgent = chromeUa,
-                    videoId = vid,
-                )
-            }
-
-            // Fallback: video-only streams
-            val videoOnlyStreams = streamExtractor.videoOnlyStreams?.filter { s ->
-                !s.content.isNullOrBlank() &&
-                    (s.codec?.contains("avc1", ignoreCase = true) == true ||
-                        s.format == MediaFormat.MPEG_4 ||
-                        (s.format?.name ?: "").contains("MP4", ignoreCase = true))
-            }.orEmpty()
-
-            val bestVideoOnly = videoOnlyStreams.firstOrNull { it.height == 360 }
-                ?: videoOnlyStreams.firstOrNull { it.height == 480 }
-                ?: videoOnlyStreams.firstOrNull { it.height in 360..720 }
-                ?: videoOnlyStreams.firstOrNull()
-
-            if (bestVideoOnly != null && !bestVideoOnly.content.isNullOrBlank()) {
-                TrackLog.d(TAG, "Resolved video-only stream for $vid")
-                return@withContext ResolvedVideoStream(
-                    url = bestVideoOnly.content,
-                    isHls = false,
-                    userAgent = chromeUa,
-                    videoId = vid,
-                )
-            }
-
-            // Fallback: HLS manifest
-            val hls = streamExtractor.hlsUrl
-            if (!hls.isNullOrBlank()) {
-                TrackLog.d(TAG, "Resolved HLS video stream for $vid")
-                return@withContext ResolvedVideoStream(
-                    url = hls,
-                    isHls = true,
-                    userAgent = chromeUa,
-                    videoId = vid,
-                )
-            }
-
-            TrackLog.w(TAG, "No playable video streams found for $videoUrl")
-            null
+            matchedId ?: if (isYtId) videoId else null
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            TrackLog.w(TAG, "resolveVideoStreamForTrack failed: ${e.message}")
+            TrackLog.w(TAG, "Native YouTubei search failed: ${e.message}")
+            if (isYtId) videoId else null
+        }
+
+        if (targetVideoId.isNullOrBlank()) {
+            TrackLog.w(TAG, "No video ID found for '$title' - '$artist'")
+            return@withContext null
+        }
+
+        // 2. Reliable Extraction via InnerTube (ANDROID_VR / IOS)
+        onStatusUpdate?.invoke("Extracting stream...")
+        val resolved = extractVideoStreamViaInnerTube(targetVideoId)
+        if (resolved != null && resolved.url.isNotBlank()) {
+            return@withContext resolved
+        }
+
+        // If targetVideoId was from search and failed, and videoId is valid YT ID and different, try videoId
+        if (isYtId && targetVideoId != videoId) {
+            val fallback = extractVideoStreamViaInnerTube(videoId)
+            if (fallback != null && fallback.url.isNotBlank()) {
+                return@withContext fallback
+            }
+        }
+
+        TrackLog.w(TAG, "InnerTube stream extraction failed for target $targetVideoId")
+        null
+    }
+
+    private fun extractVideoStreamViaInnerTube(targetVideoId: String): ResolvedVideoStream? {
+        val vrResult = queryInnerTubeVideoPlayer(
+            targetVideoId = targetVideoId,
+            clientName = "ANDROID_VR",
+            clientVersion = "1.60.19",
+            clientNumber = "28",
+            userAgent = "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+        )
+        if (vrResult != null) return vrResult
+
+        val iosResult = queryInnerTubeVideoPlayer(
+            targetVideoId = targetVideoId,
+            clientName = "IOS",
+            clientVersion = "19.45.4",
+            clientNumber = "5",
+            userAgent = "com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)",
+        )
+        return iosResult
+    }
+
+    private fun queryInnerTubeVideoPlayer(
+        targetVideoId: String,
+        clientName: String,
+        clientVersion: String,
+        clientNumber: String,
+        userAgent: String,
+    ): ResolvedVideoStream? {
+        return try {
+            val payload = buildJsonObject {
+                putJsonObject("context") {
+                    putJsonObject("client") {
+                        put("clientName", clientName)
+                        put("clientVersion", clientVersion)
+                        put("hl", "en")
+                        put("gl", "US")
+                    }
+                }
+                put("videoId", targetVideoId)
+                put("contentCheckOk", true)
+                put("racyCheckOk", true)
+            }.toString().toRequestBody("application/json".toMediaType())
+
+            val request = okhttp3.Request.Builder()
+                .url("https://www.youtube.com/youtubei/v1/player")
+                .header("User-Agent", userAgent)
+                .header("Content-Type", "application/json")
+                .header("X-YouTube-Client-Name", clientNumber)
+                .header("X-YouTube-Client-Version", clientVersion)
+                .post(payload)
+                .build()
+
+            val client = Http.client.newBuilder()
+                .connectTimeout(5000, TimeUnit.MILLISECONDS)
+                .readTimeout(5000, TimeUnit.MILLISECONDS)
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string() ?: return null
+                val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
+                val streamingData = root["streamingData"]?.jsonObject ?: return null
+
+                // 1. Prioritize a muxed MP4 URL from formats (e.g. itag 18 or 22)
+                val formats = streamingData["formats"]?.jsonArray?.mapNotNull { it.jsonObject }
+                val muxedMp4 = formats?.filter {
+                    val u = it["url"]?.jsonPrimitive?.content
+                    val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
+                    !u.isNullOrBlank() && mime.contains("video/mp4")
+                }
+                val bestMuxed = muxedMp4?.firstOrNull { it["itag"]?.jsonPrimitive?.content == "18" }
+                    ?: muxedMp4?.firstOrNull { it["itag"]?.jsonPrimitive?.content == "22" }
+                    ?: muxedMp4?.maxByOrNull { it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0 }
+
+                val muxedUrl = bestMuxed?.get("url")?.jsonPrimitive?.content
+                if (!muxedUrl.isNullOrBlank()) {
+                    return ResolvedVideoStream(
+                        url = muxedUrl,
+                        isHls = false,
+                        userAgent = userAgent,
+                        videoId = targetVideoId,
+                    )
+                }
+
+                // 2. Grab the best video/mp4 URL from adaptiveFormats
+                val adaptive = streamingData["adaptiveFormats"]?.jsonArray?.mapNotNull { it.jsonObject }
+                val videoAdaptive = adaptive?.filter {
+                    val u = it["url"]?.jsonPrimitive?.content
+                    val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
+                    !u.isNullOrBlank() && mime.contains("video/mp4")
+                }
+                val avc1Matches = videoAdaptive?.filter {
+                    val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
+                    mime.contains("avc1", ignoreCase = true)
+                }
+                val pickedAdaptive = avc1Matches?.filter {
+                    val h = it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                    h in 360..720
+                }?.maxByOrNull {
+                    it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                } ?: avc1Matches?.maxByOrNull {
+                    it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                } ?: videoAdaptive?.maxByOrNull {
+                    it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                } ?: videoAdaptive?.firstOrNull()
+
+                val adaptiveUrl = pickedAdaptive?.get("url")?.jsonPrimitive?.content
+                if (!adaptiveUrl.isNullOrBlank()) {
+                    return ResolvedVideoStream(
+                        url = adaptiveUrl,
+                        isHls = false,
+                        userAgent = userAgent,
+                        videoId = targetVideoId,
+                    )
+                }
+
+                // 3. Fallback: HLS manifest
+                val hls = streamingData["hlsManifestUrl"]?.jsonPrimitive?.content
+                if (!hls.isNullOrBlank()) {
+                    return ResolvedVideoStream(
+                        url = hls,
+                        isHls = true,
+                        userAgent = userAgent,
+                        videoId = targetVideoId,
+                    )
+                }
+
+                null
+            }
+        } catch (e: Exception) {
+            TrackLog.w(TAG, "InnerTube player extraction failed for $clientName on $targetVideoId: ${e.message}")
             null
         }
     }

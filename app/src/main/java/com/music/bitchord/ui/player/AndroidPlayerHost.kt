@@ -482,7 +482,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     videoExoPlayer.playWhenReady = true
                 } else {
                     TrackLog.w("VideoPlayer", "Failed to resolve video stream for $mediaId ($title - $artist)")
-                    PlaybackService.videoStatusText.value = "Video not found, reverting to audio"
+                    PlaybackService.videoStatusText.value = "Error: Video unavailable"
                     delay(2000L)
                     PlaybackService.isVideoMode.value = false
                     PlaybackService.dismissVideoLoading()
@@ -490,7 +490,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 TrackLog.w("VideoPlayer", "Exception resolving video for $mediaId: ${e.message}")
-                PlaybackService.videoStatusText.value = "Video not found, reverting to audio"
+                PlaybackService.videoStatusText.value = "Error: Video unavailable"
                 delay(2000L)
                 PlaybackService.isVideoMode.value = false
                 PlaybackService.dismissVideoLoading()
