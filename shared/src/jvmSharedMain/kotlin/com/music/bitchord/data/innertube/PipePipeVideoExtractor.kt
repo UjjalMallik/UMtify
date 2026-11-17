@@ -107,6 +107,10 @@ object PipePipeVideoExtractor {
             "",
         ).trim()
         val cleanArtist = trackArtist.trim()
+        val primaryArtist = cleanArtist
+            .replace(Regex("""(?i)\b(feat\.|ft\.|presents)\b.*"""), "")
+            .split(',', '&', '/')
+            .firstOrNull()?.trim() ?: cleanArtist
         val searchQuery = "$cleanTitle $cleanArtist official video".trim()
 
         // 1. Fast InnerTube JSON search (<600ms) with Videos filter
@@ -115,13 +119,51 @@ object PipePipeVideoExtractor {
             return@withContext webResults
         }
 
-        // 2. Fast fallback search without "official video"
+        // 2. Primary artist query if different (handles comma-separated multi-artists)
+        if (primaryArtist.isNotBlank() && primaryArtist != cleanArtist) {
+            val primaryResults = searchYouTubeVideos("$cleanTitle $primaryArtist official video")
+            if (primaryResults.isNotEmpty()) {
+                return@withContext primaryResults
+            }
+        }
+
+        // 3. Fast fallback search without "official video"
         val fallbackResults = searchYouTubeVideos("$cleanTitle $cleanArtist")
         if (fallbackResults.isNotEmpty()) {
             return@withContext fallbackResults
         }
+        if (primaryArtist.isNotBlank() && primaryArtist != cleanArtist) {
+            val primaryFallback = searchYouTubeVideos("$cleanTitle $primaryArtist")
+            if (primaryFallback.isNotEmpty()) {
+                return@withContext primaryFallback
+            }
+        }
 
-        // 3. Fast InnerTube search fallback
+        // 4. NewPipe search fallback (run safely with timeout)
+        try {
+            StreamResolver.ensureInit()
+            val searchExtractor = org.schabi.newpipe.extractor.ServiceList.YouTube.getSearchExtractor(
+                searchQuery,
+                listOf(org.schabi.newpipe.extractor.services.youtube.linkHandler.YoutubeSearchQueryHandlerFactory.VIDEOS),
+                null,
+            )
+            searchExtractor.fetchPage()
+            val items = searchExtractor.initialPage?.items.orEmpty()
+            val npResults = mutableListOf<String>()
+            for (item in items) {
+                val title = item.name.orEmpty()
+                if (isExcludedVideoTitle(title)) continue
+                val vid = extractVideoId(item.url.orEmpty())
+                if (vid != null && isValidYoutubeId(vid) && !npResults.contains(vid)) {
+                    npResults.add(vid)
+                }
+            }
+            if (npResults.isNotEmpty()) return@withContext npResults
+        } catch (e: Exception) {
+            TrackLog.w(TAG, "NewPipe search fallback failed: ${e.message}")
+        }
+
+        // 5. Fast InnerTube search fallback
         try {
             val tracks = YtMusicRepository.search(searchQuery, SearchFilter.VIDEOS)
                 .getOrNull()

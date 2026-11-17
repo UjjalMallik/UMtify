@@ -1052,6 +1052,7 @@ class PlaybackService : MediaLibraryService() {
 
             if (isVideoMode && mediaItem?.mediaId != currentVideoTrackId) {
                 isVideoMode = false
+                Companion.isVideoMode.value = false
                 currentVideoTrackId = null
                 activeVideoTrackId.value = null
                 activeVideoSong.value = null
@@ -2628,6 +2629,7 @@ class PlaybackService : MediaLibraryService() {
         if (currentIndex !in 0 until activePlayer.mediaItemCount) return
 
         isVideoMode = true
+        Companion.isVideoMode.value = true
         currentVideoTrackId = targetSong.videoId
         activeVideoTrackId.value = targetSong.videoId
         activeVideoSong.value = targetSong
@@ -2667,6 +2669,7 @@ class PlaybackService : MediaLibraryService() {
         if (currentIndex !in 0 until activePlayer.mediaItemCount) return
 
         isVideoMode = false
+        Companion.isVideoMode.value = false
         currentVideoTrackId = null
         activeVideoTrackId.value = null
         activeVideoSong.value = null
@@ -9315,12 +9318,14 @@ class PlaybackService : MediaLibraryService() {
         val activeVideoTrackId = MutableStateFlow<String?>(null)
         val activeVideoSong = MutableStateFlow<Song?>(null)
         val webViewFallbackVideoId = MutableStateFlow<String?>(null)
+        val isVideoMode = MutableStateFlow(false)
 
         fun dismissVideoLoading() {
             activeVideoTrackId.value = null
             activeVideoSong.value = null
             isVideoFrameRendered.value = true
             videoStatusText.value = ""
+            isVideoMode.value = false
         }
         const val MEDIA_ROOT_ID = "root"
         const val MEDIA_RECENTS_ID = "recents"

@@ -646,7 +646,22 @@ object StreamResolver {
         ensureInit()
         val isYtId = videoId.length == 11 && videoId.all { it.isLetterOrDigit() || it == '-' || it == '_' }
 
-        // If candidateOffset > 0, this is a retry attempt, so skip already failed candidates
+        // Non-YouTube track (e.g. JioSaavn / SoundCloud / Local)
+        if (!isYtId) {
+            onStatusUpdate?.invoke("Searching video for track...")
+            val candidates = PipePipeVideoExtractor.searchVideoCandidates(title, artist)
+            for (cid in candidates) {
+                val stream = extractVideoStreamSingle(cid, onStatusUpdate)
+                if (stream != null && stream.url.isNotBlank()) {
+                    TrackLog.d(TAG, "Resolved video stream for non-YT track '$title' ($cid)")
+                    return@withContext stream
+                }
+            }
+            TrackLog.w(TAG, "No video stream resolved for non-YT track '$title' - '$artist'")
+            return@withContext null
+        }
+
+        // If candidateOffset > 0 on YouTube track, this is a retry attempt, so skip already failed candidates
         if (candidateOffset > 0) {
             onStatusUpdate?.invoke("Searching alternative video...")
             val candidates = PipePipeVideoExtractor.searchVideoCandidates(title, artist)
@@ -659,19 +674,22 @@ object StreamResolver {
 
         coroutineScope {
             // Branch A: Immediate extraction for currentMediaId (0ms delay)
-            val branchA = if (isYtId) {
-                async(Dispatchers.IO) {
-                    extractVideoStreamSingle(videoId, onStatusUpdate)
-                }
-            } else null
+            val branchA = async(Dispatchers.IO) {
+                extractVideoStreamSingle(videoId, onStatusUpdate)
+            }
 
             // Branch B: Fast InnerTube JSON search (<600ms) for official music video
             val branchB = async(Dispatchers.IO) {
                 val candidates = PipePipeVideoExtractor.searchVideoCandidates(title, artist)
-                val omvId = candidates.firstOrNull { it != videoId }
-                if (omvId != null) {
-                    extractVideoStreamSingle(omvId, onStatusUpdate)
-                } else null
+                for (cid in candidates) {
+                    if (cid != videoId) {
+                        val stream = extractVideoStreamSingle(cid, onStatusUpdate)
+                        if (stream != null && stream.url.isNotBlank()) {
+                            return@async stream
+                        }
+                    }
+                }
+                null
             }
 
             // Pick the Best Video ID:
@@ -691,7 +709,7 @@ object StreamResolver {
 
             // Otherwise immediately use Branch A (currentMediaId)
             val directStream = try {
-                branchA?.await()
+                branchA.await()
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 TrackLog.w(TAG, "Branch A (currentMediaId) resolution failed: ${e.message}")
@@ -701,17 +719,6 @@ object StreamResolver {
             if (directStream != null && directStream.url.isNotBlank()) {
                 TrackLog.d(TAG, "Resolved video via Branch A (${directStream.videoId})")
                 return@coroutineScope directStream
-            }
-
-            // Fallback: If neither Branch B nor Branch A returned a stream, try remaining search candidates
-            val candidates = PipePipeVideoExtractor.searchVideoCandidates(title, artist)
-            for (cid in candidates) {
-                if (cid != videoId && cid != omvStream?.videoId) {
-                    val fallbackStream = extractVideoStreamSingle(cid, onStatusUpdate)
-                    if (fallbackStream != null && fallbackStream.url.isNotBlank()) {
-                        return@coroutineScope fallbackStream
-                    }
-                }
             }
 
             TrackLog.w(TAG, "All video resolution methods failed for '$title' - '$artist'")

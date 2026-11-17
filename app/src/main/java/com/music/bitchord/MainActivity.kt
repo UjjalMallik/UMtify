@@ -1414,65 +1414,47 @@ private fun BitChordApp(
         val c = controller ?: return
         val index = c.currentMediaItemIndex
         if (index !in 0 until c.mediaItemCount ||
-            c.currentMediaItem?.mediaId != song.videoId ||
             switchingAudioVersion
         ) return
 
         val resumeAfterResolution = pauseWhileResolving && c.playWhenReady
         switchingAudioVersion = true
-        // Mirrors the music-only path: the bar lights up for the resolve and
-        // the service keeps it lit through the measure-and-cut, and the row
-        // stays on the audio version until that swap actually commits — see
-        // [alignmentPending] at the toggle.
         val holdUntilAligned = AppSettings.smartVersionAlignment.value
         if (holdUntilAligned) AppSettings.versionAlignmentInProgress.value = true
         if (pauseWhileResolving) c.pause()
         try {
             TrackLog.d("Player", "video switch requested for '${song.title}'", song.videoId)
             val video = runCatching { YtMusicRepository.resolveVideo(song) }.getOrNull()
-            val stillCurrent = c.currentMediaItemIndex == index &&
-                c.currentMediaItem?.mediaId == song.videoId
+            val stillCurrent = c.currentMediaItemIndex == index
 
-            if (video == null) {
-                TrackLog.w("Player", "video switch found no video", song.videoId)
-                withContext(Dispatchers.Main) {
-                    android.widget.Toast.makeText(context, "No video version found for this track", android.widget.Toast.LENGTH_SHORT).show()
-                }
-                if (stillCurrent && resumeAfterResolution) c.play()
-                return
-            }
             if (!stillCurrent) {
                 TrackLog.d("Player", "video switch discarded; listener changed track", song.videoId)
                 return
             }
 
-            keepVideoId = video.videoId
-            convertedFromAudio = song
-            convertedVideoId = video.videoId
-            TrackLog.d("Player", "video switch applying '${video.title}' (${video.videoId})", song.videoId)
-            val target = video.copy(
-                queueTier = song.queueTier,
-                queueEntryId = song.queueEntryId,
-                radioName = song.radioName,
-                playbackSource = null,
-                playbackSourceType = null,
-                playbackSourceId = null,
-                isVideo = true,
-                isVideoOrigin = true,
-            )
-            // Not while an alignment is still owed: claiming the video here
-            // would show a version the player is not playing yet, and would
-            // make the switch look finished before it had begun.
-            if (!holdUntilAligned ||
-                VersionAudioAligner.getCachedOffsetMs(song.videoId, target.videoId) != null
-            ) {
-                optimisticVersionSong = target
+            if (video != null && video.videoId != song.videoId) {
+                keepVideoId = video.videoId
+                convertedFromAudio = song
+                convertedVideoId = video.videoId
+                TrackLog.d("Player", "video switch applying '${video.title}' (${video.videoId})", song.videoId)
+                val target = video.copy(
+                    queueTier = song.queueTier,
+                    queueEntryId = song.queueEntryId,
+                    radioName = song.radioName,
+                    playbackSource = null,
+                    playbackSourceType = null,
+                    playbackSourceId = null,
+                    isVideo = true,
+                    isVideoOrigin = true,
+                )
+                if (!holdUntilAligned ||
+                    VersionAudioAligner.getCachedOffsetMs(song.videoId, target.videoId) != null
+                ) {
+                    optimisticVersionSong = target
+                }
+                if (holdUntilAligned) AppSettings.versionAlignmentInProgress.value = false
+                c.swapToVersion(target)
             }
-            // Released before the handover for the same reason as the
-            // music-only path above: the service owns the flag from here, and
-            // the finally only exists for the paths that never send.
-            if (holdUntilAligned) AppSettings.versionAlignmentInProgress.value = false
-            c.swapToVersion(target)
         } finally {
             if (holdUntilAligned) AppSettings.versionAlignmentInProgress.value = false
             switchingAudioVersion = false
@@ -2401,6 +2383,7 @@ private fun BitChordApp(
     val nowPlaying: @Composable (Song) -> Unit = { song ->
         val effectiveSong = optimisticVersionSong?.takeIf {
             it.videoId == convertedAudioId || it.videoId == convertedVideoId || it.videoId == keepVideoId ||
+            it.videoId == song.videoId ||
             it.videoId == YtMusicRepository.cachedAudioVersion(song.videoId)?.videoId ||
             it.videoId == YtMusicRepository.cachedVideoVersion(song.videoId)?.videoId
         } ?: song
@@ -4586,18 +4569,21 @@ private fun BitChordApp(
                             android.widget.Toast.makeText(context, "Switching to video...", android.widget.Toast.LENGTH_SHORT).show()
                             val cached = YtMusicRepository.cachedVideoVersion(song.videoId)
                                 ?: YtMusicRepository.cachedVideoVersion(versionEffectiveSong.videoId)
-                            if (cached != null && cached.videoId != song.videoId &&
-                                !versionAlignmentPending(cached.videoId)
-                            ) {
-                                optimisticVersionSong = cached.copy(
-                                    queueTier = song.queueTier,
-                                    queueEntryId = song.queueEntryId,
-                                    radioName = song.radioName,
-                                    playbackSource = song.playbackSource,
-                                    playbackSourceType = song.playbackSourceType,
-                                    playbackSourceId = song.playbackSourceId,
-                                )
-                            }
+                            val targetVideoSong = (cached ?: song).copy(
+                                queueTier = song.queueTier,
+                                queueEntryId = song.queueEntryId,
+                                radioName = song.radioName,
+                                playbackSource = song.playbackSource,
+                                playbackSourceType = song.playbackSourceType,
+                                playbackSourceId = song.playbackSourceId,
+                                isVideo = true,
+                                isVideoOrigin = true,
+                            )
+                            optimisticVersionSong = targetVideoSong
+                            convertedFromAudio = song
+                            convertedVideoId = targetVideoSong.videoId
+                            keepVideoId = targetVideoSong.videoId
+                            c.swapToVersion(targetVideoSong)
                             scope.launch { switchToVideo(song, pauseWhileResolving = false) }
                         }
                     }

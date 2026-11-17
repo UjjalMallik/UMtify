@@ -293,6 +293,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     override fun VideoPlayer(modifier: Modifier) {
         val activeTrackId by PlaybackService.activeVideoTrackId.collectAsStateWithLifecycle()
         val activeSong by PlaybackService.activeVideoSong.collectAsStateWithLifecycle()
+        val isVideoMode by PlaybackService.isVideoMode.collectAsStateWithLifecycle()
         val mainPlayer = PlaybackService.activeExoPlayer ?: activeController
 
         val currentMediaItem = mainPlayer?.currentMediaItem
@@ -419,8 +420,9 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         var resolvedStream by remember(mediaId) { mutableStateOf<ResolvedVideoStream?>(null) }
 
         // Resolve video stream via StreamResolver working YouTube pipeline
-        // Keyed ONLY on (mediaId, retryCount) to avoid coroutine cancellation when durationSec/title/artist updates
-        LaunchedEffect(mediaId, retryCount) {
+        // Keyed ONLY on (mediaId, isVideoMode) to avoid premature coroutine cancellation
+        LaunchedEffect(mediaId, isVideoMode) {
+            if (!isVideoMode) return@LaunchedEffect
             try {
                 PlaybackService.isVideoFrameRendered.value = false
                 PlaybackService.videoStatusText.value = "Finding video..."
@@ -432,15 +434,16 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                         title = title,
                         artist = artist,
                         durationSec = durationSec,
-                        candidateOffset = retryCount,
+                        candidateOffset = 0,
                         onStatusUpdate = { status ->
                             PlaybackService.videoStatusText.value = status
                         },
                     )
                 }
 
-                // 2. If primary search took longer or returned null, fallback to direct mediaId or Piped API
-                if (stream == null) {
+                // 2. If primary search took longer or returned null, fallback to direct mediaId or Piped API (for valid YouTube IDs)
+                val isYtId = mediaId.length == 11 && mediaId.all { it.isLetterOrDigit() || it == '-' || it == '_' }
+                if (stream == null && isYtId) {
                     PlaybackService.videoStatusText.value = "Connecting stream..."
                     stream = withTimeoutOrNull(8000L) {
                         val direct = StreamResolver.resolveVideoPlaybackInfo(mediaId)

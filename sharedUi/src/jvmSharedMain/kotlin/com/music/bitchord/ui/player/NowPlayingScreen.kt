@@ -917,16 +917,6 @@ fun NowPlayingScreen(
     val canvas = rememberCanvasArtwork(song)
     val videoFrameRendered by PlayerPlatform.host.isVideoFrameRendered.collectAsStateWithLifecycle()
     val videoStatusText by PlayerPlatform.host.videoStatusText.collectAsStateWithLifecycle()
-
-    // Guard against infinite video loading: if video frames fail to render within 5 seconds, fallback to audio
-    LaunchedEffect(song.videoId, song.isVideo, videoFrameRendered) {
-        if (song.isVideo && !videoFrameRendered) {
-            delay(5000L)
-            if (!videoFrameRendered) {
-                onSwitchToAudio?.invoke()
-            }
-        }
-    }
     // What the credits say. The canvas above, the palette, the album link and
     // everything else addressed by id keep the original track: a renamed song
     // is the same song, only wearing a different label.
@@ -3146,7 +3136,7 @@ fun NowPlayingScreen(
                                 // URL was never there, or the retries used it up.
                                 val artIsGone = art.url.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url) ||
                                     (art.failed && art.attempt >= ART_RETRIES)
-                                if ((!song.isVideo || !videoFrameRendered) && artIsGone && !canvasRendered) {
+                                if (!song.isVideo && artIsGone && !canvasRendered) {
                                     DefaultCoverTile(
                                         modifier = Modifier.graphicsLayer {
                                             val scale = 1f - 0.5f * p()
@@ -3176,7 +3166,7 @@ fun NowPlayingScreen(
                                 }
                             }
 
-                            if ((!song.isVideo || !videoFrameRendered) && !art.url.isNullOrBlank() && !com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url)) {
+                            if (!song.isVideo && !art.url.isNullOrBlank() && !com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url)) {
                                 AsyncImage(
                                 // Decode at the sleeve's *expanded* size, always.
                                 // Coil otherwise sizes the decode to however large
@@ -3216,7 +3206,7 @@ fun NowPlayingScreen(
                                 // [PlayerArtwork.loaded] still flips the moment it does.
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .drawWithContent { if ((!song.isVideo || !videoFrameRendered) && (art.loaded || !canvasRendered)) drawContent() },
+                                    .drawWithContent { if (!song.isVideo && (art.loaded || !canvasRendered)) drawContent() },
                                 )
                             }
 
