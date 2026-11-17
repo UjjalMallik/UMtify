@@ -3,7 +3,6 @@ package com.music.bitchord.data
 import com.music.bitchord.data.DebugLog as Log
 import com.music.bitchord.data.innertube.Innertube
 import com.music.bitchord.data.innertube.InnertubeParser
-import com.music.bitchord.data.innertube.PipePipeVideoExtractor
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.Account
 import com.music.bitchord.data.model.AccountChannel
@@ -461,20 +460,6 @@ object YtMusicRepository {
                 videoVersionCache[song.videoId] = resolvedSong
                 return resolvedSong
             }
-        }
-
-        // 2. Fast search for official music video candidate (<600ms)
-        val fastCandidates = PipePipeVideoExtractor.searchVideoCandidates(song.title, song.artist)
-        val bestFastCandidate = fastCandidates.firstOrNull { it != song.videoId }
-        if (bestFastCandidate != null) {
-            val resolvedSong = song.copy(
-                videoId = bestFastCandidate,
-                isVideo = true,
-                isVideoOrigin = true,
-            )
-            Log.d(TAG, "video switch fast candidate: '${song.title}' -> '$bestFastCandidate'")
-            videoVersionCache[song.videoId] = resolvedSong
-            return resolvedSong
         }
 
         // 3. Fallback: if valid YouTube ID, use the current videoId as video
