@@ -985,26 +985,13 @@ fun NowPlayingScreen(
     val scrub = rememberPlayerScrub(song.videoId, position, activeDurationMs)
     // Read by the scrubber itself — see [PlayerScrubber.shown].
     val shown: () -> Float = {
-        if (videoMode && !scrub.scrubbing) {
-            val d = if (videoDurationMs > 0L) videoDurationMs else durationMs
+        if (videoMode) {
+            val d = if (videoDurationMs > 0L) videoDurationMs else activeDurationMs
             val p = if (videoPositionMs > 0L) videoPositionMs else position.positionMs
-            if (d > 0L) (p.toFloat() / d.toFloat()).coerceIn(0f, 1f) else 0f
+            scrub.shown(p, d)
         } else {
             scrub.shown(position.positionMs, activeDurationMs)
         }
-    }
-    val activeOnScrubFinished: (Float) -> Unit = if (videoMode) {
-        { fraction ->
-            scrub.scrubbing = false
-            val d = if (videoDurationMs > 0L) videoDurationMs else durationMs
-            if (d > 0L) {
-                val target = (fraction * d).toLong()
-                PlayerPlatform.host.seekVideo(target)
-                onSeek(target)
-            }
-        }
-    } else {
-        onScrubFinished
     }
     // Back restarts the track rather than stepping back once it is a few
     // seconds in. Derived, so this scope hears about the playhead once, when
@@ -1622,7 +1609,16 @@ fun NowPlayingScreen(
         // into a rattle, and the beat that matters is the one that says where
         // the playhead landed.
         haptics.play(Haptic.Select)
-        scrub.release(onSeekFraction)
+        scrub.release { fraction ->
+            if (videoMode) {
+                val d = if (videoDurationMs > 0L) videoDurationMs else durationMs
+                if (d > 0L) {
+                    val target = (fraction * d).toLong()
+                    PlayerPlatform.host.seekVideo(target)
+                }
+            }
+            onSeekFraction(fraction)
+        }
     }
 
     // The row both layouts end on: playback modes, queue, sleep timer and the
@@ -2078,7 +2074,7 @@ fun NowPlayingScreen(
                                         ?.takeIf { !scrub.scrubbing && it.end > it.start }
                                         ?.let { it.start..it.end },
                                     onScrub = onScrub,
-                                    onScrubFinished = activeOnScrubFinished,
+                                    onScrubFinished = onScrubFinished,
                                 ) {
                                     PlaybackQualityLabel(
                                         song = song,
@@ -3866,7 +3862,7 @@ fun NowPlayingScreen(
                             ?.takeIf { !scrub.scrubbing && it.end > it.start }
                             ?.let { it.start..it.end },
                         onScrub = onScrub,
-                        onScrubFinished = activeOnScrubFinished,
+                        onScrubFinished = onScrubFinished,
                     ) {
                         PlaybackQualityLabel(
                             song = song,
