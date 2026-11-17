@@ -42,11 +42,19 @@ interface PlayerHost {
     @Composable
     fun CanvasVideo(spec: CanvasVideoSpec, modifier: Modifier)
 
+    /** Seamless in-player video surface decoded from the active player session. */
+    @Composable
+    fun VideoPlayer(modifier: Modifier = Modifier) = Unit
+
+    val isVideoFrameRendered: StateFlow<Boolean> get() = MutableStateFlow(false)
+
+    val videoStatusText: StateFlow<String> get() = MutableStateFlow("")
+
     /**
      * Whether this platform shows a music video's picture over the playing
      * audio. False keeps every video surface out of the player altogether.
      */
-    val musicVideoSupported: Boolean get() = false
+    val musicVideoSupported: Boolean get() = true
 
     /**
      * The playing music video's picture, fitted into these bounds ([fit]) or
@@ -55,7 +63,7 @@ interface PlayerHost {
      * still artwork under it until then.
      */
     @Composable
-    fun MusicVideo(videoId: String, fit: Boolean, onRenderedChanged: (Boolean) -> Unit, modifier: Modifier) = Unit
+    fun MusicVideo(videoId: String, fit: Boolean, onRenderedChanged: (Boolean) -> Unit, modifier: Modifier) = VideoPlayer(modifier)
 
     /** Whether [videoId] shows its picture, rather than playing as audio by the listener's choice. */
     fun showsMusicVideoPicture(videoId: String): Boolean = true

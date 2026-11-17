@@ -15,12 +15,35 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.session.MediaController
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
+import com.music.bitchord.data.TrackLog
+import com.music.bitchord.data.innertube.StreamResolver
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withContext
 import com.music.bitchord.playback.MusicOnlyPlayback
 import com.music.bitchord.data.SongEditStore
 import com.music.bitchord.data.canvas.CanvasArtwork
@@ -58,6 +81,10 @@ import kotlin.math.roundToInt
  * moved into the shared module.
  */
 class AndroidPlayerHost(context: Context) : PlayerHost {
+    companion object {
+        var activeController: MediaController? = null
+    }
+
     private val app = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val main = Handler(Looper.getMainLooper())
@@ -252,18 +279,197 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
     override val musicVideoSupported: Boolean get() = true
 
+    override val isVideoFrameRendered: StateFlow<Boolean>
+        get() = PlaybackService.isVideoFrameRendered
+
+    override val videoStatusText: StateFlow<String>
+        get() = PlaybackService.videoStatusText
+
+    @Composable
+    override fun VideoPlayer(modifier: Modifier) {
+        val activeTrackId by PlaybackService.activeVideoTrackId.collectAsStateWithLifecycle()
+        val activeSong by PlaybackService.activeVideoSong.collectAsStateWithLifecycle()
+        val isVideoMode by PlaybackService.isVideoMode.collectAsStateWithLifecycle()
+        val mainPlayer = PlaybackService.activeExoPlayer ?: activeController
+
+        val currentMediaItem = mainPlayer?.currentMediaItem
+        val mediaId = activeTrackId
+            ?: activeSong?.videoId
+            ?: currentMediaItem?.mediaId
+            ?: return
+
+        val title = activeSong?.title
+            ?: currentMediaItem?.mediaMetadata?.title?.toString().orEmpty()
+        val artist = activeSong?.artist
+            ?: currentMediaItem?.mediaMetadata?.artist?.toString().orEmpty()
+        val durationSec = (
+            (activeSong?.durationMillis()?.takeIf { it > 0L }
+                ?: mainPlayer?.duration?.takeIf { it > 0L }
+                ?: 0L) / 1000L
+        ).toInt()
+
+        val context = LocalContext.current
+
+        // Dedicated ExoPlayer for direct muxed Video+Audio stream (do NOT mute: volume stays default 1f)
+        val videoExoPlayer = remember(context) {
+            ExoPlayer.Builder(
+                context,
+                DefaultRenderersFactory(context).setEnableDecoderFallback(true),
+            ).build().apply {
+                videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
+            }
+        }
+
+        // Clean up video player on dispose, sync position back to main audio player, and resume
+        DisposableEffect(videoExoPlayer) {
+            onDispose {
+                PlaybackService.isVideoFrameRendered.value = false
+                PlaybackService.videoStatusText.value = ""
+                val pos = videoExoPlayer.currentPosition
+                videoExoPlayer.stop()
+                videoExoPlayer.clearMediaItems()
+                videoExoPlayer.release()
+                mainPlayer?.let { player ->
+                    if (pos > 0L) {
+                        val dur = player.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
+                        player.seekTo(pos.coerceAtMost(dur))
+                    }
+                    player.play()
+                }
+            }
+        }
+
+        // Listen for rendered first frame, STATE_READY, and onPlayerError
+        DisposableEffect(videoExoPlayer) {
+            val listener = object : Player.Listener {
+                override fun onRenderedFirstFrame() {
+                    PlaybackService.isVideoFrameRendered.value = true
+                    PlaybackService.videoStatusText.value = ""
+                }
+
+                override fun onVideoSizeChanged(videoSize: VideoSize) {
+                    if (videoSize.width > 0 && videoSize.height > 0) {
+                        PlaybackService.isVideoFrameRendered.value = true
+                        PlaybackService.videoStatusText.value = ""
+                    }
+                }
+
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == Player.STATE_READY) {
+                        PlaybackService.isVideoFrameRendered.value = true
+                        PlaybackService.videoStatusText.value = ""
+                    }
+                }
+
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    TrackLog.w("VideoPlayer", "videoExoPlayer error: ${error.message}, errorCode: ${error.errorCodeName}")
+                    val msg = "Video playback failed: ${error.message ?: error.errorCodeName}"
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    PlaybackService.dismissVideoLoading()
+                }
+            }
+            videoExoPlayer.addListener(listener)
+            onDispose {
+                videoExoPlayer.removeListener(listener)
+            }
+        }
+
+        // Fetch direct muxed MP4 stream (itag 18 or 22 - contains BOTH video and audio)
+        LaunchedEffect(mediaId) {
+            PlaybackService.isVideoFrameRendered.value = false
+            PlaybackService.videoStatusText.value = "Finding video..."
+
+            try {
+                val stream = withContext(Dispatchers.IO) {
+                    StreamResolver.resolveVideoStreamForTrack(
+                        videoId = mediaId,
+                        title = title,
+                        artist = artist,
+                        durationSec = durationSec,
+                        candidateOffset = 0,
+                        onStatusUpdate = { status ->
+                            PlaybackService.videoStatusText.value = status
+                        },
+                    )
+                }
+
+                if (stream != null) {
+                    PlaybackService.videoStatusText.value = "Buffering video..."
+                    val headers = StreamResolver.mediaHeadersFor(stream.url)
+                    val ua = stream.userAgent.ifBlank {
+                        headers["User-Agent"] ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+                    }
+
+                    val reqHeaders = HashMap<String, String>().apply {
+                        put("Referer", "https://www.youtube.com/")
+                        put("Origin", "https://www.youtube.com")
+                        headers.forEach { (k, v) -> put(k, v) }
+                    }
+
+                    val dataSourceFactory = DefaultHttpDataSource.Factory()
+                        .setUserAgent(ua)
+                        .setDefaultRequestProperties(reqHeaders)
+                        .setAllowCrossProtocolRedirects(true)
+                        .setConnectTimeoutMs(8000)
+                        .setReadTimeoutMs(8000)
+
+                    val mediaSource = if (stream.isHls) {
+                        HlsMediaSource.Factory(dataSourceFactory)
+                            .createMediaSource(MediaItem.fromUri(stream.url))
+                    } else {
+                        ProgressiveMediaSource.Factory(dataSourceFactory)
+                            .createMediaSource(MediaItem.fromUri(stream.url))
+                    }
+
+                    val currentPos = mainPlayer?.currentPosition ?: 0L
+                    val currentDur = mainPlayer?.duration?.takeIf { it > 0 } ?: Long.MAX_VALUE
+
+                    // Pause main background audio player
+                    mainPlayer?.pause()
+
+                    videoExoPlayer.setMediaSource(mediaSource)
+                    if (currentPos > 0L) {
+                        videoExoPlayer.seekTo(currentPos.coerceAtMost(currentDur))
+                    }
+                    videoExoPlayer.prepare()
+                    videoExoPlayer.playWhenReady = true
+                } else {
+                    TrackLog.w("VideoPlayer", "Failed to resolve video stream for $mediaId ($title - $artist)")
+                    Toast.makeText(context, "Video unavailable", Toast.LENGTH_SHORT).show()
+                    PlaybackService.dismissVideoLoading()
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                TrackLog.w("VideoPlayer", "Exception resolving video for $mediaId: ${e.message}")
+                Toast.makeText(context, "Error: ${e.message ?: "Video unavailable"}", Toast.LENGTH_SHORT).show()
+                PlaybackService.dismissVideoLoading()
+            }
+        }
+
+        // Standard official Media3 PlayerView that cleanly handles Surface lifecycle
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    useController = false
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    player = videoExoPlayer
+                }
+            },
+            modifier = modifier.fillMaxSize(),
+        )
+    }
+
     @Composable
     override fun MusicVideo(videoId: String, fit: Boolean, onRenderedChanged: (Boolean) -> Unit, modifier: Modifier) =
-        AndroidMusicVideo(videoId, fit, onRenderedChanged, modifier)
+        VideoPlayer(modifier)
 
-    override fun showsMusicVideoPicture(videoId: String): Boolean =
-        MusicOnlyPlayback.showsPicture(videoId) && MusicVideoEngine.hasPicture(videoId)
+    override fun showsMusicVideoPicture(videoId: String): Boolean = true
 
-    override val musicVideoAspect: StateFlow<Float> get() = MusicVideoEngine.aspect
+    override val musicVideoAspect: StateFlow<Float> get() = MutableStateFlow(16f / 9f)
 
-    override val musicVideoQuality: StateFlow<MusicVideoQualityUi> get() = MusicVideoEngine.quality
+    override val musicVideoQuality: StateFlow<MusicVideoQualityUi> get() = MutableStateFlow(MusicVideoQualityUi())
 
-    override fun setMusicVideoQuality(height: Int?) = MusicVideoEngine.setQuality(height)
+    override fun setMusicVideoQuality(height: Int?) = Unit
 
     @Composable
     override fun LyricsShareSheet(

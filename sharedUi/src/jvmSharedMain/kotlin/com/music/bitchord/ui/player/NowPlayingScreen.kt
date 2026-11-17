@@ -914,9 +914,10 @@ fun NowPlayingScreen(
     // track" check lives.
     val spotifyCanvasAutoHide by PlayerSettings.spotifyCanvasAutoHide.collectAsStateWithLifecycle()
     val mixing by PlayerSettings.smartMixInProgress.collectAsStateWithLifecycle()
-    val videoMode = showsMusicVideo(song)
+    val videoFrameRendered by PlayerPlatform.host.isVideoFrameRendered.collectAsStateWithLifecycle()
+    val videoStatusText by PlayerPlatform.host.videoStatusText.collectAsStateWithLifecycle()
+    val videoMode = song.isVideo
     val canvas = rememberCanvasArtwork(song)?.takeUnless { videoMode }
-    var videoRendered by remember(song.videoId) { mutableStateOf(false) }
     // What the credits say. The canvas above, the palette, the album link and
     // everything else addressed by id keep the original track: a renamed song
     // is the same song, only wearing a different label.
@@ -3148,26 +3149,16 @@ fun NowPlayingScreen(
                                 }
                             }
 
-                            if (videoMode) {
+                            if (song.isVideo) {
                                 WhileShown({ !collapsePastHalf }) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .clip(RoundedCornerShape(24.dp))
-                                            .background(if (videoRendered) Color.Black else Color.Transparent),
+                                            .background(Color.Black),
                                         contentAlignment = Alignment.Center,
                                     ) {
-                                        if (!videoRendered) {
-                                            VideoLoadingBackdrop(
-                                                Modifier
-                                                    .fillMaxSize()
-                                                    .clip(RoundedCornerShape(24.dp)),
-                                            )
-                                        }
-                                        MusicVideoSurface(
-                                            videoId = song.videoId,
-                                            fit = true,
-                                            onRenderedChanged = { videoRendered = it },
+                                        PlayerPlatform.host.VideoPlayer(
                                             modifier = Modifier
                                                 .fillMaxSize()
                                                 .clip(RoundedCornerShape(24.dp)),
@@ -3176,7 +3167,7 @@ fun NowPlayingScreen(
                                 }
                             }
 
-                            if ((!videoMode || !videoRendered) && !art.url.isNullOrBlank() && !com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url)) {
+                            if (!song.isVideo && !art.url.isNullOrBlank() && !com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url)) {
                                 AsyncImage(
                                 // Decode at the sleeve's *expanded* size, always.
                                 // Coil otherwise sizes the decode to however large
@@ -3216,14 +3207,14 @@ fun NowPlayingScreen(
                                 // [PlayerArtwork.loaded] still flips the moment it does.
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .drawWithContent { if ((!videoMode || !videoRendered) && (art.loaded || !canvasRendered)) drawContent() },
+                                    .drawWithContent { if (!song.isVideo && (art.loaded || !canvasRendered)) drawContent() },
                                 )
                             }
 
                             // Where the clip plays when it can't have the banner:
                             // inside the same clip as the still art, taking the
                             // sleeve's corners, shadow and paused shrink for free.
-                            if (!videoMode && !heroMode && canvas != null) {
+                            if (!song.isVideo && !heroMode && canvas != null) {
                                 WhileShown({ !collapsePastHalf }) {
                                     CanvasArtworkPlayer(
                                         canvas = canvas,
@@ -3247,7 +3238,35 @@ fun NowPlayingScreen(
                                 }
                             }
 
-                            if (videoMode) {
+                            if (song.isVideo) {
+                                if (!videoFrameRendered) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(RoundedCornerShape(24.dp))
+                                            .background(Color.Black.copy(alpha = 0.5f)),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(36.dp),
+                                                color = Color.White.copy(alpha = 0.85f),
+                                                strokeWidth = 3.dp,
+                                            )
+                                            if (videoStatusText.isNotBlank()) {
+                                                Text(
+                                                    text = videoStatusText,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = Color.White.copy(alpha = 0.85f),
+                                                    maxLines = 1,
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                                 Box(
                                     modifier = Modifier
                                         .align(Alignment.TopCenter)

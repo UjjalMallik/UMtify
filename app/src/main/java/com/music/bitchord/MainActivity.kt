@@ -303,7 +303,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import com.music.bitchord.ui.player.LocalPlayerDock
 import com.music.bitchord.ui.player.PlayerDock
-import com.music.bitchord.ui.player.MusicVideoEngine
 import com.music.bitchord.ui.screens.DetailScreen
 import com.music.bitchord.ui.screens.sortedForDetail
 import com.music.bitchord.ui.screens.ExploreScreen
@@ -397,10 +396,20 @@ class MainActivity : AppCompatActivity() {
             // the current track: the whole app changes colour with the cover,
             // not only the player screen that already reads its tones.
             val controller = rememberMediaController()
-            // A music video's picture follows this controller's clock — see [MusicVideoEngine].
             DisposableEffect(controller) {
-                MusicVideoEngine.attach(controller)
-                onDispose { MusicVideoEngine.attach(null) }
+                com.music.bitchord.ui.player.AndroidPlayerHost.activeController = controller
+                com.music.bitchord.playback.PlaybackService.onRequestSwitchToAudio = {
+                    scope.launch {
+                        val s = controller?.currentMediaItem?.toSong()
+                        if (s != null && s.isVideo) {
+                            switchToMusicOnly(s, pauseWhileResolving = false)
+                        }
+                    }
+                }
+                onDispose {
+                    com.music.bitchord.ui.player.AndroidPlayerHost.activeController = null
+                    com.music.bitchord.playback.PlaybackService.onRequestSwitchToAudio = null
+                }
             }
             val player = rememberPlayerState(controller)
             val dynamicVariant by AppSettings.dynamicThemeVariant.collectAsStateWithLifecycle()

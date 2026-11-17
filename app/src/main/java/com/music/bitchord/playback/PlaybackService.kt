@@ -1054,6 +1054,23 @@ class PlaybackService : MediaLibraryService() {
             speakers.onLocalTransition(mediaItem, reason)
             lastPrefetchedNearEndIndex = C.INDEX_UNSET
 
+            if (mediaItem != null) {
+                val song = mediaItem.toSong()
+                if (song.isVideo) {
+                    isVideoMode.value = true
+                    activeVideoTrackId.value = song.videoId
+                    activeVideoSong.value = song
+                    isVideoFrameRendered.value = false
+                    videoStatusText.value = "Finding video..."
+                } else if (isVideoMode.value) {
+                    isVideoMode.value = false
+                    activeVideoTrackId.value = null
+                    activeVideoSong.value = null
+                    isVideoFrameRendered.value = false
+                    videoStatusText.value = ""
+                }
+            }
+
             // No crossfade case to allow for here any more. A blended advance
             // never reaches this callback — the incoming track starts as the
             // *first* item of the other player — so it is booked by
@@ -8397,8 +8414,18 @@ class PlaybackService : MediaLibraryService() {
                         val targetSong = songFromBundle(bundle)
                         // The listener's own choice outranks the music-only setting.
                         if (targetSong.isVideo) {
+                            isVideoMode.value = true
+                            activeVideoTrackId.value = targetSong.videoId
+                            activeVideoSong.value = targetSong
+                            isVideoFrameRendered.value = false
+                            videoStatusText.value = "Finding video..."
                             MusicOnlyPlayback.keep(targetSong.videoId)
                         } else {
+                            isVideoMode.value = false
+                            activeVideoTrackId.value = null
+                            activeVideoSong.value = null
+                            isVideoFrameRendered.value = false
+                            videoStatusText.value = ""
                             session.player.currentMediaItem?.mediaId?.let(MusicOnlyPlayback::letGo)
                         }
                         smoothSwapCurrentTrackVersion(targetSong.toMediaItem())
@@ -9208,6 +9235,21 @@ class PlaybackService : MediaLibraryService() {
         @Volatile
         var activeExoPlayer: ExoPlayer? = null
             internal set
+        val isVideoFrameRendered = MutableStateFlow(false)
+        val videoStatusText = MutableStateFlow("")
+        val activeVideoTrackId = MutableStateFlow<String?>(null)
+        val activeVideoSong = MutableStateFlow<Song?>(null)
+        val isVideoMode = MutableStateFlow(false)
+        var onRequestSwitchToAudio: (() -> Unit)? = null
+
+        fun dismissVideoLoading() {
+            activeVideoTrackId.value = null
+            activeVideoSong.value = null
+            isVideoFrameRendered.value = false
+            videoStatusText.value = ""
+            isVideoMode.value = false
+            onRequestSwitchToAudio?.invoke()
+        }
         const val MEDIA_ROOT_ID = "root"
         const val MEDIA_RECENTS_ID = "recents"
         const val MEDIA_QUICK_PICKS_ID = "quick_picks"
