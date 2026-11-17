@@ -12,10 +12,20 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.widget.Toast
+import android.graphics.Matrix
+import android.graphics.SurfaceTexture
+import android.view.TextureView
+import android.view.ViewGroup
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -23,11 +33,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -311,19 +327,26 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         ).toInt()
 
         val context = LocalContext.current
+        var isFill by remember { mutableStateOf(true) }
+        var videoAspect by remember { mutableStateOf(16f / 9f) }
+        val textureViewRef = remember { mutableStateOf<TextureView?>(null) }
 
         // Dedicated ExoPlayer for video rendering (volume = 0f; audio remains on mainPlayer)
         val videoExoPlayer = remember(context) {
             ExoPlayer.Builder(
                 context,
                 DefaultRenderersFactory(context).setEnableDecoderFallback(true),
-            ).build().apply {
-                videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
-                volume = 0f
-                trackSelectionParameters = trackSelectionParameters.buildUpon()
-                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
-                    .build()
-            }
+            )
+                .setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus = */ false)
+                .setHandleAudioBecomingNoisy(false)
+                .build().apply {
+                    videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
+                    volume = 0f
+                    repeatMode = Player.REPEAT_MODE_ONE
+                    trackSelectionParameters = trackSelectionParameters.buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                        .build()
+                }
         }
 
         // Clean up video player on dispose
@@ -331,13 +354,17 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             onDispose {
                 PlaybackService.isVideoFrameRendered.value = false
                 PlaybackService.videoStatusText.value = ""
+                textureViewRef.value?.let { view ->
+                    videoExoPlayer.clearVideoTextureView(view)
+                }
+                textureViewRef.value = null
                 videoExoPlayer.stop()
                 videoExoPlayer.clearMediaItems()
                 videoExoPlayer.release()
             }
         }
 
-        // Synchronize play/pause and seeks from mainPlayer to videoExoPlayer
+        // Synchronize play/pause and user seeks from mainPlayer to videoExoPlayer
         DisposableEffect(videoExoPlayer, mainPlayer) {
             val player = mainPlayer
             if (player == null) return@DisposableEffect onDispose {}
@@ -345,8 +372,12 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             val syncListener = object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     videoExoPlayer.playWhenReady = isPlaying
-                    if (isPlaying && videoExoPlayer.playbackState == Player.STATE_READY) {
-                        videoExoPlayer.play()
+                    if (isPlaying) {
+                        if (videoExoPlayer.playbackState == Player.STATE_READY) {
+                            videoExoPlayer.play()
+                        }
+                    } else {
+                        videoExoPlayer.pause()
                     }
                 }
 
@@ -355,7 +386,10 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     newPosition: Player.PositionInfo,
                     reason: Int,
                 ) {
-                    videoExoPlayer.seekTo(newPosition.positionMs)
+                    // Only seek when user performs an explicit scrub / seek
+                    if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                        videoExoPlayer.seekTo(newPosition.positionMs)
+                    }
                 }
 
                 override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
@@ -368,18 +402,19 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             }
         }
 
-        // Periodic drift correction to ensure video stays synchronized with audio
+        // Relaxed periodic drift correction to avoid seek thrashing (2000ms interval, 2500ms tolerance)
         LaunchedEffect(videoExoPlayer, mainPlayer) {
             while (isActive) {
-                delay(500)
+                delay(2000)
                 val mPlayer = mainPlayer ?: continue
+                val mainPos = mPlayer.currentPosition
                 if (mPlayer.isPlaying && videoExoPlayer.playbackState == Player.STATE_READY) {
-                    val drift = kotlin.math.abs(videoExoPlayer.currentPosition - mPlayer.currentPosition)
-                    if (drift > 600L) {
-                        videoExoPlayer.seekTo(mPlayer.currentPosition)
-                    }
                     if (!videoExoPlayer.isPlaying && videoExoPlayer.playWhenReady) {
                         videoExoPlayer.play()
+                    }
+                    val drift = kotlin.math.abs(videoExoPlayer.currentPosition - mainPos)
+                    if (!videoExoPlayer.isLoading && drift > 2500L) {
+                        videoExoPlayer.seekTo(mainPos)
                     }
                 }
             }
@@ -391,12 +426,20 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                 override fun onRenderedFirstFrame() {
                     PlaybackService.isVideoFrameRendered.value = true
                     PlaybackService.videoStatusText.value = ""
+                    if (mainPlayer?.isPlaying == true) {
+                        videoExoPlayer.play()
+                    }
                 }
 
                 override fun onVideoSizeChanged(videoSize: VideoSize) {
                     if (videoSize.width > 0 && videoSize.height > 0) {
+                        val aspect = (videoSize.width * videoSize.pixelWidthHeightRatio) / videoSize.height.toFloat()
+                        if (aspect > 0f && aspect.isFinite()) {
+                            videoAspect = aspect
+                        }
                         PlaybackService.isVideoFrameRendered.value = true
                         PlaybackService.videoStatusText.value = ""
+                        updateTextureViewTransform(textureViewRef.value, videoAspect, isFill)
                     }
                 }
 
@@ -404,6 +447,9 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     if (playbackState == Player.STATE_READY) {
                         PlaybackService.isVideoFrameRendered.value = true
                         PlaybackService.videoStatusText.value = ""
+                        if (mainPlayer?.isPlaying == true) {
+                            videoExoPlayer.play()
+                        }
                     }
                 }
 
@@ -458,8 +504,8 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                         .setUserAgent(ua)
                         .setDefaultRequestProperties(reqHeaders)
                         .setAllowCrossProtocolRedirects(true)
-                        .setConnectTimeoutMs(8000)
-                        .setReadTimeoutMs(8000)
+                        .setConnectTimeoutMs(10000)
+                        .setReadTimeoutMs(15000)
 
                     val mediaSource = if (stream.isHls) {
                         HlsMediaSource.Factory(dataSourceFactory)
@@ -478,6 +524,9 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     }
                     videoExoPlayer.prepare()
                     videoExoPlayer.playWhenReady = mainPlayer?.isPlaying ?: true
+                    if (mainPlayer?.isPlaying == true) {
+                        videoExoPlayer.play()
+                    }
 
                     // Ensure main audio player continues playing seamless audio
                     if (mainPlayer != null && !mainPlayer.isPlaying && mainPlayer.playWhenReady) {
@@ -496,17 +545,70 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             }
         }
 
-        // Standard official Media3 PlayerView that cleanly handles Surface lifecycle
-        AndroidView(
-            factory = { ctx ->
-                PlayerView(ctx).apply {
-                    useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                    player = videoExoPlayer
-                }
-            },
+        Box(
             modifier = modifier.fillMaxSize(),
-        )
+            contentAlignment = Alignment.Center,
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    TextureView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                        isOpaque = false
+                        keepScreenOn = true
+                        videoExoPlayer.setVideoTextureView(this)
+                        textureViewRef.value = this
+                        surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                            override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+                                updateTextureViewTransform(this@apply, videoAspect, isFill)
+                                if (videoExoPlayer.playbackState == Player.STATE_READY && mainPlayer?.isPlaying == true) {
+                                    videoExoPlayer.play()
+                                }
+                            }
+
+                            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+                                updateTextureViewTransform(this@apply, videoAspect, isFill)
+                            }
+
+                            override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                                return true
+                            }
+
+                            override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
+                                PlaybackService.isVideoFrameRendered.value = true
+                            }
+                        }
+                    }
+                },
+                update = { view ->
+                    updateTextureViewTransform(view, videoAspect, isFill)
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+
+            // Glass toggle button: Fit vs Fill
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 12.dp, bottom = 12.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .clickable {
+                        isFill = !isFill
+                        updateTextureViewTransform(textureViewRef.value, videoAspect, isFill)
+                    }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = if (isFill) "⛶ Fit" else "⛶ Fill",
+                    color = Color.White.copy(alpha = 0.9f),
+                    fontSize = 12.sp,
+                )
+            }
+        }
     }
 
     @Composable
@@ -527,6 +629,43 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         request: LyricsShareRequest,
         onDismiss: () -> Unit,
     ) = AndroidLyricsShareSheet(hazeState = hazeState, request = request, onDismiss = onDismiss)
+}
+
+private fun updateTextureViewTransform(
+    textureView: TextureView?,
+    videoAspect: Float,
+    isFill: Boolean,
+) {
+    val view = textureView ?: return
+    val viewWidth = view.width.toFloat()
+    val viewHeight = view.height.toFloat()
+    if (viewWidth <= 0f || viewHeight <= 0f || videoAspect <= 0f || !videoAspect.isFinite()) {
+        view.setTransform(Matrix())
+        return
+    }
+
+    val viewAspect = viewWidth / viewHeight
+    val pivotX = viewWidth / 2f
+    val pivotY = viewHeight / 2f
+
+    val matrix = Matrix().apply {
+        if (isFill) {
+            // Fill / Zoom mode: CenterCrop to fill container with zero black bars
+            if (videoAspect > viewAspect) {
+                setScale(videoAspect / viewAspect, 1f, pivotX, pivotY)
+            } else {
+                setScale(1f, viewAspect / videoAspect, pivotX, pivotY)
+            }
+        } else {
+            // Fit mode: FitCenter to show full widescreen with letterboxing
+            if (videoAspect > viewAspect) {
+                setScale(1f, viewAspect / videoAspect, pivotX, pivotY)
+            } else {
+                setScale(videoAspect / viewAspect, 1f, pivotX, pivotY)
+            }
+        }
+    }
+    view.setTransform(matrix)
 }
 
 private fun AudioOutputStatus.Snapshot.toOutputFormat(): OutputFormatUi {

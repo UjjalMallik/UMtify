@@ -1420,7 +1420,20 @@ object StreamResolver {
                 val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
                 val streamingData = root["streamingData"]?.jsonObject ?: return null
 
-                // 1. Prioritize a muxed MP4 URL from formats (e.g. itag 18 or 22 - contains BOTH video and audio)
+                // 1. Priority 1: HLS manifest (chunks smoothly and never stalls on range limits)
+                val hls = streamingData["hlsManifestUrl"]?.jsonPrimitive?.content
+                if (!hls.isNullOrBlank()) {
+                    return ResolvedVideoStream(
+                        url = hls,
+                        isHls = true,
+                        userAgent = userAgent,
+                        videoId = targetVideoId,
+                        hasEmbeddedAudio = true,
+                        headers = mapOf("User-Agent" to userAgent),
+                    )
+                }
+
+                // 2. Priority 2: Muxed MP4 URL from formats (e.g. itag 18 or 22 - contains BOTH video and audio, not range-throttled)
                 val formats = streamingData["formats"]?.jsonArray?.mapNotNull { it.jsonObject }
                 val muxedMp4 = formats?.filter {
                     val u = it["url"]?.jsonPrimitive?.content
@@ -1443,7 +1456,7 @@ object StreamResolver {
                     )
                 }
 
-                // 2. Grab the best video URL from adaptiveFormats (MP4 and WebM)
+                // 3. Priority 3: Video URL from adaptiveFormats (MP4 and WebM)
                 val adaptive = streamingData["adaptiveFormats"]?.jsonArray?.mapNotNull { it.jsonObject }
                 val videoAdaptive = adaptive?.filter {
                     val u = it["url"]?.jsonPrimitive?.content
@@ -1467,19 +1480,6 @@ object StreamResolver {
                         userAgent = userAgent,
                         videoId = targetVideoId,
                         hasEmbeddedAudio = false,
-                        headers = mapOf("User-Agent" to userAgent),
-                    )
-                }
-
-                // 3. Fallback: HLS manifest
-                val hls = streamingData["hlsManifestUrl"]?.jsonPrimitive?.content
-                if (!hls.isNullOrBlank()) {
-                    return ResolvedVideoStream(
-                        url = hls,
-                        isHls = true,
-                        userAgent = userAgent,
-                        videoId = targetVideoId,
-                        hasEmbeddedAudio = true,
                         headers = mapOf("User-Agent" to userAgent),
                     )
                 }
