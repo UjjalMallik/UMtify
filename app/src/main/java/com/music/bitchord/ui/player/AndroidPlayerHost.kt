@@ -427,8 +427,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                 PlaybackService.isVideoFrameRendered.value = false
                 PlaybackService.videoStatusText.value = "Finding video..."
 
-                // 1. 8-second timeout on video search and resolution
-                var stream = withTimeoutOrNull(8000L) {
+                val stream = withTimeoutOrNull(10000L) {
                     StreamResolver.resolveVideoStreamForTrack(
                         videoId = mediaId,
                         title = title,
@@ -439,28 +438,6 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                             PlaybackService.videoStatusText.value = status
                         },
                     )
-                }
-
-                // 2. If primary search took longer or returned null, fallback to direct mediaId or Piped API (for valid YouTube IDs)
-                val isYtId = mediaId.length == 11 && mediaId.all { it.isLetterOrDigit() || it == '-' || it == '_' }
-                if (stream == null && isYtId) {
-                    PlaybackService.videoStatusText.value = "Connecting stream..."
-                    stream = withTimeoutOrNull(8000L) {
-                        val direct = StreamResolver.resolveVideoPlaybackInfo(mediaId)
-                        if (direct != null && direct.videoUri.isNotBlank()) {
-                            val ua = direct.userAgent.ifBlank {
-                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
-                            }
-                            ResolvedVideoStream(
-                                url = direct.videoUri,
-                                isHls = direct.isHls,
-                                userAgent = ua,
-                                videoId = mediaId,
-                            )
-                        } else {
-                            PipePipeVideoExtractor.extractFromPipedApi(mediaId)
-                        }
-                    }
                 }
 
                 resolvedStream = stream
@@ -502,16 +479,17 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     videoExoPlayer.prepare()
                     videoExoPlayer.playWhenReady = true
                 } else {
-                    TrackLog.w("VideoPlayer", "Failed to resolve video stream for $mediaId ($title - $artist, retry=$retryCount)")
-                    PlaybackService.videoStatusText.value = "Error: Video stream unavailable"
-                    Toast.makeText(context, "Video stream unavailable", Toast.LENGTH_SHORT).show()
-                    delay(5000L)
+                    TrackLog.w("VideoPlayer", "Failed to resolve video stream for $mediaId ($title - $artist)")
+                    PlaybackService.videoStatusText.value = "Error: Video not found"
+                    delay(3000L)
+                    PlaybackService.dismissVideoLoading()
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 TrackLog.w("VideoPlayer", "Exception resolving video for $mediaId: ${e.message}")
-                PlaybackService.videoStatusText.value = "Error: ${e.javaClass.simpleName}: ${e.message?.take(40)}"
-                delay(5000L)
+                PlaybackService.videoStatusText.value = "Error: Video not found"
+                delay(3000L)
+                PlaybackService.dismissVideoLoading()
             }
         }
 

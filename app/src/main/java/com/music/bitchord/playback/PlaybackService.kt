@@ -9319,13 +9319,15 @@ class PlaybackService : MediaLibraryService() {
         val activeVideoSong = MutableStateFlow<Song?>(null)
         val webViewFallbackVideoId = MutableStateFlow<String?>(null)
         val isVideoMode = MutableStateFlow(false)
+        var onRequestSwitchToAudio: (() -> Unit)? = null
 
         fun dismissVideoLoading() {
             activeVideoTrackId.value = null
             activeVideoSong.value = null
-            isVideoFrameRendered.value = true
+            isVideoFrameRendered.value = false
             videoStatusText.value = ""
             isVideoMode.value = false
+            onRequestSwitchToAudio?.invoke()
         }
         const val MEDIA_ROOT_ID = "root"
         const val MEDIA_RECENTS_ID = "recents"

@@ -139,31 +139,7 @@ object PipePipeVideoExtractor {
             }
         }
 
-        // 4. NewPipe search fallback (run safely with timeout)
-        try {
-            StreamResolver.ensureInit()
-            val searchExtractor = org.schabi.newpipe.extractor.ServiceList.YouTube.getSearchExtractor(
-                searchQuery,
-                listOf(org.schabi.newpipe.extractor.services.youtube.linkHandler.YoutubeSearchQueryHandlerFactory.VIDEOS),
-                null,
-            )
-            searchExtractor.fetchPage()
-            val items = searchExtractor.initialPage?.items.orEmpty()
-            val npResults = mutableListOf<String>()
-            for (item in items) {
-                val title = item.name.orEmpty()
-                if (isExcludedVideoTitle(title)) continue
-                val vid = extractVideoId(item.url.orEmpty())
-                if (vid != null && isValidYoutubeId(vid) && !npResults.contains(vid)) {
-                    npResults.add(vid)
-                }
-            }
-            if (npResults.isNotEmpty()) return@withContext npResults
-        } catch (e: Exception) {
-            TrackLog.w(TAG, "NewPipe search fallback failed: ${e.message}")
-        }
-
-        // 5. Fast InnerTube search fallback
+        // 4. Fast InnerTube search fallback
         try {
             val tracks = YtMusicRepository.search(searchQuery, SearchFilter.VIDEOS)
                 .getOrNull()

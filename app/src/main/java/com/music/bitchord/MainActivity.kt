@@ -2409,6 +2409,26 @@ private fun BitChordApp(
                         it.memberId == playback.startedBy
                     }?.displayName?.takeIf(String::isNotBlank)
             }
+        val handleSwitchToAudio = remember(displayedSong) {
+            {
+                optimisticVersionSong = null
+                convertedVideoId = null
+                convertedFromAudio = null
+                keepVideoId = null
+                scope.launch {
+                    switchToMusicOnly(displayedSong, pauseWhileResolving = false)
+                }
+                Unit
+            }
+        }
+        DisposableEffect(handleSwitchToAudio) {
+            PlaybackService.onRequestSwitchToAudio = handleSwitchToAudio
+            onDispose {
+                if (PlaybackService.onRequestSwitchToAudio === handleSwitchToAudio) {
+                    PlaybackService.onRequestSwitchToAudio = null
+                }
+            }
+        }
         NowPlayingScreen(
             song = displayedSong,
             playedBy = playedBy,
@@ -2421,15 +2441,7 @@ private fun BitChordApp(
             durationMs = player.durationMs,
             audioVersionSwitching = switchingAudioVersion,
             qualityUpgraded = player.isQualityUpgraded,
-            onSwitchToAudio = {
-                optimisticVersionSong = null
-                convertedVideoId = null
-                convertedFromAudio = null
-                keepVideoId = null
-                scope.launch {
-                    switchToMusicOnly(displayedSong, pauseWhileResolving = false)
-                }
-            },
+            onSwitchToAudio = handleSwitchToAudio,
             onPlayPause = {
                 togglePlayPause()
             },
