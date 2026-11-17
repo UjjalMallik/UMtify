@@ -1314,6 +1314,12 @@ object StreamResolver {
                     ?: InnerTubeXResolver.extractVideo(targetId, 1080, ageRestricted = true)
                 if (xStream != null && xStream.url.isNotBlank()) {
                     TrackLog.d(TAG, "Video stream resolved via InnerTubeX for $targetId: ${xStream.width}x${xStream.height}")
+                    val xQualities = xStream.heights.map { h ->
+                        VideoQualityOption(label = if (h >= 720) "HD · ${h}p" else "${h}p", height = h, url = xStream.url, isHls = false)
+                    }.ifEmpty {
+                        val h = xStream.height
+                        listOf(VideoQualityOption(label = if (h >= 720) "HD · ${h}p" else if (h > 0) "${h}p" else "Auto", height = h, url = xStream.url, isHls = false))
+                    }
                     return@withContext ResolvedVideoStream(
                         url = xStream.url,
                         isHls = false,
@@ -1321,6 +1327,7 @@ object StreamResolver {
                         videoId = targetId,
                         hasEmbeddedAudio = false,
                         headers = xStream.headers,
+                        availableQualities = xQualities,
                     )
                 }
             } catch (e: Exception) {
@@ -1420,8 +1427,35 @@ object StreamResolver {
                 val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
                 val streamingData = root["streamingData"]?.jsonObject ?: return null
 
-                // 1. Priority 1: HLS manifest (chunks smoothly and never stalls on range limits)
+                val qualityOptions = mutableListOf<VideoQualityOption>()
                 val hls = streamingData["hlsManifestUrl"]?.jsonPrimitive?.content
+                if (!hls.isNullOrBlank()) {
+                    qualityOptions.add(VideoQualityOption("Auto (HLS)", 0, hls, true))
+                }
+                val formats = streamingData["formats"]?.jsonArray?.mapNotNull { it.jsonObject }
+                formats?.forEach { fmt ->
+                    val u = fmt["url"]?.jsonPrimitive?.content
+                    val h = fmt["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                    if (!u.isNullOrBlank() && h > 0) {
+                        qualityOptions.add(VideoQualityOption(if (h >= 720) "HD · ${h}p" else "${h}p", h, u, false))
+                    }
+                }
+                val adaptive = streamingData["adaptiveFormats"]?.jsonArray?.mapNotNull { it.jsonObject }
+                val videoAdaptive = adaptive?.filter {
+                    val u = it["url"]?.jsonPrimitive?.content
+                    val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
+                    !u.isNullOrBlank() && mime.contains("video/")
+                }
+                videoAdaptive?.forEach { fmt ->
+                    val u = fmt["url"]?.jsonPrimitive?.content
+                    val h = fmt["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                    if (!u.isNullOrBlank() && h in 144..1080) {
+                        qualityOptions.add(VideoQualityOption(if (h >= 720) "HD · ${h}p" else "${h}p", h, u, false))
+                    }
+                }
+                val availableQualities = qualityOptions.distinctBy { it.height }.sortedByDescending { it.height }
+
+                // 1. Priority 1: HLS manifest (chunks smoothly and never stalls on range limits)
                 if (!hls.isNullOrBlank()) {
                     return ResolvedVideoStream(
                         url = hls,
@@ -1430,11 +1464,11 @@ object StreamResolver {
                         videoId = targetVideoId,
                         hasEmbeddedAudio = true,
                         headers = mapOf("User-Agent" to userAgent),
+                        availableQualities = availableQualities,
                     )
                 }
 
                 // 2. Priority 2: Muxed MP4 URL from formats (e.g. itag 18 or 22 - contains BOTH video and audio, not range-throttled)
-                val formats = streamingData["formats"]?.jsonArray?.mapNotNull { it.jsonObject }
                 val muxedMp4 = formats?.filter {
                     val u = it["url"]?.jsonPrimitive?.content
                     val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
@@ -1453,16 +1487,11 @@ object StreamResolver {
                         videoId = targetVideoId,
                         hasEmbeddedAudio = true,
                         headers = mapOf("User-Agent" to userAgent),
+                        availableQualities = availableQualities,
                     )
                 }
 
                 // 3. Priority 3: Video URL from adaptiveFormats (MP4 and WebM)
-                val adaptive = streamingData["adaptiveFormats"]?.jsonArray?.mapNotNull { it.jsonObject }
-                val videoAdaptive = adaptive?.filter {
-                    val u = it["url"]?.jsonPrimitive?.content
-                    val mime = it["mimeType"]?.jsonPrimitive?.content.orEmpty()
-                    !u.isNullOrBlank() && mime.contains("video/")
-                }
                 val pickedAdaptive = videoAdaptive?.filter {
                     val h = it["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
                     h in 360..1080
@@ -1481,6 +1510,7 @@ object StreamResolver {
                         videoId = targetVideoId,
                         hasEmbeddedAudio = false,
                         headers = mapOf("User-Agent" to userAgent),
+                        availableQualities = availableQualities,
                     )
                 }
 
@@ -1501,7 +1531,25 @@ object StreamResolver {
                 )
                 extractor.fetchPage()
 
+                val npQualities = mutableListOf<VideoQualityOption>()
                 val hls = extractor.hlsUrl
+                if (!hls.isNullOrBlank()) {
+                    npQualities.add(VideoQualityOption("Auto (HLS)", 0, hls, true))
+                }
+                extractor.videoStreams?.filter { !it.content.isNullOrBlank() }?.forEach { vs ->
+                    val h = vs.resolution?.filter { it.isDigit() }?.toIntOrNull() ?: 0
+                    if (h > 0) {
+                        npQualities.add(VideoQualityOption(if (h >= 720) "HD · ${h}p" else "${h}p", h, vs.content, false))
+                    }
+                }
+                extractor.videoOnlyStreams?.filter { !it.content.isNullOrBlank() }?.forEach { vs ->
+                    val h = vs.resolution?.filter { it.isDigit() }?.toIntOrNull() ?: 0
+                    if (h > 0) {
+                        npQualities.add(VideoQualityOption(if (h >= 720) "HD · ${h}p" else "${h}p", h, vs.content, false))
+                    }
+                }
+                val availableNp = npQualities.distinctBy { it.height }.sortedByDescending { it.height }
+
                 if (!hls.isNullOrBlank()) {
                     return@withContext ResolvedVideoStream(
                         url = hls,
@@ -1509,6 +1557,7 @@ object StreamResolver {
                         userAgent = "",
                         videoId = targetVideoId,
                         hasEmbeddedAudio = true,
+                        availableQualities = availableNp,
                     )
                 }
 
@@ -1523,6 +1572,7 @@ object StreamResolver {
                         userAgent = "",
                         videoId = targetVideoId,
                         hasEmbeddedAudio = true,
+                        availableQualities = availableNp,
                     )
                 }
 
@@ -1543,6 +1593,7 @@ object StreamResolver {
                         userAgent = "",
                         videoId = targetVideoId,
                         hasEmbeddedAudio = false,
+                        availableQualities = availableNp,
                     )
                 }
 
@@ -1629,6 +1680,13 @@ object StreamResolver {
     }
 }
 
+data class VideoQualityOption(
+    val label: String,
+    val height: Int,
+    val url: String,
+    val isHls: Boolean = false,
+)
+
 data class ResolvedVideoStream(
     val url: String,
     val isHls: Boolean = false,
@@ -1636,4 +1694,5 @@ data class ResolvedVideoStream(
     val videoId: String = "",
     val hasEmbeddedAudio: Boolean = false,
     val headers: Map<String, String> = emptyMap(),
+    val availableQualities: List<VideoQualityOption> = emptyList(),
 )

@@ -1,30 +1,48 @@
 package com.music.bitchord.ui.player
 
 import com.music.bitchord.wear.WearBridge
+import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ActivityInfo
 import android.database.ContentObserver
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import android.widget.Toast
-import android.graphics.Matrix
-import android.graphics.SurfaceTexture
 import android.view.TextureView
 import android.view.ViewGroup
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
+import androidx.compose.material.icons.rounded.HighQuality
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -38,10 +56,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -58,6 +82,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.music.bitchord.data.TrackLog
 import com.music.bitchord.data.innertube.StreamResolver
+import com.music.bitchord.data.innertube.VideoQualityOption
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -327,9 +352,19 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         ).toInt()
 
         val context = LocalContext.current
-        var isFill by remember { mutableStateOf(true) }
-        var videoAspect by remember { mutableStateOf(16f / 9f) }
-        val textureViewRef = remember { mutableStateOf<TextureView?>(null) }
+        val activity = context as? Activity
+
+        var isFullscreen by remember { mutableStateOf(false) }
+        var showControls by remember { mutableStateOf(true) }
+        var qualityMenuOpen by remember { mutableStateOf(false) }
+
+        var availableQualities by remember { mutableStateOf<List<VideoQualityOption>>(emptyList()) }
+        var selectedQuality by remember { mutableStateOf<VideoQualityOption?>(null) }
+        var currentHeaders by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+        var currentUa by remember { mutableStateOf("") }
+
+        val inlineTextureRef = remember { mutableStateOf<TextureView?>(null) }
+        val fullscreenTextureRef = remember { mutableStateOf<TextureView?>(null) }
 
         // Dedicated ExoPlayer for video rendering (volume = 0f; audio remains on mainPlayer)
         val videoExoPlayer = remember(context) {
@@ -340,7 +375,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                 .setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus = */ false)
                 .setHandleAudioBecomingNoisy(false)
                 .build().apply {
-                    videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
+                    videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
                     volume = 0f
                     repeatMode = Player.REPEAT_MODE_ONE
                     trackSelectionParameters = trackSelectionParameters.buildUpon()
@@ -354,10 +389,10 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             onDispose {
                 PlaybackService.isVideoFrameRendered.value = false
                 PlaybackService.videoStatusText.value = ""
-                textureViewRef.value?.let { view ->
-                    videoExoPlayer.clearVideoTextureView(view)
-                }
-                textureViewRef.value = null
+                inlineTextureRef.value?.let { videoExoPlayer.clearVideoTextureView(it) }
+                fullscreenTextureRef.value?.let { videoExoPlayer.clearVideoTextureView(it) }
+                inlineTextureRef.value = null
+                fullscreenTextureRef.value = null
                 videoExoPlayer.stop()
                 videoExoPlayer.clearMediaItems()
                 videoExoPlayer.release()
@@ -386,7 +421,6 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     newPosition: Player.PositionInfo,
                     reason: Int,
                 ) {
-                    // Only seek when user performs an explicit scrub / seek
                     if (reason == Player.DISCONTINUITY_REASON_SEEK) {
                         videoExoPlayer.seekTo(newPosition.positionMs)
                     }
@@ -402,10 +436,10 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             }
         }
 
-        // Relaxed periodic drift correction to avoid seek thrashing (2000ms interval, 2500ms tolerance)
+        // Periodic drift correction - relaxed to 2500ms interval and 3000ms drift to prevent seek thrashing
         LaunchedEffect(videoExoPlayer, mainPlayer) {
             while (isActive) {
-                delay(2000)
+                delay(2500)
                 val mPlayer = mainPlayer ?: continue
                 val mainPos = mPlayer.currentPosition
                 if (mPlayer.isPlaying && videoExoPlayer.playbackState == Player.STATE_READY) {
@@ -413,7 +447,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                         videoExoPlayer.play()
                     }
                     val drift = kotlin.math.abs(videoExoPlayer.currentPosition - mainPos)
-                    if (!videoExoPlayer.isLoading && drift > 2500L) {
+                    if (!videoExoPlayer.isLoading && drift > 3000L) {
                         videoExoPlayer.seekTo(mainPos)
                     }
                 }
@@ -431,18 +465,6 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     }
                 }
 
-                override fun onVideoSizeChanged(videoSize: VideoSize) {
-                    if (videoSize.width > 0 && videoSize.height > 0) {
-                        val aspect = (videoSize.width * videoSize.pixelWidthHeightRatio) / videoSize.height.toFloat()
-                        if (aspect > 0f && aspect.isFinite()) {
-                            videoAspect = aspect
-                        }
-                        PlaybackService.isVideoFrameRendered.value = true
-                        PlaybackService.videoStatusText.value = ""
-                        updateTextureViewTransform(textureViewRef.value, videoAspect, isFill)
-                    }
-                }
-
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_READY) {
                         PlaybackService.isVideoFrameRendered.value = true
@@ -455,7 +477,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                     TrackLog.w("VideoPlayer", "videoExoPlayer error: ${error.message}, errorCode: ${error.errorCodeName}")
-                    val msg = "Video playback failed: ${error.message ?: error.errorCodeName}"
+                    val msg = "Video playback error: ${error.message ?: error.errorCodeName}"
                     Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                     PlaybackService.dismissVideoLoading()
                 }
@@ -466,12 +488,51 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             }
         }
 
-        // Fetch video stream (supporting adaptiveFormats MP4/WebM, HLS, and deciphered streams)
+        // Helper to load or switch video stream quality
+        fun playStream(url: String, isHls: Boolean, headers: Map<String, String>, ua: String) {
+            val reqHeaders = HashMap<String, String>().apply {
+                put("Referer", "https://www.youtube.com/")
+                put("Origin", "https://www.youtube.com")
+                headers.forEach { (k, v) -> put(k, v) }
+            }
+
+            val dataSourceFactory = DefaultHttpDataSource.Factory()
+                .setUserAgent(ua.ifBlank { "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36" })
+                .setDefaultRequestProperties(reqHeaders)
+                .setAllowCrossProtocolRedirects(true)
+                .setConnectTimeoutMs(10000)
+                .setReadTimeoutMs(15000)
+
+            val mediaSource = if (isHls) {
+                HlsMediaSource.Factory(dataSourceFactory)
+                    .createMediaSource(MediaItem.fromUri(url))
+            } else {
+                ProgressiveMediaSource.Factory(dataSourceFactory)
+                    .createMediaSource(MediaItem.fromUri(url))
+            }
+
+            val currentPos = mainPlayer?.currentPosition ?: 0L
+            val currentDur = mainPlayer?.duration?.takeIf { it > 0 } ?: Long.MAX_VALUE
+
+            videoExoPlayer.setMediaSource(mediaSource)
+            if (currentPos > 0L) {
+                videoExoPlayer.seekTo(currentPos.coerceAtMost(currentDur))
+            }
+            videoExoPlayer.prepare()
+            videoExoPlayer.playWhenReady = mainPlayer?.isPlaying ?: true
+            if (mainPlayer?.isPlaying == true) {
+                videoExoPlayer.play()
+            }
+        }
+
+        // Initial resolution on mediaId change
         LaunchedEffect(mediaId) {
             PlaybackService.isVideoFrameRendered.value = false
             PlaybackService.videoStatusText.value = "Finding video..."
             videoExoPlayer.stop()
             videoExoPlayer.clearMediaItems()
+            availableQualities = emptyList()
+            selectedQuality = null
 
             try {
                 val stream = withContext(Dispatchers.IO) {
@@ -493,42 +554,16 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                     val ua = stream.userAgent.ifBlank {
                         headers["User-Agent"] ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
                     }
+                    currentHeaders = headers
+                    currentUa = ua
 
-                    val reqHeaders = HashMap<String, String>().apply {
-                        put("Referer", "https://www.youtube.com/")
-                        put("Origin", "https://www.youtube.com")
-                        headers.forEach { (k, v) -> put(k, v) }
-                    }
+                    availableQualities = stream.availableQualities
+                    selectedQuality = stream.availableQualities.firstOrNull { it.url == stream.url }
+                        ?: stream.availableQualities.firstOrNull()
+                        ?: VideoQualityOption(label = "720p", height = 720, url = stream.url, isHls = stream.isHls)
 
-                    val dataSourceFactory = DefaultHttpDataSource.Factory()
-                        .setUserAgent(ua)
-                        .setDefaultRequestProperties(reqHeaders)
-                        .setAllowCrossProtocolRedirects(true)
-                        .setConnectTimeoutMs(10000)
-                        .setReadTimeoutMs(15000)
+                    playStream(stream.url, stream.isHls, headers, ua)
 
-                    val mediaSource = if (stream.isHls) {
-                        HlsMediaSource.Factory(dataSourceFactory)
-                            .createMediaSource(MediaItem.fromUri(stream.url))
-                    } else {
-                        ProgressiveMediaSource.Factory(dataSourceFactory)
-                            .createMediaSource(MediaItem.fromUri(stream.url))
-                    }
-
-                    val currentPos = mainPlayer?.currentPosition ?: 0L
-                    val currentDur = mainPlayer?.duration?.takeIf { it > 0 } ?: Long.MAX_VALUE
-
-                    videoExoPlayer.setMediaSource(mediaSource)
-                    if (currentPos > 0L) {
-                        videoExoPlayer.seekTo(currentPos.coerceAtMost(currentDur))
-                    }
-                    videoExoPlayer.prepare()
-                    videoExoPlayer.playWhenReady = mainPlayer?.isPlaying ?: true
-                    if (mainPlayer?.isPlaying == true) {
-                        videoExoPlayer.play()
-                    }
-
-                    // Ensure main audio player continues playing seamless audio
                     if (mainPlayer != null && !mainPlayer.isPlaying && mainPlayer.playWhenReady) {
                         mainPlayer.play()
                     }
@@ -549,6 +584,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             modifier = modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
         ) {
+            // Direct clean TextureView without broken Matrix transforms
             AndroidView(
                 factory = { ctx ->
                     TextureView(ctx).apply {
@@ -556,57 +592,331 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT,
                         )
-                        isOpaque = false
                         keepScreenOn = true
                         videoExoPlayer.setVideoTextureView(this)
-                        textureViewRef.value = this
-                        surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                            override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                                updateTextureViewTransform(this@apply, videoAspect, isFill)
-                                if (videoExoPlayer.playbackState == Player.STATE_READY && mainPlayer?.isPlaying == true) {
-                                    videoExoPlayer.play()
-                                }
-                            }
-
-                            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
-                                updateTextureViewTransform(this@apply, videoAspect, isFill)
-                            }
-
-                            override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                                return true
-                            }
-
-                            override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
-                                PlaybackService.isVideoFrameRendered.value = true
-                            }
-                        }
+                        inlineTextureRef.value = this
                     }
-                },
-                update = { view ->
-                    updateTextureViewTransform(view, videoAspect, isFill)
                 },
                 modifier = Modifier.fillMaxSize(),
             )
 
-            // Glass toggle button: Fit vs Fill
-            Box(
+            // Quality selector pill (top-right corner)
+            if (availableQualities.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 10.dp, end = 10.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.Black.copy(alpha = 0.65f))
+                            .clickable { qualityMenuOpen = true }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.HighQuality,
+                                contentDescription = "Quality",
+                                tint = Color.White.copy(alpha = 0.9f),
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Text(
+                                text = selectedQuality?.label ?: "Quality",
+                                color = Color.White.copy(alpha = 0.9f),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+
+                    DropdownMenu(
+                        expanded = qualityMenuOpen,
+                        onDismissRequest = { qualityMenuOpen = false },
+                    ) {
+                        availableQualities.forEach { option ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = option.label,
+                                        fontWeight = if (selectedQuality == option) FontWeight.Bold else FontWeight.Normal,
+                                    )
+                                },
+                                onClick = {
+                                    qualityMenuOpen = false
+                                    if (selectedQuality != option) {
+                                        selectedQuality = option
+                                        playStream(option.url, option.isHls, currentHeaders, currentUa)
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Fullscreen toggle button (bottom-right corner)
+            IconButton(
+                onClick = { isFullscreen = true },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 12.dp, bottom = 12.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .clickable {
-                        isFill = !isFill
-                        updateTextureViewTransform(textureViewRef.value, videoAspect, isFill)
-                    }
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                contentAlignment = Alignment.Center,
+                    .padding(end = 8.dp, bottom = 8.dp)
+                    .size(36.dp)
+                    .background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(10.dp)),
             ) {
-                Text(
-                    text = if (isFill) "⛶ Fit" else "⛶ Fill",
-                    color = Color.White.copy(alpha = 0.9f),
-                    fontSize = 12.sp,
+                Icon(
+                    imageVector = Icons.Rounded.Fullscreen,
+                    contentDescription = "Fullscreen",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp),
                 )
+            }
+        }
+
+        // Fullscreen Landscape Video Dialog
+        if (isFullscreen) {
+            Dialog(
+                onDismissRequest = { isFullscreen = false },
+                properties = DialogProperties(
+                    usePlatformDefaultWidth = false,
+                    decorFitsSystemWindows = false,
+                ),
+            ) {
+                BackHandler { isFullscreen = false }
+
+                DisposableEffect(Unit) {
+                    activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    activity?.let { act ->
+                        WindowCompat.setDecorFitsSystemWindows(act.window, false)
+                        WindowInsetsControllerCompat(act.window, act.window.decorView).apply {
+                            hide(WindowInsetsCompat.Type.systemBars())
+                            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                        }
+                    }
+                    onDispose {
+                        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        activity?.let { act ->
+                            WindowCompat.setDecorFitsSystemWindows(act.window, true)
+                            WindowInsetsControllerCompat(act.window, act.window.decorView).show(WindowInsetsCompat.Type.systemBars())
+                        }
+                        // Re-attach to inline TextureView when exiting fullscreen
+                        inlineTextureRef.value?.let { videoExoPlayer.setVideoTextureView(it) }
+                    }
+                }
+
+                // Auto-hide controls after 4 seconds of inactivity while playing
+                LaunchedEffect(showControls) {
+                    if (showControls && mainPlayer?.isPlaying == true) {
+                        delay(4000)
+                        showControls = false
+                    }
+                }
+
+                var currentPositionMs by remember { mutableStateOf(mainPlayer?.currentPosition ?: 0L) }
+                val durationMs = mainPlayer?.duration?.takeIf { it > 0 } ?: 1L
+                val isPlaying = mainPlayer?.isPlaying == true
+
+                LaunchedEffect(Unit) {
+                    while (isActive) {
+                        currentPositionMs = mainPlayer?.currentPosition ?: 0L
+                        delay(200)
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black)
+                        .clickable { showControls = !showControls },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    // Fullscreen TextureView
+                    AndroidView(
+                        factory = { ctx ->
+                            TextureView(ctx).apply {
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                )
+                                keepScreenOn = true
+                                videoExoPlayer.setVideoTextureView(this)
+                                fullscreenTextureRef.value = this
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+
+                    // Overlay Controls
+                    if (showControls) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.45f)),
+                        ) {
+                            // Top bar: title, artist, quality selector
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .align(Alignment.TopCenter)
+                                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f, fill = false)) {
+                                    Text(
+                                        text = title,
+                                        color = Color.White,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                    )
+                                    if (artist.isNotBlank()) {
+                                        Text(
+                                            text = artist,
+                                            color = Color.White.copy(alpha = 0.75f),
+                                            fontSize = 13.sp,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
+
+                                if (availableQualities.isNotEmpty()) {
+                                    Box {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(Color.White.copy(alpha = 0.2f))
+                                                .clickable { qualityMenuOpen = true }
+                                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.HighQuality,
+                                                    contentDescription = "Quality",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(16.dp),
+                                                )
+                                                Text(
+                                                    text = selectedQuality?.label ?: "Quality",
+                                                    color = Color.White,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                )
+                                            }
+                                        }
+
+                                        DropdownMenu(
+                                            expanded = qualityMenuOpen,
+                                            onDismissRequest = { qualityMenuOpen = false },
+                                        ) {
+                                            availableQualities.forEach { option ->
+                                                DropdownMenuItem(
+                                                    text = {
+                                                        Text(
+                                                            text = option.label,
+                                                            fontWeight = if (selectedQuality == option) FontWeight.Bold else FontWeight.Normal,
+                                                        )
+                                                    },
+                                                    onClick = {
+                                                        qualityMenuOpen = false
+                                                        if (selectedQuality != option) {
+                                                            selectedQuality = option
+                                                            playStream(option.url, option.isHls, currentHeaders, currentUa)
+                                                        }
+                                                    },
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Center Play/Pause button
+                            IconButton(
+                                onClick = {
+                                    if (isPlaying) {
+                                        mainPlayer?.pause()
+                                        videoExoPlayer.pause()
+                                    } else {
+                                        mainPlayer?.play()
+                                        videoExoPlayer.play()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .size(64.dp)
+                                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(32.dp)),
+                            ) {
+                                Icon(
+                                    imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                    contentDescription = if (isPlaying) "Pause" else "Play",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(36.dp),
+                                )
+                            }
+
+                            // Bottom bar: seekbar, time text, exit fullscreen button
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .align(Alignment.BottomCenter)
+                                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                            ) {
+                                Slider(
+                                    value = currentPositionMs.toFloat().coerceIn(0f, durationMs.toFloat()),
+                                    onValueChange = { newPos ->
+                                        currentPositionMs = newPos.toLong()
+                                        mainPlayer?.seekTo(newPos.toLong())
+                                        videoExoPlayer.seekTo(newPos.toLong())
+                                    },
+                                    valueRange = 0f..durationMs.toFloat(),
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = Color.White,
+                                        activeTrackColor = Color.White,
+                                        inactiveTrackColor = Color.White.copy(alpha = 0.3f),
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    val curMin = (currentPositionMs / 1000) / 60
+                                    val curSec = (currentPositionMs / 1000) % 60
+                                    val durMin = (durationMs / 1000) / 60
+                                    val durSec = (durationMs / 1000) % 60
+                                    Text(
+                                        text = "%d:%02d / %d:%02d".format(curMin, curSec, durMin, durSec),
+                                        color = Color.White.copy(alpha = 0.85f),
+                                        fontSize = 12.sp,
+                                    )
+
+                                    IconButton(
+                                        onClick = { isFullscreen = false },
+                                        modifier = Modifier.size(36.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.FullscreenExit,
+                                            contentDescription = "Exit Fullscreen",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(24.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -629,43 +939,6 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         request: LyricsShareRequest,
         onDismiss: () -> Unit,
     ) = AndroidLyricsShareSheet(hazeState = hazeState, request = request, onDismiss = onDismiss)
-}
-
-private fun updateTextureViewTransform(
-    textureView: TextureView?,
-    videoAspect: Float,
-    isFill: Boolean,
-) {
-    val view = textureView ?: return
-    val viewWidth = view.width.toFloat()
-    val viewHeight = view.height.toFloat()
-    if (viewWidth <= 0f || viewHeight <= 0f || videoAspect <= 0f || !videoAspect.isFinite()) {
-        view.setTransform(Matrix())
-        return
-    }
-
-    val viewAspect = viewWidth / viewHeight
-    val pivotX = viewWidth / 2f
-    val pivotY = viewHeight / 2f
-
-    val matrix = Matrix().apply {
-        if (isFill) {
-            // Fill / Zoom mode: CenterCrop to fill container with zero black bars
-            if (videoAspect > viewAspect) {
-                setScale(videoAspect / viewAspect, 1f, pivotX, pivotY)
-            } else {
-                setScale(1f, viewAspect / videoAspect, pivotX, pivotY)
-            }
-        } else {
-            // Fit mode: FitCenter to show full widescreen with letterboxing
-            if (videoAspect > viewAspect) {
-                setScale(1f, viewAspect / videoAspect, pivotX, pivotY)
-            } else {
-                setScale(videoAspect / viewAspect, 1f, pivotX, pivotY)
-            }
-        }
-    }
-    view.setTransform(matrix)
 }
 
 private fun AudioOutputStatus.Snapshot.toOutputFormat(): OutputFormatUi {

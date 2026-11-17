@@ -3153,15 +3153,16 @@ fun NowPlayingScreen(
                                 WhileShown({ !collapsePastHalf }) {
                                     Box(
                                         modifier = Modifier
-                                            .fillMaxSize()
-                                            .clip(RoundedCornerShape(24.dp))
+                                            .fillMaxWidth()
+                                            .aspectRatio(16f / 9f)
+                                            .clip(RoundedCornerShape(20.dp))
                                             .background(Color.Black),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         PlayerPlatform.host.VideoPlayer(
                                             modifier = Modifier
                                                 .fillMaxSize()
-                                                .clip(RoundedCornerShape(24.dp)),
+                                                .clip(RoundedCornerShape(20.dp)),
                                         )
                                     }
                                 }
@@ -4120,37 +4121,6 @@ private fun VideoSkipOverlay(
                             color = Color.White,
                         )
                     }
-                }
-            }
-        }
-
-        if (currentPos in 1_000L..30_000L || activeSegment != null) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .border(0.8.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
-                    .clickable {
-                        onSeek((currentPos + 10_000L).coerceAtMost(durationMs))
-                    }
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.FastForward,
-                        contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.9f),
-                        modifier = Modifier.size(12.dp),
-                    )
-                    Text(
-                        text = "+10s",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                        color = Color.White.copy(alpha = 0.9f),
-                    )
                 }
             }
         }
