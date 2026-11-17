@@ -1458,8 +1458,7 @@ private fun BitChordApp(
             // would show a version the player is not playing yet, and would
             // make the switch look finished before it had begun.
             if (!holdUntilAligned ||
-                VersionAudioAligner.getCachedOffsetMs(song.videoId, target.videoId) != null ||
-                YtMusicRepository.versionTimeMap(song.videoId, target.videoId) != null
+                VersionAudioAligner.getCachedOffsetMs(song.videoId, target.videoId) != null
             ) {
                 optimisticVersionSong = target
             }

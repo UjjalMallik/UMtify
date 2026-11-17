@@ -1450,29 +1450,6 @@ class PlaybackService : MediaLibraryService() {
             // usually *not* the one playing, which is exactly why the lines
             // have to say. See [TrackLog.about].
             val about = TrackLog.about(mediaIdIn(dataSpec.uri))
-            val isVideoRequest = dataSpec.uri.getQueryParameter("video") == "1"
-            val videoId = dataSpec.uri.getQueryParameter("v")
-
-            // A video playback request fetches the multiplexed video+audio stream directly
-            if (isVideoRequest && !videoId.isNullOrBlank()) {
-                QualityUpgrade.forget(videoId)
-                StreamChoice.forget(videoId)
-                NerdStats.clearDeclared(videoId)
-                NerdStats.recordSource(videoId, "YouTube Video")
-                val streamUrl = try {
-                    runBlocking(about) {
-                        withTimeout(RESOLVE_TIMEOUT_MS) { StreamResolver.resolveVideoStream(videoId) }
-                    }
-                } catch (e: TimeoutCancellationException) {
-                    throw java.io.IOException("Video stream resolution timed out for $videoId", e)
-                }
-                val headers = StreamResolver.mediaHeadersFor(streamUrl)
-                TrackLog.d("BitChord", "serving progressive video stream for $videoId", about = videoId)
-                return@Resolver dataSpec.buildUpon()
-                    .setUri(Uri.parse(streamUrl))
-                    .setHttpRequestHeaders(headers)
-                    .build()
-            }
 
             // A source-backed track is resolved by whichever source can serve
             // it, which is not necessarily the one it was queued from — see
