@@ -1227,7 +1227,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
                         }
                     }
                     onDispose {
-                        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                         activity?.let { a ->
                             WindowCompat.setDecorFitsSystemWindows(a.window, true)
                             WindowCompat.getInsetsController(a.window, a.window.decorView).apply {

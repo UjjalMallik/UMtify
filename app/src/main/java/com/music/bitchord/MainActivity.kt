@@ -2480,8 +2480,8 @@ private fun BitChordApp(
             isLoading = playPauseBusy,
             position = player.position,
             durationMs = player.durationMs,
-            audioVersionSwitching = switchingAudioVersion,
-            qualityUpgraded = player.isQualityUpgraded,
+            audioVersionSwitching = if (displayedSong.isVideo || PlaybackService.isVideoMode.value) false else switchingAudioVersion,
+            qualityUpgraded = if (displayedSong.isVideo || PlaybackService.isVideoMode.value) false else player.isQualityUpgraded,
             onSwitchToAudio = handleSwitchToAudio,
             onPlayPause = {
                 if (displayedSong.isVideo || PlaybackService.isVideoMode.value) {

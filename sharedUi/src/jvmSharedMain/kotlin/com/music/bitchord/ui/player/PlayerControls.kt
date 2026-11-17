@@ -394,6 +394,7 @@ internal fun PlaybackQualityLabel(
     isLoading: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    if (song.isVideo) return
     val wifiQuality by PlayerSettings.audioQualityWifi.collectAsStateWithLifecycle()
     val cellularQuality by PlayerSettings.audioQualityCellular.collectAsStateWithLifecycle()
     val metered by PlayerSettings.meteredConnection.collectAsStateWithLifecycle()

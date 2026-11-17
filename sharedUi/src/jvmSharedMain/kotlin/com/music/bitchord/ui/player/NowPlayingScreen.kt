@@ -2069,7 +2069,7 @@ fun NowPlayingScreen(
                                     shown = shown,
                                     durationMs = activeDurationMs,
                                     isPlaying = if (videoMode) activeIsPlaying else (activeIsPlaying && position.advancing),
-                                    loading = versionAligning || audioVersionSwitching,
+                                    loading = if (videoMode) false else (versionAligning || audioVersionSwitching),
                                     mixing = mixing && !scrub.scrubbing,
                                     transitionWindow = transitionWindow
                                         ?.takeIf { !scrub.scrubbing && it.end > it.start }
@@ -2077,19 +2077,21 @@ fun NowPlayingScreen(
                                     onScrub = onScrub,
                                     onScrubFinished = onScrubFinished,
                                 ) {
-                                    PlaybackQualityLabel(
-                                        song = song,
-                                        isLoading = isLoading,
-                                        modifier = Modifier
-                                            .align(Alignment.Center)
-                                            .padding(horizontal = 8.dp),
-                                    )
+                                    if (!videoMode) {
+                                        PlaybackQualityLabel(
+                                            song = song,
+                                            isLoading = isLoading,
+                                            modifier = Modifier
+                                                .align(Alignment.Center)
+                                                .padding(horizontal = 8.dp),
+                                        )
+                                    }
                                 }
                             },
                             transport = {
                                 TransportRow(
                                     isPlaying = activeIsPlaying,
-                                    isLoading = isLoading || audioVersionSwitching,
+                                    isLoading = if (videoMode) false else (isLoading || audioVersionSwitching),
                                     previousEnabled = !controlsLocked &&
                                         (hasPrevious || pastRestartPoint),
                                     nextEnabled = !controlsLocked && hasNext,
@@ -3853,7 +3855,7 @@ fun NowPlayingScreen(
                         shown = shown,
                         durationMs = activeDurationMs,
                         isPlaying = if (videoMode) activeIsPlaying else (activeIsPlaying && position.advancing),
-                        loading = versionSwitching,
+                        loading = if (videoMode) false else versionSwitching,
                         mixing = mixing && !scrub.scrubbing,
                         // Hidden while scrubbing: the planner is still describing
                         // where the transition *would* be, and a marker sitting under
@@ -3865,13 +3867,15 @@ fun NowPlayingScreen(
                         onScrub = onScrub,
                         onScrubFinished = onScrubFinished,
                     ) {
-                        PlaybackQualityLabel(
-                            song = song,
-                            isLoading = isLoading,
-                            modifier = Modifier
-                                .align(Alignment.Center)
-                                .padding(horizontal = 8.dp),
-                        )
+                        if (!videoMode) {
+                            PlaybackQualityLabel(
+                                song = song,
+                                isLoading = isLoading,
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .padding(horizontal = 8.dp),
+                            )
+                        }
                     }
 
                     // The transport rides midway between the two blocks it separates:
@@ -3890,7 +3894,7 @@ fun NowPlayingScreen(
 
                     TransportRow(
                         isPlaying = activeIsPlaying,
-                        isLoading = isLoading || audioVersionSwitching,
+                        isLoading = if (videoMode) false else (isLoading || audioVersionSwitching),
                         previousEnabled = !controlsLocked &&
                             (hasPrevious || pastRestartPoint),
                         nextEnabled = !controlsLocked && hasNext,
