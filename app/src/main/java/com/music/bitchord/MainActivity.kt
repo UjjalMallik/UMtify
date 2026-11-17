@@ -303,6 +303,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import com.music.bitchord.ui.player.LocalPlayerDock
 import com.music.bitchord.ui.player.PlayerDock
+import com.music.bitchord.ui.player.MusicVideoEngine
 import com.music.bitchord.ui.screens.DetailScreen
 import com.music.bitchord.ui.screens.sortedForDetail
 import com.music.bitchord.ui.screens.ExploreScreen
@@ -396,13 +397,10 @@ class MainActivity : AppCompatActivity() {
             // the current track: the whole app changes colour with the cover,
             // not only the player screen that already reads its tones.
             val controller = rememberMediaController()
+            // A music video's picture follows this controller's clock — see [MusicVideoEngine].
             DisposableEffect(controller) {
-                com.music.bitchord.ui.player.AndroidPlayerHost.activeController = controller
-                onDispose {
-                    if (com.music.bitchord.ui.player.AndroidPlayerHost.activeController === controller) {
-                        com.music.bitchord.ui.player.AndroidPlayerHost.activeController = null
-                    }
-                }
+                MusicVideoEngine.attach(controller)
+                onDispose { MusicVideoEngine.attach(null) }
             }
             val player = rememberPlayerState(controller)
             val dynamicVariant by AppSettings.dynamicThemeVariant.collectAsStateWithLifecycle()
@@ -1415,47 +1413,58 @@ private fun BitChordApp(
         val c = controller ?: return
         val index = c.currentMediaItemIndex
         if (index !in 0 until c.mediaItemCount ||
+            c.currentMediaItem?.mediaId != song.videoId ||
             switchingAudioVersion
         ) return
 
         val resumeAfterResolution = pauseWhileResolving && c.playWhenReady
         switchingAudioVersion = true
+        // Mirrors the music-only path: the bar lights up for the resolve and
+        // the service keeps it lit through the measure-and-cut, and the row
+        // stays on the audio version until that swap actually commits — see
+        // [alignmentPending] at the toggle.
         val holdUntilAligned = AppSettings.smartVersionAlignment.value
         if (holdUntilAligned) AppSettings.versionAlignmentInProgress.value = true
         if (pauseWhileResolving) c.pause()
         try {
             TrackLog.d("Player", "video switch requested for '${song.title}'", song.videoId)
             val video = runCatching { YtMusicRepository.resolveVideo(song) }.getOrNull()
-            val stillCurrent = c.currentMediaItemIndex == index
+            val stillCurrent = c.currentMediaItemIndex == index &&
+                c.currentMediaItem?.mediaId == song.videoId
 
             if (!stillCurrent) {
                 TrackLog.d("Player", "video switch discarded; listener changed track", song.videoId)
                 return
             }
 
-            if (video != null && video.videoId != song.videoId) {
-                keepVideoId = video.videoId
+            val target = if (video != null && video.videoId != song.videoId) {
                 convertedFromAudio = song
                 convertedVideoId = video.videoId
                 TrackLog.d("Player", "video switch applying '${video.title}' (${video.videoId})", song.videoId)
-                val target = video.copy(
+                video.copy(
                     queueTier = song.queueTier,
                     queueEntryId = song.queueEntryId,
                     radioName = song.radioName,
-                    playbackSource = null,
-                    playbackSourceType = null,
-                    playbackSourceId = null,
+                    playbackSource = song.playbackSource,
+                    playbackSourceType = song.playbackSourceType,
+                    playbackSourceId = song.playbackSourceId,
                     isVideo = true,
-                    isVideoOrigin = true,
                 )
-                if (!holdUntilAligned ||
-                    VersionAudioAligner.getCachedOffsetMs(song.videoId, target.videoId) != null
-                ) {
-                    optimisticVersionSong = target
-                }
-                if (holdUntilAligned) AppSettings.versionAlignmentInProgress.value = false
-                c.swapToVersion(target)
+            } else {
+                song.copy(isVideo = true)
             }
+
+            // Not while an alignment is still owed: claiming the video here
+            // would show a version the player is not playing yet, and would
+            // make the switch look finished before it had begun.
+            if (!holdUntilAligned ||
+                VersionAudioAligner.getCachedOffsetMs(song.videoId, target.videoId) != null ||
+                YtMusicRepository.versionTimeMap(song.videoId, target.videoId) != null
+            ) {
+                optimisticVersionSong = target
+            }
+            if (holdUntilAligned) AppSettings.versionAlignmentInProgress.value = false
+            c.swapToVersion(target)
         } finally {
             if (holdUntilAligned) AppSettings.versionAlignmentInProgress.value = false
             switchingAudioVersion = false
@@ -2420,14 +2429,6 @@ private fun BitChordApp(
                     switchToMusicOnly(displayedSong, pauseWhileResolving = false)
                 }
                 Unit
-            }
-        }
-        DisposableEffect(handleSwitchToAudio) {
-            PlaybackService.onRequestSwitchToAudio = handleSwitchToAudio
-            onDispose {
-                if (PlaybackService.onRequestSwitchToAudio === handleSwitchToAudio) {
-                    PlaybackService.onRequestSwitchToAudio = null
-                }
             }
         }
         NowPlayingScreen(
@@ -4579,24 +4580,20 @@ private fun BitChordApp(
                             scope.launch { switchToMusicOnly(song, pauseWhileResolving = false) }
                         }
                         else -> {
-                            android.widget.Toast.makeText(context, "Switching to video...", android.widget.Toast.LENGTH_SHORT).show()
                             val cached = YtMusicRepository.cachedVideoVersion(song.videoId)
                                 ?: YtMusicRepository.cachedVideoVersion(versionEffectiveSong.videoId)
-                            val targetVideoSong = (cached ?: song).copy(
-                                queueTier = song.queueTier,
-                                queueEntryId = song.queueEntryId,
-                                radioName = song.radioName,
-                                playbackSource = song.playbackSource,
-                                playbackSourceType = song.playbackSourceType,
-                                playbackSourceId = song.playbackSourceId,
-                                isVideo = true,
-                                isVideoOrigin = true,
-                            )
-                            optimisticVersionSong = targetVideoSong
-                            convertedFromAudio = song
-                            convertedVideoId = targetVideoSong.videoId
-                            keepVideoId = targetVideoSong.videoId
-                            c.swapToVersion(targetVideoSong)
+                            if (cached != null && cached.videoId != song.videoId &&
+                                !versionAlignmentPending(cached.videoId)
+                            ) {
+                                optimisticVersionSong = cached.copy(
+                                    queueTier = song.queueTier,
+                                    queueEntryId = song.queueEntryId,
+                                    radioName = song.radioName,
+                                    playbackSource = song.playbackSource,
+                                    playbackSourceType = song.playbackSourceType,
+                                    playbackSourceId = song.playbackSourceId,
+                                )
+                            }
                             scope.launch { switchToVideo(song, pauseWhileResolving = false) }
                         }
                     }

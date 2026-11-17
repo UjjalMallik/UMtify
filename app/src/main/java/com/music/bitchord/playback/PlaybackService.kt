@@ -588,8 +588,6 @@ class PlaybackService : MediaLibraryService() {
             activeExoPlayer = value
         }
 
-    private var isVideoMode: Boolean = false
-    private var currentVideoTrackId: String? = null
 
     /**
      * The idle player. Between transitions it holds nothing; to arm one,
@@ -1044,27 +1042,10 @@ class PlaybackService : MediaLibraryService() {
             // are invisible until someone reads their listening history.
             if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED &&
                 mediaItem?.mediaId != null &&
-                (mediaItem.mediaId == swappingMediaId || (isVideoMode && mediaItem.mediaId == currentVideoTrackId))
+                mediaItem.mediaId == swappingMediaId
             ) {
                 swappingMediaId = null
                 return
-            }
-
-            if (isVideoMode && mediaItem?.mediaId != currentVideoTrackId) {
-                isVideoMode = false
-                Companion.isVideoMode.value = false
-                currentVideoTrackId = null
-                activeVideoTrackId.value = null
-                activeVideoSong.value = null
-                webViewFallbackVideoId.value = null
-                isVideoFrameRendered.value = false
-                videoStatusText.value = ""
-                (exoPlayer.trackSelector as? DefaultTrackSelector)?.let { selector ->
-                    selector.setParameters(
-                        selector.buildUponParameters()
-                            .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
-                    )
-                }
             }
 
             // A receiver, if it is the speaker, is put on whatever became
@@ -2607,7 +2588,14 @@ class PlaybackService : MediaLibraryService() {
         val targetVideoId = args.getString("targetVideoId")
         val targetIsVideo = args.getBoolean("targetIsVideo", false)
 
-        if (targetVideoId == null || (targetVideoId == song.videoId && targetIsVideo == song.isVideo)) return
+        if (targetVideoId == null || targetVideoId == song.videoId) return
+
+        val position = activePlayer.currentPosition
+        val wasPlaying = activePlayer.isPlaying
+        // The new item has a different id, so the transition callback must be
+        // told to treat it as the same listen, not a new track to record.
+        swappingMediaId = targetVideoId
+        PlaybackTracker.onVersionSwapped(song.videoId, targetVideoId)
 
         // Create the target song with the appropriate flags
         val targetSong = song.copy(
@@ -2616,80 +2604,9 @@ class PlaybackService : MediaLibraryService() {
             isVideoOrigin = if (targetIsVideo) false else song.isVideoOrigin,
         )
 
-        if (targetIsVideo) {
-            playVideoStreamForTrack(targetSong)
-        } else {
-            restoreAudioStreamForTrack(targetSong)
-        }
-    }
-
-    private fun playVideoStreamForTrack(targetSong: Song) {
-        val activePlayer = player ?: return
-        val currentIndex = activePlayer.currentMediaItemIndex
-        if (currentIndex !in 0 until activePlayer.mediaItemCount) return
-
-        isVideoMode = true
-        Companion.isVideoMode.value = true
-        currentVideoTrackId = targetSong.videoId
-        activeVideoTrackId.value = targetSong.videoId
-        activeVideoSong.value = targetSong
-        webViewFallbackVideoId.value = targetSong.videoId
-        isVideoFrameRendered.value = false
-        videoStatusText.value = "Finding video..."
-
-        // NEVER mute active player audio! Main ExoPlayer keeps playing audio stream at full volume.
-        if (!activePlayer.isPlaying && activePlayer.playWhenReady) {
-            activePlayer.play()
-        }
-        refreshCustomLayouts()
-
-        // If targetSong.videoId is not already a valid 11-char YouTube ID, resolve OMV in background
-        val isValidYtId = targetSong.videoId.length == 11 &&
-            targetSong.videoId.all { it.isLetterOrDigit() || it == '-' || it == '_' }
-        if (!isValidYtId) {
-            scope.launch(Dispatchers.IO) {
-                val omv = runCatching { YtMusicRepository.resolveVideo(targetSong) }.getOrNull()
-                if (omv != null && omv.videoId.length == 11) {
-                    withContext(Dispatchers.Main) {
-                        if (isVideoMode) {
-                            currentVideoTrackId = omv.videoId
-                            activeVideoTrackId.value = omv.videoId
-                            activeVideoSong.value = omv
-                            webViewFallbackVideoId.value = omv.videoId
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private fun restoreAudioStreamForTrack(targetSong: Song) {
-        val activePlayer = player ?: return
-        val currentIndex = activePlayer.currentMediaItemIndex
-        if (currentIndex !in 0 until activePlayer.mediaItemCount) return
-
-        isVideoMode = false
-        Companion.isVideoMode.value = false
-        currentVideoTrackId = null
-        activeVideoTrackId.value = null
-        activeVideoSong.value = null
-        webViewFallbackVideoId.value = null
-        isVideoFrameRendered.value = false
-        videoStatusText.value = ""
-
-        // Main player audio remains active and unmuted
-        (activePlayer.trackSelector as? DefaultTrackSelector)?.let { selector ->
-            selector.setParameters(
-                selector.buildUponParameters()
-                    .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
-            )
-        }
-        (spare?.trackSelector as? DefaultTrackSelector)?.let { selector ->
-            selector.setParameters(
-                selector.buildUponParameters()
-                    .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
-            )
-        }
+        activePlayer.replaceMediaItem(index, targetSong.toMediaItem())
+        activePlayer.seekTo(index, position)
+        if (wasPlaying) activePlayer.play()
         refreshCustomLayouts()
     }
 
@@ -8501,11 +8418,13 @@ class PlaybackService : MediaLibraryService() {
                     val bundle = args.getBundle(EXTRA_SWAP_MEDIA_ITEM)
                     if (bundle != null) {
                         val targetSong = songFromBundle(bundle)
+                        // The listener's own choice outranks the music-only setting.
                         if (targetSong.isVideo) {
-                            playVideoStreamForTrack(targetSong)
+                            MusicOnlyPlayback.keep(targetSong.videoId)
                         } else {
-                            restoreAudioStreamForTrack(targetSong)
+                            session.player.currentMediaItem?.mediaId?.let(MusicOnlyPlayback::letGo)
                         }
+                        smoothSwapCurrentTrackVersion(targetSong.toMediaItem())
                     }
                 }
                 ACTION_QUEUE_DRAG -> {
@@ -9312,23 +9231,6 @@ class PlaybackService : MediaLibraryService() {
         @Volatile
         var activeExoPlayer: ExoPlayer? = null
             internal set
-        val isVideoFrameRendered = MutableStateFlow(false)
-        val videoStatusText = MutableStateFlow("")
-        /** Active videoId when in video mode. */
-        val activeVideoTrackId = MutableStateFlow<String?>(null)
-        val activeVideoSong = MutableStateFlow<Song?>(null)
-        val webViewFallbackVideoId = MutableStateFlow<String?>(null)
-        val isVideoMode = MutableStateFlow(false)
-        var onRequestSwitchToAudio: (() -> Unit)? = null
-
-        fun dismissVideoLoading() {
-            activeVideoTrackId.value = null
-            activeVideoSong.value = null
-            isVideoFrameRendered.value = false
-            videoStatusText.value = ""
-            isVideoMode.value = false
-            onRequestSwitchToAudio?.invoke()
-        }
         const val MEDIA_ROOT_ID = "root"
         const val MEDIA_RECENTS_ID = "recents"
         const val MEDIA_QUICK_PICKS_ID = "quick_picks"

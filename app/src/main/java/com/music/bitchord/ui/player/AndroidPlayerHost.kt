@@ -11,46 +11,17 @@ import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import android.view.TextureView
-import android.view.View
-import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.media3.common.C
-import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
-import androidx.media3.common.VideoSize
-import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.exoplayer.DefaultRenderersFactory
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.hls.HlsMediaSource
-import androidx.media3.exoplayer.source.ProgressiveMediaSource
-import com.music.bitchord.data.TrackLog
-import com.music.bitchord.data.innertube.PipePipeVideoExtractor
-import com.music.bitchord.data.innertube.ResolvedVideoStream
-import com.music.bitchord.data.innertube.StreamResolver
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
-import com.music.bitchord.playback.swapToVersion
-import com.music.bitchord.playback.toSong
-import androidx.media3.session.MediaController
+import com.music.bitchord.playback.MusicOnlyPlayback
 import com.music.bitchord.data.SongEditStore
 import com.music.bitchord.data.canvas.CanvasArtwork
 import com.music.bitchord.data.canvas.CanvasRepository
@@ -87,10 +58,6 @@ import kotlin.math.roundToInt
  * moved into the shared module.
  */
 class AndroidPlayerHost(context: Context) : PlayerHost {
-    companion object {
-        var activeController: MediaController? = null
-    }
-
     private val app = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val main = Handler(Looper.getMainLooper())
@@ -283,255 +250,19 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     // desktop has no answer to it, so it never sees the pick mode at all.
     override val lyricsShareAvailable: Boolean get() = true
 
-    override val isVideoFrameRendered: StateFlow<Boolean>
-        get() = PlaybackService.isVideoFrameRendered
-
-    override val videoStatusText: StateFlow<String>
-        get() = PlaybackService.videoStatusText
+    override val musicVideoSupported: Boolean get() = true
 
     @Composable
-    override fun VideoPlayer(modifier: Modifier) {
-        val activeTrackId by PlaybackService.activeVideoTrackId.collectAsStateWithLifecycle()
-        val activeSong by PlaybackService.activeVideoSong.collectAsStateWithLifecycle()
-        val isVideoMode by PlaybackService.isVideoMode.collectAsStateWithLifecycle()
-        val mainPlayer = PlaybackService.activeExoPlayer ?: activeController
+    override fun MusicVideo(videoId: String, fit: Boolean, onRenderedChanged: (Boolean) -> Unit, modifier: Modifier) =
+        AndroidMusicVideo(videoId, fit, onRenderedChanged, modifier)
 
-        val currentMediaItem = mainPlayer?.currentMediaItem
-        val mediaId = activeTrackId
-            ?: activeSong?.videoId
-            ?: currentMediaItem?.mediaId
-            ?: return
+    override fun showsMusicVideoPicture(videoId: String): Boolean = MusicOnlyPlayback.showsPicture(videoId)
 
-        val title = activeSong?.title
-            ?: currentMediaItem?.mediaMetadata?.title?.toString().orEmpty()
-        val artist = activeSong?.artist
-            ?: currentMediaItem?.mediaMetadata?.artist?.toString().orEmpty()
-        val durationSec = (
-            (activeSong?.durationMillis()?.takeIf { it > 0L }
-                ?: mainPlayer?.duration?.takeIf { it > 0L }
-                ?: 0L) / 1000L
-        ).toInt()
+    override val musicVideoAspect: StateFlow<Float> get() = MusicVideoEngine.aspect
 
-        val context = LocalContext.current
+    override val musicVideoQuality: StateFlow<MusicVideoQualityUi> get() = MusicVideoEngine.quality
 
-        // Dedicated ExoPlayer for video with volume = 0f to NEVER mute main audio player
-        val videoExoPlayer = remember(context) {
-            ExoPlayer.Builder(
-                context,
-                DefaultRenderersFactory(context).setEnableDecoderFallback(true),
-            ).build().apply {
-                volume = 0f
-                videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
-            }
-        }
-
-        // Clean up video player on dispose
-        DisposableEffect(videoExoPlayer) {
-            onDispose {
-                PlaybackService.isVideoFrameRendered.value = false
-                PlaybackService.videoStatusText.value = ""
-                videoExoPlayer.stop()
-                videoExoPlayer.clearMediaItems()
-                videoExoPlayer.release()
-            }
-        }
-
-        var retryCount by remember(mediaId) { mutableStateOf(0) }
-
-        // Listen for rendered first frame or video size to notify UI that video is ready
-        DisposableEffect(videoExoPlayer) {
-            val listener = object : Player.Listener {
-                override fun onRenderedFirstFrame() {
-                    PlaybackService.isVideoFrameRendered.value = true
-                    PlaybackService.videoStatusText.value = ""
-                }
-
-                override fun onVideoSizeChanged(videoSize: VideoSize) {
-                    if (videoSize.width > 0 && videoSize.height > 0) {
-                        PlaybackService.isVideoFrameRendered.value = true
-                        PlaybackService.videoStatusText.value = ""
-                    }
-                }
-
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    if (playbackState == Player.STATE_READY) {
-                        PlaybackService.isVideoFrameRendered.value = true
-                        PlaybackService.videoStatusText.value = ""
-                    }
-                }
-
-                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                    TrackLog.w("VideoPlayer", "videoExoPlayer error: ${error.message}, errorCode: ${error.errorCodeName}")
-                    if (retryCount < 3) {
-                        PlaybackService.videoStatusText.value = "Retrying video (${retryCount + 1}/3)..."
-                        retryCount++
-                    } else {
-                        PlaybackService.videoStatusText.value = "Error: ${error.javaClass.simpleName}: ${error.message?.take(40)}"
-                    }
-                }
-            }
-            videoExoPlayer.addListener(listener)
-            onDispose {
-                videoExoPlayer.removeListener(listener)
-            }
-        }
-
-        // Synchronize play/pause and seeks from main player
-        DisposableEffect(mainPlayer, videoExoPlayer) {
-            if (mainPlayer == null) return@DisposableEffect onDispose {}
-
-            val syncListener = object : Player.Listener {
-                override fun onIsPlayingChanged(isPlaying: Boolean) {
-                    if (isPlaying) {
-                        if (!videoExoPlayer.isPlaying && videoExoPlayer.playbackState != Player.STATE_ENDED) {
-                            videoExoPlayer.play()
-                        }
-                    } else {
-                        if (videoExoPlayer.isPlaying) {
-                            videoExoPlayer.pause()
-                        }
-                    }
-                }
-
-                override fun onPositionDiscontinuity(
-                    oldPosition: Player.PositionInfo,
-                    newPosition: Player.PositionInfo,
-                    reason: Int,
-                ) {
-                    if (reason == Player.DISCONTINUITY_REASON_SEEK) {
-                        val dur = videoExoPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
-                        videoExoPlayer.seekTo(newPosition.positionMs.coerceAtMost(dur))
-                    }
-                }
-            }
-
-            mainPlayer.addListener(syncListener)
-            if (mainPlayer.isPlaying) {
-                videoExoPlayer.play()
-            } else {
-                videoExoPlayer.pause()
-            }
-
-            onDispose {
-                mainPlayer.removeListener(syncListener)
-            }
-        }
-
-        var resolvedStream by remember(mediaId) { mutableStateOf<ResolvedVideoStream?>(null) }
-
-        // Resolve video stream via StreamResolver working YouTube pipeline
-        // Keyed ONLY on (mediaId, isVideoMode) to avoid premature coroutine cancellation
-        LaunchedEffect(mediaId, isVideoMode) {
-            if (!isVideoMode) return@LaunchedEffect
-            PlaybackService.isVideoFrameRendered.value = false
-            PlaybackService.videoStatusText.value = "Finding video..."
-
-            try {
-                // Crucially: Ensure search and extraction run on Dispatchers.IO
-                val stream = withContext(Dispatchers.IO) {
-                    StreamResolver.resolveVideoStreamForTrack(
-                        videoId = mediaId,
-                        title = title,
-                        artist = artist,
-                        durationSec = durationSec,
-                        candidateOffset = 0,
-                        onStatusUpdate = { status ->
-                            PlaybackService.videoStatusText.value = status
-                        },
-                    )
-                }
-
-                if (stream != null) {
-                    PlaybackService.videoStatusText.value = "Extracting stream..."
-                    resolvedStream = stream
-
-                    PlaybackService.videoStatusText.value = "Buffering video..."
-                    val headers = StreamResolver.mediaHeadersFor(stream.url)
-                    val ua = stream.userAgent.ifBlank {
-                        headers["User-Agent"] ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
-                    }
-
-                    val reqHeaders = HashMap<String, String>().apply {
-                        put("Referer", "https://www.youtube.com/")
-                        put("Origin", "https://www.youtube.com")
-                        headers.forEach { (k, v) -> put(k, v) }
-                    }
-
-                    val dataSourceFactory = DefaultHttpDataSource.Factory()
-                        .setUserAgent(ua)
-                        .setDefaultRequestProperties(reqHeaders)
-                        .setAllowCrossProtocolRedirects(true)
-                        .setConnectTimeoutMs(8000)
-                        .setReadTimeoutMs(8000)
-
-                    val mediaSource = if (stream.isHls) {
-                        HlsMediaSource.Factory(dataSourceFactory)
-                            .createMediaSource(MediaItem.fromUri(stream.url))
-                    } else {
-                        ProgressiveMediaSource.Factory(dataSourceFactory)
-                            .createMediaSource(MediaItem.fromUri(stream.url))
-                    }
-
-                    val currentPos = mainPlayer?.currentPosition ?: 0L
-                    val currentDur = mainPlayer?.duration?.takeIf { it > 0 } ?: Long.MAX_VALUE
-                    videoExoPlayer.setMediaSource(mediaSource)
-                    if (currentPos > 0L) {
-                        videoExoPlayer.seekTo(currentPos.coerceAtMost(currentDur))
-                    }
-                    videoExoPlayer.prepare()
-                    videoExoPlayer.playWhenReady = true
-                } else {
-                    TrackLog.w("VideoPlayer", "Failed to resolve video stream for $mediaId ($title - $artist)")
-                    PlaybackService.videoStatusText.value = "Error: Video unavailable"
-                    delay(2000L)
-                    PlaybackService.isVideoMode.value = false
-                    PlaybackService.dismissVideoLoading()
-                }
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                TrackLog.w("VideoPlayer", "Exception resolving video for $mediaId: ${e.message}")
-                PlaybackService.videoStatusText.value = "Error: Video unavailable"
-                delay(2000L)
-                PlaybackService.isVideoMode.value = false
-                PlaybackService.dismissVideoLoading()
-            }
-        }
-
-        // Tightly sync drift for long podcasts / episodes (>10 min) where video ID matches
-        LaunchedEffect(mainPlayer, videoExoPlayer, durationSec, mediaId, resolvedStream?.videoId) {
-            val isExactEpisode = (resolvedStream?.videoId == mediaId) && durationSec > 600
-            if (isExactEpisode && mainPlayer != null) {
-                while (isActive) {
-                    delay(1000L)
-                    if (mainPlayer.isPlaying && videoExoPlayer.isPlaying) {
-                        val audioPos = mainPlayer.currentPosition
-                        val videoPos = videoExoPlayer.currentPosition
-                        if (kotlin.math.abs(videoPos - audioPos) > 400L) {
-                            val dur = videoExoPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
-                            videoExoPlayer.seekTo(audioPos.coerceAtMost(dur))
-                        }
-                    }
-                }
-            }
-        }
-
-        AndroidView(
-            factory = { ctx ->
-                TextureView(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    )
-                    videoExoPlayer.setVideoTextureView(this)
-                }
-            },
-            update = { /* Surface attached once in factory. Do NOT setVideoTextureView here to avoid resetting playback */ },
-            onRelease = { textureView ->
-                videoExoPlayer.clearVideoTextureView(textureView)
-            },
-            modifier = modifier,
-        )
-    }
+    override fun setMusicVideoQuality(height: Int?) = MusicVideoEngine.setQuality(height)
 
     @Composable
     override fun LyricsShareSheet(
