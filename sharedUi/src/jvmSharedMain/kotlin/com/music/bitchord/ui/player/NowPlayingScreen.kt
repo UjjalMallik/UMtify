@@ -74,8 +74,15 @@ import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.FastRewind
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.IosShare
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -2364,21 +2371,6 @@ fun NowPlayingScreen(
                     )
                 }
 
-                if (heroMode) {
-                    // Smooth, rich vertical gradient scrim over the bottom half of the full-screen
-                    // cover art so the playback controls and lyrics pop beautifully and look premium.
-                    Box(
-                        modifier = Modifier
-                            .matchParentSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f)),
-                                    startY = playerBounds.height.toFloat() * 0.45f,
-                                    endY = playerBounds.height.toFloat(),
-                                ),
-                            ),
-                    )
-                }
 
                 // Spotify Canvas keeps its pixels sharp across the whole phone. Pure
                 // glass blur belongs only under the temporary lower control deck,
@@ -2961,10 +2953,17 @@ fun NowPlayingScreen(
                         }
                         // The card's rounding belongs to the card. As the sleeve
                         // becomes the full-bleed banner its corners unwind to
-                        // square, so nothing of the photocard's shape survives on
-                        // an image that is now the screen itself.
-                        fun sleeveChromeCorner(): Dp =
-                            lerp(sleeveCorner(), 0.dp, bannerShare())
+                        // square. When docking into mini player (t < 1f), maintain
+                        // smooth rounded corners throughout the entire collapse.
+                        fun sleeveChromeCorner(): Dp {
+                            val corner = sleeveCorner()
+                            val t = dockT()
+                            if (t < 1f) {
+                                val miniCorner = dock?.miniArtCorner() ?: 12.dp
+                                return lerp(miniCorner, 20.dp, t)
+                            }
+                            return lerp(corner, 0.dp, bannerShare())
+                        }
 
                         // The sleeve proper — card, banner and thumbnail in turn, see
                         // [sleeveRect]. Separate from the slot below, which keeps the
@@ -3087,10 +3086,15 @@ fun NowPlayingScreen(
                                 // the card still being there.
                                 .drawWithContent {
                                     drawContent()
-                                    val edge = 0.16f * (1f - p()).coerceIn(0f, 1f) *
-                                        (1f - bannerShare())
+                                    val edge = if (dockT() < 1f) {
+                                        0.18f
+                                    } else {
+                                        0.16f * (1f - p()).coerceIn(0f, 1f) *
+                                            (1f - bannerShare())
+                                    }
                                     if (edge > 0.001f) {
                                         val line = 1.dp.toPx()
+                                        val cornerPx = with(density) { sleeveChromeCorner().toPx() }
                                         drawRoundRect(
                                             color = Color.White.copy(alpha = edge),
                                             topLeft = Offset(line / 2f, line / 2f),
@@ -3099,7 +3103,7 @@ fun NowPlayingScreen(
                                                 height = size.height - line,
                                             ),
                                             cornerRadius = CornerRadius(
-                                                with(density) { sleeveCorner().toPx() } - line / 2f,
+                                                (cornerPx - line / 2f).coerceAtLeast(0f),
                                             ),
                                             style = Stroke(width = line),
                                         )
@@ -3258,24 +3262,6 @@ fun NowPlayingScreen(
                             }
                         }
 
-                        // Smooth vertical gradient scrim over bottom half of full-screen cover art
-                        if (heroMode && playerBounds.height > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(
-                                        Brush.verticalGradient(
-                                            colors = listOf(
-                                                Color.Transparent,
-                                                Color.Black.copy(alpha = 0.50f),
-                                                Color.Black.copy(alpha = 0.90f),
-                                            ),
-                                            startY = playerBounds.height.toFloat() * 0.40f,
-                                            endY = playerBounds.height.toFloat(),
-                                        ),
-                                    ),
-                            )
-                        }
 
                         // The card's slot: where the sleeve sits as a card, whether or
                         // not it is being drawn as one. Takes the gestures and measures
@@ -3536,7 +3522,7 @@ fun NowPlayingScreen(
                                     icon = if (lyricPicker.picking) {
                                         Icons.Rounded.Close
                                     } else {
-                                        Icons.Rounded.IosShare
+                                        Icons.Rounded.Share
                                     },
                                     contentDescription = stringResource(
                                         if (lyricPicker.picking) Res.string.cancel else Res.string.share,
@@ -3555,7 +3541,7 @@ fun NowPlayingScreen(
                                 // there is no watch page to send — the heart
                                 // stays, and the title takes the room.
                                 PlayerSurfaceButton(
-                                    icon = Icons.Rounded.IosShare,
+                                    icon = Icons.Rounded.Share,
                                     contentDescription = stringResource(Res.string.share),
                                     onClick = onShare,
                                 )
@@ -3925,6 +3911,204 @@ fun NowPlayingScreen(
                     }
                     }
                 }
+                }
+
+                // Sleek frosted glass top rim & ambient glow on collapsing sheet edge
+                if (dockMoving) {
+                    val rimAlpha = (1f - dockT()).coerceIn(0f, 1f)
+                    if (rimAlpha > 0.01f) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(3.dp)
+                                .align(Alignment.TopCenter)
+                                .background(
+                                    Brush.horizontalGradient(
+                                        colors = listOf(
+                                            Color.Transparent,
+                                            Color.White.copy(alpha = 0.25f * rimAlpha),
+                                            Color.White.copy(alpha = 0.45f * rimAlpha),
+                                            Color.White.copy(alpha = 0.25f * rimAlpha),
+                                            Color.Transparent,
+                                        ),
+                                    ),
+                                ),
+                        )
+                    }
+                }
+
+                // Progressive Liquid Glass morphing bar beside collapsing artwork during swipe-down minimize
+                if (dockMoving && dockT() < 0.88f) {
+                    val t = dockT()
+                    val morphAlpha = ((0.88f - t) / 0.35f).coerceIn(0f, 1f)
+                    val artRightPx = dockFrame.portalLeft + dockFrame.sleeve.width
+                    val artCenterYPx = dockFrame.portalTop + dockFrame.sleeve.height / 2f
+                    val rightBarLeftPx = artRightPx + with(density) { 8.dp.toPx() }
+                    val rightBarWidthPx = (playerBounds.width.toFloat() - with(density) { 14.dp.toPx() } - rightBarLeftPx).coerceAtLeast(0f)
+                    val rightBarHeightPx = with(density) { 50.dp.toPx() }
+                    val rightBarTopPx = artCenterYPx - rightBarHeightPx / 2f
+
+                    if (rightBarWidthPx > with(density) { 80.dp.toPx() } && morphAlpha > 0.01f) {
+                        Box(
+                            modifier = Modifier
+                                .offset {
+                                    IntOffset(
+                                        x = rightBarLeftPx.roundToInt(),
+                                        y = rightBarTopPx.roundToInt(),
+                                    )
+                                }
+                                .size(
+                                    width = with(density) { rightBarWidthPx.toDp() },
+                                    height = with(density) { rightBarHeightPx.toDp() },
+                                )
+                                .clip(RoundedCornerShape(25.dp))
+                                .background(Color(0xFF1E1C22).copy(alpha = 0.82f * morphAlpha))
+                                .border(
+                                    width = 1.dp,
+                                    brush = Brush.horizontalGradient(
+                                        colors = listOf(
+                                            Color.White.copy(alpha = 0.26f * morphAlpha),
+                                            Color.White.copy(alpha = 0.10f * morphAlpha),
+                                        ),
+                                    ),
+                                    shape = RoundedCornerShape(25.dp),
+                                )
+                                .padding(start = 12.dp, end = 8.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.Center,
+                                ) {
+                                    Text(
+                                        text = displaySong.title,
+                                        style = MaterialTheme.typography.titleSmall.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 13.5.sp,
+                                        ),
+                                        color = Color.White.copy(alpha = morphAlpha),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        text = displaySong.artist,
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontSize = 11.sp,
+                                        ),
+                                        color = Color.White.copy(alpha = 0.65f * morphAlpha),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+
+                                // Audio Waveform / Visualizer pill
+                                Row(
+                                    modifier = Modifier
+                                        .padding(horizontal = 6.dp)
+                                        .height(14.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    val waveAnim = rememberInfiniteTransition(label = "morphWave")
+                                    val b1 by waveAnim.animateFloat(
+                                        initialValue = 0.35f,
+                                        targetValue = 0.95f,
+                                        animationSpec = infiniteRepeatable(
+                                            animation = tween(420, easing = LinearEasing),
+                                            repeatMode = RepeatMode.Reverse,
+                                        ),
+                                        label = "wb1",
+                                    )
+                                    val b2 by waveAnim.animateFloat(
+                                        initialValue = 0.85f,
+                                        targetValue = 0.25f,
+                                        animationSpec = infiniteRepeatable(
+                                            animation = tween(360, easing = LinearEasing),
+                                            repeatMode = RepeatMode.Reverse,
+                                        ),
+                                        label = "wb2",
+                                    )
+                                    val b3 by waveAnim.animateFloat(
+                                        initialValue = 0.40f,
+                                        targetValue = 1.0f,
+                                        animationSpec = infiniteRepeatable(
+                                            animation = tween(490, easing = LinearEasing),
+                                            repeatMode = RepeatMode.Reverse,
+                                        ),
+                                        label = "wb3",
+                                    )
+                                    val barH1 = if (isPlaying) b1 else 0.4f
+                                    val barH2 = if (isPlaying) b2 else 0.6f
+                                    val barH3 = if (isPlaying) b3 else 0.3f
+                                    Box(
+                                        Modifier
+                                            .width(2.5.dp)
+                                            .height((14 * barH1).dp)
+                                            .background(
+                                                Color.White.copy(alpha = 0.85f * morphAlpha),
+                                                RoundedCornerShape(1.dp),
+                                            ),
+                                    )
+                                    Box(
+                                        Modifier
+                                            .width(2.5.dp)
+                                            .height((14 * barH2).dp)
+                                            .background(
+                                                Color.White.copy(alpha = 0.85f * morphAlpha),
+                                                RoundedCornerShape(1.dp),
+                                            ),
+                                    )
+                                    Box(
+                                        Modifier
+                                            .width(2.5.dp)
+                                            .height((14 * barH3).dp)
+                                            .background(
+                                                Color.White.copy(alpha = 0.85f * morphAlpha),
+                                                RoundedCornerShape(1.dp),
+                                            ),
+                                    )
+                                }
+
+                                // Play / Pause Glass Control
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.12f * morphAlpha))
+                                        .clickable(onClick = onPlayPause),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                        contentDescription = null,
+                                        tint = Color.White.copy(alpha = morphAlpha),
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+
+                                Spacer(Modifier.width(6.dp))
+
+                                // Next Track Glass Control
+                                Box(
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(CircleShape)
+                                        .clickable(enabled = hasNext, onClick = onNext),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.FastForward,
+                                        contentDescription = null,
+                                        tint = Color.White.copy(alpha = if (hasNext) 0.75f * morphAlpha else 0.30f * morphAlpha),
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
                 playerOverlays()
             }

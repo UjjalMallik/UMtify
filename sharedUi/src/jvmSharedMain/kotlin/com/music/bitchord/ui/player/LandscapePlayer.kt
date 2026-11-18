@@ -31,7 +31,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.IosShare
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -466,7 +466,7 @@ internal fun LandscapeCredits(
         Spacer(Modifier.width(10.dp))
         if (song.hasShareableVideoId) {
             PlayerSurfaceButton(
-                icon = Icons.Rounded.IosShare,
+                icon = Icons.Rounded.Share,
                 contentDescription = stringResource(Res.string.share),
                 onClick = onShare,
             )
