@@ -4270,13 +4270,13 @@ private fun BitChordApp(
                 // None of M3's: it follows the sheet's own animation, which is
                 // no longer what moves the player. The player draws its own,
                 // off where the player actually is — see the content below.
-                scrimColor = Color.Black.copy(alpha = 0.7f),
+                scrimColor = if (reducePlayerMotion) BottomSheetDefaults.ScrimColor else Color.Transparent,
                 // The player fills the screen and paints its own background to
                 // the very top, so the sheet's default 28.dp top corners would
                 // only cut two notches out of the artwork behind the status bar.
                 // Square, and not clipped along its top — see [PlayerSheetShape].
                 shape = PlayerSheetShape,
-                containerColor = Color.Black,
+                containerColor = Color.Transparent,
                 dragHandle = null,
                 contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
                 // M3 caps a bottom sheet at [BottomSheetDefaults.SheetMaxWidth]
@@ -4314,7 +4314,6 @@ private fun BitChordApp(
                         // Where the app is holding the player, if it is — see
                         // [PlayerSheetMotion.contentOffsetPx]. Placement only.
                         .offset { IntOffset(0, playerSheetMotion.contentOffsetPx()) }
-                        .background(Color.Black)
                         // The dim behind the player, from the window's top to
                         // its bottom whatever the player's offset, and as deep
                         // as the player is open.
@@ -4342,12 +4341,7 @@ private fun BitChordApp(
                         },
                 ) {
                     CompositionLocalProvider(LocalPlayerDock provides activeDock) {
-                        Surface(
-                            modifier = Modifier.fillMaxSize(),
-                            color = Color.Black,
-                        ) {
-                            nowPlaying(playerSong)
-                        }
+                        nowPlaying(playerSong)
                     }
                 }
             }

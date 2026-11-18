@@ -3069,7 +3069,10 @@ fun NowPlayingScreen(
                                     clip = true
                                     // The mask below erases part of what this layer
                                     // drew, which it can only do in a buffer of its own.
-                                    compositingStrategy = if (sleeveShown() > 0f && sleeveShown() < 1f) {
+                                    // CompositingStrategy.Offscreen is strictly required whenever
+                                    // sleeveShown > 0 so DstIn cannot erase the window framebuffer
+                                    // or punch through the sheet's background layers.
+                                    compositingStrategy = if (sleeveShown() > 0f) {
                                         CompositingStrategy.Offscreen
                                     } else {
                                         CompositingStrategy.Auto
