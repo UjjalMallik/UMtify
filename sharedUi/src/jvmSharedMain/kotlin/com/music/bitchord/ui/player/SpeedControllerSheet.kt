@@ -11,6 +11,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,11 +27,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -56,6 +60,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.music.bitchord.playback.VoiceEffect
 import com.music.bitchord.ui.components.optimizedHazeEffect
 import com.music.bitchord.ui.haptics.Haptic
 import com.music.bitchord.ui.haptics.rememberHaptics
@@ -74,7 +79,6 @@ private val DrawerMaxWidth = 640.dp
 private const val DismissDragFraction = 0.25f
 
 private val SPEED_PRESETS = listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
-private val PITCH_PRESETS = listOf(0.8f, 1.0f, 1.2f)
 
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
@@ -84,10 +88,10 @@ internal fun SpeedControllerSheet(
     modifier: Modifier = Modifier,
 ) {
     val speedFlow by PlayerPlatform.host.playbackSpeed.collectAsStateWithLifecycle()
-    val pitchFlow by PlayerPlatform.host.playbackPitch.collectAsStateWithLifecycle()
+    val activeVoiceEffect by PlayerPlatform.host.voiceEffect.collectAsStateWithLifecycle()
 
     var currentSpeed by remember(speedFlow) { mutableFloatStateOf(speedFlow) }
-    var currentPitch by remember(pitchFlow) { mutableFloatStateOf(pitchFlow) }
+    var showCustomInput by remember { mutableStateOf(false) }
 
     val haptics = rememberHaptics()
     var drag by remember { mutableFloatStateOf(0f) }
@@ -106,10 +110,15 @@ internal fun SpeedControllerSheet(
     LaunchedEffect(Unit) { shown = true }
     val reduceDynamicBlur by PlayerSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
 
-    fun updateSpeedAndPitch(speed: Float, pitch: Float) {
+    fun updateSpeed(speed: Float) {
         currentSpeed = speed
-        currentPitch = pitch
-        PlayerPlatform.host.setPlaybackSpeedAndPitch(speed, pitch)
+        val currentPitchEffect = activeVoiceEffect.pitch
+        PlayerPlatform.host.setPlaybackSpeedAndPitch(speed, currentPitchEffect)
+    }
+
+    fun selectVoiceEffect(effect: VoiceEffect) {
+        haptics.play(Haptic.Tap)
+        PlayerPlatform.host.setVoiceEffect(effect)
     }
 
     Box(
@@ -199,7 +208,7 @@ internal fun SpeedControllerSheet(
                         )
                         Column {
                             Text(
-                                text = "Speed Controller",
+                                text = "Speed & Voice Effects",
                                 style = MaterialTheme.typography.titleLarge.copy(
                                     fontSize = 19.sp,
                                     fontWeight = FontWeight.Bold,
@@ -207,7 +216,7 @@ internal fun SpeedControllerSheet(
                                 color = Color.White,
                             )
                             Text(
-                                text = "Fine-tune speed & pitch dynamically",
+                                text = "Custom playback speed & DSP acoustic engine",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color.White.copy(alpha = 0.55f),
                             )
@@ -217,18 +226,19 @@ internal fun SpeedControllerSheet(
                     IconButton(
                         onClick = {
                             haptics.play(Haptic.Tap)
-                            updateSpeedAndPitch(1.0f, 1.0f)
+                            updateSpeed(1.0f)
+                            selectVoiceEffect(VoiceEffect.NORMAL)
                         },
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Refresh,
-                            contentDescription = "Reset speed and pitch",
+                            contentDescription = "Reset speed and effects",
                             tint = Color.White.copy(alpha = 0.7f),
                         )
                     }
                 }
 
-                // --- SPEED CONTROLLER ---
+                // --- SPEED CONTROLLER SECTION ---
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -248,31 +258,18 @@ internal fun SpeedControllerSheet(
                     )
                 }
 
-                Slider(
-                    value = currentSpeed,
-                    onValueChange = { newSpeed ->
-                        val rounded = (newSpeed * 20f).roundToInt() / 20f
-                        currentSpeed = rounded
-                        PlayerPlatform.host.setPlaybackSpeedAndPitch(rounded, currentPitch)
-                    },
-                    valueRange = 0.5f..2.0f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = MaterialTheme.colorScheme.primary,
-                        activeTrackColor = MaterialTheme.colorScheme.primary,
-                        inactiveTrackColor = Color.White.copy(alpha = 0.15f),
-                    ),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                )
+                // Speed preset chips (0.75x, 1x, 1.25x, 1.5x, 2x, Custom)
+                val matchesPreset = SPEED_PRESETS.any { abs(currentSpeed - it) < 0.02f }
+                val isCustomActive = !matchesPreset || showCustomInput
 
-                // Speed preset chips (0.75x, 1x, 1.25x, 1.5x, 2x)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 18.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        .padding(top = 10.dp, bottom = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     for (preset in SPEED_PRESETS) {
-                        val isSelected = abs(currentSpeed - preset) < 0.02f
+                        val isSelected = !isCustomActive && abs(currentSpeed - preset) < 0.02f
                         val label = if (preset == 1.0f || preset == 2.0f) "${preset.toInt()}x" else "${preset}x"
                         Box(
                             modifier = Modifier
@@ -285,33 +282,129 @@ internal fun SpeedControllerSheet(
                                 )
                                 .clickable {
                                     haptics.play(Haptic.Tap)
-                                    updateSpeedAndPitch(preset, currentPitch)
+                                    showCustomInput = false
+                                    updateSpeed(preset)
                                 },
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(
                                 text = label,
-                                fontSize = 13.sp,
+                                fontSize = 12.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.85f),
                             )
                         }
                     }
+
+                    // Custom preset chip
+                    Box(
+                        modifier = Modifier
+                            .weight(1.2f)
+                            .height(36.dp)
+                            .clip(ChipShape)
+                            .background(
+                                if (isCustomActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+                                else Color.White.copy(alpha = 0.08f),
+                            )
+                            .clickable {
+                                haptics.play(Haptic.Tap)
+                                showCustomInput = true
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Tune,
+                                contentDescription = null,
+                                tint = if (isCustomActive) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.85f),
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Text(
+                                text = "Custom",
+                                fontSize = 12.sp,
+                                fontWeight = if (isCustomActive) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isCustomActive) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.85f),
+                            )
+                        }
+                    }
                 }
 
-                // --- PITCH CONTROLLER ---
+                // Fine-grained custom speed slider (0.1x to 3.0x)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                ) {
+                    Slider(
+                        value = currentSpeed.coerceIn(0.1f, 3.0f),
+                        onValueChange = { newSpeed ->
+                            val rounded = (newSpeed * 20f).roundToInt() / 20f
+                            val clamped = rounded.coerceIn(0.1f, 3.0f)
+                            currentSpeed = clamped
+                            val currentPitchEffect = activeVoiceEffect.pitch
+                            PlayerPlatform.host.setPlaybackSpeedAndPitch(clamped, currentPitchEffect)
+                        },
+                        valueRange = 0.1f..3.0f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary,
+                            inactiveTrackColor = Color.White.copy(alpha = 0.15f),
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = "0.1x (Slow)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.45f),
+                        )
+                        Text(
+                            text = "1.0x",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.45f),
+                        )
+                        Text(
+                            text = "3.0x (Ultra-Fast)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.45f),
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(18.dp))
+
+                // --- VOICE EFFECTS SYSTEM SECTION ---
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.GraphicEq,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = "Voice Effects",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = Color.White,
+                        )
+                    }
                     Text(
-                        text = "Pitch",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = Color.White,
-                    )
-                    Text(
-                        text = String.format(Locale.US, "%.2fx", currentPitch),
+                        text = activeVoiceEffect.label,
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary,
@@ -319,49 +412,39 @@ internal fun SpeedControllerSheet(
                     )
                 }
 
-                Slider(
-                    value = currentPitch,
-                    onValueChange = { newPitch ->
-                        val rounded = (newPitch * 20f).roundToInt() / 20f
-                        currentPitch = rounded
-                        PlayerPlatform.host.setPlaybackSpeedAndPitch(currentSpeed, rounded)
-                    },
-                    valueRange = 0.5f..2.0f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = MaterialTheme.colorScheme.primary,
-                        activeTrackColor = MaterialTheme.colorScheme.primary,
-                        inactiveTrackColor = Color.White.copy(alpha = 0.15f),
-                    ),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                Text(
+                    text = "Acoustic DSP transformations & pitch shifting",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
                 )
 
-                // Pitch preset chips (0.8x, 1x, 1.2x)
+                // Horizontal scrollable preset chips: Normal, Chipmunk, Demon, Robot, Stadium, Underwater
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 6.dp),
+                        .horizontalScroll(rememberScrollState())
+                        .padding(top = 10.dp, bottom = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    for (preset in PITCH_PRESETS) {
-                        val isSelected = abs(currentPitch - preset) < 0.02f
-                        val label = if (preset == 1.0f) "1x (Normal)" else "${preset}x"
+                    for (effect in VoiceEffect.entries) {
+                        val isSelected = activeVoiceEffect == effect
                         Box(
                             modifier = Modifier
-                                .weight(1f)
-                                .height(36.dp)
+                                .height(38.dp)
                                 .clip(ChipShape)
                                 .background(
                                     if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
                                     else Color.White.copy(alpha = 0.08f),
                                 )
                                 .clickable {
-                                    haptics.play(Haptic.Tap)
-                                    updateSpeedAndPitch(currentSpeed, preset)
-                                },
+                                    selectVoiceEffect(effect)
+                                }
+                                .padding(horizontal = 14.dp),
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(
-                                text = label,
+                                text = effect.label,
                                 fontSize = 13.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.85f),

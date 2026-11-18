@@ -3901,6 +3901,7 @@ fun NowPlayingScreen(
     }
 }
 }
+}
 
 /**
  * The upward half of the sleeve's vertical gesture: dragged up, the artwork

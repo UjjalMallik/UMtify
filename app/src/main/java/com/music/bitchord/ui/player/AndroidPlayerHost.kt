@@ -38,6 +38,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.FastRewind
 import androidx.compose.material.icons.rounded.Fullscreen
+import com.music.bitchord.playback.VoiceEffect
 import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.HighQuality
@@ -349,8 +350,14 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
     override val playbackPitch: StateFlow<Float> get() = PlaybackService.playbackPitchFlow
 
+    override val voiceEffect: StateFlow<VoiceEffect> get() = PlaybackService.voiceEffectFlow
+
     override fun setPlaybackSpeedAndPitch(speed: Float, pitch: Float) {
         PlaybackService.setPlaybackParameters(speed, pitch)
+    }
+
+    override fun setVoiceEffect(effect: VoiceEffect) {
+        PlaybackService.setVoiceEffect(effect)
     }
 
     @Composable

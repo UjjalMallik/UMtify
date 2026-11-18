@@ -15,6 +15,7 @@ import com.music.bitchord.data.settings.LastPlayerScreen
 import com.music.bitchord.data.settings.SmartAnalysis
 import com.music.bitchord.data.settings.MixBlend
 import com.music.bitchord.data.settings.TransitionWindow
+import com.music.bitchord.playback.VoiceEffect
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,7 +47,11 @@ interface PlayerHost {
 
     val playbackPitch: StateFlow<Float> get() = MutableStateFlow(1f)
 
+    val voiceEffect: StateFlow<VoiceEffect> get() = MutableStateFlow(VoiceEffect.NORMAL)
+
     fun setPlaybackSpeedAndPitch(speed: Float, pitch: Float) = Unit
+
+    fun setVoiceEffect(effect: VoiceEffect) = Unit
 
     /**
      * Whether this platform shows a music video's picture over the playing

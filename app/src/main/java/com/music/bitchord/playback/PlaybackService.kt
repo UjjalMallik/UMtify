@@ -14,9 +14,12 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.MediaMetadataRetriever
 import android.media.audiofx.AudioEffect
+import android.media.audiofx.BassBoost
 import android.media.audiofx.DynamicsProcessing
 import android.media.audiofx.EnvironmentalReverb
+import android.media.audiofx.PresetReverb
 import android.media.audiofx.Virtualizer
+import com.music.bitchord.playback.VoiceEffect
 import android.net.Uri
 import android.widget.Toast
 import android.os.Bundle
@@ -642,6 +645,8 @@ class PlaybackService : MediaLibraryService() {
     private var nativeVirtualizer: Virtualizer? = null
     private var nativeEnvironmentalReverb: EnvironmentalReverb? = null
     private var nativeDynamicsProcessing: DynamicsProcessing? = null
+    private var nativePresetReverb: PresetReverb? = null
+    private var nativeBassBoost: BassBoost? = null
 
     /**
      * Whether the format currently arriving at the active player's decoder
@@ -3494,6 +3499,87 @@ class PlaybackService : MediaLibraryService() {
                 nativeDynamicsProcessing = null
             }
         }
+        applyVoiceAudioEffects(voiceEffectFlow.value)
+    }
+
+    private fun applyVoiceAudioEffects(effect: VoiceEffect) {
+        val sessionId = advertisedAudioEffectSessionId
+        if (sessionId == C.AUDIO_SESSION_ID_UNSET || sessionId <= 0) return
+
+        when (effect) {
+            VoiceEffect.NORMAL, VoiceEffect.CHIPMUNK, VoiceEffect.DEMON -> {
+                try {
+                    nativePresetReverb?.enabled = false
+                    nativePresetReverb?.release()
+                } catch (_: Throwable) {}
+                nativePresetReverb = null
+
+                try {
+                    nativeBassBoost?.enabled = false
+                    nativeBassBoost?.release()
+                } catch (_: Throwable) {}
+                nativeBassBoost = null
+            }
+            VoiceEffect.STADIUM -> {
+                try {
+                    nativeBassBoost?.enabled = false
+                    nativeBassBoost?.release()
+                } catch (_: Throwable) {}
+                nativeBassBoost = null
+
+                try {
+                    if (nativePresetReverb == null) {
+                        nativePresetReverb = PresetReverb(0, sessionId)
+                    }
+                    nativePresetReverb?.apply {
+                        preset = PresetReverb.PRESET_LARGEHALL
+                        enabled = true
+                    }
+                } catch (_: Throwable) {
+                    nativePresetReverb = null
+                }
+            }
+            VoiceEffect.ROBOT -> {
+                try {
+                    nativeBassBoost?.enabled = false
+                    nativeBassBoost?.release()
+                } catch (_: Throwable) {}
+                nativeBassBoost = null
+
+                try {
+                    if (nativePresetReverb == null) {
+                        nativePresetReverb = PresetReverb(0, sessionId)
+                    }
+                    nativePresetReverb?.apply {
+                        preset = PresetReverb.PRESET_SMALLROOM
+                        enabled = true
+                    }
+                } catch (_: Throwable) {
+                    nativePresetReverb = null
+                }
+            }
+            VoiceEffect.UNDERWATER -> {
+                try {
+                    nativePresetReverb?.enabled = false
+                    nativePresetReverb?.release()
+                } catch (_: Throwable) {}
+                nativePresetReverb = null
+
+                try {
+                    if (nativeBassBoost == null) {
+                        nativeBassBoost = BassBoost(0, sessionId)
+                    }
+                    nativeBassBoost?.apply {
+                        if (strengthSupported) {
+                            setStrength(1000.toShort())
+                        }
+                        enabled = true
+                    }
+                } catch (_: Throwable) {
+                    nativeBassBoost = null
+                }
+            }
+        }
     }
 
     private fun applyNative3dEffectsState(enabled: Boolean, strength: Int) {
@@ -3541,6 +3627,18 @@ class PlaybackService : MediaLibraryService() {
             } catch (_: Throwable) {}
             nativeDynamicsProcessing = null
         }
+
+        try {
+            nativePresetReverb?.enabled = false
+            nativePresetReverb?.release()
+        } catch (_: Throwable) {}
+        nativePresetReverb = null
+
+        try {
+            nativeBassBoost?.enabled = false
+            nativeBassBoost?.release()
+        } catch (_: Throwable) {}
+        nativeBassBoost = null
     }
 
     /**
@@ -9317,6 +9415,7 @@ class PlaybackService : MediaLibraryService() {
 
         val playbackSpeedFlow = MutableStateFlow(1.0f)
         val playbackPitchFlow = MutableStateFlow(1.0f)
+        val voiceEffectFlow = MutableStateFlow(VoiceEffect.NORMAL)
 
         fun setPlaybackParameters(speed: Float, pitch: Float) {
             playbackSpeedFlow.value = speed
@@ -9330,6 +9429,14 @@ class PlaybackService : MediaLibraryService() {
                 s.spare?.playbackParameters = params
                 s.crossfade?.applyPlaybackSpeed(speed)
             }
+        }
+
+        fun setVoiceEffect(effect: VoiceEffect) {
+            voiceEffectFlow.value = effect
+            val speed = playbackSpeedFlow.value
+            val pitch = effect.pitch
+            setPlaybackParameters(speed, pitch)
+            currentService?.applyVoiceAudioEffects(effect)
         }
 
         fun play() {
