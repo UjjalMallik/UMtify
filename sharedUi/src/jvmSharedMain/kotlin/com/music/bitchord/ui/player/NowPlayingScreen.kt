@@ -1849,14 +1849,22 @@ fun NowPlayingScreen(
         LocalPlayerTones provides playerTones,
     ) {
         Surface(
-            modifier = modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.background,
+            modifier = modifier
+                .fillMaxSize()
+                .background(Color.Black),
+            color = Color.Black,
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black),
             ) {
+                // Outermost solid opaque black base behind entire expanded player view
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black),
+                )
                 if (landscape) {
             // Paused always wins outright over a scrub in progress — see
             // [ARTWORK_PAUSE_SHRINK_SCALE].
@@ -2170,18 +2178,24 @@ fun NowPlayingScreen(
             }
         } else {
             Box(
-                modifier = modifier
+                modifier = Modifier
                     .fillMaxSize()
                     .onSizeChanged { playerBounds = it }
-                    .then(dockHost)
                     .background(Color.Black),
             ) {
-                // Solid opaque base to ensure zero background bleed-through
+                // Completely solid, fully opaque black floor sitting behind the cover art and mesh
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black)
+                        .background(Color.Black),
                 )
+
+                // Dock host layer for transition animation and mini player docking
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(dockHost),
+                ) {
 
                 // Anchored to the sleeve's bottom edge, so the screen carries on in the
                 // colours the artwork ended in rather than in a quantiser's idea of what
@@ -3241,6 +3255,25 @@ fun NowPlayingScreen(
                             }
                         }
 
+                        // Smooth vertical gradient scrim over bottom half of full-screen cover art
+                        if (heroMode && playerBounds.height > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            colors = listOf(
+                                                Color.Transparent,
+                                                Color.Black.copy(alpha = 0.50f),
+                                                Color.Black.copy(alpha = 0.90f),
+                                            ),
+                                            startY = playerBounds.height.toFloat() * 0.40f,
+                                            endY = playerBounds.height.toFloat(),
+                                        ),
+                                    ),
+                            )
+                        }
+
                         // The card's slot: where the sleeve sits as a card, whether or
                         // not it is being drawn as one. Takes the gestures and measures
                         // the dismiss band, both of which belong to the card's place
@@ -3888,6 +3921,7 @@ fun NowPlayingScreen(
                     }
                     }
                     }
+                }
                 }
                 playerOverlays()
             }

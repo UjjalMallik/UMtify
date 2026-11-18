@@ -476,7 +476,7 @@ private fun TintedSheet(
     val maxHeight = LocalConfiguration.current.screenHeightDp.dp * 0.85f
     val glassBorder = Brush.verticalGradient(
         listOf(
-            Color.White.copy(alpha = 0.35f),
+            Color.White.copy(alpha = 0.25f),
             Color.White.copy(alpha = 0.08f),
             Color.Transparent,
         )
@@ -486,12 +486,12 @@ private fun TintedSheet(
             .fillMaxWidth()
             .clip(SHEET_SHAPE)
             .border(width = 1.dp, brush = glassBorder, shape = SHEET_SHAPE)
-            .background(Color.Black.copy(alpha = 0.70f)),
+            .background(Color.Black.copy(alpha = 0.50f)),
     ) {
         ArtworkBackdrop(
             palette = palette,
             imageUrl = imageUrl,
-            modifier = Modifier.matchParentSize().graphicsLayer { alpha = 0.50f },
+            modifier = Modifier.matchParentSize().graphicsLayer { alpha = 0.35f },
             // A sheet is a fraction of the height of a page, so the wash has
             // to resolve over a much shorter run to read the same way.
             washFraction = 0.75f,
@@ -501,11 +501,12 @@ private fun TintedSheet(
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(80.dp)
+                .height(90.dp)
                 .background(
                     Brush.verticalGradient(
                         listOf(
-                            Color.White.copy(alpha = 0.12f),
+                            Color.White.copy(alpha = 0.15f),
+                            Color.White.copy(alpha = 0.04f),
                             Color.Transparent,
                         )
                     )
@@ -854,6 +855,11 @@ private fun SleepOption(
     accent: Color,
     onClick: () -> Unit,
 ) {
+    val textShadow = Shadow(
+        color = Color.Black.copy(alpha = 0.85f),
+        offset = Offset(0f, 2f),
+        blurRadius = 4f,
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -863,8 +869,8 @@ private fun SleepOption(
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onBackground,
+            style = MaterialTheme.typography.bodyLarge.copy(shadow = textShadow),
+            color = Color.White,
             modifier = Modifier.weight(1f),
         )
         if (selected) {
@@ -925,13 +931,13 @@ internal fun ActionRow(
 ) {
     val menu = LocalActionRowStyle.current == ActionRowStyle.Menu
     // The popup sits on a surface rather than the page background, so its
-    // text follows the surface's colour — the two differ in light mode.
-    val foreground = if (menu) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onBackground
-    val alpha = if (enabled) 1f else 0.4f
+    // text follows the surface's colour; on the glassy frosted sheet it stays crisp white.
+    val foreground = if (menu) MaterialTheme.colorScheme.onSurface else Color.White
+    val alpha = if (enabled) 1f else 0.45f
     val textShadow = Shadow(
-        color = Color.Black.copy(alpha = 0.65f),
-        offset = Offset(0f, 1.5f),
-        blurRadius = 3f,
+        color = Color.Black.copy(alpha = 0.85f),
+        offset = Offset(0f, 2f),
+        blurRadius = 4f,
     )
     val iconView: @Composable () -> Unit = {
         Icon(
@@ -1062,19 +1068,19 @@ internal fun SheetTrackHeader(
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             val titleShadow = Shadow(
-                color = Color.Black.copy(alpha = 0.75f),
-                offset = Offset(0f, 1.5f),
-                blurRadius = 3f,
+                color = Color.Black.copy(alpha = 0.85f),
+                offset = Offset(0f, 2f),
+                blurRadius = 4f,
             )
             ExplicitSongTitle(
                 song = display,
                 style = MaterialTheme.typography.titleMedium.copy(shadow = titleShadow),
-                color = MaterialTheme.colorScheme.onBackground,
+                color = Color.White,
             )
             Text(
                 text = display.artist,
                 style = MaterialTheme.typography.bodyMedium.copy(shadow = titleShadow),
-                color = subtitleColor,
+                color = Color.White.copy(alpha = 0.75f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -1088,7 +1094,7 @@ internal fun SheetHeading(text: String) {
     Text(
         text = text,
         style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = Color.White.copy(alpha = 0.65f),
         modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 16.dp, bottom = 4.dp),
     )
 }

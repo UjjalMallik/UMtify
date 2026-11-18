@@ -4269,7 +4269,7 @@ private fun BitChordApp(
                 // None of M3's: it follows the sheet's own animation, which is
                 // no longer what moves the player. The player draws its own,
                 // off where the player actually is — see the content below.
-                scrimColor = if (reducePlayerMotion) BottomSheetDefaults.ScrimColor else Color.Transparent,
+                scrimColor = Color.Black.copy(alpha = 0.7f),
                 // The player fills the screen and paints its own background to
                 // the very top, so the sheet's default 28.dp top corners would
                 // only cut two notches out of the artwork behind the status bar.
@@ -4610,9 +4610,8 @@ private fun BitChordApp(
                     songActions = null
                     songMenuStartsWithSleepTimer = false
                 },
-                // The sheet paints itself in the track's own colours, corners
-                // and drag handle included — see SongActionsSheet.
-                containerColor = Color.Transparent,
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                containerColor = Color.Black.copy(alpha = 0.55f),
                 dragHandle = null,
             ) {
                 songMenuBody(song, SongActionsPresentation.Sheet)
