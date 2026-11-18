@@ -1156,9 +1156,6 @@ private fun BitChordApp(
     // remembering it, the automatic preference would see the restored video
     // as a fresh item and immediately convert it again.
     var keepVideoId by remember { mutableStateOf<String?>(null) }
-    // Track conversion from audio to video (inverse of above)
-    var convertedFromAudio by remember { mutableStateOf<Song?>(null) }
-    var convertedVideoId by remember { mutableStateOf<String?>(null) }
     // Optimistically updated track for instant UI updates when switching versions
     var optimisticVersionSong by remember { mutableStateOf<Song?>(null) }
     // Track whether alternate (film/video vs release/audio) version exists for current track
@@ -1405,98 +1402,6 @@ private fun BitChordApp(
         }
     }
 
-    /**
-     * Resolve and apply the video version without replacing the audio row
-     * up front. This is the inverse of switchToMusicOnly.
-     */
-    suspend fun switchToVideo(song: Song, pauseWhileResolving: Boolean) {
-        val c = controller ?: return
-        val index = c.currentMediaItemIndex
-        if (index !in 0 until c.mediaItemCount ||
-            c.currentMediaItem?.mediaId != song.videoId ||
-            switchingAudioVersion
-        ) return
-
-        val resumeAfterResolution = pauseWhileResolving && c.playWhenReady
-        switchingAudioVersion = true
-        // Mirrors the music-only path: the bar lights up for the resolve and
-        // the service keeps it lit through the measure-and-cut, and the row
-        // stays on the audio version until that swap actually commits — see
-        // [alignmentPending] at the toggle.
-        val holdUntilAligned = AppSettings.smartVersionAlignment.value
-        if (holdUntilAligned) AppSettings.versionAlignmentInProgress.value = true
-        if (pauseWhileResolving) c.pause()
-        try {
-            TrackLog.d("Player", "video switch requested for '${song.title}'", song.videoId)
-            val video = runCatching { YtMusicRepository.resolveVideo(song) }.getOrNull()
-            val stillCurrent = c.currentMediaItemIndex == index &&
-                c.currentMediaItem?.mediaId == song.videoId
-
-            if (!stillCurrent) {
-                TrackLog.d("Player", "video switch discarded; listener changed track", song.videoId)
-                return
-            }
-
-            val target = if (video != null && video.videoId != song.videoId) {
-                convertedFromAudio = song
-                convertedVideoId = video.videoId
-                TrackLog.d("Player", "video switch applying '${video.title}' (${video.videoId})", song.videoId)
-                video.copy(
-                    queueTier = song.queueTier,
-                    queueEntryId = song.queueEntryId,
-                    radioName = song.radioName,
-                    playbackSource = song.playbackSource,
-                    playbackSourceType = song.playbackSourceType,
-                    playbackSourceId = song.playbackSourceId,
-                    isVideo = true,
-                )
-            } else {
-                song.copy(isVideo = true)
-            }
-
-            // Not while an alignment is still owed: claiming the video here
-            // would show a version the player is not playing yet, and would
-            // make the switch look finished before it had begun.
-            if (!holdUntilAligned ||
-                VersionAudioAligner.getCachedOffsetMs(song.videoId, target.videoId) != null
-            ) {
-                optimisticVersionSong = target
-            }
-            if (holdUntilAligned) AppSettings.versionAlignmentInProgress.value = false
-            c.swapToVersion(target)
-        } finally {
-            if (holdUntilAligned) AppSettings.versionAlignmentInProgress.value = false
-            switchingAudioVersion = false
-        }
-    }
-
-    DisposableEffect(controller) {
-        com.music.bitchord.playback.PlaybackService.onRequestSwitchToAudio = {
-            val vp = com.music.bitchord.playback.PlaybackService.activeVideoExoPlayer
-            val syncPos = vp?.currentPosition?.takeIf { it > 0L } ?: com.music.bitchord.playback.PlaybackService.videoPositionMs.value
-            vp?.pause()
-            controller?.let { c ->
-                if (syncPos > 0L) {
-                    c.seekTo(syncPos)
-                }
-                c.play()
-            }
-            com.music.bitchord.playback.PlaybackService.dismissVideoLoading()
-            optimisticVersionSong = null
-            convertedVideoId = null
-            convertedFromAudio = null
-            keepVideoId = null
-            scope.launch {
-                val s = controller?.currentMediaItem?.toSong()
-                if (s != null && s.isVideo) {
-                    switchToMusicOnly(s, pauseWhileResolving = false)
-                }
-            }
-        }
-        onDispose {
-            com.music.bitchord.playback.PlaybackService.onRequestSwitchToAudio = null
-        }
-    }
 
     fun playFrom(
         allSongs: List<Song>,
@@ -1571,7 +1476,7 @@ private fun BitChordApp(
     }
     LaunchedEffect(player.song?.videoId) {
         if (optimisticVersionSong?.videoId == player.song?.videoId ||
-            (optimisticVersionSong != null && player.song?.videoId != convertedAudioId && player.song?.videoId != convertedVideoId && player.song?.videoId != keepVideoId)
+            (optimisticVersionSong != null && player.song?.videoId != convertedAudioId && player.song?.videoId != keepVideoId)
         ) {
             optimisticVersionSong = null
         }
@@ -1580,11 +1485,6 @@ private fun BitChordApp(
         if (player.song?.videoId != convertedAudioId) {
             convertedFromVideo = null
             convertedAudioId = null
-            switchingAudioVersion = false
-        }
-        if (player.song?.videoId != convertedVideoId) {
-            convertedFromAudio = null
-            convertedVideoId = null
             switchingAudioVersion = false
         }
     }
@@ -1605,14 +1505,13 @@ private fun BitChordApp(
     // each member on their own cut of what is supposed to be one song — see
     // [ListenTogether] and the matching guard server-side in
     // [PlaybackService.smoothSwapCurrentTrackVersion].
-    LaunchedEffect(player.song?.videoId, convertedAudioId, convertedVideoId, partyState.inParty) {
+    LaunchedEffect(player.song?.videoId, convertedAudioId, partyState.inParty) {
         val song = player.song
         if (song == null || partyState.inParty) {
             hasAlternateVersion = false
             return@LaunchedEffect
         }
-        if ((convertedFromVideo != null && convertedAudioId == song.videoId) ||
-            (convertedFromAudio != null && convertedVideoId == song.videoId)) {
+        if (convertedFromVideo != null && convertedAudioId == song.videoId) {
             hasAlternateVersion = true
             return@LaunchedEffect
         }
@@ -2419,10 +2318,9 @@ private fun BitChordApp(
     // mounts it so the sheet's own setup reads on its own.
     val nowPlaying: @Composable (Song) -> Unit = { song ->
         val effectiveSong = optimisticVersionSong?.takeIf {
-            it.videoId == convertedAudioId || it.videoId == convertedVideoId || it.videoId == keepVideoId ||
+            it.videoId == convertedAudioId || it.videoId == keepVideoId ||
             it.videoId == song.videoId ||
-            it.videoId == YtMusicRepository.cachedAudioVersion(song.videoId)?.videoId ||
-            it.videoId == YtMusicRepository.cachedVideoVersion(song.videoId)?.videoId
+            it.videoId == YtMusicRepository.cachedAudioVersion(song.videoId)?.videoId
         } ?: song
         val displayedSong = activeRadioSeed
             ?.takeIf { (videoId, _) -> effectiveSong.radioName == null && videoId == effectiveSong.videoId }
@@ -2446,117 +2344,61 @@ private fun BitChordApp(
                         it.memberId == playback.startedBy
                     }?.displayName?.takeIf(String::isNotBlank)
             }
-        val handleSwitchToAudio = remember(displayedSong) {
-            {
-                PlaybackService.onRequestSwitchToAudio?.invoke() ?: run {
-                    val vp = PlaybackService.activeVideoExoPlayer
-                    val syncPos = vp?.currentPosition?.takeIf { it > 0L } ?: PlaybackService.videoPositionMs.value
-                    vp?.pause()
-                    controller?.let { c ->
-                        if (syncPos > 0L) {
-                            c.seekTo(syncPos)
-                        }
-                        c.play()
-                    }
-                    PlaybackService.dismissVideoLoading()
-                    optimisticVersionSong = null
-                    convertedVideoId = null
-                    convertedFromAudio = null
-                    keepVideoId = null
-                    scope.launch {
-                        switchToMusicOnly(displayedSong, pauseWhileResolving = false)
-                    }
-                }
-                Unit
-            }
-        }
         NowPlayingScreen(
             song = displayedSong,
             playedBy = playedBy,
             accountName = account?.name,
             windowWidth = windowWidth,
             windowHeight = windowHeight,
-            isPlaying = if (displayedSong.isVideo || PlaybackService.isVideoMode.value) (PlaybackService.activeVideoExoPlayer?.isPlaying == true || PlaybackService.isVideoPlaying.value) else player.isPlaying,
+            isPlaying = player.isPlaying,
             isLoading = playPauseBusy,
             position = player.position,
             durationMs = player.durationMs,
-            audioVersionSwitching = if (displayedSong.isVideo || PlaybackService.isVideoMode.value) false else switchingAudioVersion,
-            qualityUpgraded = if (displayedSong.isVideo || PlaybackService.isVideoMode.value) false else player.isQualityUpgraded,
-            onSwitchToAudio = handleSwitchToAudio,
-            onPlayPause = {
-                if (displayedSong.isVideo || PlaybackService.isVideoMode.value) {
-                    PlaybackService.togglePlayPause()
-                } else {
-                    togglePlayPause()
-                }
-            },
+            audioVersionSwitching = switchingAudioVersion,
+            qualityUpgraded = player.isQualityUpgraded,
+            onPlayPause = { togglePlayPause() },
             onNext = { controller?.seekToNextMediaItem() },
             onPrevious = { controller?.seekToPrevious() },
             onBlockedControl = showHostOnlyNotice,
             onSeekFraction = { fraction ->
-                if (displayedSong.isVideo || PlaybackService.isVideoMode.value) {
-                    val videoPlayer = PlaybackService.activeVideoExoPlayer
-                    if (videoPlayer != null) {
-                        val duration = videoPlayer.duration
-                        if (duration > 0) {
-                            val target = (fraction * duration).toLong()
-                                .coerceIn(0L, (duration - SEEK_END_GUARD_MS).coerceAtLeast(0L))
-                            PlaybackService.seekTo(target)
-                        }
-                    }
-                } else {
-                    controller?.let { player ->
-                        // Read at the moment of the seek, not from the
-                        // polled snapshot the screen draws with: a track
-                        // change updates the current item before it updates
-                        // the duration, so a fraction dropped seconds after
-                        // a transition would otherwise be scaled by the
-                        // previous song's length.
-                        val duration = player.duration
-                        if (duration > 0) {
-                            player.seekTo(
-                                (fraction * duration).toLong()
-                                    .coerceIn(0L, (duration - SEEK_END_GUARD_MS).coerceAtLeast(0L)),
-                            )
-                        }
+                controller?.let { player ->
+                    // Read at the moment of the seek, not from the
+                    // polled snapshot the screen draws with: a track
+                    // change updates the current item before it updates
+                    // the duration, so a fraction dropped seconds after
+                    // a transition would otherwise be scaled by the
+                    // previous song's length.
+                    val duration = player.duration
+                    if (duration > 0) {
+                        player.seekTo(
+                            (fraction * duration).toLong()
+                                .coerceIn(0L, (duration - SEEK_END_GUARD_MS).coerceAtLeast(0L)),
+                        )
                     }
                 }
             },
             onSeek = { target ->
-                if (displayedSong.isVideo || PlaybackService.isVideoMode.value) {
-                    val videoPlayer = PlaybackService.activeVideoExoPlayer
-                    if (videoPlayer != null) {
-                        val duration = videoPlayer.duration
-                        val boundedTarget = if (duration > 0) {
+                controller?.let { player ->
+                    // Clamped here rather than at each caller because
+                    // not every caller can clamp. The scrubber's target
+                    // is a fraction of the duration and cannot overrun,
+                    // but a tapped lyric line seeks to a timestamp from
+                    // whichever transcription matched on title, artist
+                    // and duration — and a match against a slightly
+                    // longer master puts every line late, so a tap near
+                    // the end asks for a position past the end of this
+                    // stream. Media3 answers that by clamping to the
+                    // final millisecond, which ends the track and starts
+                    // the next one: tapping the last line of a song
+                    // skipped it.
+                    val duration = player.duration
+                    player.seekTo(
+                        if (duration > 0) {
                             target.coerceIn(0L, (duration - SEEK_END_GUARD_MS).coerceAtLeast(0L))
                         } else {
                             target.coerceAtLeast(0L)
-                        }
-                        PlaybackService.seekTo(boundedTarget)
-                    }
-                } else {
-                    controller?.let { player ->
-                        // Clamped here rather than at each caller because
-                        // not every caller can clamp. The scrubber's target
-                        // is a fraction of the duration and cannot overrun,
-                        // but a tapped lyric line seeks to a timestamp from
-                        // whichever transcription matched on title, artist
-                        // and duration — and a match against a slightly
-                        // longer master puts every line late, so a tap near
-                        // the end asks for a position past the end of this
-                        // stream. Media3 answers that by clamping to the
-                        // final millisecond, which ends the track and starts
-                        // the next one: tapping the last line of a song
-                        // skipped it.
-                        val duration = player.duration
-                        player.seekTo(
-                            if (duration > 0) {
-                                target.coerceIn(0L, (duration - SEEK_END_GUARD_MS).coerceAtLeast(0L))
-                            } else {
-                                target.coerceAtLeast(0L)
-                            },
-                        )
-                    }
+                        },
+                    )
                 }
             },
             queue = player.queue,
@@ -4574,101 +4416,6 @@ private fun BitChordApp(
                 val art = song.thumbnailUrl.takeUnless { type == BrowseType.ARTIST }
                 viewModel.openDetail(id, title, sub, art, type)
             }
-            // Video vs audio, moved here from the player's own controls: it is
-            // the same kind of choice as Revert to original / Upgrade
-            // quality just above it — which recording is playing — so it now
-            // sits in the same list rather than as a control of its own.
-            //
-            // Mirrors what the pill used to compute, keyed to this sheet's
-            // own [song] rather than a `nowPlaying` lambda parameter: an
-            // in-flight optimistic swap is still read off [optimisticVersionSong]
-            // so a menu opened mid-switch describes the version actually
-            // becoming current, not the one about to be left.
-            val versionEffectiveSong = optimisticVersionSong?.takeIf {
-                it.videoId == convertedAudioId || it.videoId == convertedVideoId || it.videoId == keepVideoId ||
-                    it.videoId == YtMusicRepository.cachedAudioVersion(song.videoId)?.videoId ||
-                    it.videoId == YtMusicRepository.cachedVideoVersion(song.videoId)?.videoId
-            } ?: song
-            fun versionAlignmentPending(targetId: String): Boolean =
-                AppSettings.smartVersionAlignment.value &&
-                    VersionAudioAligner.getCachedOffsetMs(song.videoId, targetId) == null
-            val menuIsAudioVersion = if (optimisticVersionSong != null) {
-                !optimisticVersionSong!!.isVideo
-            } else {
-                !song.isVideo && convertedVideoId != song.videoId
-            }
-            val onToggleVersion: (() -> Unit)? = if (fromPlayer &&
-                !switchingAudioVersion &&
-                controller?.currentMediaItem?.mediaId == song.videoId
-            ) {
-                {
-                    songActions = null
-                    val c = controller
-                    val original = convertedFromVideo
-                    val originalAudio = convertedFromAudio
-                    when {
-                        c == null -> Unit
-                        original != null && (
-                            convertedAudioId == song.videoId ||
-                                convertedAudioId == versionEffectiveSong.videoId ||
-                                convertedAudioId == optimisticVersionSong?.videoId
-                            ) -> {
-                            keepVideoId = original.videoId
-                            convertedFromVideo = null
-                            convertedAudioId = null
-                            if (!versionAlignmentPending(original.videoId)) optimisticVersionSong = original
-                            c.swapToVersion(original)
-                        }
-                        originalAudio != null && (
-                            convertedVideoId == song.videoId ||
-                                convertedVideoId == versionEffectiveSong.videoId ||
-                                convertedVideoId == optimisticVersionSong?.videoId
-                            ) -> {
-                            convertedFromAudio = null
-                            convertedVideoId = null
-                            if (!versionAlignmentPending(originalAudio.videoId)) optimisticVersionSong = originalAudio
-                            c.swapToVersion(originalAudio)
-                        }
-                        versionEffectiveSong.isVideo || song.isVideo -> {
-                            val cached = YtMusicRepository.cachedAudioVersion(song.videoId)
-                                ?: YtMusicRepository.cachedAudioVersion(versionEffectiveSong.videoId)
-                            if (cached != null && cached.videoId != song.videoId &&
-                                !versionAlignmentPending(cached.videoId)
-                            ) {
-                                optimisticVersionSong = cached.copy(
-                                    isVideoOrigin = true,
-                                    queueTier = song.queueTier,
-                                    queueEntryId = song.queueEntryId,
-                                    radioName = song.radioName,
-                                    playbackSource = song.playbackSource,
-                                    playbackSourceType = song.playbackSourceType,
-                                    playbackSourceId = song.playbackSourceId,
-                                )
-                            }
-                            scope.launch { switchToMusicOnly(song, pauseWhileResolving = false) }
-                        }
-                        else -> {
-                            val cached = YtMusicRepository.cachedVideoVersion(song.videoId)
-                                ?: YtMusicRepository.cachedVideoVersion(versionEffectiveSong.videoId)
-                            if (cached != null && cached.videoId != song.videoId &&
-                                !versionAlignmentPending(cached.videoId)
-                            ) {
-                                optimisticVersionSong = cached.copy(
-                                    queueTier = song.queueTier,
-                                    queueEntryId = song.queueEntryId,
-                                    radioName = song.radioName,
-                                    playbackSource = song.playbackSource,
-                                    playbackSourceType = song.playbackSourceType,
-                                    playbackSourceId = song.playbackSourceId,
-                                )
-                            }
-                            scope.launch { switchToVideo(song, pauseWhileResolving = false) }
-                        }
-                    }
-                }
-            } else {
-                null
-            }
             // The library toggle needs tokens only YouTube can mint, and the
             // rating it comes back with is more authoritative than anything
             // the library feed knew — so the menu asks as it opens.
@@ -4804,8 +4551,6 @@ private fun BitChordApp(
                     null
                 },
                 upgradeQualityInProgress = fromPlayer && song.videoId in qualityUpgradesInFlight,
-                onToggleAudioVersion = onToggleVersion,
-                isAudioVersion = menuIsAudioVersion,
                 // Hidden outright when there's no real YouTube id behind
                 // this row to build a link from — SongActionsSheet already
                 // drops it for a local file via `isOffline`, this catches

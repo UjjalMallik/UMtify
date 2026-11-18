@@ -32,6 +32,7 @@ import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.MediaMetadata
@@ -1054,23 +1055,6 @@ class PlaybackService : MediaLibraryService() {
             speakers.onLocalTransition(mediaItem, reason)
             lastPrefetchedNearEndIndex = C.INDEX_UNSET
 
-            if (mediaItem != null) {
-                val song = mediaItem.toSong()
-                if (song.isVideo) {
-                    isVideoMode.value = true
-                    activeVideoTrackId.value = song.videoId
-                    activeVideoSong.value = song
-                    isVideoFrameRendered.value = false
-                    videoStatusText.value = "Finding video..."
-                } else if (isVideoMode.value) {
-                    isVideoMode.value = false
-                    activeVideoTrackId.value = null
-                    activeVideoSong.value = null
-                    isVideoFrameRendered.value = false
-                    videoStatusText.value = ""
-                }
-            }
-
             // No crossfade case to allow for here any more. A blended advance
             // never reaches this callback — the incoming track starts as the
             // *first* item of the other player — so it is booked by
@@ -1350,6 +1334,8 @@ class PlaybackService : MediaLibraryService() {
     override fun onCreate() {
         super.onCreate()
         isServiceRunning = true
+        currentService = this
+        playbackSpeedFlow.value = AppSettings.playbackSpeed.value
 
         if (com.music.bitchord.data.innertube.Innertube.cookie == null) {
             com.music.bitchord.data.innertube.Innertube.cookie = com.music.bitchord.auth.AuthStore(this).cookie
@@ -3333,6 +3319,7 @@ class PlaybackService : MediaLibraryService() {
         val trackSelector = DefaultTrackSelector(this).apply {
             setParameters(
                 buildUponParameters()
+                    .setPreferredAudioMimeTypes("audio/opus", "audio/flac", "audio/mp4")
                     .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
                     .clearVideoSizeConstraints()
             )
@@ -6576,6 +6563,7 @@ class PlaybackService : MediaLibraryService() {
         loudness: LoudnessProcessor,
     ) = object : DefaultRenderersFactory(this) {
         init {
+            setExtensionRendererMode(EXTENSION_RENDERER_MODE_PREFER)
             // Where the platform advertises a decoder for a format and it
             // cannot actually handle it — a vendor E-AC-3 blocklist entry, a
             // 24-bit FLAC the hardware refuses — take the next candidate
@@ -7617,6 +7605,7 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onDestroy() {
         isServiceRunning = false
+        currentService = null
         activeExoPlayer = null
         MediaWidgetSnapshot.setPlaying(this, false)
         val stoppedSnapshot = MediaWidgetSnapshot.load(this).copy(isPlaying = false)
@@ -8412,22 +8401,6 @@ class PlaybackService : MediaLibraryService() {
                     val bundle = args.getBundle(EXTRA_SWAP_MEDIA_ITEM)
                     if (bundle != null) {
                         val targetSong = songFromBundle(bundle)
-                        // The listener's own choice outranks the music-only setting.
-                        if (targetSong.isVideo) {
-                            isVideoMode.value = true
-                            activeVideoTrackId.value = targetSong.videoId
-                            activeVideoSong.value = targetSong
-                            isVideoFrameRendered.value = false
-                            videoStatusText.value = "Finding video..."
-                            MusicOnlyPlayback.keep(targetSong.videoId)
-                        } else {
-                            isVideoMode.value = false
-                            activeVideoTrackId.value = null
-                            activeVideoSong.value = null
-                            isVideoFrameRendered.value = false
-                            videoStatusText.value = ""
-                            session.player.currentMediaItem?.mediaId?.let(MusicOnlyPlayback::letGo)
-                        }
                         smoothSwapCurrentTrackVersion(targetSong.toMediaItem())
                     }
                 }
@@ -9236,109 +9209,46 @@ class PlaybackService : MediaLibraryService() {
         var activeExoPlayer: ExoPlayer? = null
             internal set
         @Volatile
-        var activeVideoExoPlayer: ExoPlayer? = null
-        val activeVideoExoPlayerFlow = MutableStateFlow<ExoPlayer?>(null)
-        val isVideoFrameRendered = MutableStateFlow(false)
-        val videoStatusText = MutableStateFlow("")
-        val activeVideoTrackId = MutableStateFlow<String?>(null)
-        val activeVideoSong = MutableStateFlow<Song?>(null)
-        val isVideoMode = MutableStateFlow(false)
-        val isVideoPlaying = MutableStateFlow(false)
-        val videoPositionMs = MutableStateFlow(0L)
-        val videoDurationMs = MutableStateFlow(0L)
-        var onRequestSwitchToAudio: (() -> Unit)? = null
+        internal var currentService: PlaybackService? = null
 
-        fun dismissVideoLoading() {
-            activeVideoTrackId.value = null
-            activeVideoSong.value = null
-            isVideoFrameRendered.value = false
-            videoStatusText.value = ""
-            isVideoMode.value = false
-            isVideoPlaying.value = false
-            videoPositionMs.value = 0L
-            videoDurationMs.value = 0L
-            activeVideoExoPlayer = null
-            activeVideoExoPlayerFlow.value = null
-            onRequestSwitchToAudio?.invoke()
-        }
+        val playbackSpeedFlow = MutableStateFlow(1.0f)
+        val playbackPitchFlow = MutableStateFlow(1.0f)
 
-        fun switchMode(toVideo: Boolean) {
+        fun setPlaybackParameters(speed: Float, pitch: Float) {
+            playbackSpeedFlow.value = speed
+            playbackPitchFlow.value = pitch
+            AppSettings.setPlaybackSpeed(speed)
+            val params = PlaybackParameters(speed, pitch)
             val mainPlayer = activeExoPlayer ?: com.music.bitchord.ui.player.AndroidPlayerHost.activeController
-            val videoPlayer = activeVideoExoPlayer
-            if (toVideo) {
-                isVideoMode.value = true
-                val pos = (mainPlayer?.currentPosition ?: 0L).coerceAtLeast(0L)
-                mainPlayer?.pause()
-                videoPlayer?.let { vp ->
-                    if (pos > 0L) vp.seekTo(pos)
-                    vp.prepare()
-                    vp.play()
-                }
-            } else {
-                isVideoMode.value = false
-                val pos = (videoPlayer?.currentPosition ?: videoPositionMs.value).coerceAtLeast(0L)
-                videoPlayer?.pause()
-                mainPlayer?.let { mp ->
-                    if (pos > 0L) mp.seekTo(pos)
-                    mp.play()
-                }
-                onRequestSwitchToAudio?.invoke()
+            mainPlayer?.playbackParameters = params
+            currentService?.let { s ->
+                s.player?.playbackParameters = params
+                s.spare?.playbackParameters = params
+                s.crossfade?.applyPlaybackSpeed(speed)
             }
         }
 
         fun play() {
-            if (isVideoMode.value) {
-                activeVideoExoPlayer?.play()
-                isVideoPlaying.value = true
-            } else {
-                (activeExoPlayer ?: com.music.bitchord.ui.player.AndroidPlayerHost.activeController)?.play()
-            }
+            (activeExoPlayer ?: com.music.bitchord.ui.player.AndroidPlayerHost.activeController)?.play()
         }
 
         fun pause() {
-            if (isVideoMode.value) {
-                activeVideoExoPlayer?.pause()
-                isVideoPlaying.value = false
-            } else {
-                (activeExoPlayer ?: com.music.bitchord.ui.player.AndroidPlayerHost.activeController)?.pause()
-            }
+            (activeExoPlayer ?: com.music.bitchord.ui.player.AndroidPlayerHost.activeController)?.pause()
         }
 
         fun togglePlayPause() {
-            if (isVideoMode.value) {
-                val vp = activeVideoExoPlayer
-                if (vp != null) {
-                    if (vp.isPlaying) {
-                        vp.pause()
-                        isVideoPlaying.value = false
-                    } else {
-                        vp.play()
-                        isVideoPlaying.value = true
-                    }
-                }
-            } else {
-                val mp = activeExoPlayer ?: com.music.bitchord.ui.player.AndroidPlayerHost.activeController
-                if (mp != null) {
-                    if (mp.isPlaying) mp.pause() else mp.play()
-                }
+            val mp = activeExoPlayer ?: com.music.bitchord.ui.player.AndroidPlayerHost.activeController
+            if (mp != null) {
+                if (mp.isPlaying) mp.pause() else mp.play()
             }
         }
 
         fun seekTo(positionMs: Long) {
-            if (isVideoMode.value) {
-                activeVideoExoPlayer?.seekTo(positionMs)
-                videoPositionMs.value = positionMs
-            } else {
-                (activeExoPlayer ?: com.music.bitchord.ui.player.AndroidPlayerHost.activeController)?.seekTo(positionMs)
-            }
+            (activeExoPlayer ?: com.music.bitchord.ui.player.AndroidPlayerHost.activeController)?.seekTo(positionMs)
         }
 
         fun currentPosition(): Long {
-            return if (isVideoMode.value) {
-                activeVideoExoPlayer?.currentPosition ?: videoPositionMs.value
-            } else {
-                (activeExoPlayer ?: com.music.bitchord.ui.player.AndroidPlayerHost.activeController)?.currentPosition ?: 0L
-            }
+            return (activeExoPlayer ?: com.music.bitchord.ui.player.AndroidPlayerHost.activeController)?.currentPosition ?: 0L
         }
         const val MEDIA_ROOT_ID = "root"
         const val MEDIA_RECENTS_ID = "recents"
@@ -9383,7 +9293,6 @@ class PlaybackService : MediaLibraryService() {
         val AUDIO_ATTRIBUTES: AudioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-            .setAllowedCapturePolicy(C.ALLOW_CAPTURE_BY_ALL)
             .build()
 
         /** Length of a FLAC STREAMINFO block, which the format fixes at 34 bytes. */

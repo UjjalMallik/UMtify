@@ -47,7 +47,6 @@ import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.ThumbDown
 import androidx.compose.material.icons.rounded.ThumbDownOffAlt
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -165,15 +164,6 @@ fun SongActionsSheet(
     onUpgradeQuality: (() -> Unit)? = null,
     /** Keeps the upgrade row visible but untappable while its lookup is running. */
     upgradeQualityInProgress: Boolean = false,
-    /**
-     * Switches the playing track between its video and audio-only cuts. Null
-     * hides the row — offered only from the player, and only once an
-     * alternate cut is known to exist. See
-     * [com.music.bitchord.playback.PlaybackService.smoothSwapCurrentTrackVersion].
-     */
-    onToggleAudioVersion: (() -> Unit)? = null,
-    /** Which cut is playing now, so the row can offer the other one. */
-    isAudioVersion: Boolean = false,
     onShare: (() -> Unit)? = null,
     /**
      * Copies what the app logged while starting this track. Null everywhere
@@ -238,7 +228,7 @@ fun SongActionsSheet(
         // a substituted copy, the other for a track held on YouTube's own —
         // and between them they are the whole of the choice, which is why they
         // sit in the same place under the same divider.
-        if (onRollbackToOriginal != null || onUpgradeQuality != null || onToggleAudioVersion != null) {
+        if (onRollbackToOriginal != null || onUpgradeQuality != null) {
             (onRollbackToOriginal ?: onUpgradeQuality)?.let {
                 ActionRow(
                     icon = if (onRollbackToOriginal != null) {
@@ -255,19 +245,6 @@ fun SongActionsSheet(
                     ),
                     accent = palette.accent,
                     enabled = onRollbackToOriginal != null || !upgradeQualityInProgress,
-                    onClick = it,
-                )
-            }
-            // Which recording, not which quality — a different question from
-            // the row above, so it sits right under it rather than merged
-            // into it, but still ahead of the divider both share.
-            onToggleAudioVersion?.let {
-                ActionRow(
-                    icon = if (isAudioVersion) Icons.Rounded.Videocam else BitChordIcons.MusicNote,
-                    label = stringResource(
-                        if (isAudioVersion) R.string.convert_to_video else R.string.convert_to_audio,
-                    ),
-                    accent = palette.accent,
                     onClick = it,
                 )
             }

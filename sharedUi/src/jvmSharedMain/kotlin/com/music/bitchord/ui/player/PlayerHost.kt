@@ -42,33 +42,17 @@ interface PlayerHost {
     @Composable
     fun CanvasVideo(spec: CanvasVideoSpec, modifier: Modifier)
 
-    /** Seamless in-player video surface decoded from the active player session. */
-    @Composable
-    fun VideoPlayer(modifier: Modifier = Modifier) = Unit
+    val playbackSpeed: StateFlow<Float> get() = MutableStateFlow(1f)
 
-    val isVideoFrameRendered: StateFlow<Boolean> get() = MutableStateFlow(false)
+    val playbackPitch: StateFlow<Float> get() = MutableStateFlow(1f)
 
-    val videoStatusText: StateFlow<String> get() = MutableStateFlow("")
-
-    val isVideoPlaying: StateFlow<Boolean> get() = MutableStateFlow(false)
-
-    val videoPositionMs: StateFlow<Long> get() = MutableStateFlow(0L)
-
-    val videoDurationMs: StateFlow<Long> get() = MutableStateFlow(0L)
-
-    fun toggleVideoPlayPause() = Unit
-
-    fun pauseVideo() = Unit
-
-    fun playVideo() = Unit
-
-    fun seekVideo(positionMs: Long) = Unit
+    fun setPlaybackSpeedAndPitch(speed: Float, pitch: Float) = Unit
 
     /**
      * Whether this platform shows a music video's picture over the playing
      * audio. False keeps every video surface out of the player altogether.
      */
-    val musicVideoSupported: Boolean get() = true
+    val musicVideoSupported: Boolean get() = false
 
     /**
      * The playing music video's picture, fitted into these bounds ([fit]) or
@@ -77,10 +61,10 @@ interface PlayerHost {
      * still artwork under it until then.
      */
     @Composable
-    fun MusicVideo(videoId: String, fit: Boolean, onRenderedChanged: (Boolean) -> Unit, modifier: Modifier) = VideoPlayer(modifier)
+    fun MusicVideo(videoId: String, fit: Boolean, onRenderedChanged: (Boolean) -> Unit, modifier: Modifier) = Unit
 
     /** Whether [videoId] shows its picture, rather than playing as audio by the listener's choice. */
-    fun showsMusicVideoPicture(videoId: String): Boolean = true
+    fun showsMusicVideoPicture(videoId: String): Boolean = false
 
     /** The playing music video's width over its height. */
     val musicVideoAspect: StateFlow<Float> get() = DefaultVideoAspect
@@ -234,10 +218,8 @@ internal fun videoQualityLabel(height: Int): String = when {
     else -> "${height}p"
 }
 
-/** Whether [song]'s picture can be shown here — a music video, on a platform that plays one. */
-internal fun showsMusicVideo(song: Song): Boolean =
-    song.isVideo && PlayerPlatform.host.musicVideoSupported &&
-        PlayerPlatform.host.showsMusicVideoPicture(song.videoId)
+/** Whether [song]'s picture can be shown here — false, video features eradicated. */
+internal fun showsMusicVideo(song: Song): Boolean = false
 
 /** @see PlayerHost.MusicVideo */
 @Composable
@@ -305,6 +287,7 @@ interface PlayerSettingsSource {
     val showLyricsButton: StateFlow<Boolean>
     val showRepeatButton: StateFlow<Boolean>
     val showMoreButton: StateFlow<Boolean>
+    val showSpeedButton: StateFlow<Boolean>
     /** Hide the device status bar while the player is up. Always false where there is none. */
     val hideStatusBar: StateFlow<Boolean>
     val lastPlayerScreen: StateFlow<LastPlayerScreen>

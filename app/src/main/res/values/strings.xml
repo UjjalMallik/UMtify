@@ -361,6 +361,7 @@
     <string name="show_lyrics_button">Lyrics button</string>
     <string name="show_repeat_button">Repeat button</string>
     <string name="show_more_button">More options button</string>
+    <string name="show_speed_controller_button">Speed controller button</string>
     <string name="hide_status_bar_in_player">Hide status bar in player</string>
     <string name="hide_status_bar_in_player_subtitle">Hides the clock, battery and notification icons while the main player is open</string>
     <string name="hide_song_status">Hide Song Status</string>
