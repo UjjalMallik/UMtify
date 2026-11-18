@@ -280,10 +280,10 @@ object AppSettings {
     val skipSilence = MutableStateFlow(false)
 
     /** Requested PCM representation at the Android AudioTrack boundary. */
-    val outputPcmMode = MutableStateFlow(OutputPcmMode.PCM_16)
+    val outputPcmMode = MutableStateFlow(OutputPcmMode.FLOAT_32)
 
     /** Prefer an attached USB audio output over the system's normal route. */
-    val preferUsbDac = MutableStateFlow(false)
+    val preferUsbDac = MutableStateFlow(true)
 
     /**
      * Level every track to the same loudness, using YouTube's own
@@ -346,7 +346,13 @@ object AppSettings {
      * pipeline. Not true object-based spatial audio — YouTube only ever hands
      * us a stereo stream, so there's no Atmos-style source to render.
      */
-    val spatialAudio = MutableStateFlow(false)
+    val spatialAudio = MutableStateFlow(true)
+
+    /** Master switch for 3D Holographic Surround Virtualizer & Reverb effects. */
+    val surround3d = MutableStateFlow(true)
+
+    /** 3D Surround effect strength (0 to 1000 mB / promille, default 800). */
+    val surround3dStrength = MutableStateFlow(800)
 
     /**
      * The app's own equaliser, master switch.
@@ -402,7 +408,7 @@ object AppSettings {
     val repeatMode = MutableStateFlow(Player.REPEAT_MODE_OFF)
 
     /** Put the playing track's codec, bitrate and sample rate on the player. */
-    val showNerdStats = MutableStateFlow(false)
+    val showNerdStats = MutableStateFlow(true)
 
     /** Display name of the listener's imported .ttf/.otf, or null for the app's own face. */
     val customFont = MutableStateFlow<String?>(null)
@@ -459,7 +465,7 @@ object AppSettings {
     val showQueueHistory = MutableStateFlow(false)
 
     /** Swiping a song row plays it next instead of adding it to the end of the queue. */
-    val swipeToPlayNext = MutableStateFlow(false)
+    val swipeToPlayNext = MutableStateFlow(true)
 
     /** Once a song has been suggested or played this session, AutoPlay won't offer it again. */
     val dontRepeatSuggestions = MutableStateFlow(false)
@@ -478,7 +484,7 @@ object AppSettings {
     val reduceDynamicBlur = MutableStateFlow(false)
 
     /** Real backdrop-sampled glass (blur, lens refraction) on the floating nav bar, Android 12+ only. */
-    val liquidGlass = MutableStateFlow(false)
+    val liquidGlass = MutableStateFlow(true)
 
     /**
      * Type size, multiplied into whatever the *system* font scale already is.
@@ -528,7 +534,7 @@ object AppSettings {
      * but it is the better default, and most tracks resolve to no canvas at
      * all. See [CanvasRepository][com.music.bitchord.data.canvas.CanvasRepository].
      */
-    val animatedCanvas = MutableStateFlow(true)
+    val animatedCanvas = MutableStateFlow(false)
 
     /**
      * Whether [animatedCanvas] is allowed to actually stream on a metered
@@ -557,7 +563,7 @@ object AppSettings {
      * Apple Music has no title logo. Blank URL means unconfigured and the
      * lookup is skipped entirely — there is no hosted default.
      */
-    val signatureApiEnabled = MutableStateFlow(false)
+    val signatureApiEnabled = MutableStateFlow(true)
     val signatureApiUrl = MutableStateFlow("")
 
     /** Persistent toggle for YouTube Music source. Permanently enabled. */
@@ -584,7 +590,7 @@ object AppSettings {
      * way — see the hero notes in
      * [NowPlayingScreen][com.music.bitchord.ui.player.NowPlayingScreen].
      */
-    val fullBleedArtwork = MutableStateFlow(true)
+    val fullBleedArtwork = MutableStateFlow(false)
 
     /**
      * Puts v1.5's backdrop back on the player: four quantised blobs drifting
@@ -601,7 +607,7 @@ object AppSettings {
      * Kept as a switch because people asked for the old look back, and neither
      * reason is one a listener has to agree with.
      */
-    val legacyMeshGradient = MutableStateFlow(false)
+    val legacyMeshGradient = MutableStateFlow(true)
 
     /** Restores the expanded player to the surface the listener left open. */
     val lastPlayerScreen = MutableStateFlow(LastPlayerScreen.MAIN)
@@ -938,15 +944,17 @@ object AppSettings {
         skipSilence.value = prefs.getBoolean(KEY_SKIP_SILENCE, false)
         outputPcmMode.value = runCatching {
             OutputPcmMode.valueOf(
-                prefs.getString(KEY_OUTPUT_PCM_MODE, OutputPcmMode.PCM_16.name)
-                    ?: OutputPcmMode.PCM_16.name,
+                prefs.getString(KEY_OUTPUT_PCM_MODE, OutputPcmMode.FLOAT_32.name)
+                    ?: OutputPcmMode.FLOAT_32.name,
             )
-        }.getOrDefault(OutputPcmMode.PCM_16)
-        preferUsbDac.value = prefs.getBoolean(KEY_PREFER_USB_DAC, false)
+        }.getOrDefault(OutputPcmMode.FLOAT_32)
+        preferUsbDac.value = prefs.getBoolean(KEY_PREFER_USB_DAC, true)
         loudnessNormalization.value = prefs.getBoolean(KEY_LOUDNESS_NORMALIZATION, true)
         loudnessOffOnSpeaker.value = prefs.getBoolean(KEY_LOUDNESS_OFF_ON_SPEAKER, true)
         dolbyAtmos.value = prefs.getBoolean(KEY_DOLBY_ATMOS, true)
-        spatialAudio.value = prefs.getBoolean(KEY_SPATIAL_AUDIO, false)
+        spatialAudio.value = prefs.getBoolean(KEY_SPATIAL_AUDIO, true)
+        surround3d.value = prefs.getBoolean(KEY_SURROUND_3D, true)
+        surround3dStrength.value = prefs.getInt(KEY_SURROUND_3D_STRENGTH, 800).coerceIn(0, 1000)
         equalizerEnabled.value = prefs.getBoolean(KEY_EQ_ENABLED, false)
         equalizerMode.value = runCatching {
             EqualizerMode.valueOf(prefs.getString(KEY_EQ_MODE, null) ?: EqualizerMode.DYNAMIC.name)
@@ -967,7 +975,7 @@ object AppSettings {
         autoplay.value = prefs.getBoolean(KEY_AUTOPLAY, true)
         shuffleEnabled.value = prefs.getBoolean(KEY_SHUFFLE_ENABLED, false)
         repeatMode.value = prefs.getInt(KEY_REPEAT_MODE, Player.REPEAT_MODE_OFF)
-        showNerdStats.value = prefs.getBoolean(KEY_NERD_STATS, false)
+        showNerdStats.value = prefs.getBoolean(KEY_NERD_STATS, true)
         customFont.value = prefs.getString(KEY_CUSTOM_FONT, null)
         reduceAnimation.value = prefs.getBoolean(KEY_REDUCE_ANIMATION, false)
         onboardingComplete.value = prefs.getBoolean(KEY_ONBOARDING_COMPLETE, false)
@@ -988,12 +996,12 @@ object AppSettings {
         hideStatusBarInPlayer.value = prefs.getBoolean(KEY_HIDE_STATUS_BAR_IN_PLAYER, false)
         hideSongStatus.value = prefs.getBoolean(KEY_HIDE_SONG_STATUS, false)
         showQueueHistory.value = prefs.getBoolean(KEY_SHOW_QUEUE_HISTORY, false)
-        swipeToPlayNext.value = prefs.getBoolean(KEY_SWIPE_TO_PLAY_NEXT, false)
+        swipeToPlayNext.value = prefs.getBoolean(KEY_SWIPE_TO_PLAY_NEXT, true)
         dontRepeatSuggestions.value = prefs.getBoolean(KEY_DONT_REPEAT_SUGGESTIONS, false)
         preferMusicOnly.value = prefs.getBoolean(KEY_PREFER_MUSIC_ONLY, false)
         smartVersionAlignment.value = prefs.getBoolean(KEY_SMART_VERSION_ALIGNMENT, true)
         reduceDynamicBlur.value = prefs.getBoolean(KEY_REDUCE_BLUR, false)
-        liquidGlass.value = prefs.getBoolean(KEY_LIQUID_GLASS, false)
+        liquidGlass.value = prefs.getBoolean(KEY_LIQUID_GLASS, true)
         fontScale.value = prefs.getFloat(KEY_FONT_SCALE, 1f).coerceIn(MIN_INTERFACE_SCALE, MAX_INTERFACE_SCALE)
         displayScale.value = prefs.getFloat(KEY_DISPLAY_SCALE, 1f).coerceIn(MIN_INTERFACE_SCALE, MAX_INTERFACE_SCALE)
         lyricsBlur.value = prefs.getBoolean(KEY_LYRICS_BLUR, true)
@@ -1004,18 +1012,18 @@ object AppSettings {
             reduceAnimation.value = false
             reduceDynamicBlur.value = false
         }
-        animatedCanvas.value = prefs.getBoolean(KEY_ANIMATED_CANVAS, true)
+        animatedCanvas.value = prefs.getBoolean(KEY_ANIMATED_CANVAS, false)
         canvasOverCellular.value = prefs.getBoolean(KEY_CANVAS_OVER_CELLULAR, false)
         spotifyCanvasAutoHide.value = prefs.getBoolean(KEY_SPOTIFY_CANVAS_AUTO_HIDE, true)
         prioritizeSpotifyCanvas.value = prefs.getBoolean(KEY_PRIORITIZE_SPOTIFY_CANVAS, false)
-        signatureApiEnabled.value = prefs.getBoolean(KEY_SIGNATURE_API_ENABLED, false)
+        signatureApiEnabled.value = prefs.getBoolean(KEY_SIGNATURE_API_ENABLED, true)
         signatureApiUrl.value = normalizeSignatureApiUrl(prefs.getString(KEY_SIGNATURE_API_URL, "").orEmpty())
         enableYouTubeMusic.value = true
         enableInternetArchiveLossless.value = prefs.getBoolean(KEY_ENABLE_INTERNET_ARCHIVE_LOSSLESS, false)
         enableJamendoLossless.value = prefs.getBoolean(KEY_ENABLE_JAMENDO_LOSSLESS, false)
         jamendoClientId.value = prefs.getString(KEY_JAMENDO_CLIENT_ID, "") ?: ""
-        fullBleedArtwork.value = prefs.getBoolean(KEY_FULL_BLEED_ARTWORK, true)
-        legacyMeshGradient.value = prefs.getBoolean(KEY_LEGACY_MESH_GRADIENT, false)
+        fullBleedArtwork.value = prefs.getBoolean(KEY_FULL_BLEED_ARTWORK, false)
+        legacyMeshGradient.value = prefs.getBoolean(KEY_LEGACY_MESH_GRADIENT, true)
         lastPlayerScreen.value = runCatching {
             LastPlayerScreen.valueOf(
                 prefs.getString(KEY_LAST_PLAYER_SCREEN, null) ?: LastPlayerScreen.MAIN.name,
@@ -1294,6 +1302,17 @@ object AppSettings {
     fun setSpatialAudio(value: Boolean) {
         spatialAudio.value = value
         prefs.edit().putBoolean(KEY_SPATIAL_AUDIO, value).apply()
+    }
+
+    fun setSurround3d(value: Boolean) {
+        surround3d.value = value
+        prefs.edit().putBoolean(KEY_SURROUND_3D, value).apply()
+    }
+
+    fun setSurround3dStrength(value: Int) {
+        val clamped = value.coerceIn(0, 1000)
+        surround3dStrength.value = clamped
+        prefs.edit().putInt(KEY_SURROUND_3D_STRENGTH, clamped).apply()
     }
 
     fun setEqualizerEnabled(value: Boolean) {
@@ -2314,6 +2333,8 @@ object AppSettings {
     private const val KEY_LOUDNESS_OFF_ON_SPEAKER = "loudness_off_on_speaker"
     private const val KEY_DOLBY_ATMOS = "dolby_atmos"
     private const val KEY_SPATIAL_AUDIO = "spatial_audio"
+    private const val KEY_SURROUND_3D = "surround_3d"
+    private const val KEY_SURROUND_3D_STRENGTH = "surround_3d_strength"
     private const val KEY_EQ_ENABLED = "equalizer_enabled"
     private const val KEY_EQ_MODE = "equalizer_mode"
     private const val KEY_EQ_TONE_X = "equalizer_tone_x"

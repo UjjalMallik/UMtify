@@ -4312,6 +4312,7 @@ private fun BitChordApp(
                         // Where the app is holding the player, if it is — see
                         // [PlayerSheetMotion.contentOffsetPx]. Placement only.
                         .offset { IntOffset(0, playerSheetMotion.contentOffsetPx()) }
+                        .background(Color.Black)
                         // The dim behind the player, from the window's top to
                         // its bottom whatever the player's offset, and as deep
                         // as the player is open.

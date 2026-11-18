@@ -32,6 +32,11 @@ enum class EqualizerPreset(vararg val bandsDb: Float) {
     CLASSICAL(3f, 2f, 0f, 0f, 1f, 2.5f, 3f),
     SMALL_SPEAKERS(5f, 4f, 2f, 0.5f, 0f, -1f, -2f),
     LATE_NIGHT(3f, 1f, 0f, 1.5f, 1f, -1f, -3f),
+    AUDIOPHILE_FLAT(0f, 0f, 0f, 0f, 0f, 0f, 0f),
+    DEEP_BASS_PUNCH(6.5f, 4.5f, 1.5f, 0f, 0.5f, 1.5f, 2f),
+    LIVE_CONCERT_3D(4f, 2.5f, 0f, 1.5f, 3f, 4.5f, 5f),
+    VOCAL_CLARITY(-2f, -1f, 1.5f, 4f, 3.5f, 2f, 1f),
+    ELECTRONIC_PANNING(5.5f, 3.5f, -1f, 1f, 2.5f, 4f, 5.5f),
     CUSTOM,
     ;
 

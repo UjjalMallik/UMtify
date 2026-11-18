@@ -78,6 +78,7 @@ import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
@@ -1860,7 +1861,16 @@ fun NowPlayingScreen(
         LocalPlayerTint provides playerTint,
         LocalPlayerTones provides playerTones,
     ) {
-        if (landscape) {
+        Surface(
+            modifier = modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black),
+            ) {
+                if (landscape) {
             // Paused always wins outright over a scrub in progress — see
             // [ARTWORK_PAUSE_SHRINK_SCALE].
             val landscapeArtScale by animateFloatAsState(
@@ -2341,6 +2351,22 @@ fun NowPlayingScreen(
                                     0f to Color.Transparent,
                                     0.40f to Color.Transparent,
                                     1f to Color.Black.copy(alpha = 0.70f),
+                                ),
+                            ),
+                    )
+                }
+
+                if (heroMode) {
+                    // Smooth, rich vertical gradient scrim over the bottom half of the full-screen
+                    // cover art so the playback controls and lyrics pop beautifully and look premium.
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f)),
+                                    startY = playerBounds.height.toFloat() * 0.45f,
+                                    endY = playerBounds.height.toFloat(),
                                 ),
                             ),
                     )
@@ -3873,6 +3899,7 @@ fun NowPlayingScreen(
             }
         }
     }
+}
 }
 
 /**

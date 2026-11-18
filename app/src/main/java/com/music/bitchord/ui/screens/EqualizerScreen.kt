@@ -32,6 +32,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -101,6 +102,8 @@ fun EqualizerScreen(
     val balance by AppSettings.equalizerBalance.collectAsStateWithLifecycle()
     val bands by AppSettings.equalizerBands.collectAsStateWithLifecycle()
     val preset by AppSettings.equalizerPreset.collectAsStateWithLifecycle()
+    val surround3d by AppSettings.surround3d.collectAsStateWithLifecycle()
+    val surround3dStrength by AppSettings.surround3dStrength.collectAsStateWithLifecycle()
     val outputStatus by AudioOutputStatus.current.collectAsStateWithLifecycle()
 
     val haptics = rememberHaptics()
@@ -233,6 +236,49 @@ fun EqualizerScreen(
                     onChange = { AppSettings.setEqualizerBalance(it) },
                     enabled = enabled,
                 )
+            }
+
+            SettingsGroup(
+                header = stringResource(R.string.equalizer_3d_surround),
+                footer = stringResource(R.string.equalizer_3d_surround_footer),
+            ) {
+                SettingsRow(
+                    icon = Icons.Rounded.Waves,
+                    title = stringResource(R.string.equalizer_3d_surround),
+                    subtitle = stringResource(
+                        if (surround3d) R.string.equalizer_3d_surround_on else R.string.equalizer_3d_surround_off,
+                        (surround3dStrength / 10f).roundToInt(),
+                    ),
+                    trailing = {
+                        Switch(
+                            checked = surround3d,
+                            onCheckedChange = {
+                                haptics.play(if (it) Haptic.ToggleOn else Haptic.ToggleOff)
+                                AppSettings.setSurround3d(it)
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                            enabled = enabled,
+                        )
+                    },
+                    onClick = {
+                        if (enabled) {
+                            haptics.play(if (!surround3d) Haptic.ToggleOn else Haptic.ToggleOff)
+                            AppSettings.setSurround3d(!surround3d)
+                        }
+                    },
+                    enabled = enabled,
+                )
+                if (surround3d) {
+                    RowDivider()
+                    SurroundStrengthControl(
+                        strength = surround3dStrength,
+                        onChange = { AppSettings.setSurround3dStrength(it) },
+                        enabled = enabled,
+                    )
+                }
             }
 
             // A stream that never gets decoded to linear PCM — a passthrough or
@@ -878,6 +924,55 @@ private fun PresetSheet(selected: EqualizerPreset, onSelect: (EqualizerPreset) -
 }
 
 @Composable
+private fun SurroundStrengthControl(
+    strength: Int,
+    onChange: (Int) -> Unit,
+    enabled: Boolean,
+) {
+    val haptics = rememberHaptics()
+    val currentOnChange by rememberUpdatedState(onChange)
+    val percentage = (strength / 10f).roundToInt()
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.equalizer_3d_surround_subtitle),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "$percentage%",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Slider(
+            value = strength.toFloat(),
+            onValueChange = { newVal ->
+                val intVal = newVal.roundToInt()
+                if (abs(intVal - strength) >= 10) {
+                    currentOnChange(intVal)
+                }
+            },
+            onValueChangeFinished = {
+                haptics.play(Haptic.Tick)
+            },
+            valueRange = 0f..1000f,
+            enabled = enabled,
+        )
+    }
+}
+
+@Composable
 private fun EqualizerMode.localizedLabel(): String = stringResource(
     when (this) {
         EqualizerMode.DYNAMIC -> R.string.equalizer_dynamic
@@ -904,6 +999,11 @@ private fun EqualizerPreset.localizedLabel(): String = stringResource(
         EqualizerPreset.CLASSICAL -> R.string.eq_preset_classical
         EqualizerPreset.SMALL_SPEAKERS -> R.string.eq_preset_small_speakers
         EqualizerPreset.LATE_NIGHT -> R.string.eq_preset_late_night
+        EqualizerPreset.AUDIOPHILE_FLAT -> R.string.eq_preset_audiophile_flat
+        EqualizerPreset.DEEP_BASS_PUNCH -> R.string.eq_preset_deep_bass_punch
+        EqualizerPreset.LIVE_CONCERT_3D -> R.string.eq_preset_live_concert_3d
+        EqualizerPreset.VOCAL_CLARITY -> R.string.eq_preset_vocal_clarity
+        EqualizerPreset.ELECTRONIC_PANNING -> R.string.eq_preset_electronic_panning
         EqualizerPreset.CUSTOM -> R.string.eq_preset_custom
     },
 )

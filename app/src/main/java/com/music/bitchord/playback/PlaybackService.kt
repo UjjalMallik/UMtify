@@ -14,6 +14,9 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.MediaMetadataRetriever
 import android.media.audiofx.AudioEffect
+import android.media.audiofx.DynamicsProcessing
+import android.media.audiofx.EnvironmentalReverb
+import android.media.audiofx.Virtualizer
 import android.net.Uri
 import android.widget.Toast
 import android.os.Bundle
@@ -636,6 +639,9 @@ class PlaybackService : MediaLibraryService() {
 
     /** The platform audio session currently advertised to system audio tools. */
     private var advertisedAudioEffectSessionId: Int = C.AUDIO_SESSION_ID_UNSET
+    private var nativeVirtualizer: Virtualizer? = null
+    private var nativeEnvironmentalReverb: EnvironmentalReverb? = null
+    private var nativeDynamicsProcessing: DynamicsProcessing? = null
 
     /**
      * Whether the format currently arriving at the active player's decoder
@@ -3425,6 +3431,7 @@ class PlaybackService : MediaLibraryService() {
 
         closeAudioEffectSession()
         advertisedAudioEffectSessionId = sessionId
+        setupNative3dEffects(sessionId)
         sendBroadcast(
             Intent(AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION).apply {
                 putExtra(AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
@@ -3439,12 +3446,101 @@ class PlaybackService : MediaLibraryService() {
         if (sessionId == C.AUDIO_SESSION_ID_UNSET) return
 
         advertisedAudioEffectSessionId = C.AUDIO_SESSION_ID_UNSET
+        releaseNative3dEffects()
         sendBroadcast(
             Intent(AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION).apply {
                 putExtra(AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
                 putExtra(AudioEffect.EXTRA_PACKAGE_NAME, packageName)
             },
         )
+    }
+
+    private fun setupNative3dEffects(sessionId: Int) {
+        releaseNative3dEffects()
+        if (sessionId == C.AUDIO_SESSION_ID_UNSET || sessionId <= 0) return
+
+        try {
+            nativeVirtualizer = Virtualizer(0, sessionId).apply {
+                val strength = AppSettings.surround3dStrength.value.coerceIn(0, 1000).toShort()
+                if (strengthSupported) {
+                    setStrength(strength)
+                }
+                enabled = AppSettings.surround3d.value
+            }
+        } catch (_: Throwable) {
+            nativeVirtualizer = null
+        }
+
+        try {
+            nativeEnvironmentalReverb = EnvironmentalReverb(0, sessionId).apply {
+                setDecayTime(1400)
+                setReflectionsLevel((-1000).toShort())
+                setReverbLevel(0.toShort())
+                val strength = AppSettings.surround3dStrength.value
+                val roomGain = (-2000 + (strength * 1.5f).toInt()).coerceIn(-6000, 0).toShort()
+                setRoomLevel(roomGain)
+                enabled = AppSettings.surround3d.value
+            }
+        } catch (_: Throwable) {
+            nativeEnvironmentalReverb = null
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                nativeDynamicsProcessing = DynamicsProcessing(sessionId).apply {
+                    enabled = true
+                }
+            } catch (_: Throwable) {
+                nativeDynamicsProcessing = null
+            }
+        }
+    }
+
+    private fun applyNative3dEffectsState(enabled: Boolean, strength: Int) {
+        try {
+            nativeVirtualizer?.apply {
+                if (strengthSupported) {
+                    setStrength(strength.coerceIn(0, 1000).toShort())
+                }
+                this.enabled = enabled
+            }
+        } catch (_: Throwable) {}
+
+        try {
+            nativeEnvironmentalReverb?.apply {
+                this.enabled = enabled
+                val roomGain = (-2000 + (strength * 1.5f).toInt()).coerceIn(-6000, 0).toShort()
+                setRoomLevel(roomGain)
+            }
+        } catch (_: Throwable) {}
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                nativeDynamicsProcessing?.enabled = enabled
+            } catch (_: Throwable) {}
+        }
+    }
+
+    private fun releaseNative3dEffects() {
+        try {
+            nativeVirtualizer?.enabled = false
+            nativeVirtualizer?.release()
+        } catch (_: Throwable) {}
+        nativeVirtualizer = null
+
+        try {
+            nativeEnvironmentalReverb?.enabled = false
+            nativeEnvironmentalReverb?.release()
+        } catch (_: Throwable) {}
+        nativeEnvironmentalReverb = null
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                nativeDynamicsProcessing?.enabled = false
+                nativeDynamicsProcessing?.release()
+            } catch (_: Throwable) {}
+            nativeDynamicsProcessing = null
+        }
     }
 
     /**
@@ -7145,6 +7241,14 @@ class PlaybackService : MediaLibraryService() {
             }.collect { applySpatialAudioEnabled() }
         }
         scope.launch {
+            combine(AppSettings.surround3d, AppSettings.surround3dStrength) { on, strength ->
+                on to strength
+            }.collect { (on, strength) ->
+                applyNative3dEffectsState(on, strength)
+                applySpatialAudioEnabled()
+            }
+        }
+        scope.launch {
             AppSettings.loudnessNormalization.collect {
                 setupLoudness(player?.currentMediaItem?.mediaId)
             }
@@ -7225,7 +7329,7 @@ class PlaybackService : MediaLibraryService() {
         val atmosFallback = activeTrackIsDolbyAtmos &&
             !DeviceCodecs.playsDolbyAtmos &&
             AppSettings.dolbyAtmos.value
-        val enabled = (AppSettings.spatialAudio.value && !activeTrackIsDolbyAtmos) || atmosFallback
+        val enabled = ((AppSettings.spatialAudio.value || AppSettings.surround3d.value) && !activeTrackIsDolbyAtmos) || atmosFallback
         spatialAudioProcessorA.enabled = enabled
         spatialAudioProcessorB.enabled = enabled
     }

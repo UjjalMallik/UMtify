@@ -299,7 +299,17 @@
     <string name="eq_preset_classical">Classical</string>
     <string name="eq_preset_small_speakers">Small speakers</string>
     <string name="eq_preset_late_night">Late night</string>
+    <string name="eq_preset_audiophile_flat">Audiophile Flat</string>
+    <string name="eq_preset_deep_bass_punch">Deep Bass Punch</string>
+    <string name="eq_preset_live_concert_3d">Live Concert 3D</string>
+    <string name="eq_preset_vocal_clarity">Vocal Clarity</string>
+    <string name="eq_preset_electronic_panning">Electronic Panning</string>
     <string name="eq_preset_custom">Custom</string>
+    <string name="equalizer_3d_surround">3D Surround</string>
+    <string name="equalizer_3d_surround_subtitle">Holographic Virtualizer &amp; Reverb</string>
+    <string name="equalizer_3d_surround_on">Spatial 3D Virtualizer active (%d%%)</string>
+    <string name="equalizer_3d_surround_off">3D Spatializer turned off</string>
+    <string name="equalizer_3d_surround_footer">Uses native Android Virtualizer and Environmental Reverb to create a full 360-degree holographic sound stage.</string>
     <string name="show_nerd_stats">Show stats for nerds</string>
     <string name="show_nerd_stats_subtitle">Codec, bitrate and sample rate on the player</string>
     <string name="app_icon">App icon</string>
