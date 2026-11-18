@@ -300,7 +300,6 @@ fun SettingsScreen(
     val showLyricsButton by AppSettings.showLyricsButton.collectAsStateWithLifecycle()
     val showRepeatButton by AppSettings.showRepeatButton.collectAsStateWithLifecycle()
     val showMoreButton by AppSettings.showMoreButton.collectAsStateWithLifecycle()
-    val showSpeedButton by AppSettings.showSpeedButton.collectAsStateWithLifecycle()
     val hideStatusBarInPlayer by AppSettings.hideStatusBarInPlayer.collectAsStateWithLifecycle()
     val hideSongStatus by AppSettings.hideSongStatus.collectAsStateWithLifecycle()
     val showQueueHistory by AppSettings.showQueueHistory.collectAsStateWithLifecycle()
@@ -1513,26 +1512,6 @@ fun SettingsScreen(
                         )
                     },
                     onClick = { AppSettings.setShowMoreButton(!showMoreButton) },
-                )
-            }
-            val showSpeedButtonTitle = stringResource(R.string.show_speed_controller_button)
-            row(showSpeedButtonTitle, "player", "toolbar", "button", "speed", "playback", "pitch") {
-                SettingsRow(
-                    icon = Icons.Rounded.Speed,
-                    title = showSpeedButtonTitle,
-                    enabled = showPlayerBottomToolbar,
-                    trailing = {
-                        Switch(
-                            checked = showSpeedButton,
-                            onCheckedChange = AppSettings::setShowSpeedButton,
-                            enabled = showPlayerBottomToolbar,
-                            colors = SwitchDefaults.colors(
-                                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                checkedBorderColor = MaterialTheme.colorScheme.primary,
-                            ),
-                        )
-                    },
-                    onClick = { AppSettings.setShowSpeedButton(!showSpeedButton) },
                 )
             }
         }

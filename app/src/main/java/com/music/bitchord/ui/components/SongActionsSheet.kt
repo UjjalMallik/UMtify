@@ -4,7 +4,9 @@ import com.music.bitchord.R
 
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -47,11 +50,13 @@ import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.ThumbDown
 import androidx.compose.material.icons.rounded.ThumbDownOffAlt
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -68,10 +73,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -464,19 +474,42 @@ private fun TintedSheet(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val maxHeight = LocalConfiguration.current.screenHeightDp.dp * 0.85f
+    val glassBorder = Brush.verticalGradient(
+        listOf(
+            Color.White.copy(alpha = 0.35f),
+            Color.White.copy(alpha = 0.08f),
+            Color.Transparent,
+        )
+    )
     Box(
         modifier
             .fillMaxWidth()
-            .clip(SHEET_SHAPE),
+            .clip(SHEET_SHAPE)
+            .border(width = 1.dp, brush = glassBorder, shape = SHEET_SHAPE)
+            .background(Color.Black.copy(alpha = 0.70f)),
     ) {
         ArtworkBackdrop(
             palette = palette,
             imageUrl = imageUrl,
-            modifier = Modifier.matchParentSize(),
+            modifier = Modifier.matchParentSize().graphicsLayer { alpha = 0.50f },
             // A sheet is a fraction of the height of a page, so the wash has
             // to resolve over a much shorter run to read the same way.
             washFraction = 0.75f,
             artPx = ROW_ART_PX,
+        )
+        // Specular glass highlight across the top edge
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(80.dp)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.12f),
+                            Color.Transparent,
+                        )
+                    )
+                )
         )
         Column(Modifier.fillMaxWidth().heightIn(max = maxHeight)) {
             // Drawn rather than taken from BottomSheetDefaults, whose handle
@@ -487,14 +520,14 @@ private fun TintedSheet(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 8.dp, bottom = 4.dp),
+                    .padding(top = 10.dp, bottom = 6.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
                     Modifier
-                        .size(width = 34.dp, height = 4.dp)
+                        .size(width = 38.dp, height = 4.dp)
                         .clip(CircleShape)
-                        .background(palette.onBackground.copy(alpha = 0.35f)),
+                        .background(Color.White.copy(alpha = 0.45f)),
                 )
             }
             Column(
@@ -651,6 +684,9 @@ private fun SleepTimerPicker(palette: ArtworkPalette, onBack: () -> Unit) {
     val chosen by SleepTimer.minutes.collectAsStateWithLifecycle()
     val afterTrack by SleepTimer.afterTrack.collectAsStateWithLifecycle()
     val countdown = sleepTimerCountdown()
+    val isCustom = chosen != null && chosen !in SleepTimer.PRESETS
+    var showCustomInput by remember { mutableStateOf(isCustom) }
+    var customMinutesText by remember { mutableStateOf(if (isCustom) chosen.toString() else "20") }
 
     Column(Modifier.fillMaxWidth()) {
         Row(
@@ -692,6 +728,7 @@ private fun SleepTimerPicker(palette: ArtworkPalette, onBack: () -> Unit) {
             selected = afterTrack,
             accent = palette.accent,
         ) {
+            showCustomInput = false
             SleepTimer.startAfterTrack()
             onBack()
         }
@@ -705,10 +742,101 @@ private fun SleepTimerPicker(palette: ArtworkPalette, onBack: () -> Unit) {
                 selected = minutes == chosen,
                 accent = palette.accent,
             ) {
+                showCustomInput = false
                 SleepTimer.start(minutes)
                 onBack()
             }
         }
+
+        // Custom duration option
+        SleepOption(
+            label = if (isCustom) "Custom ($chosen min)" else "Custom...",
+            selected = isCustom,
+            accent = palette.accent,
+        ) {
+            showCustomInput = !showCustomInput
+        }
+
+        if (showCustomInput) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 22.dp, vertical = 8.dp)
+                    .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
+                    .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
+                    .padding(16.dp),
+            ) {
+                Text(
+                    text = "Custom Sleep Duration",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                Spacer(Modifier.height(10.dp))
+                // Quick chips
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    listOf(10, 20, 30, 90, 120).forEach { presetMin ->
+                        val isSelected = customMinutesText == presetMin.toString()
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (isSelected) palette.accent.copy(alpha = 0.25f)
+                                    else Color.White.copy(alpha = 0.08f)
+                                )
+                                .border(
+                                    0.5.dp,
+                                    if (isSelected) palette.accent else Color.White.copy(alpha = 0.15f),
+                                    RoundedCornerShape(8.dp),
+                                )
+                                .clickable { customMinutesText = presetMin.toString() }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                        ) {
+                            Text(
+                                text = "${presetMin}m",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isSelected) palette.accent else MaterialTheme.colorScheme.onBackground,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    OutlinedTextField(
+                        value = customMinutesText,
+                        onValueChange = { input ->
+                            val digits = input.filter { it.isDigit() }.take(4)
+                            customMinutesText = digits
+                        },
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        label = { Text("Minutes") },
+                        shape = RoundedCornerShape(12.dp),
+                    )
+                    Button(
+                        onClick = {
+                            val mins = customMinutesText.toIntOrNull()
+                            if (mins != null && mins > 0) {
+                                SleepTimer.start(mins)
+                                onBack()
+                            }
+                        },
+                        enabled = (customMinutesText.toIntOrNull() ?: 0) > 0,
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text("Set Timer")
+                    }
+                }
+            }
+        }
+
         if (chosen != null || afterTrack) {
             ActionRow(Icons.Rounded.Close, stringResource(R.string.turn_off_timer), accent = palette.accent) {
                 SleepTimer.cancel()
@@ -800,6 +928,11 @@ internal fun ActionRow(
     // text follows the surface's colour — the two differ in light mode.
     val foreground = if (menu) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onBackground
     val alpha = if (enabled) 1f else 0.4f
+    val textShadow = Shadow(
+        color = Color.Black.copy(alpha = 0.65f),
+        offset = Offset(0f, 1.5f),
+        blurRadius = 3f,
+    )
     val iconView: @Composable () -> Unit = {
         Icon(
             imageVector = icon,
@@ -829,7 +962,7 @@ internal fun ActionRow(
         }
         Text(
             text = label,
-            style = MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyLarge.copy(shadow = textShadow),
             color = foreground.copy(alpha = alpha),
             maxLines = if (menu) 2 else Int.MAX_VALUE,
             overflow = TextOverflow.Ellipsis,
@@ -839,7 +972,7 @@ internal fun ActionRow(
             Spacer(Modifier.width(12.dp))
             Text(
                 text = value,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyLarge.copy(shadow = textShadow),
                 color = accent.copy(alpha = alpha),
                 maxLines = 1,
             )
@@ -928,14 +1061,19 @@ internal fun SheetTrackHeader(
         )
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
+            val titleShadow = Shadow(
+                color = Color.Black.copy(alpha = 0.75f),
+                offset = Offset(0f, 1.5f),
+                blurRadius = 3f,
+            )
             ExplicitSongTitle(
                 song = display,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleMedium.copy(shadow = titleShadow),
                 color = MaterialTheme.colorScheme.onBackground,
             )
             Text(
                 text = display.artist,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodyMedium.copy(shadow = titleShadow),
                 color = subtitleColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

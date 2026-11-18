@@ -15,7 +15,6 @@ import com.music.bitchord.data.settings.LastPlayerScreen
 import com.music.bitchord.data.settings.SmartAnalysis
 import com.music.bitchord.data.settings.MixBlend
 import com.music.bitchord.data.settings.TransitionWindow
-import com.music.bitchord.playback.VoiceEffect
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -47,11 +46,7 @@ interface PlayerHost {
 
     val playbackPitch: StateFlow<Float> get() = MutableStateFlow(1f)
 
-    val voiceEffect: StateFlow<VoiceEffect> get() = MutableStateFlow(VoiceEffect.NORMAL)
-
     fun setPlaybackSpeedAndPitch(speed: Float, pitch: Float) = Unit
-
-    fun setVoiceEffect(effect: VoiceEffect) = Unit
 
     /**
      * Whether this platform shows a music video's picture over the playing
@@ -292,7 +287,6 @@ interface PlayerSettingsSource {
     val showLyricsButton: StateFlow<Boolean>
     val showRepeatButton: StateFlow<Boolean>
     val showMoreButton: StateFlow<Boolean>
-    val showSpeedButton: StateFlow<Boolean>
     /** Hide the device status bar while the player is up. Always false where there is none. */
     val hideStatusBar: StateFlow<Boolean>
     val lastPlayerScreen: StateFlow<LastPlayerScreen>

@@ -900,7 +900,6 @@ fun NowPlayingScreen(
     val showLyricsButton by PlayerSettings.showLyricsButton.collectAsStateWithLifecycle()
     val showRepeatButton by PlayerSettings.showRepeatButton.collectAsStateWithLifecycle()
     val showMoreButton by PlayerSettings.showMoreButton.collectAsStateWithLifecycle()
-    val showSpeedButton by PlayerSettings.showSpeedButton.collectAsStateWithLifecycle()
     val actionVisibility = PlayerActionVisibility(
         queue = showQueueButton,
         sleepTimer = showSleepTimerButton,
@@ -908,11 +907,7 @@ fun NowPlayingScreen(
         lyrics = showLyricsButton,
         repeat = showRepeatButton,
         more = showMoreButton,
-        speed = showSpeedButton,
     )
-    val playbackSpeed by PlayerPlatform.host.playbackSpeed.collectAsStateWithLifecycle()
-    val playbackPitch by PlayerPlatform.host.playbackPitch.collectAsStateWithLifecycle()
-    var showSpeedController by remember { mutableStateOf(false) }
 
     // Animated cover art: the looping video some labels publish alongside a
     // release, laid over the sleeve. A miss is the normal answer — see
@@ -1614,8 +1609,6 @@ fun NowPlayingScreen(
                 onCycleRepeat = onCycleRepeat,
                 onOpenSleepTimer = onOpenSleepTimer,
                 onOpenMenu = onOpenMenu,
-                onOpenSpeed = { showSpeedController = true },
-                speedActive = (playbackSpeed != 1f || playbackPitch != 1f),
                 menuIcon = if (showRevertCue) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.MoreHoriz,
                 sleepTimerActive = sleepTimerActive,
                 visibility = actionVisibility,
@@ -1641,12 +1634,6 @@ fun NowPlayingScreen(
     // whichever layout is on screen — they are overlays over the player, not
     // part of either shape of it.
     val playerOverlays: @Composable () -> Unit = {
-        if (showSpeedController) {
-            SpeedControllerSheet(
-                hazeState = playerHaze,
-                onDismiss = { showSpeedController = false },
-            )
-        }
         if (showAudioOutput) {
             AudioOutputSheet(
                 hazeState = playerHaze,
@@ -2189,6 +2176,13 @@ fun NowPlayingScreen(
                     .then(dockHost)
                     .background(Color.Black),
             ) {
+                // Solid opaque base to ensure zero background bleed-through
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black)
+                )
+
                 // Anchored to the sleeve's bottom edge, so the screen carries on in the
                 // colours the artwork ended in rather than in a quantiser's idea of what
                 // the artwork was about. Position ticks recompose this screen twice a

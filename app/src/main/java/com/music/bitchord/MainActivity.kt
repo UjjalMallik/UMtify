@@ -4275,7 +4275,7 @@ private fun BitChordApp(
                 // only cut two notches out of the artwork behind the status bar.
                 // Square, and not clipped along its top — see [PlayerSheetShape].
                 shape = PlayerSheetShape,
-                containerColor = Color.Transparent,
+                containerColor = Color.Black,
                 dragHandle = null,
                 contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
                 // M3 caps a bottom sheet at [BottomSheetDefaults.SheetMaxWidth]
@@ -4309,6 +4309,7 @@ private fun BitChordApp(
                 }
                 Box(
                     Modifier
+                        .fillMaxSize()
                         // Where the app is holding the player, if it is — see
                         // [PlayerSheetMotion.contentOffsetPx]. Placement only.
                         .offset { IntOffset(0, playerSheetMotion.contentOffsetPx()) }
@@ -4340,7 +4341,12 @@ private fun BitChordApp(
                         },
                 ) {
                     CompositionLocalProvider(LocalPlayerDock provides activeDock) {
-                        nowPlaying(playerSong)
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = Color.Black,
+                        ) {
+                            nowPlaying(playerSong)
+                        }
                     }
                 }
             }

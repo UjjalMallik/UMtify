@@ -38,7 +38,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.FastRewind
 import androidx.compose.material.icons.rounded.Fullscreen
-import com.music.bitchord.playback.VoiceEffect
 import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.HighQuality
@@ -152,7 +151,6 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         override val showLyricsButton get() = AppSettings.showLyricsButton
         override val showRepeatButton get() = AppSettings.showRepeatButton
         override val showMoreButton get() = AppSettings.showMoreButton
-        override val showSpeedButton get() = AppSettings.showSpeedButton
         override val hideStatusBar get() = AppSettings.hideStatusBarInPlayer
         override val lastPlayerScreen get() = AppSettings.lastPlayerScreen
         override val legacyMeshGradient get() = AppSettings.legacyMeshGradient
@@ -346,19 +344,11 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
     override fun setMusicVideoQuality(height: Int?) = Unit
 
-    override val playbackSpeed: StateFlow<Float> get() = PlaybackService.playbackSpeedFlow
+    override val playbackSpeed: StateFlow<Float> get() = MutableStateFlow(1.0f)
 
-    override val playbackPitch: StateFlow<Float> get() = PlaybackService.playbackPitchFlow
+    override val playbackPitch: StateFlow<Float> get() = MutableStateFlow(1.0f)
 
-    override val voiceEffect: StateFlow<VoiceEffect> get() = PlaybackService.voiceEffectFlow
-
-    override fun setPlaybackSpeedAndPitch(speed: Float, pitch: Float) {
-        PlaybackService.setPlaybackParameters(speed, pitch)
-    }
-
-    override fun setVoiceEffect(effect: VoiceEffect) {
-        PlaybackService.setVoiceEffect(effect)
-    }
+    override fun setPlaybackSpeedAndPitch(speed: Float, pitch: Float) = Unit
 
     @Composable
     override fun LyricsShareSheet(

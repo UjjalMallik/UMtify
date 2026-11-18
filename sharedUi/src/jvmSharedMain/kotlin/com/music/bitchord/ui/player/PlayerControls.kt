@@ -1313,7 +1313,6 @@ internal fun PlayerVolumeBar(
 internal data class PlayerActionVisibility(
     val queue: Boolean = true,
     val sleepTimer: Boolean = true,
-    val speed: Boolean = true,
     val shuffle: Boolean = true,
     val lyrics: Boolean = true,
     val repeat: Boolean = true,
@@ -1321,7 +1320,7 @@ internal data class PlayerActionVisibility(
 ) {
     /** How many keys survive the filter. */
     val shownCount: Int
-        get() = listOf(queue, sleepTimer, speed, shuffle, lyrics, repeat, more).count { it }
+        get() = listOf(queue, sleepTimer, shuffle, lyrics, repeat, more).count { it }
 
     /** Nothing left to draw means the caller hides the row entirely. */
     val showsAnything: Boolean get() = shownCount > 0
@@ -1357,13 +1356,11 @@ internal fun PlayerActionBar(
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
     onOpenSleepTimer: () -> Unit,
-    onOpenSpeed: () -> Unit = {},
     onOpenMenu: () -> Unit,
     /** Briefly an undo arrow after a quality upgrade. */
     menuIcon: ImageVector = Icons.Rounded.MoreHoriz,
     /** A sleep timer is armed — either a countdown or "after this track". */
     sleepTimerActive: Boolean = false,
-    speedActive: Boolean = false,
     visibility: PlayerActionVisibility = PlayerActionVisibility(),
     modifier: Modifier = Modifier,
 ) {
@@ -1442,16 +1439,6 @@ internal fun PlayerActionBar(
                 modifier = m,
             )
         }
-        val speed: @Composable (Modifier) -> Unit = { m ->
-            PlayerTonalKey(
-                icon = Icons.Rounded.Speed,
-                contentDescription = "Playback speed",
-                active = speedActive,
-                onClick = onOpenSpeed,
-                iconSize = iconSize,
-                modifier = m,
-            )
-        }
         val more: @Composable (Modifier) -> Unit = { m ->
             PlayerTonalKey(
                 icon = menuIcon,
@@ -1465,7 +1452,6 @@ internal fun PlayerActionBar(
         val keys = listOfNotNull(
             queue.takeIf { visibility.queue },
             sleep.takeIf { visibility.sleepTimer },
-            speed.takeIf { visibility.speed },
             shuffle.takeIf { visibility.shuffle },
             lyrics.takeIf { visibility.lyrics },
             repeat.takeIf { visibility.repeat },

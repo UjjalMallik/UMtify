@@ -454,7 +454,6 @@ object AppSettings {
     val showLyricsButton = MutableStateFlow(true)
     val showRepeatButton = MutableStateFlow(true)
     val showMoreButton = MutableStateFlow(true)
-    val showSpeedButton = MutableStateFlow(true)
 
     /** Hides the device status bar (clock, battery, notifications) while the main player is open. */
     val hideStatusBarInPlayer = MutableStateFlow(false)
@@ -992,7 +991,6 @@ object AppSettings {
         showLyricsButton.value = prefs.getBoolean(KEY_SHOW_LYRICS_BUTTON, true)
         showRepeatButton.value = prefs.getBoolean(KEY_SHOW_REPEAT_BUTTON, true)
         showMoreButton.value = prefs.getBoolean(KEY_SHOW_MORE_BUTTON, true)
-        showSpeedButton.value = prefs.getBoolean(KEY_SHOW_SPEED_BUTTON, true)
         hideStatusBarInPlayer.value = prefs.getBoolean(KEY_HIDE_STATUS_BAR_IN_PLAYER, false)
         hideSongStatus.value = prefs.getBoolean(KEY_HIDE_SONG_STATUS, false)
         showQueueHistory.value = prefs.getBoolean(KEY_SHOW_QUEUE_HISTORY, false)
@@ -1495,11 +1493,6 @@ object AppSettings {
     fun setShowMoreButton(value: Boolean) {
         showMoreButton.value = value
         prefs.edit().putBoolean(KEY_SHOW_MORE_BUTTON, value).apply()
-    }
-
-    fun setShowSpeedButton(value: Boolean) {
-        showSpeedButton.value = value
-        prefs.edit().putBoolean(KEY_SHOW_SPEED_BUTTON, value).apply()
     }
 
     fun setHideStatusBarInPlayer(value: Boolean) {
@@ -2366,7 +2359,6 @@ object AppSettings {
     private const val KEY_SHOW_LYRICS_BUTTON = "show_lyrics_button"
     private const val KEY_SHOW_REPEAT_BUTTON = "show_repeat_button"
     private const val KEY_SHOW_MORE_BUTTON = "show_more_button"
-    private const val KEY_SHOW_SPEED_BUTTON = "show_speed_button"
     private const val KEY_HIDE_STATUS_BAR_IN_PLAYER = "hide_status_bar_in_player"
     private const val KEY_HIDE_SONG_STATUS = "hide_song_status"
     private const val KEY_SHOW_QUEUE_HISTORY = "show_queue_history"
