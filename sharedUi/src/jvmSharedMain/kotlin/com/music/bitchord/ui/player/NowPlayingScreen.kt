@@ -2956,6 +2956,7 @@ fun NowPlayingScreen(
                         // square. When docking into mini player (t < 1f), maintain
                         // smooth rounded corners throughout the entire collapse.
                         fun sleeveChromeCorner(): Dp {
+                            if (heroMode && dockT() >= 1f) return 0.dp
                             val corner = sleeveCorner()
                             val t = dockT()
                             if (t < 1f) {
@@ -3049,23 +3050,24 @@ fun NowPlayingScreen(
                                     // The card floats: a deeper shadow while the
                                     // music runs, a shallower one at rest, both
                                     // letting go as the sleeve docks away.
-                                    shadowElevation = if (art.loaded) {
+                                    val isHeroExpanded = heroMode && dockT() >= 1f
+                                    shadowElevation = if (isHeroExpanded) {
+                                        0f
+                                    } else if (art.loaded) {
                                         (if (isPlaying) 24.dp else 12.dp).toPx() *
                                             (1f - 2f * shown).coerceAtLeast(0f) * dockT() *
                                             (1f - bannerShare())
                                     } else {
                                         0f
                                     }
-                                    shape = dockFrame.cornerShape(sleeveChromeCorner())
+                                    shape = if (isHeroExpanded) RectangleShape else dockFrame.cornerShape(sleeveChromeCorner())
                                     // What `.shadow` did: it clips only when it casts.
-                                    clip = art.loaded
+                                    clip = art.loaded && !isHeroExpanded
                                 }
                                 .graphicsLayer {
-                                    // Clipped a second time, as `.shadow` and then
-                                    // `.clip` always did: a card's anti-aliased corners
-                                    // come out as they did before the banner moved in.
-                                    shape = dockFrame.cornerShape(sleeveChromeCorner())
-                                    clip = true
+                                    val isHeroExpanded = heroMode && dockT() >= 1f
+                                    shape = if (isHeroExpanded) RectangleShape else dockFrame.cornerShape(sleeveChromeCorner())
+                                    clip = !isHeroExpanded
                                     // The mask below erases part of what this layer
                                     // drew, which it can only do in a buffer of its own.
                                     // CompositingStrategy.Offscreen is strictly required whenever
@@ -3086,27 +3088,29 @@ fun NowPlayingScreen(
                                 // the card still being there.
                                 .drawWithContent {
                                     drawContent()
-                                    val edge = if (dockT() < 1f) {
-                                        0.18f
-                                    } else {
-                                        0.16f * (1f - p()).coerceIn(0f, 1f) *
-                                            (1f - bannerShare())
-                                    }
-                                    if (edge > 0.001f) {
-                                        val line = 1.dp.toPx()
-                                        val cornerPx = with(density) { sleeveChromeCorner().toPx() }
-                                        drawRoundRect(
-                                            color = Color.White.copy(alpha = edge),
-                                            topLeft = Offset(line / 2f, line / 2f),
-                                            size = Size(
-                                                width = size.width - line,
-                                                height = size.height - line,
-                                            ),
-                                            cornerRadius = CornerRadius(
-                                                (cornerPx - line / 2f).coerceAtLeast(0f),
-                                            ),
-                                            style = Stroke(width = line),
-                                        )
+                                    if (!heroMode || dockT() < 1f) {
+                                        val edge = if (dockT() < 1f) {
+                                            0.18f
+                                        } else {
+                                            0.16f * (1f - p()).coerceIn(0f, 1f) *
+                                                (1f - bannerShare())
+                                        }
+                                        if (edge > 0.001f) {
+                                            val line = 1.dp.toPx()
+                                            val cornerPx = with(density) { sleeveChromeCorner().toPx() }
+                                            drawRoundRect(
+                                                color = Color.White.copy(alpha = edge),
+                                                topLeft = Offset(line / 2f, line / 2f),
+                                                size = Size(
+                                                    width = size.width - line,
+                                                    height = size.height - line,
+                                                ),
+                                                cornerRadius = CornerRadius(
+                                                    (cornerPx - line / 2f).coerceAtLeast(0f),
+                                                ),
+                                                style = Stroke(width = line),
+                                            )
+                                        }
                                     }
                                 }
                                 // The banner dissolves into the backdrop where the
@@ -3116,9 +3120,15 @@ fun NowPlayingScreen(
                                     drawContent()
                                     val shown = sleeveShown()
                                     if (shown > 0f) {
+                                        val fadeAlpha = (1f - shown).coerceIn(0f, 1f)
                                         drawRect(
                                             brush = Brush.verticalGradient(
-                                                colors = listOf(Color.Black, Color.Black.copy(alpha = 1f - shown)),
+                                                colorStops = arrayOf(
+                                                    0.00f to Color.Black,
+                                                    0.55f to Color.Black,
+                                                    0.85f to Color.Black.copy(alpha = fadeAlpha),
+                                                    1.00f to Color.Black.copy(alpha = fadeAlpha),
+                                                ),
                                                 startY = size.height * (1f - HERO_FADE_FRACTION),
                                                 endY = size.height,
                                             ),
@@ -3169,8 +3179,9 @@ fun NowPlayingScreen(
                                         // Its own corners only once it is smaller than
                                         // the sleeve; as the whole card it takes the
                                         // sleeve's clip, as it always did.
-                                        shape = TileShape
-                                        clip = share > 0f
+                                        val isHeroExpanded = heroMode && dockT() >= 1f
+                                        shape = if (isHeroExpanded) RectangleShape else TileShape
+                                        clip = (share > 0f) && !isHeroExpanded
                                     }
                                     // The empty-state tile's tinted square, not a
                                     // container for the cover. It is only visible
@@ -3180,9 +3191,11 @@ fun NowPlayingScreen(
                                     // banner is exactly the ghost this mode is
                                     // meant not to have.
                                     .drawBehind {
-                                        val scrim = 0.18f * (1f - bannerShare())
-                                        if (scrim > 0.001f) {
-                                            drawRect(Color.Black.copy(alpha = scrim))
+                                        if (!heroMode || dockT() < 1f) {
+                                            val scrim = 0.18f * (1f - bannerShare())
+                                            if (scrim > 0.001f) {
+                                                drawRect(Color.Black.copy(alpha = scrim))
+                                            }
                                         }
                                     },
                                 contentAlignment = Alignment.Center,

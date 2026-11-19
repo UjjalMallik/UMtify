@@ -241,7 +241,7 @@ object LocalMediaRepository {
         return uriOrPath.substringAfterLast('/').ifBlank { "Storage" }
     }
 
-    private fun safUriToStoragePath(uri: Uri): String? = runCatching {
+    internal fun safUriToStoragePath(uri: Uri): String? = runCatching {
         val uriStr = uri.toString()
         val docId = if (uriStr.contains("/document/")) {
             DocumentsContract.getDocumentId(uri)
@@ -414,7 +414,7 @@ object LocalMediaRepository {
             videoId = uriStr,
             title = title,
             artist = artist,
-            thumbnailUrl = null,
+            thumbnailUrl = "local_art://$uriStr",
             durationText = durationText,
             albumName = albumName,
             localUri = uriStr,
@@ -585,7 +585,7 @@ object LocalMediaRepository {
                             ?: "Track $id"
                         val artist = rawArtist.takeUnless { it.isNullOrBlank() || it == "<unknown>" } ?: "Unknown Artist"
                         val albumName = rawAlbum.takeUnless { it.isNullOrBlank() || it == "<unknown>" }
-                        val artworkUrl = if (albumId > 0) ContentUris.withAppendedId(albumArtBaseUri, albumId).toString() else null
+                        val artworkUrl = if (albumId > 0) ContentUris.withAppendedId(albumArtBaseUri, albumId).toString() else "local_art://$contentUri"
                         val durationText = durationMs.takeIf { it > 0 }?.let(::formatDuration)
                         val trackNumber = if (trackCol >= 0 && !cursor.isNull(trackCol)) {
                             trackNumberFromMediaStore(cursor.getInt(trackCol))
@@ -794,7 +794,7 @@ object LocalMediaRepository {
                             val artist = cursor.getString(artistCol).cleanTag() ?: "Unknown Artist"
                             val album = cursor.getString(albumCol).cleanTag()
                             val albumId = cursor.getLong(albumIdCol)
-                            val artworkUrl = if (albumId > 0) ContentUris.withAppendedId(albumArtBaseUri, albumId).toString() else null
+                            val artworkUrl = if (albumId > 0) ContentUris.withAppendedId(albumArtBaseUri, albumId).toString() else "local_art://$contentUri"
                             val song = Song(
                                 videoId = contentUri,
                                 title = title,
@@ -924,7 +924,7 @@ object LocalMediaRepository {
             videoId = uriStr,
             title = title,
             artist = artist,
-            thumbnailUrl = scanned?.artworkUrl,
+            thumbnailUrl = scanned?.artworkUrl ?: "local_art://$uriStr",
             durationText = durationText,
             albumName = albumName ?: scanned?.albumName,
             localUri = uriStr,

@@ -22,6 +22,7 @@ import androidx.appcompat.app.AppCompatDelegate
 import com.music.bitchord.ui.player.AndroidPlayerHost
 import com.music.bitchord.ui.player.PlayerPlatform
 import com.music.bitchord.data.canvas.CanvasCache
+import com.music.bitchord.data.local.LocalAudioCoverFetcher
 import com.music.bitchord.data.smb.SmbCoverFetcher
 import com.music.bitchord.data.webdav.WebDavCoilAuth
 import com.music.bitchord.image.DefaultCoverFallback
@@ -224,6 +225,9 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
             // the header is attached per request instead. See WebDavCoilAuth.
             .components {
                 add(WebDavCoilAuth())
+                // Embedded cover art from local audio files (SAF & MediaStore)
+                add(LocalAudioCoverFetcher.Factory(context))
+                add(LocalAudioCoverFetcher.UriFactory(context))
                 // Covers filed on the SMB share; anything else falls
                 // through to Coil's own fetchers. See SmbCoverFetcher.
                 add(SmbCoverFetcher.Factory())
