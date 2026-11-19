@@ -688,6 +688,9 @@ object AppSettings {
     /** Multi-folder selection: set of persisted SAF tree URIs or local absolute folder paths. */
     val localMusicFolders = MutableStateFlow<Set<String>>(emptySet())
 
+    /** Persisted SAF custom folders: set of custom storage tree URIs added by user. */
+    val localMusicCustomFolders = MutableStateFlow<Set<String>>(emptySet())
+
     /** Explicitly selected local songs (empty means all are eligible unless in excluded set). */
     val localMusicSelectedSongs = MutableStateFlow<Set<String>>(emptySet())
 
@@ -1053,6 +1056,7 @@ object AppSettings {
         detailSongSorts.value = readDetailSongSorts()
         localMusicFolderUri.value = prefs.getString(KEY_LOCAL_MUSIC_FOLDER_URI, "").orEmpty()
         localMusicFolders.value = prefs.getStringSet(KEY_LOCAL_MUSIC_FOLDERS, emptySet()).orEmpty()
+        localMusicCustomFolders.value = prefs.getStringSet(KEY_LOCAL_MUSIC_CUSTOM_FOLDERS, emptySet()).orEmpty()
         localMusicSelectedSongs.value = prefs.getStringSet(KEY_LOCAL_MUSIC_SELECTED_SONGS, emptySet()).orEmpty()
         localMusicExcludedSongs.value = prefs.getStringSet(KEY_LOCAL_MUSIC_EXCLUDED_SONGS, emptySet()).orEmpty()
         webdavUrl.value = prefs.getString(KEY_WEBDAV_URL, "").orEmpty()
@@ -2002,6 +2006,28 @@ object AppSettings {
         setLocalMusicFolders(updated)
     }
 
+    fun setLocalMusicCustomFolders(values: Set<String>) {
+        localMusicCustomFolders.value = values
+        prefs.edit().putStringSet(KEY_LOCAL_MUSIC_CUSTOM_FOLDERS, values).apply()
+    }
+
+    fun addLocalMusicCustomFolder(uri: String) {
+        val current = localMusicCustomFolders.value
+        if (uri !in current) {
+            setLocalMusicCustomFolders(current + uri)
+        }
+    }
+
+    fun removeLocalMusicCustomFolder(uri: String) {
+        setLocalMusicCustomFolders(localMusicCustomFolders.value - uri)
+        if (uri in localMusicFolders.value) {
+            setLocalMusicFolders(localMusicFolders.value - uri)
+        }
+        if (localMusicFolderUri.value == uri) {
+            setLocalMusicFolderUri("")
+        }
+    }
+
     fun setLocalMusicSelectedSongs(songs: Set<String>) {
         localMusicSelectedSongs.value = songs
         prefs.edit().putStringSet(KEY_LOCAL_MUSIC_SELECTED_SONGS, songs).apply()
@@ -2263,6 +2289,7 @@ object AppSettings {
         "downloaded_collections",
         KEY_LOCAL_MUSIC_FOLDER_URI,
         KEY_LOCAL_MUSIC_FOLDERS,
+        KEY_LOCAL_MUSIC_CUSTOM_FOLDERS,
         KEY_LOCAL_MUSIC_SELECTED_SONGS,
         KEY_LOCAL_MUSIC_EXCLUDED_SONGS,
         KEY_LAST_VERSION_CODE,
@@ -2401,6 +2428,7 @@ object AppSettings {
     private const val KEY_HOME_RECENTS_VIEW_TYPE = "home_recents_view_type"
     private const val KEY_LOCAL_MUSIC_FOLDER_URI = "local_music_folder_uri"
     private const val KEY_LOCAL_MUSIC_FOLDERS = "local_music_folders"
+    private const val KEY_LOCAL_MUSIC_CUSTOM_FOLDERS = "local_music_custom_folders"
     private const val KEY_LOCAL_MUSIC_SELECTED_SONGS = "local_music_selected_songs"
     private const val KEY_LOCAL_MUSIC_EXCLUDED_SONGS = "local_music_excluded_songs"
     private const val KEY_WEBDAV_URL = "webdav_url"

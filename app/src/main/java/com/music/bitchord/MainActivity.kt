@@ -1011,6 +1011,7 @@ private fun BitChordApp(
     // taken again whenever the record of what's on disk changes.
     val savedDownloads by Downloads.saved.collectAsStateWithLifecycle()
     val localMusicFolderUri by AppSettings.localMusicFolderUri.collectAsStateWithLifecycle()
+    val localMusicCustomFolders by AppSettings.localMusicCustomFolders.collectAsStateWithLifecycle()
     val filterNonMusicAudio by AppSettings.filterNonMusicAudio.collectAsStateWithLifecycle()
     val webdavUrl by AppSettings.webdavUrl.collectAsStateWithLifecycle()
     val smbHost by AppSettings.smbHost.collectAsStateWithLifecycle()
@@ -1063,7 +1064,7 @@ private fun BitChordApp(
             viewModel.reloadLocalDetail(open)
         }
     }
-    LaunchedEffect(localMusicFolderUri, filterNonMusicAudio) {
+    LaunchedEffect(localMusicFolderUri, localMusicCustomFolders, filterNonMusicAudio) {
         val open = detail?.browseId
         if (open == "local:all" || LocalGroups.folderOf(open) == "local:all") {
             viewModel.reloadLocalDetail(open!!)
@@ -2065,7 +2066,7 @@ private fun BitChordApp(
     // The Search tab's Library source reads the Local Music folder, so it asks
     // for the same permission opening that folder does.
     val onSearchSourceChange: (SearchSource) -> Unit = { source ->
-        if (source == SearchSource.LIBRARY && !LocalMediaRepository.hasStoragePermission(context)) {
+        if (source == SearchSource.LIBRARY && !LocalMediaRepository.hasStoragePermission(context) && !LocalMediaRepository.hasCustomFolders()) {
             mediaPermissionLauncher.launch(mediaPermission)
         }
         viewModel.setSearchSource(source)
@@ -2078,7 +2079,7 @@ private fun BitChordApp(
                 showSpotify = true
                 return@let
             }
-            if ((id == "local:all" || id == "local:downloads") && !LocalMediaRepository.hasStoragePermission(context)) {
+            if ((id == "local:all" || id == "local:downloads") && !LocalMediaRepository.hasStoragePermission(context) && !LocalMediaRepository.hasCustomFolders()) {
                 mediaPermissionLauncher.launch(mediaPermission)
             }
             // Left set rather than cleared: a card opened from a shelf's

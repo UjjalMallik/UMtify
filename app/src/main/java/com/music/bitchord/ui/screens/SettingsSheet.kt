@@ -374,14 +374,20 @@ fun SettingsScreen(
         ActivityResultContracts.OpenDocumentTree(),
     ) { folder ->
         if (folder == null) return@rememberLauncherForActivityResult
-        runCatching {
+        try {
             context.contentResolver.takePersistableUriPermission(
                 folder,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION,
             )
+        } catch (_: SecurityException) { /* fallback if already granted */ }
+        AppSettings.addLocalMusicCustomFolder(folder.toString())
+        if (AppSettings.localMusicFolders.value.isNotEmpty()) {
+            AppSettings.setLocalMusicFolders(AppSettings.localMusicFolders.value + folder.toString())
         }
-        AppSettings.setLocalMusicFolderUri(folder.toString())
-        AppSettings.toggleLocalMusicFolder(folder.toString())
+        backupScope.launch(Dispatchers.IO) {
+            LocalMediaRepository.refreshFoldersAndSongs(context)
+            LocalMediaRepository.getLocalMusic(context)
+        }
     }
 
     val localMusicSongPicker = rememberLauncherForActivityResult(
@@ -389,15 +395,19 @@ fun SettingsScreen(
     ) { uris ->
         if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
         uris.forEach { uri ->
-            runCatching {
+            try {
                 context.contentResolver.takePersistableUriPermission(
                     uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION,
                 )
-            }
+            } catch (_: SecurityException) { /* fallback if already granted */ }
         }
         val current = AppSettings.localMusicSelectedSongs.value
         AppSettings.setLocalMusicSelectedSongs(current + uris.map { it.toString() })
+        backupScope.launch(Dispatchers.IO) {
+            LocalMediaRepository.refreshFoldersAndSongs(context)
+            LocalMediaRepository.getLocalMusic(context)
+        }
     }
 
     /**

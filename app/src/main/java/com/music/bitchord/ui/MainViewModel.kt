@@ -1643,13 +1643,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             combine(
                 AppSettings.localMusicFolders,
                 AppSettings.localMusicFolderUri,
+                AppSettings.localMusicCustomFolders,
                 AppSettings.localMusicExcludedSongs,
                 AppSettings.localMusicSelectedSongs,
-            ) { _, _, _, _ -> Unit }
+            ) { _, _, _, _, _ -> Unit }
                 .drop(1)
                 .collect {
                     loadOfflineHome()
                     loadLibrary()
+                    loadLibrarySongs()
+                    if (_detailStack.value.any { page -> page.browseId == "local:all" }) {
+                        reloadLocalDetail("local:all")
+                    }
                 }
         }
         viewModelScope.launch {
@@ -2601,7 +2606,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun loadLibrarySongs() {
         viewModelScope.launch {
             val context = getApplication<Application>()
-            _librarySongs.value = if (!LocalMediaRepository.hasStoragePermission(context)) {
+            val hasCustom = LocalMediaRepository.hasCustomFolders()
+            _librarySongs.value = if (!LocalMediaRepository.hasStoragePermission(context) && !hasCustom) {
                 UiState.Error(text(R.string.storage_required_read))
             } else {
                 runCatching { LocalMediaRepository.getLocalMusic(context) }.fold(

@@ -66,10 +66,11 @@ fun libraryLinks(): List<LibraryLink> {
     // Live local music count
     val localFolders by AppSettings.localMusicFolders.collectAsStateWithLifecycle()
     val localFolderUri by AppSettings.localMusicFolderUri.collectAsStateWithLifecycle()
+    val localCustomFolders by AppSettings.localMusicCustomFolders.collectAsStateWithLifecycle()
     val localExcludedSongs by AppSettings.localMusicExcludedSongs.collectAsStateWithLifecycle()
     val localSelectedSongs by AppSettings.localMusicSelectedSongs.collectAsStateWithLifecycle()
     var localMusicCount by remember { mutableStateOf<Int?>(null) }
-    LaunchedEffect(localFolders, localFolderUri, localExcludedSongs, localSelectedSongs) {
+    LaunchedEffect(localFolders, localFolderUri, localCustomFolders, localExcludedSongs, localSelectedSongs) {
         val count = runCatching { LocalMediaRepository.getLocalMusic(context).size }.getOrNull()
         localMusicCount = count
     }
