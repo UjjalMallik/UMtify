@@ -691,6 +691,9 @@ object AppSettings {
     /** Persisted SAF custom folders: set of custom storage tree URIs added by user. */
     val localMusicCustomFolders = MutableStateFlow<Set<String>>(emptySet())
 
+    /** Whether to automatically scan all device MediaStore audio folders. Defaults to false. */
+    val scanAllAudioFolders = MutableStateFlow(false)
+
     /** Explicitly selected local songs (empty means all are eligible unless in excluded set). */
     val localMusicSelectedSongs = MutableStateFlow<Set<String>>(emptySet())
 
@@ -1057,6 +1060,7 @@ object AppSettings {
         localMusicFolderUri.value = prefs.getString(KEY_LOCAL_MUSIC_FOLDER_URI, "").orEmpty()
         localMusicFolders.value = prefs.getStringSet(KEY_LOCAL_MUSIC_FOLDERS, emptySet()).orEmpty()
         localMusicCustomFolders.value = prefs.getStringSet(KEY_LOCAL_MUSIC_CUSTOM_FOLDERS, emptySet()).orEmpty()
+        scanAllAudioFolders.value = prefs.getBoolean(KEY_SCAN_ALL_AUDIO_FOLDERS, false)
         localMusicSelectedSongs.value = prefs.getStringSet(KEY_LOCAL_MUSIC_SELECTED_SONGS, emptySet()).orEmpty()
         localMusicExcludedSongs.value = prefs.getStringSet(KEY_LOCAL_MUSIC_EXCLUDED_SONGS, emptySet()).orEmpty()
         webdavUrl.value = prefs.getString(KEY_WEBDAV_URL, "").orEmpty()
@@ -2000,6 +2004,11 @@ object AppSettings {
         prefs.edit().putStringSet(KEY_LOCAL_MUSIC_FOLDERS, values).apply()
     }
 
+    fun setScanAllAudioFolders(enabled: Boolean) {
+        scanAllAudioFolders.value = enabled
+        prefs.edit().putBoolean(KEY_SCAN_ALL_AUDIO_FOLDERS, enabled).apply()
+    }
+
     fun toggleLocalMusicFolder(folderUriOrPath: String) {
         val current = localMusicFolders.value
         val updated = if (folderUriOrPath in current) current - folderUriOrPath else current + folderUriOrPath
@@ -2290,6 +2299,7 @@ object AppSettings {
         KEY_LOCAL_MUSIC_FOLDER_URI,
         KEY_LOCAL_MUSIC_FOLDERS,
         KEY_LOCAL_MUSIC_CUSTOM_FOLDERS,
+        KEY_SCAN_ALL_AUDIO_FOLDERS,
         KEY_LOCAL_MUSIC_SELECTED_SONGS,
         KEY_LOCAL_MUSIC_EXCLUDED_SONGS,
         KEY_LAST_VERSION_CODE,
@@ -2429,6 +2439,7 @@ object AppSettings {
     private const val KEY_LOCAL_MUSIC_FOLDER_URI = "local_music_folder_uri"
     private const val KEY_LOCAL_MUSIC_FOLDERS = "local_music_folders"
     private const val KEY_LOCAL_MUSIC_CUSTOM_FOLDERS = "local_music_custom_folders"
+    private const val KEY_SCAN_ALL_AUDIO_FOLDERS = "scan_all_audio_folders"
     private const val KEY_LOCAL_MUSIC_SELECTED_SONGS = "local_music_selected_songs"
     private const val KEY_LOCAL_MUSIC_EXCLUDED_SONGS = "local_music_excluded_songs"
     private const val KEY_WEBDAV_URL = "webdav_url"

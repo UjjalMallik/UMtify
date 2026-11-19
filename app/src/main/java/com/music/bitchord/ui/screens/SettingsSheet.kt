@@ -310,6 +310,7 @@ fun SettingsScreen(
     val filterNonMusicAudio by AppSettings.filterNonMusicAudio.collectAsStateWithLifecycle()
     val localMusicFolderUri by AppSettings.localMusicFolderUri.collectAsStateWithLifecycle()
     val localMusicFolders by AppSettings.localMusicFolders.collectAsStateWithLifecycle()
+    val scanAllAudioFolders by AppSettings.scanAllAudioFolders.collectAsStateWithLifecycle()
     val localMusicSelectedSongs by AppSettings.localMusicSelectedSongs.collectAsStateWithLifecycle()
     val localMusicExcludedSongs by AppSettings.localMusicExcludedSongs.collectAsStateWithLifecycle()
     var showLocalMusicManager by remember { mutableStateOf(false) }
@@ -1541,9 +1542,10 @@ fun SettingsScreen(
                 foldersLabel != null && localMusicExcludedSongs.isNotEmpty() ->
                     "$foldersLabel · ${localMusicExcludedSongs.size} excluded"
                 foldersLabel != null -> foldersLabel
-                localMusicExcludedSongs.isNotEmpty() ->
+                scanAllAudioFolders && localMusicExcludedSongs.isNotEmpty() ->
                     "${stringResource(R.string.all_audio_folders)} · ${localMusicExcludedSongs.size} excluded"
-                else -> stringResource(R.string.all_audio_folders)
+                scanAllAudioFolders -> stringResource(R.string.all_audio_folders)
+                else -> stringResource(R.string.local_music_folder)
             }
             row(localMusicFolderTitle, "folder", "offline", "files", "local music") {
                 SettingsRow(

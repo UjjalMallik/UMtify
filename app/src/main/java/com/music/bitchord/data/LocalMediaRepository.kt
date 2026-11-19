@@ -268,7 +268,62 @@ object LocalMediaRepository {
         "mp4", "mkv", "avi", "mov", "wmv", "3gp", "ts", "flv", "webm",
     )
 
+    fun scanSafFolderFast(context: Context, treeUriString: String): List<Song> {
+        val songs = mutableListOf<Song>()
+        runCatching {
+            val treeUri = Uri.parse(treeUriString)
+            val parentDocId = DocumentsContract.getTreeDocumentId(treeUri)
+            val queue = ArrayDeque<String>()
+            queue.add(parentDocId)
+
+            val projection = arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+            )
+
+            while (queue.isNotEmpty()) {
+                val curDocId = queue.removeFirst()
+                val curChildrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, curDocId)
+                context.contentResolver.query(curChildrenUri, projection, null, null, null)?.use { cursor ->
+                    val idCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                    val nameCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                    val mimeCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                    val modCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+
+                    while (cursor.moveToNext()) {
+                        val docId = cursor.getString(idCol) ?: continue
+                        val mime = cursor.getString(mimeCol).orEmpty()
+                        val name = cursor.getString(nameCol).orEmpty()
+
+                        if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                            queue.add(docId)
+                        } else {
+                            val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
+                            if (ext in safVideoExtensions || mime.startsWith("video/")) continue
+                            val isAudio = mime.startsWith("audio/") || ext in safAudioExtensions
+                            if (isAudio) {
+                                val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+                                val modTime = if (modCol >= 0 && !cursor.isNull(modCol)) cursor.getLong(modCol) / 1000 else null
+                                songs.add(buildSongFast(context, fileUri, docId, name, modTime))
+                            }
+                        }
+                    }
+                }
+            }
+        }.onFailure {
+            Log.w(TAG, "Fast SAF query failed for $treeUriString: ${it.message}")
+            songs.addAll(scanSafTreeFallback(context, treeUriString))
+        }
+        return songs
+    }
+
     fun scanSafTree(context: Context, treeUriString: String): List<Song> {
+        return scanSafFolderFast(context, treeUriString)
+    }
+
+    private fun scanSafTreeFallback(context: Context, treeUriString: String): List<Song> {
         val uri = Uri.parse(treeUriString)
         val root = runCatching { DocumentFile.fromTreeUri(context, uri) }.getOrNull() ?: return emptyList()
         val songs = mutableListOf<Song>()
@@ -286,45 +341,53 @@ object LocalMediaRepository {
                     val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
                     val mime = file.type?.lowercase(Locale.ROOT)
 
-                    // Skip video files like .mp4 / .mkv (as seen in 210040.jpg)
-                    if (ext in safVideoExtensions || mime?.startsWith("video/") == true) {
-                        continue
-                    }
-
-                    // Check if audio file
+                    if (ext in safVideoExtensions || mime?.startsWith("video/") == true) continue
                     val isAudio = (mime?.startsWith("audio/") == true) || (ext in safAudioExtensions)
                     if (!isAudio) continue
 
-                    val song = buildSongFromSafDocument(context, file, treeUriString)
-                    if (song != null) {
-                        songs.add(song)
-                    }
+                    val modified = file.lastModified().takeIf { it > 0 }?.div(1000)
+                    songs.add(buildSongFast(context, file.uri, file.uri.toString(), name, modified))
                 }
             }
         }
         return songs
     }
 
-    private fun buildSongFromSafDocument(
+    private fun buildSongFast(
         context: Context,
-        file: DocumentFile,
-        folderUri: String,
-    ): Song? {
-        val fileUri = file.uri
+        fileUri: Uri,
+        docId: String,
+        fileName: String,
+        modifiedSeconds: Long?,
+    ): Song {
         val uriStr = fileUri.toString()
-        val fileName = file.name.orEmpty()
         val nameWithoutExt = fileName.substringBeforeLast('.').ifBlank { fileName }
 
         var title = nameWithoutExt
         var artist = "Unknown Artist"
+        if (nameWithoutExt.contains(" - ")) {
+            val parts = nameWithoutExt.split(" - ", limit = 2)
+            if (parts[0].isNotBlank()) artist = parts[0].trim()
+            if (parts[1].isNotBlank()) title = parts[1].trim()
+        }
+
         var albumName: String? = null
-        var durationMs: Long? = null
+        var durationText: String? = null
         var trackNumber: Int? = null
+
+        val directPath = safUriToStoragePath(fileUri)
+        val localFile = directPath?.let { File(it) }?.takeIf { it.exists() }
 
         runCatching {
             val retriever = MediaMetadataRetriever()
             try {
-                retriever.setDataSource(context, fileUri)
+                if (localFile != null) {
+                    retriever.setDataSource(localFile.path)
+                } else {
+                    context.contentResolver.openFileDescriptor(fileUri, "r")?.use { pfd ->
+                        retriever.setDataSource(pfd.fileDescriptor)
+                    }
+                }
                 val metaTitle = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
                 val metaArtist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
                 val metaAlbum = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
@@ -338,16 +401,14 @@ object LocalMediaRepository {
                     artist = metaArtist.cleanTag() ?: artist
                 }
                 albumName = metaAlbum.cleanTag()
-                durationMs = metaDur
+                if (metaDur != null && metaDur > 0) {
+                    durationText = formatDuration(metaDur)
+                }
                 trackNumber = trackNumberFromTag(metaTrack)
             } finally {
                 retriever.release()
             }
         }
-
-        val durationText = durationMs?.takeIf { it > 0 }?.let(::formatDuration)
-        val modifiedSeconds = file.lastModified().takeIf { it > 0 }?.div(1000)
-        val convertedPath = safUriToStoragePath(fileUri) ?: fileUri.path ?: uriStr
 
         return Song(
             videoId = uriStr,
@@ -357,7 +418,7 @@ object LocalMediaRepository {
             durationText = durationText,
             albumName = albumName,
             localUri = uriStr,
-            localPath = convertedPath,
+            localPath = directPath ?: uriStr,
             localDateAddedSeconds = modifiedSeconds,
             localDateModifiedSeconds = modifiedSeconds,
             trackNumber = trackNumber,
@@ -365,10 +426,12 @@ object LocalMediaRepository {
     }
 
     suspend fun refreshFoldersAndSongs(context: Context) = withContext(Dispatchers.IO) {
-        val folders = getAllDeviceAudioFolders(context)
-        val songs = getAllLocalSongsRaw(context)
-        detectedAudioFolders.value = folders
-        allLocalSongsFlow.value = songs
+        runCatching {
+            val folders = getAllDeviceAudioFolders(context)
+            val songs = getAllLocalSongsRaw(context)
+            detectedAudioFolders.value = folders
+            allLocalSongsFlow.value = songs
+        }.onFailure { Log.w(TAG, "refreshFoldersAndSongs failed: ${it.message}") }
     }
 
     /**
@@ -377,8 +440,16 @@ object LocalMediaRepository {
     suspend fun getLocalMusic(context: Context): List<Song> = withContext(Dispatchers.IO) {
         val hasPerm = hasStoragePermission(context)
         val customUris = getCustomFolderUris()
+        val scanAll = AppSettings.scanAllAudioFolders.value
+
+        if (!scanAll && customUris.isEmpty()) {
+            allLocalSongsFlow.value = emptyList()
+            return@withContext emptyList()
+        }
         if (!hasPerm && customUris.isEmpty()) {
-            return@withContext extraLocalMusic?.invoke(context, emptyList()) ?: emptyList()
+            val extra = extraLocalMusic?.invoke(context, emptyList()) ?: emptyList()
+            allLocalSongsFlow.value = extra
+            return@withContext extra
         }
 
         val songs = mutableListOf<Song>()
@@ -386,11 +457,38 @@ object LocalMediaRepository {
         val singleFolderUri = AppSettings.localMusicFolderUri.value
         val excludedSongs = AppSettings.localMusicExcludedSongs.value
         val selectedSongs = AppSettings.localMusicSelectedSongs.value
-        val allFoldersActive = selectedFolders.isEmpty() && singleFolderUri.isBlank()
         val filterNonMusic = AppSettings.filterNonMusicAudio.value
         val seenKeys = mutableSetOf<String>()
 
-        if (hasPerm) {
+        // 1. Scan custom SAF folders
+        for (uriStr in customUris) {
+            val isCustomFolderIncluded = scanAll || (selectedFolders.isEmpty() && singleFolderUri.isBlank()) ||
+                (uriStr in selectedFolders) || (singleFolderUri == uriStr)
+            if (!isCustomFolderIncluded) continue
+
+            val safSongs = scanSafFolderFast(context, uriStr)
+            for (safSong in safSongs) {
+                val songIdentifier = safSong.localPath ?: safSong.localUri ?: safSong.videoId
+                val normPath = safSong.localPath?.normalizedPath()
+
+                if (normPath != null && normPath in seenKeys) continue
+                if (safSong.localUri != null && safSong.localUri in seenKeys) continue
+
+                if (excludedSongs.isNotEmpty() && (songIdentifier in excludedSongs || safSong.localUri in excludedSongs || safSong.videoId in excludedSongs)) {
+                    continue
+                }
+                if (selectedSongs.isNotEmpty() && (songIdentifier !in selectedSongs && safSong.localUri !in selectedSongs && safSong.videoId !in selectedSongs)) {
+                    continue
+                }
+
+                songs.add(safSong)
+                normPath?.let { seenKeys.add(it) }
+                safSong.localUri?.let { seenKeys.add(it) }
+            }
+        }
+
+        // 2. Scan MediaStore if scanAllAudioFolders is true and permission is granted
+        if (scanAll && hasPerm) {
             val videoIdByUri = Downloads.saved.value.entries.associate { (id, uri) -> uri to id }
             val projection = arrayOf(
                 MediaStore.Audio.Media._ID,
@@ -467,6 +565,11 @@ object LocalMediaRepository {
                         if (!isInSelectedFolders(path, selectedFolders, singleFolderUri)) continue
 
                         val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id).toString()
+                        val normPath = path?.normalizedPath()
+
+                        if (normPath != null && normPath in seenKeys) continue
+                        if (contentUri in seenKeys) continue
+
                         val videoId = videoIdByUri[contentUri] ?: contentUri
                         val songIdentifier = path ?: contentUri
 
@@ -504,39 +607,14 @@ object LocalMediaRepository {
                             trackNumber = trackNumber,
                         )
                         songs.add(song)
-                        path?.let { seenKeys.add(it.normalizedPath()) }
+                        normPath?.let { seenKeys.add(it) }
                         seenKeys.add(contentUri)
                     }
                 }
             }.onFailure { Log.w(TAG, "Failed scanning device local music: ${it.message}") }
         }
 
-        // Scan custom SAF folders
-        for (uriStr in customUris) {
-            val isCustomFolderIncluded = allFoldersActive || (uriStr in selectedFolders) || (singleFolderUri == uriStr)
-            if (!isCustomFolderIncluded) continue
-
-            val safSongs = scanSafTree(context, uriStr)
-            for (safSong in safSongs) {
-                val songIdentifier = safSong.localPath ?: safSong.localUri ?: safSong.videoId
-                val normPath = safSong.localPath?.normalizedPath()
-
-                if (normPath != null && normPath in seenKeys) continue
-                if (safSong.localUri != null && safSong.localUri in seenKeys) continue
-
-                if (excludedSongs.isNotEmpty() && (songIdentifier in excludedSongs || safSong.localUri in excludedSongs || safSong.videoId in excludedSongs)) {
-                    continue
-                }
-                if (selectedSongs.isNotEmpty() && (songIdentifier !in selectedSongs && safSong.localUri !in selectedSongs && safSong.videoId !in selectedSongs)) {
-                    continue
-                }
-
-                songs.add(safSong)
-                normPath?.let { seenKeys.add(it) }
-                safSong.localUri?.let { seenKeys.add(it) }
-            }
-        }
-
+        allLocalSongsFlow.value = songs
         extraLocalMusic?.invoke(context, songs) ?: songs
     }
 
@@ -548,7 +626,8 @@ object LocalMediaRepository {
         }.getOrNull()
 
     fun foldersSummaryLabel(folderUris: Set<String>, singleUri: String): String? {
-        val all = (folderUris + singleUri + AppSettings.localMusicCustomFolders.value).filter { it.isNotBlank() }
+        val customFolders = AppSettings.localMusicCustomFolders.value
+        val all = (folderUris + singleUri + customFolders).filter { it.isNotBlank() }
         if (all.isEmpty()) return null
         if (all.size == 1) {
             val item = all.first()
@@ -586,6 +665,9 @@ object LocalMediaRepository {
     }
 
     fun isInSelectedFolders(path: String?, folderUris: Set<String>, singleUri: String): Boolean {
+        if (AppSettings.scanAllAudioFolders.value && folderUris.isEmpty() && singleUri.isBlank()) {
+            return true
+        }
         val all = (folderUris + singleUri + AppSettings.localMusicCustomFolders.value).filter { it.isNotBlank() }
         if (all.isEmpty()) return true
         val candidate = path?.normalizedPath() ?: return false
@@ -598,7 +680,16 @@ object LocalMediaRepository {
         val result = mutableListOf<DeviceFolder>()
         val seenPaths = mutableSetOf<String>()
 
-        if (hasStoragePermission(context)) {
+        val customUris = getCustomFolderUris()
+        for (uriStr in customUris) {
+            val songs = scanSafFolderFast(context, uriStr)
+            val displayName = getFolderDisplayName(context, uriStr)
+            result.add(DeviceFolder(displayName, uriStr, songs.size, isCustom = true))
+            seenPaths.add(uriStr)
+            safUriToStoragePath(Uri.parse(uriStr))?.let { seenPaths.add(it.normalizedPath()) }
+        }
+
+        if (AppSettings.scanAllAudioFolders.value && hasStoragePermission(context)) {
             val projection = arrayOf(MediaStore.Audio.Media.DATA)
             val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
             val folderCounts = mutableMapOf<String, Int>()
@@ -621,17 +712,12 @@ object LocalMediaRepository {
             }
 
             folderCounts.forEach { (path, count) ->
-                val name = path.substringAfterLast('/').ifBlank { "Storage" }
-                result.add(DeviceFolder(name, path, count, isCustom = false))
-                seenPaths.add(path.normalizedPath())
+                if (path.normalizedPath() !in seenPaths) {
+                    val name = path.substringAfterLast('/').ifBlank { "Storage" }
+                    result.add(DeviceFolder(name, path, count, isCustom = false))
+                    seenPaths.add(path.normalizedPath())
+                }
             }
-        }
-
-        val customUris = getCustomFolderUris()
-        for (uriStr in customUris) {
-            val songs = scanSafTree(context, uriStr)
-            val displayName = getFolderDisplayName(context, uriStr)
-            result.add(DeviceFolder(displayName, uriStr, songs.size, isCustom = true))
         }
 
         result.sortedWith(
@@ -644,7 +730,21 @@ object LocalMediaRepository {
         val songs = mutableListOf<Song>()
         val seenKeys = mutableSetOf<String>()
 
-        if (hasStoragePermission(context)) {
+        val customUris = getCustomFolderUris()
+        for (uriStr in customUris) {
+            val safSongs = scanSafFolderFast(context, uriStr)
+            for (safSong in safSongs) {
+                val normPath = safSong.localPath?.normalizedPath()
+                if (normPath != null && normPath in seenKeys) continue
+                if (safSong.localUri != null && safSong.localUri in seenKeys) continue
+
+                songs.add(safSong)
+                normPath?.let { seenKeys.add(it) }
+                safSong.localUri?.let { seenKeys.add(it) }
+            }
+        }
+
+        if (AppSettings.scanAllAudioFolders.value && hasStoragePermission(context)) {
             val projection = arrayOf(
                 MediaStore.Audio.Media._ID,
                 MediaStore.Audio.Media.DISPLAY_NAME,
@@ -684,6 +784,10 @@ object LocalMediaRepository {
                         val path = cursor.getString(dataCol)
                         if (isEligibleLocalMusic(durationMs, displayName, path)) {
                             val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id).toString()
+                            val normPath = path?.normalizedPath()
+                            if (normPath != null && normPath in seenKeys) continue
+                            if (contentUri in seenKeys) continue
+
                             val title = cursor.getString(titleCol).cleanTag()?.removeAudioExtension()
                                 ?: displayName.substringBeforeLast('.').takeIf { it.isNotBlank() }
                                 ?: "Track $id"
@@ -704,25 +808,11 @@ object LocalMediaRepository {
                                 localDateModifiedSeconds = cursor.getLong(dateModifiedCol),
                             )
                             songs.add(song)
-                            path?.let { seenKeys.add(it.normalizedPath()) }
+                            normPath?.let { seenKeys.add(it) }
                             seenKeys.add(contentUri)
                         }
                     }
                 }
-            }
-        }
-
-        val customUris = getCustomFolderUris()
-        for (uriStr in customUris) {
-            val safSongs = scanSafTree(context, uriStr)
-            for (safSong in safSongs) {
-                val normPath = safSong.localPath?.normalizedPath()
-                if (normPath != null && normPath in seenKeys) continue
-                if (safSong.localUri != null && safSong.localUri in seenKeys) continue
-
-                songs.add(safSong)
-                normPath?.let { seenKeys.add(it) }
-                safSong.localUri?.let { seenKeys.add(it) }
             }
         }
 

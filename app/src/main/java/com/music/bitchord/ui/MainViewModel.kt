@@ -165,7 +165,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .filter { it.videoId.isNotBlank() }
         // Unpermitted is not the same as empty, but offline the page has no
         // way to ask for it politely; the folder still can when opened.
-        val local = if (LocalMediaRepository.hasStoragePermission(context)) {
+        val local = if (LocalMediaRepository.hasStoragePermission(context) || LocalMediaRepository.hasCustomFolders()) {
             runCatching { LocalMediaRepository.getLocalMusic(context) }.getOrDefault(emptyList())
                 .filter { it.videoId.isNotBlank() }
         } else {
@@ -3434,10 +3434,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             browseId == "local:downloads" ->
                 nonEmpty(Downloads.getDownloadedSongs(context)) { "No downloaded tracks" }
             browseId == CACHE_FOLDER_BROWSE_ID -> cachedSongsState()
-            browseId == "local:all" -> if (!LocalMediaRepository.hasStoragePermission(context)) {
-                UiState.Error(text(R.string.storage_required_read))
-            } else {
-                nonEmpty(LocalMediaRepository.getLocalMusic(context)) { text(R.string.no_local_audio_found) }
+            browseId == "local:all" -> {
+                val hasPerm = LocalMediaRepository.hasStoragePermission(context)
+                val hasCustom = LocalMediaRepository.hasCustomFolders()
+                if (!hasPerm && !hasCustom && !AppSettings.scanAllAudioFolders.value) {
+                    UiState.Error(text(R.string.storage_required_read))
+                } else {
+                    val songs = runCatching { LocalMediaRepository.getLocalMusic(context) }.getOrDefault(emptyList())
+                    nonEmpty(songs) { text(R.string.no_local_audio_found) }
+                }
             }
             else -> null
         }
