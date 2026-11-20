@@ -926,10 +926,14 @@ class PlaybackService : MediaLibraryService() {
                     }
                     val artUri = "file://${artFile.absolutePath}"
                     if (exoPlayer.mediaMetadata.artworkUri == null || exoPlayer.mediaMetadata.artworkUri?.scheme == "local_art") {
-                        val updatedMeta = exoPlayer.mediaMetadata.buildUpon()
+                        val metaBuilder = exoPlayer.mediaMetadata.buildUpon()
                             .setArtworkUri(android.net.Uri.parse(artUri))
-                            .build()
-                        exoPlayer.playlistMetadata = updatedMeta
+                        val localBytes = loadLocalArtworkBytes(artFile.absolutePath)
+                        if (localBytes != null) {
+                            metaBuilder.setArtworkData(localBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+                        }
+                        exoPlayer.playlistMetadata = metaBuilder.build()
+                        triggerNotificationUpdate()
                     }
                 }
             }

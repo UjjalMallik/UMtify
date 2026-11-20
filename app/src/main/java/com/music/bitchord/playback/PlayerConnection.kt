@@ -737,10 +737,16 @@ fun Song.toMediaItem(): MediaItem {
             // on: read back off the player, a track with no album here is a
             // track that cannot be filed under one.
             .setAlbumTitle(albumName)
-            // Sized here rather than left as stored: this is what the lock
-            // screen, the notification and Android Auto draw, all of them
-            // large, and none of them go back for a better copy later.
-            .setArtworkUri(artworkAt(NOTIFICATION_ART_PX)?.toUri())
+            .apply {
+                val artUrl = artworkAt(NOTIFICATION_ART_PX)
+                setArtworkUri(artUrl?.toUri())
+                if (!artUrl.isNullOrBlank() && (artUrl.startsWith("file://") || artUrl.startsWith("/"))) {
+                    val localArtBytes = loadLocalArtworkBytes(artUrl)
+                    if (localArtBytes != null) {
+                        setArtworkData(localArtBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+                    }
+                }
+            }
             // System media surfaces (One UI's Now Bar, Android Auto, Assistant)
             // classify a session by its media type; untyped sessions get treated
             // as generic audio and lose the music-specific card.

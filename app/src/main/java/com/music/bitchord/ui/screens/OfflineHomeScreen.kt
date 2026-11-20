@@ -1225,35 +1225,43 @@ private fun CompactBentoCard(
                             .align(Alignment.Center),
                     )
                 }
-                // Count pill overlay bottom-left
+            }
+            // Title row with clean glassy count pill on the right
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(6.dp))
                 Box(
                     modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(6.dp)
-                        .clip(CircleShape)
-                        .background(accentGlow.copy(alpha = 0.20f))
-                        .border(0.6.dp, accentGlow.copy(alpha = 0.45f), CircleShape)
-                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.White.copy(alpha = 0.12f))
+                        .border(0.6.dp, Color.White.copy(alpha = 0.20f), RoundedCornerShape(50))
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         text = "$count",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        color = Color.White,
                     )
                 }
             }
-            // Label + badge text
-            Text(
-                text = label,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                ),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
             Text(
                 text = trackPreview,
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),

@@ -20,7 +20,68 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
+
+/**
+ * Decodes a local file path or file:// URI into a scaled Bitmap, completely
+ * bypassing network loaders and Coil for local music covers.
+ */
+internal fun decodeLocalBitmap(pathOrUri: String, maxDim: Int = NOTIFICATION_ART_PX): Bitmap? {
+    return runCatching {
+        val path = if (pathOrUri.startsWith("file://")) {
+            Uri.parse(pathOrUri).path ?: pathOrUri.removePrefix("file://")
+        } else {
+            pathOrUri
+        }
+        val file = File(path)
+        if (!file.exists() || file.length() == 0L) return null
+
+        val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, boundsOptions)
+        val origW = boundsOptions.outWidth
+        val origH = boundsOptions.outHeight
+        if (origW <= 0 || origH <= 0) return null
+
+        var sampleSize = 1
+        val maxSide = maxOf(origW, origH)
+        while (maxSide / (sampleSize * 2) >= maxDim) {
+            sampleSize *= 2
+        }
+
+        val decodeOptions = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        val bitmap = BitmapFactory.decodeFile(path, decodeOptions) ?: return null
+
+        if (bitmap.width > maxDim || bitmap.height > maxDim) {
+            val scale = minOf(maxDim.toFloat() / bitmap.width, maxDim.toFloat() / bitmap.height)
+            val w = (bitmap.width * scale).toInt().coerceAtLeast(1)
+            val h = (bitmap.height * scale).toInt().coerceAtLeast(1)
+            Bitmap.createScaledBitmap(bitmap, w, h, true).also {
+                if (it != bitmap) bitmap.recycle()
+            }
+        } else {
+            bitmap
+        }
+    }.getOrNull()
+}
+
+/**
+ * Loads downsampled JPEG bytes for a local file to attach directly as
+ * [androidx.media3.common.MediaMetadata.artworkData] for lock screen & notifications.
+ */
+internal fun loadLocalArtworkBytes(pathOrUri: String, maxDim: Int = SESSION_ART_PX): ByteArray? {
+    return runCatching {
+        val bitmap = decodeLocalBitmap(pathOrUri, maxDim) ?: return null
+        ByteArrayOutputStream().use { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, SESSION_ART_JPEG_QUALITY, out)
+            bitmap.recycle()
+            out.toByteArray().takeIf { it.isNotEmpty() && it.size <= LEGACY_ARTWORK_DATA_LIMIT }
+        }
+    }.getOrNull()
+}
 
 /**
  * Resolves a session's artwork to the bitmap every system media surface draws.
@@ -58,6 +119,32 @@ internal class SessionArtworkLoader(
         }
 
     override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> = scope.future(Dispatchers.IO) {
+        val uriStr = uri.toString()
+        if (uri.scheme == "file" || uri.scheme == null || uriStr.startsWith("file://") || uriStr.startsWith("/")) {
+            val path = uri.path ?: uriStr.removePrefix("file://")
+            val local = decodeLocalBitmap(path, NOTIFICATION_ART_PX)
+            if (local != null) return@future local
+        } else if (uri.scheme == "content") {
+            val contentBitmap = runCatching {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    val bytes = stream.readBytes()
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                    val maxSide = maxOf(bounds.outWidth, bounds.outHeight)
+                    var sampleSize = 1
+                    while (maxSide / (sampleSize * 2) >= NOTIFICATION_ART_PX) {
+                        sampleSize *= 2
+                    }
+                    val opts = BitmapFactory.Options().apply {
+                        inSampleSize = sampleSize
+                        inPreferredConfig = Bitmap.Config.ARGB_8888
+                    }
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+                }
+            }.getOrNull()
+            if (contentBitmap != null) return@future contentBitmap
+        }
+
         val request = ImageRequest.Builder(context)
             .data(uri)
             // The size the URI was already asked for, so this lands on the cache
@@ -103,6 +190,36 @@ internal class SessionArtworkLoader(
  */
 internal suspend fun sessionArtworkBytes(context: Context, uri: Uri): ByteArray? =
     withContext(Dispatchers.IO) {
+        val uriStr = uri.toString()
+        if (uri.scheme == "file" || uri.scheme == null || uriStr.startsWith("file://") || uriStr.startsWith("/")) {
+            val path = uri.path ?: uriStr.removePrefix("file://")
+            val localBytes = loadLocalArtworkBytes(path, SESSION_ART_PX)
+            if (localBytes != null) return@withContext localBytes
+        } else if (uri.scheme == "content") {
+            val contentBytes = runCatching {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    val bytes = stream.readBytes()
+                    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@use null
+                    val scaled = if (bitmap.width > SESSION_ART_PX || bitmap.height > SESSION_ART_PX) {
+                        val scale = minOf(SESSION_ART_PX.toFloat() / bitmap.width, SESSION_ART_PX.toFloat() / bitmap.height)
+                        val w = (bitmap.width * scale).toInt().coerceAtLeast(1)
+                        val h = (bitmap.height * scale).toInt().coerceAtLeast(1)
+                        Bitmap.createScaledBitmap(bitmap, w, h, true).also {
+                            if (it != bitmap) bitmap.recycle()
+                        }
+                    } else {
+                        bitmap
+                    }
+                    ByteArrayOutputStream().use { out ->
+                        scaled.compress(Bitmap.CompressFormat.JPEG, SESSION_ART_JPEG_QUALITY, out)
+                        scaled.recycle()
+                        out.toByteArray().takeIf { it.isNotEmpty() && it.size <= LEGACY_ARTWORK_DATA_LIMIT }
+                    }
+                }
+            }.getOrNull()
+            if (contentBytes != null) return@withContext contentBytes
+        }
+
         val request = ImageRequest.Builder(context)
             .data(uri)
             .size(SESSION_ART_PX)

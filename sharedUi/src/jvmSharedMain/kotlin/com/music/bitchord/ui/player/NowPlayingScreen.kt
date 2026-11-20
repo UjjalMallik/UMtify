@@ -1819,7 +1819,7 @@ fun NowPlayingScreen(
         // everything while it travels, as the one thing still moving.
         .drawWithContent {
             drawContent()
-            if (docking()) {
+            if (docking() && !heroMode) {
                 translate(dockFrame.portalLeft, dockFrame.portalTop) {
                     val portalScale = dockFrame.portalScale
                     scale(portalScale, portalScale, pivot = Offset.Zero) { drawLayer(sleeveLayer) }
@@ -1832,7 +1832,7 @@ fun NowPlayingScreen(
         // way home the cover went on being drawn from a stale recording,
         // bigger and higher than the bar's. One step of 255 is nothing to
         // look at and keeps the subtree drawing.
-        .graphicsLayer { alpha = if (docking()) dockFade().coerceAtLeast(DOCK_FADE_FLOOR) else 1f }
+        .graphicsLayer { alpha = if (docking() && !heroMode) dockFade().coerceAtLeast(DOCK_FADE_FLOOR) else 1f }
 
     // Every secondary line and glyph in the player — artist, timestamps,
     // quality badge, the lyrics/output/queue row — reads this rather than a
@@ -2868,7 +2868,7 @@ fun NowPlayingScreen(
                         // card. Zero until there is a banner to be, which is to say
                         // until [heroHeight] and the player's width have been measured.
                         fun bannerShare(): Float =
-                            if (heroHeight > 0.dp && playerBounds.width > 0) heroT.value else 0f
+                            if (heroMode) 1f else if (heroHeight > 0.dp && playerBounds.width > 0) heroT.value else 0f
                         // How much of the banner is on screen: its share, given up as
                         // the sleeve collapses — the same movement as the collapse
                         // rather than a fade chained after it.
@@ -2885,6 +2885,18 @@ fun NowPlayingScreen(
                             )
                         }
                         fun sleeveRect(): Rect {
+                            if (heroMode) {
+                                val banner = with(density) {
+                                    val bannerH = if (heroHeight > 0.dp) heroHeight.roundToPx().toFloat() else (playerBounds.width.toFloat() * 1.35f).coerceAtLeast(300.dp.toPx())
+                                    Rect(
+                                        offset = Offset(-(playerBounds.width - boxWidthPx) / 2f, bannerTopPx.toFloat()),
+                                        size = Size(playerBounds.width.toFloat(), bannerH),
+                                    )
+                                }
+                                val thumbSide = with(density) { THUMB_SIZE.roundToPx().toFloat() }
+                                val thumb = Rect(Offset.Zero, Size(thumbSide, thumbSide))
+                                return lerp(banner, thumb, p())
+                            }
                             val card = cardRect()
                             val share = bannerShare()
                             if (share == 0f) return card
@@ -2942,20 +2954,20 @@ fun NowPlayingScreen(
                         // A rect of the sleeve's, carried as far towards the cover as
                         // the sheet has gone.
                         fun towardsDock(rect: Rect, mini: Rect?): Rect {
-                            if (mini == null) return rect
+                            if (mini == null || heroMode) return rect
                             val unridden = dockFrame.offset * (1f - dockFrame.ride)
                             return lerp(mini, rect.translate(0f, -unridden), dockT())
                         }
                         // The banner's dissolve, firmed up into the cover's hard edge as
                         // it docks.
-                        fun sleeveShown(): Float = bannerShown() * dockT()
+                        fun sleeveShown(): Float = if (heroMode) (1f - p()) else bannerShown() * dockT()
                         // The photocard's generous corner, giving way to the
                         // header thumbnail's tighter one only as the sleeve
                         // collapses into it.
-                        fun sleeveCorner(): Dp = lerp(24.dp, 8.dp, p())
+                        fun sleeveCorner(): Dp = if (heroMode) 0.dp else lerp(24.dp, 8.dp, p())
 
                         fun sleeveChromeCorner(): Dp {
-                            if (heroMode && dockT() >= 1f) return 0.dp
+                            if (heroMode) return 0.dp
                             val corner = sleeveCorner()
                             return lerp(corner, 0.dp, bannerShare())
                         }
@@ -2998,25 +3010,27 @@ fun NowPlayingScreen(
                                 // around it. The same node, laid out right here: only
                                 // where its pixels land changes.
                                 .drawWithContent {
-                                    if (docking()) {
+                                    if (docking() && !heroMode) {
                                         sleeveLayer.record { this@drawWithContent.drawContent() }
                                     } else {
                                         drawContent()
                                     }
                                 }
                                 .graphicsLayer {
-                                    // The paused shrink and the swipe nudge belong to
-                                    // the full card alone. A banner shrinking or sliding
-                                    // would open bare backdrop down the screen's edges,
-                                    // and the mini player's cover does neither.
-                                    val share = bannerShare()
-                                    val idle = cardScale()
-                                    val t = dockT()
-                                    val open = idle + (1f - idle) * share
-                                    val scale = if (t >= 1f) open else 1f + (open - 1f) * t
-                                    scaleX = scale
-                                    scaleY = scale
-                                    translationX = swipeSettle.value * (1f - p()) * (1f - share) * t
+                                    if (heroMode) {
+                                        scaleX = 1f
+                                        scaleY = 1f
+                                        translationX = 0f
+                                    } else {
+                                        val share = bannerShare()
+                                        val idle = cardScale()
+                                        val t = dockT()
+                                        val open = idle + (1f - idle) * share
+                                        val scale = if (t >= 1f) open else 1f + (open - 1f) * t
+                                        scaleX = scale
+                                        scaleY = scale
+                                        translationX = swipeSettle.value * (1f - p()) * (1f - share) * t
+                                    }
                                 }
                                 // Haze must observe the drawable layer itself, the
                                 // banner included — a source on the surrounding layout
@@ -3044,7 +3058,7 @@ fun NowPlayingScreen(
                                     // The card floats: a deeper shadow while the
                                     // music runs, a shallower one at rest, both
                                     // letting go as the sleeve docks away.
-                                    val isHeroExpanded = heroMode && dockT() >= 1f
+                                    val isHeroExpanded = heroMode
                                     shadowElevation = if (isHeroExpanded) {
                                         0f
                                     } else if (art.loaded) {
@@ -3059,7 +3073,7 @@ fun NowPlayingScreen(
                                     clip = art.loaded && !isHeroExpanded
                                 }
                                 .graphicsLayer {
-                                    val isHeroExpanded = heroMode && dockT() >= 1f
+                                    val isHeroExpanded = heroMode
                                     shape = if (isHeroExpanded) RectangleShape else dockFrame.cornerShape(sleeveChromeCorner())
                                     clip = !isHeroExpanded
                                     // The mask below erases part of what this layer
@@ -3067,7 +3081,7 @@ fun NowPlayingScreen(
                                     // CompositingStrategy.Offscreen is strictly required whenever
                                     // sleeveShown > 0 so DstIn cannot erase the window framebuffer
                                     // or punch through the sheet's background layers.
-                                    compositingStrategy = if (sleeveShown() > 0f) {
+                                    compositingStrategy = if (isHeroExpanded || sleeveShown() > 0f) {
                                         CompositingStrategy.Offscreen
                                     } else {
                                         CompositingStrategy.Auto
@@ -3082,7 +3096,7 @@ fun NowPlayingScreen(
                                 // the card still being there.
                                 .drawWithContent {
                                     drawContent()
-                                    if (!heroMode || dockT() < 1f) {
+                                    if (!heroMode) {
                                         val edge = if (dockT() < 1f) {
                                             0.18f
                                         } else {
@@ -3112,7 +3126,7 @@ fun NowPlayingScreen(
                                 // up into that edge as it collapses.
                                 .drawWithContent {
                                     drawContent()
-                                    val shown = sleeveShown()
+                                    val shown = if (heroMode) (1f - p()) else sleeveShown()
                                     if (shown > 0f) {
                                         // Soft lower scrim blending over the lower 35% of the cover art
                                         val scrimAlpha = (0.45f * shown).coerceIn(0f, 1f)
@@ -3195,7 +3209,7 @@ fun NowPlayingScreen(
                                         // Its own corners only once it is smaller than
                                         // the sleeve; as the whole card it takes the
                                         // sleeve's clip, as it always did.
-                                        val isHeroExpanded = heroMode && dockT() >= 1f
+                                        val isHeroExpanded = heroMode
                                         shape = if (isHeroExpanded) RectangleShape else TileShape
                                         clip = (share > 0f) && !isHeroExpanded
                                     }
@@ -3207,7 +3221,7 @@ fun NowPlayingScreen(
                                     // banner is exactly the ghost this mode is
                                     // meant not to have.
                                     .drawBehind {
-                                        if (!heroMode || dockT() < 1f) {
+                                        if (!heroMode) {
                                             val scrim = 0.18f * (1f - bannerShare())
                                             if (scrim > 0.001f) {
                                                 drawRect(Color.Black.copy(alpha = scrim))
