@@ -1,8 +1,11 @@
 package com.music.bitchord.data.local
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
+import android.util.Size
 import coil3.ImageLoader
 import coil3.decode.DataSource
 import coil3.decode.ImageSource
@@ -16,6 +19,7 @@ import kotlinx.coroutines.withContext
 import okio.FileSystem
 import okio.buffer
 import okio.source
+import java.io.ByteArrayOutputStream
 import java.io.File
 
 /**
@@ -77,6 +81,15 @@ class LocalAudioCoverFetcher(
 
         // 4. Fallback direct extraction
         val bytes = extractEmbeddedPicture(context, cleanPath) ?: return@withContext null
+        if (!artFile.exists() || artFile.length() == 0L) {
+            runCatching {
+                val tmp = File(artFile.parentFile, "${artFile.name}.tmp")
+                tmp.writeBytes(bytes)
+                if (!tmp.renameTo(artFile)) {
+                    runCatching { tmp.copyTo(artFile, overwrite = true); tmp.delete() }
+                }
+            }
+        }
 
         val mime = detectMimeType(bytes) ?: "image/jpeg"
         SourceFetchResult(
@@ -168,6 +181,19 @@ class LocalAudioCoverFetcher(
                                 pic = fb.embeddedPicture
                             } finally {
                                 fb.release()
+                            }
+                        }
+                    }
+
+                    // Tier 2: ContentResolver.loadThumbnail for Android Q+
+                    if ((pic == null || pic.isEmpty()) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        runCatching {
+                            val bm = context.contentResolver.loadThumbnail(uri, Size(512, 512), null)
+                            val stream = ByteArrayOutputStream()
+                            bm.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+                            val thumbBytes = stream.toByteArray()
+                            if (thumbBytes.isNotEmpty()) {
+                                pic = thumbBytes
                             }
                         }
                     }

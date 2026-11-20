@@ -188,7 +188,8 @@ internal fun rememberPlayerArtwork(remoteArt: String?, artPx: Int = ART_PX): Pla
         // A track with no artwork at all fails immediately and would fail
         // identically three more times: there is no request to make, so there is
         // nothing a second go could do differently.
-        if (artUrl == null || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(artUrl) || !art.failed || art.attempt >= ART_RETRIES) return@LaunchedEffect
+        val isLocal = artUrl != null && (artUrl.startsWith("file://") || artUrl.startsWith("local_art://") || artUrl.startsWith("content://") || artUrl.startsWith("/"))
+        if (artUrl == null || isLocal || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(artUrl) || !art.failed || art.attempt >= ART_RETRIES) return@LaunchedEffect
         delay(ART_RETRY_DELAY_MS)
         art.retry()
     }

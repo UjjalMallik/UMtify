@@ -302,6 +302,7 @@ fun String?.durationMillis(): Long {
 /** As [Song.artworkAt], for artwork that isn't a track's. */
 fun String?.artworkAt(px: Int): String? {
     if (this == null) return null
+    if (this.startsWith("file://") || this.startsWith("local_art://") || this.startsWith("content://") || this.startsWith("/")) return this
     val sized = this.replace(SIZE_HINT, "w$px-h$px")
     return if (isGoogleImageHost(this)) {
         sized.replace(PARAM_SIZE_HINT, "=s$px")

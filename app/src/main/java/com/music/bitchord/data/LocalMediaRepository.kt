@@ -4,11 +4,13 @@ import android.Manifest
 import android.content.ContentUris
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
 import android.provider.MediaStore
+import android.util.Size
 import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
 import com.music.bitchord.data.DebugLog as Log
@@ -26,6 +28,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Locale
 
@@ -294,9 +297,24 @@ object LocalMediaRepository {
                     }
                 }
 
+                // Tier 2: ContentResolver.loadThumbnail for Android Q+ if Tier 1 returned no picture
+                if ((picBytes == null || picBytes.isEmpty()) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    runCatching {
+                        val bm = context.contentResolver.loadThumbnail(fileUri, Size(512, 512), null)
+                        val stream = ByteArrayOutputStream()
+                        bm.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+                        val bytes = stream.toByteArray()
+                        if (bytes.isNotEmpty()) {
+                            picBytes = bytes
+                        }
+                    }
+                }
+
                 var artUri: String? = null
-                if (picBytes != null && picBytes.isNotEmpty()) {
-                    val artFile = getLocalArtFile(context, trackKey)
+                val artFile = getLocalArtFile(context, trackKey)
+                if (artFile.exists() && artFile.length() > 0) {
+                    artUri = "file://${artFile.absolutePath}"
+                } else if (picBytes != null && picBytes.isNotEmpty()) {
                     runCatching {
                         val tmp = File(artFile.parentFile, "${artFile.name}.tmp")
                         tmp.writeBytes(picBytes)
@@ -334,7 +352,6 @@ object LocalMediaRepository {
             if (toEnrich.isEmpty()) return@launch
 
             val updatedMap = mutableMapOf<String, Song>()
-            var enrichedCount = 0
 
             for (song in toEnrich) {
                 if (!isActive) break
@@ -357,19 +374,18 @@ object LocalMediaRepository {
                         thumbnailUrl = newArt,
                         trackNumber = newTrackNum,
                     )
-                    updatedMap[song.videoId] = enriched
-                    enrichedCount++
-
-                    if (enrichedCount % 10 == 0) {
-                        val current = allLocalSongsFlow.value
-                        allLocalSongsFlow.value = current.map { updatedMap[it.videoId] ?: it }
+                    if (enriched != song) {
+                        updatedMap[song.videoId] = enriched
                     }
                 }
             }
 
             if (updatedMap.isNotEmpty() && isActive) {
                 val current = allLocalSongsFlow.value
-                allLocalSongsFlow.value = current.map { updatedMap[it.videoId] ?: it }
+                val hasChanges = current.any { updatedMap.containsKey(it.videoId) && updatedMap[it.videoId] != it }
+                if (hasChanges) {
+                    allLocalSongsFlow.value = current.map { updatedMap[it.videoId] ?: it }
+                }
             }
         }
     }

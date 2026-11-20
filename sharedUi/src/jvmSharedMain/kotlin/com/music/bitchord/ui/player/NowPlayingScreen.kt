@@ -3230,7 +3230,7 @@ fun NowPlayingScreen(
                                 // every one of them; it shows now only when the
                                 // URL was never there, or the retries used it up.
                                 val artIsGone = art.url.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url) ||
-                                    (art.failed && art.attempt >= ART_RETRIES)
+                                    art.failed
                                 if (artIsGone && !canvasRendered) {
                                     DefaultCoverTile(
                                         modifier = Modifier.graphicsLayer {
@@ -3243,7 +3243,7 @@ fun NowPlayingScreen(
                                 }
                             }
 
-                            if (!art.url.isNullOrBlank() && !com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url)) {
+                            if (!artIsGone) {
                                 AsyncImage(
                                     // Decode at the sleeve's *expanded* size, always.
                                     // Coil otherwise sizes the decode to however large

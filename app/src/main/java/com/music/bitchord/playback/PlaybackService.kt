@@ -906,6 +906,35 @@ class PlaybackService : MediaLibraryService() {
             }
         }
 
+        override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+            val picBytes = mediaMetadata.artworkData
+            if (picBytes != null && picBytes.isNotEmpty()) {
+                val exoPlayer = player ?: return
+                val currentMediaItem = exoPlayer.currentMediaItem
+                val currentSong = currentMediaItem?.toSong()
+                val key = currentSong?.localUri ?: currentSong?.localPath ?: currentSong?.videoId ?: currentMediaItem?.mediaId
+                if (key != null && (key.startsWith("content://") || key.startsWith("/") || key.startsWith("file://"))) {
+                    val artFile = com.music.bitchord.data.LocalMediaRepository.getLocalArtFile(this@PlaybackService, key)
+                    if (!artFile.exists() || artFile.length() == 0L) {
+                        runCatching {
+                            val tmp = java.io.File(artFile.parentFile, "${artFile.name}.tmp")
+                            tmp.writeBytes(picBytes)
+                            if (!tmp.renameTo(artFile)) {
+                                runCatching { tmp.copyTo(artFile, overwrite = true); tmp.delete() }
+                            }
+                        }
+                    }
+                    val artUri = "file://${artFile.absolutePath}"
+                    if (exoPlayer.mediaMetadata.artworkUri == null || exoPlayer.mediaMetadata.artworkUri?.scheme == "local_art") {
+                        val updatedMeta = exoPlayer.mediaMetadata.buildUpon()
+                            .setArtworkUri(android.net.Uri.parse(artUri))
+                            .build()
+                        exoPlayer.playlistMetadata = updatedMeta
+                    }
+                }
+            }
+        }
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             updateWakeLock()
             // The player this fired on, which is by definition the one the
