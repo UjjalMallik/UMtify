@@ -737,16 +737,7 @@ fun Song.toMediaItem(): MediaItem {
             // on: read back off the player, a track with no album here is a
             // track that cannot be filed under one.
             .setAlbumTitle(albumName)
-            .apply {
-                val artUrl = artworkAt(NOTIFICATION_ART_PX)
-                setArtworkUri(artUrl?.toUri())
-                if (!artUrl.isNullOrBlank() && (artUrl.startsWith("file://") || artUrl.startsWith("/"))) {
-                    val localArtBytes = loadLocalArtworkBytes(artUrl)
-                    if (localArtBytes != null) {
-                        setArtworkData(localArtBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
-                    }
-                }
-            }
+            .setArtworkUri(artworkAt(NOTIFICATION_ART_PX)?.toUri())
             // System media surfaces (One UI's Now Bar, Android Auto, Assistant)
             // classify a session by its media type; untyped sessions get treated
             // as generic audio and lose the music-specific card.
@@ -900,7 +891,7 @@ suspend fun MediaController.playSongs(songs: List<Song>, startIndex: Int) {
     sendCustomCommand(
         SessionCommand(ACTION_CLEAR_BOUNDED_CONTEXT, Bundle.EMPTY),
         Bundle.EMPTY,
-    ).await()
+    )
     // A queue started while shuffle is on goes in shuffled rather than being
     // played out of order — see [QueueShuffle]. The track the user picked still
     // leads, so it ends up at the top instead of at [startIndex].
@@ -917,18 +908,24 @@ suspend fun MediaController.playSongs(songs: List<Song>, startIndex: Int) {
         } else {
             songsWithIds
         }
-        val mediaItems = queue.map { song ->
+        val mediaItems = ArrayList<MediaItem>(queue.size)
+        for (song in queue) {
             val item = song.toMediaItem()
             val cIndex = if (song.queueTier == QueueTier.CONTEXT) {
                 canonicalIndexMap[song.queueEntryId]
             } else null
-            if (cIndex != null) QueueShuffle.withQueueMetadata(item, newCanonicalIndex = cIndex) else item
+            val finalItem = if (cIndex != null) QueueShuffle.withQueueMetadata(item, newCanonicalIndex = cIndex) else item
+            mediaItems.add(finalItem)
         }
 
-        val canonicalMediaItems = contextEntries.mapIndexed { idx, s ->
-            QueueShuffle.withQueueMetadata(s.toMediaItem(), newCanonicalIndex = idx)
+        if (contextEntries.isNotEmpty()) {
+            val itemsByEntryId = mediaItems.associateBy { it.mediaMetadata.extras?.getString(EXTRA_QUEUE_ENTRY_ID) }
+            val canonicalMediaItems = contextEntries.mapIndexed { idx, s ->
+                val matched = itemsByEntryId[s.queueEntryId]
+                if (matched != null) matched else QueueShuffle.withQueueMetadata(s.toMediaItem(), newCanonicalIndex = idx)
+            }
+            QueueShuffle.setCanonicalContext(canonicalMediaItems)
         }
-        QueueShuffle.setCanonicalContext(canonicalMediaItems)
 
         mediaItems
     }

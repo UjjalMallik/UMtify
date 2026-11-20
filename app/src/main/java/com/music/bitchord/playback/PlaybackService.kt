@@ -1483,6 +1483,14 @@ class PlaybackService : MediaLibraryService() {
         }
 
         val streamResolver = ResolvingDataSource.Resolver { dataSpec ->
+            val scheme = dataSpec.uri.scheme
+            val uriStr = dataSpec.uri.toString()
+            if (scheme == "file" || scheme == "content" || scheme == "android.resource" ||
+                uriStr.startsWith("file://") || uriStr.startsWith("content://") || uriStr.startsWith("/")
+            ) {
+                return@Resolver dataSpec
+            }
+
             // Which track everything below is for, said once, because none of
             // it would otherwise know: this runs on ExoPlayer's loader thread
             // with a DataSpec and nothing else, and the work it starts — the
@@ -3766,16 +3774,17 @@ class PlaybackService : MediaLibraryService() {
         // an auto-advance, a repeat, or a crossfade at the very end. A
         // manual skip (SEEK) means the song wasn't listened to, so it must
         // not be scrobbled.
+        val isOffline = AppSettings.isOffline
         val ended = previousEnded
         val prevSong = listenBrainzSong
         val prevStart = listenBrainzStartMs
-        if (prevSong != null && ended && prevStart > 0L) {
+        if (!isOffline && prevSong != null && ended && prevStart > 0L) {
             submitListenBrainzFinished(prevSong, prevStart, listenBrainzDurationMs)
         }
         listenBrainzSong = newSong
         listenBrainzStartMs = if (exoPlayer.isPlaying) System.currentTimeMillis() else 0L
         listenBrainzDurationMs = durationMs
-        if (newSong != null && exoPlayer.isPlaying) {
+        if (!isOffline && newSong != null && exoPlayer.isPlaying) {
             submitListenBrainzPlayingNow(newSong, 0L, durationMs)
         }
 
@@ -3789,7 +3798,7 @@ class PlaybackService : MediaLibraryService() {
         // Discord: the whole of "live updating" for a card whose bar Discord
         // draws itself. Only a track change needs a new presence; the countdown
         // in between is Discord's own arithmetic.
-        if (exoPlayer.isPlaying) pushDiscordPresence(exoPlayer)
+        if (exoPlayer.isPlaying && !isOffline) pushDiscordPresence(exoPlayer)
 
         // "Sleep after this song": the queue moving on by itself is the
         // moment the track the user meant has finished. REPEAT counts
@@ -4540,9 +4549,12 @@ class PlaybackService : MediaLibraryService() {
      * instead — see [adoptCachedTrack] and [QualityUpgrade.adoptUnresolved].
      */
     private fun lookForBetterCopy(player: ExoPlayer) {
+        if (AppSettings.isOffline) return
         val item = player.currentMediaItem ?: return
         val mediaId = item.mediaId
         val uri = item.localConfiguration?.uri
+        val scheme = uri?.scheme
+        if (scheme == "file" || scheme == "content" || mediaId.startsWith("file://") || mediaId.startsWith("content://")) return
         val alreadyPending = QualityUpgrade.isPending(mediaId)
         val shelved = QualityUpgrade.shelvedFor(mediaId)
         if (shelved == null && !alreadyPending && !QualityUpgrade.couldStillUpgrade(mediaId, uri)) return
@@ -6313,6 +6325,7 @@ class PlaybackService : MediaLibraryService() {
      * tracks is more than it does anything with, but it decides that, not this.
      */
     private fun prefetchAround(player: ExoPlayer) {
+        if (AppSettings.isOffline) return
         val nextIndex = player.nextMediaItemIndex
         val upcomingSongs = if (nextIndex != C.INDEX_UNSET) {
             val end = (nextIndex + AudioCache.QUEUE_DEPTH - 1).coerceAtMost(player.mediaItemCount - 1)
@@ -6637,10 +6650,10 @@ class PlaybackService : MediaLibraryService() {
      */
     private fun farBufferingLoadControl() = DefaultLoadControl.Builder()
         .setBufferDurationsMs(
-            /* minBufferMs = */ 30_000,
-            /* maxBufferMs = */ 90_000,
-            /* bufferForPlaybackMs = */ 450,
-            /* bufferForPlaybackAfterRebufferMs = */ 1_200,
+            /* minBufferMs = */ 15_000,
+            /* maxBufferMs = */ 30_000,
+            /* bufferForPlaybackMs = */ 200,
+            /* bufferForPlaybackAfterRebufferMs = */ 500,
         )
         .setTargetBufferBytes(FAR_BUFFER_BYTES)
         .setBackBuffer(/* backBufferDurationMs = */ BACK_BUFFER_MS, /* retainBackBufferFromKeyframe = */ true)
@@ -7587,6 +7600,7 @@ class PlaybackService : MediaLibraryService() {
      * track change.
      */
     private fun pushDiscordPresence(exoPlayer: ExoPlayer) {
+        if (AppSettings.isOffline) return
         val rpc = discordRpc ?: return
         val song = exoPlayer.currentMediaItem?.toSong() ?: return
         // Read on the main thread, before the push is handed to IO: by the time
@@ -7871,7 +7885,7 @@ class PlaybackService : MediaLibraryService() {
             if (localUri != null) {
                 lines = EmbeddedLyrics.forUri(this@PlaybackService, localUri)
             }
-            if (lines == null) {
+            if (lines == null && !AppSettings.isOffline && !currentSong.videoId.startsWith("file://") && !currentSong.videoId.startsWith("content://")) {
                 val found = LyricsRepository.lyrics(
                     videoId = currentSong.videoId,
                     title = currentSong.title,
