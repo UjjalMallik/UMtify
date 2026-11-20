@@ -13,12 +13,23 @@ object FailedArtworkCache {
 
     fun markFailed(url: String?) {
         if (!url.isNullOrBlank()) {
+            if (url.startsWith("file://") || url.startsWith("/") ||
+                url.startsWith("local_art://") || url.startsWith("content://")
+            ) {
+                return
+            }
             failed.add(url)
         }
     }
 
     fun isFailed(url: String?): Boolean {
-        return !url.isNullOrBlank() && failed.contains(url)
+        if (url.isNullOrBlank()) return false
+        if (url.startsWith("file://") || url.startsWith("/") ||
+            url.startsWith("local_art://") || url.startsWith("content://")
+        ) {
+            return false
+        }
+        return failed.contains(url)
     }
 
     fun clear() {

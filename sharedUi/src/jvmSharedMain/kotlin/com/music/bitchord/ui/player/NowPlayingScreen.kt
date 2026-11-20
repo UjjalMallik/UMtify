@@ -2817,8 +2817,14 @@ fun NowPlayingScreen(
                         // below it not to move when it appears. Everything between the
                         // screen's top and this box's own top is fixed padding, so it
                         // can simply be added back up rather than measured.
-                        val bannerBottom = statusBarTop + topStrip + ART_BOX_TOP_PAD +
+                        val standardBannerBottom = statusBarTop + topStrip + ART_BOX_TOP_PAD +
                             groupTop + fullArt + ART_TITLE_GAP / 2
+                        val extendedBannerBottom = if (playerBounds.height > 0) {
+                            with(density) { (playerBounds.height * 0.68f).toDp() }
+                        } else {
+                            standardBannerBottom
+                        }
+                        val bannerBottom = maxOf(standardBannerBottom, extendedBannerBottom)
                         // Frozen while lyrics are up. The controls now retain their full
                         // footprint across the transition, so this answer is identical
                         // on both sides; avoiding writes during the panel keeps the
@@ -3120,16 +3126,34 @@ fun NowPlayingScreen(
                                     drawContent()
                                     val shown = sleeveShown()
                                     if (shown > 0f) {
+                                        // Soft lower scrim blending over the lower 35% of the cover art
+                                        val scrimAlpha = (0.45f * shown).coerceIn(0f, 1f)
+                                        drawRect(
+                                            brush = Brush.verticalGradient(
+                                                colorStops = arrayOf(
+                                                    0.00f to Color.Transparent,
+                                                    0.65f to Color.Transparent,
+                                                    0.82f to Color.Black.copy(alpha = scrimAlpha * 0.5f),
+                                                    1.00f to Color.Black.copy(alpha = scrimAlpha),
+                                                ),
+                                                startY = 0f,
+                                                endY = size.height,
+                                            ),
+                                        )
+
+                                        // Ultra-gradual multi-stop vertical alpha mask
                                         val fadeAlpha = (1f - shown).coerceIn(0f, 1f)
                                         drawRect(
                                             brush = Brush.verticalGradient(
                                                 colorStops = arrayOf(
                                                     0.00f to Color.Black,
-                                                    0.55f to Color.Black,
-                                                    0.85f to Color.Black.copy(alpha = fadeAlpha),
-                                                    1.00f to Color.Black.copy(alpha = fadeAlpha),
+                                                    0.42f to Color.Black,
+                                                    0.58f to Color.Black.copy(alpha = (0.72f * shown + fadeAlpha * (1f - shown)).coerceIn(0f, 1f)),
+                                                    0.72f to Color.Black.copy(alpha = (0.35f * shown + fadeAlpha * (1f - shown)).coerceIn(0f, 1f)),
+                                                    0.86f to Color.Black.copy(alpha = (0.08f * shown + fadeAlpha * (1f - shown)).coerceIn(0f, 1f)),
+                                                    1.00f to Color.Transparent,
                                                 ),
-                                                startY = size.height * (1f - HERO_FADE_FRACTION),
+                                                startY = 0f,
                                                 endY = size.height,
                                             ),
                                             blendMode = BlendMode.DstIn,

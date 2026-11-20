@@ -31,13 +31,32 @@ class LocalAudioCoverFetcher(
 ) : Fetcher {
 
     override suspend fun fetch(): FetchResult? = withContext(Dispatchers.IO) {
-        val audioUriStr = when {
+        val cleanPath = when {
             rawData.startsWith(SCHEME_PREFIX) -> rawData.removePrefix(SCHEME_PREFIX)
+            rawData.startsWith("file://") -> rawData.removePrefix("file://")
             else -> rawData
         }
 
-        // 1. Check if cached .jpg exists on disk
-        val artFile = LocalMediaRepository.getLocalArtFile(context, audioUriStr)
+        // 1. If direct image file exists on disk, load it immediately
+        val directFile = File(cleanPath)
+        if (directFile.exists() && directFile.length() > 0 &&
+            (cleanPath.endsWith(".jpg", ignoreCase = true) || cleanPath.endsWith(".jpeg", ignoreCase = true) ||
+             cleanPath.endsWith(".png", ignoreCase = true) || cleanPath.endsWith(".webp", ignoreCase = true))
+        ) {
+            val mime = when {
+                cleanPath.endsWith(".png", ignoreCase = true) -> "image/png"
+                cleanPath.endsWith(".webp", ignoreCase = true) -> "image/webp"
+                else -> "image/jpeg"
+            }
+            return@withContext SourceFetchResult(
+                source = ImageSource(directFile.source().buffer(), FileSystem.SYSTEM),
+                mimeType = mime,
+                dataSource = DataSource.DISK,
+            )
+        }
+
+        // 2. Check if cached .jpg exists on disk
+        val artFile = LocalMediaRepository.getLocalArtFile(context, cleanPath)
         if (artFile.exists() && artFile.length() > 0) {
             return@withContext SourceFetchResult(
                 source = ImageSource(artFile.source().buffer(), FileSystem.SYSTEM),
@@ -46,8 +65,8 @@ class LocalAudioCoverFetcher(
             )
         }
 
-        // 2. Extract and cache to disk
-        LocalMediaRepository.extractAndCacheLocalArt(context, audioUriStr, audioUriStr)
+        // 3. Extract and cache to disk
+        LocalMediaRepository.extractAndCacheLocalArt(context, cleanPath, cleanPath)
         if (artFile.exists() && artFile.length() > 0) {
             return@withContext SourceFetchResult(
                 source = ImageSource(artFile.source().buffer(), FileSystem.SYSTEM),
@@ -56,8 +75,8 @@ class LocalAudioCoverFetcher(
             )
         }
 
-        // 3. Fallback direct extraction
-        val bytes = extractEmbeddedPicture(context, audioUriStr) ?: return@withContext null
+        // 4. Fallback direct extraction
+        val bytes = extractEmbeddedPicture(context, cleanPath) ?: return@withContext null
 
         val mime = detectMimeType(bytes) ?: "image/jpeg"
         SourceFetchResult(
@@ -99,45 +118,63 @@ class LocalAudioCoverFetcher(
 
         fun isLocalAudioArt(data: String): Boolean {
             if (data.startsWith(SCHEME_PREFIX)) return true
-            if (data.startsWith("content://") && (data.contains("document") || data.contains("tree") || data.contains("audio"))) {
-                val lower = data.lowercase()
-                return lower.endsWith(".mp3") || lower.endsWith(".flac") || lower.endsWith(".m4a") ||
-                    lower.endsWith(".ogg") || lower.endsWith(".opus") || lower.endsWith(".wav") ||
-                    lower.endsWith(".aac") || data.contains("audio")
-            }
-            if (data.startsWith("/") || data.startsWith("file://")) {
-                val lower = data.lowercase()
+            if (data.startsWith("file://") || data.startsWith("/")) {
+                val path = data.removePrefix("file://")
+                val file = File(path)
+                if (file.exists() && (path.endsWith(".jpg", ignoreCase = true) || path.endsWith(".jpeg", ignoreCase = true) ||
+                    path.endsWith(".png", ignoreCase = true) || path.endsWith(".webp", ignoreCase = true))
+                ) {
+                    return true
+                }
+                val lower = path.lowercase(java.util.Locale.ROOT)
                 return lower.endsWith(".mp3") || lower.endsWith(".flac") || lower.endsWith(".m4a") ||
                     lower.endsWith(".ogg") || lower.endsWith(".opus") || lower.endsWith(".wav") ||
                     lower.endsWith(".aac")
+            }
+            if (data.startsWith("content://")) {
+                return true
             }
             return false
         }
 
         fun extractEmbeddedPicture(context: Context, audioUriStr: String): ByteArray? {
             return runCatching {
+                val uri = Uri.parse(audioUriStr)
+                val directPath = if (audioUriStr.startsWith("/")) audioUriStr else LocalMediaRepository.safUriToStoragePath(uri)
+                val localFile = directPath?.let { File(it) }?.takeIf { it.exists() }
+
+                val pfd = if (localFile == null && !audioUriStr.startsWith("/")) {
+                    runCatching { context.contentResolver.openFileDescriptor(uri, "r") }.getOrNull()
+                } else null
+
                 val retriever = MediaMetadataRetriever()
                 try {
-                    val uri = Uri.parse(audioUriStr)
-                    val directPath = if (audioUriStr.startsWith("/")) audioUriStr else LocalMediaRepository.safUriToStoragePath(uri)
-                    val localFile = directPath?.let { File(it) }?.takeIf { it.exists() }
-                    if (localFile != null) {
+                    if (pfd != null) {
+                        retriever.setDataSource(pfd.fileDescriptor)
+                    } else if (localFile != null) {
                         retriever.setDataSource(localFile.path)
                     } else if (audioUriStr.startsWith("/")) {
                         retriever.setDataSource(audioUriStr)
                     } else {
-                        val pfd = runCatching { context.contentResolver.openFileDescriptor(uri, "r") }.getOrNull()
-                        if (pfd != null) {
-                            pfd.use {
-                                retriever.setDataSource(it.fileDescriptor)
+                        retriever.setDataSource(context, uri)
+                    }
+
+                    var pic = retriever.embeddedPicture
+                    if ((pic == null || pic.isEmpty()) && pfd != null) {
+                        runCatching {
+                            val fb = MediaMetadataRetriever()
+                            try {
+                                fb.setDataSource(context, uri)
+                                pic = fb.embeddedPicture
+                            } finally {
+                                fb.release()
                             }
-                        } else {
-                            retriever.setDataSource(context, uri)
                         }
                     }
-                    retriever.embeddedPicture
+                    pic
                 } finally {
                     retriever.release()
+                    pfd?.close()
                 }
             }.getOrNull()
         }
@@ -151,7 +188,7 @@ class LocalAudioCoverFetcher(
     class UriFactory(private val context: Context) : Fetcher.Factory<Uri> {
         override fun create(data: Uri, options: Options, imageLoader: ImageLoader): Fetcher? {
             val str = data.toString()
-            return if (isLocalAudioArt(str)) LocalAudioCoverFetcher(context, str) else null
+            return if (isLocalAudioArt(str) || data.scheme == "file") LocalAudioCoverFetcher(context, str) else null
         }
     }
 }

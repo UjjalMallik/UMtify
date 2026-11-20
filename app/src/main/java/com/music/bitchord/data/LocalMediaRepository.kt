@@ -231,14 +231,14 @@ object LocalMediaRepository {
 
     fun getLocalArtFile(context: Context, key: String): File {
         val dir = File(context.cacheDir, LOCAL_ART_DIR).apply { if (!exists()) mkdirs() }
-        val safeHash = (key.hashCode().toLong() and 0xFFFFFFFFL).toString(16)
-        return File(dir, "art_$safeHash.jpg")
+        val hash = key.hashCode().toUInt().toString()
+        return File(dir, "$hash.jpg")
     }
 
     fun getCachedLocalArtUri(context: Context, key: String): String? {
         val file = getLocalArtFile(context, key)
         return if (file.exists() && file.length() > 0) {
-            Uri.fromFile(file).toString()
+            "file://${file.absolutePath}"
         } else {
             null
         }
@@ -258,22 +258,21 @@ object LocalMediaRepository {
         val directPath = safUriToStoragePath(fileUri)
         val localFile = directPath?.let { File(it) }?.takeIf { it.exists() }
 
+        val pfd = if (localFile == null && !uriStr.startsWith("/")) {
+            runCatching { context.contentResolver.openFileDescriptor(fileUri, "r") }.getOrNull()
+        } else null
+
         return runCatching {
             val retriever = MediaMetadataRetriever()
             try {
-                if (localFile != null) {
+                if (pfd != null) {
+                    retriever.setDataSource(pfd.fileDescriptor)
+                } else if (localFile != null) {
                     retriever.setDataSource(localFile.path)
                 } else if (uriStr.startsWith("/")) {
                     retriever.setDataSource(uriStr)
                 } else {
-                    val pfd = runCatching { context.contentResolver.openFileDescriptor(fileUri, "r") }.getOrNull()
-                    if (pfd != null) {
-                        pfd.use {
-                            retriever.setDataSource(it.fileDescriptor)
-                        }
-                    } else {
-                        retriever.setDataSource(context, fileUri)
-                    }
+                    retriever.setDataSource(context, fileUri)
                 }
 
                 val metaTitle = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
@@ -282,7 +281,19 @@ object LocalMediaRepository {
                 val metaDur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
                 val metaTrack = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)
 
-                val picBytes = retriever.embeddedPicture
+                var picBytes = retriever.embeddedPicture
+                if ((picBytes == null || picBytes.isEmpty()) && pfd != null) {
+                    runCatching {
+                        val fallbackRetriever = MediaMetadataRetriever()
+                        try {
+                            fallbackRetriever.setDataSource(context, fileUri)
+                            picBytes = fallbackRetriever.embeddedPicture
+                        } finally {
+                            fallbackRetriever.release()
+                        }
+                    }
+                }
+
                 var artUri: String? = null
                 if (picBytes != null && picBytes.isNotEmpty()) {
                     val artFile = getLocalArtFile(context, trackKey)
@@ -290,7 +301,7 @@ object LocalMediaRepository {
                         val tmp = File(artFile.parentFile, "${artFile.name}.tmp")
                         tmp.writeBytes(picBytes)
                         if (tmp.renameTo(artFile) || runCatching { tmp.copyTo(artFile, overwrite = true); tmp.delete() }.isSuccess) {
-                            artUri = Uri.fromFile(artFile).toString()
+                            artUri = "file://${artFile.absolutePath}"
                         }
                     }
                 }
@@ -305,6 +316,7 @@ object LocalMediaRepository {
                 )
             } finally {
                 retriever.release()
+                pfd?.close()
             }
         }.getOrNull()
     }
@@ -316,7 +328,8 @@ object LocalMediaRepository {
             val toEnrich = songs.filter { song ->
                 val uriStr = song.localUri ?: song.videoId
                 val cachedArt = getCachedLocalArtUri(appContext, uriStr)
-                cachedArt == null || song.durationText == null || song.albumName == null
+                cachedArt == null || song.durationText == null || song.albumName == null ||
+                    song.thumbnailUrl?.startsWith("file://") != true
             }
             if (toEnrich.isEmpty()) return@launch
 

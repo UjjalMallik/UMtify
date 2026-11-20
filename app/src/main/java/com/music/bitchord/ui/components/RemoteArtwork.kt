@@ -33,12 +33,14 @@ fun rememberRemoteArtworkUrl(song: Song?, ignoreCustom: Boolean = false): String
     // [ignoreCustom] is the editor's source-art preview.
     val edits by SongEditStore.edits.collectAsStateWithLifecycle()
     val custom = if (ignoreCustom) null else song?.let { edits[it.videoId]?.coverPath }?.let { "file://$it" }
-    var resolved by remember(key) { mutableStateOf(song?.thumbnailUrl) }
-    LaunchedEffect(key, custom) {
+    var resolved by remember(key, song?.thumbnailUrl) { mutableStateOf(song?.thumbnailUrl) }
+    LaunchedEffect(key, custom, song?.thumbnailUrl) {
         if (custom == null && song != null && song.thumbnailUrl == null &&
             (song.videoId.startsWith("webdav:") || song.videoId.startsWith("smb:"))
         ) {
             resolved = RemoteArtworkStore.resolveArt(context, song)
+        } else if (song?.thumbnailUrl != null) {
+            resolved = song.thumbnailUrl
         }
     }
     return custom ?: resolved
