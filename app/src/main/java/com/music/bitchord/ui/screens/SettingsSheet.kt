@@ -391,25 +391,6 @@ fun SettingsScreen(
         }
     }
 
-    val localMusicSongPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenMultipleDocuments(),
-    ) { uris ->
-        if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
-        uris.forEach { uri ->
-            try {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                )
-            } catch (_: SecurityException) { /* fallback if already granted */ }
-        }
-        val current = AppSettings.localMusicSelectedSongs.value
-        AppSettings.setLocalMusicSelectedSongs(current + uris.map { it.toString() })
-        backupScope.launch(Dispatchers.IO) {
-            LocalMediaRepository.refreshLocalMusic(context)
-        }
-    }
-
     /**
      * Both halves go through the system document picker rather than a path of
      * this app's own choosing. That is what puts the file somewhere the user can
@@ -2293,7 +2274,6 @@ fun SettingsScreen(
         LocalMusicManagerDialog(
             onDismiss = { showLocalMusicManager = false },
             onAddFolder = { localMusicFolderPicker.launch(null) },
-            onAddSongs = { localMusicSongPicker.launch(arrayOf("audio/*")) },
         )
     }
 

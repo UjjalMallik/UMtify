@@ -701,6 +701,9 @@ object AppSettings {
     /** Explicitly excluded local songs. */
     val localMusicExcludedSongs = MutableStateFlow<Set<String>>(emptySet())
 
+    /** Explicitly excluded local device folders. */
+    val localMusicExcludedFolders = MutableStateFlow<Set<String>>(emptySet())
+
     // ── WebDAV ────────────────────────────────────────────────────────────
 
     /**
@@ -1064,6 +1067,7 @@ object AppSettings {
         scanAllAudioFolders.value = prefs.getBoolean(KEY_SCAN_ALL_AUDIO_FOLDERS, false)
         localMusicSelectedSongs.value = prefs.getStringSet(KEY_LOCAL_MUSIC_SELECTED_SONGS, emptySet()).orEmpty()
         localMusicExcludedSongs.value = prefs.getStringSet(KEY_LOCAL_MUSIC_EXCLUDED_SONGS, emptySet()).orEmpty()
+        localMusicExcludedFolders.value = prefs.getStringSet(KEY_LOCAL_MUSIC_EXCLUDED_FOLDERS, emptySet()).orEmpty()
         webdavUrl.value = prefs.getString(KEY_WEBDAV_URL, "").orEmpty()
         webdavUsername.value = prefs.getString(KEY_WEBDAV_USERNAME, "").orEmpty()
         webdavPassword.value = authStore.webdavPassword.orEmpty()
@@ -2090,6 +2094,19 @@ object AppSettings {
         }
     }
 
+    fun setLocalMusicExcludedFolders(folders: Set<String>) {
+        localMusicExcludedFolders.value = folders
+        prefs.edit().putStringSet(KEY_LOCAL_MUSIC_EXCLUDED_FOLDERS, folders).commit()
+    }
+
+    fun addLocalMusicExcludedFolder(folderPath: String) {
+        setLocalMusicExcludedFolders(localMusicExcludedFolders.value + folderPath)
+    }
+
+    fun removeLocalMusicExcludedFolder(folderPath: String) {
+        setLocalMusicExcludedFolders(localMusicExcludedFolders.value - folderPath)
+    }
+
     fun setWebDavUrl(value: String) {
         val normalized = value.trim().trimEnd('/')
         webdavUrl.value = normalized
@@ -2317,6 +2334,7 @@ object AppSettings {
         KEY_SCAN_ALL_AUDIO_FOLDERS,
         KEY_LOCAL_MUSIC_SELECTED_SONGS,
         KEY_LOCAL_MUSIC_EXCLUDED_SONGS,
+        KEY_LOCAL_MUSIC_EXCLUDED_FOLDERS,
         KEY_LAST_VERSION_CODE,
         // The name is only ever the label of the file the listener imported
         // here; the file itself is not in the backup, so restoring the name
@@ -2457,6 +2475,7 @@ object AppSettings {
     private const val KEY_SCAN_ALL_AUDIO_FOLDERS = "scan_all_audio_folders"
     private const val KEY_LOCAL_MUSIC_SELECTED_SONGS = "local_music_selected_songs"
     private const val KEY_LOCAL_MUSIC_EXCLUDED_SONGS = "local_music_excluded_songs"
+    private const val KEY_LOCAL_MUSIC_EXCLUDED_FOLDERS = "local_music_excluded_folders"
     private const val KEY_WEBDAV_URL = "webdav_url"
     private const val KEY_WEBDAV_USERNAME = "webdav_username"
     private const val KEY_SMB_HOST = "smb_host"

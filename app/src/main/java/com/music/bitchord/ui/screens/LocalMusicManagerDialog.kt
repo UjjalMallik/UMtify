@@ -87,7 +87,6 @@ import java.util.Locale
 fun LocalMusicManagerDialog(
     onDismiss: () -> Unit,
     onAddFolder: (() -> Unit)? = null,
-    onAddSongs: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -99,6 +98,7 @@ fun LocalMusicManagerDialog(
     val localFolders by AppSettings.localMusicFolders.collectAsStateWithLifecycle()
     val singleFolderUri by AppSettings.localMusicFolderUri.collectAsStateWithLifecycle()
     val excludedSongs by AppSettings.localMusicExcludedSongs.collectAsStateWithLifecycle()
+    val excludedFolders by AppSettings.localMusicExcludedFolders.collectAsStateWithLifecycle()
     val selectedSongs by AppSettings.localMusicSelectedSongs.collectAsStateWithLifecycle()
 
     val detectedFolders by LocalMediaRepository.detectedAudioFolders.collectAsStateWithLifecycle()
@@ -143,25 +143,6 @@ fun LocalMusicManagerDialog(
         }
     }
 
-    val songPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenMultipleDocuments(),
-    ) { uris ->
-        if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
-        uris.forEach { uri ->
-            try {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                )
-            } catch (_: SecurityException) { /* fallback if already granted */ }
-        }
-        val uriStrings = uris.map { it.toString() }
-        AppSettings.addLocalMusicIndividualFiles(uriStrings)
-        scope.launch(Dispatchers.IO) {
-            LocalMediaRepository.refreshLocalMusic(context)
-        }
-    }
-
     LaunchedEffect(Unit) {
         if (scanAllAudioFolders && !LocalMediaRepository.hasStoragePermission(context)) {
             storagePermissionLauncher.launch(storagePermission)
@@ -170,10 +151,11 @@ fun LocalMusicManagerDialog(
     }
 
     // Display folders: custom folders are computed immediately from AppSettings.localMusicCustomFolders
-    val displayFolders = remember(customFolders, detectedFolders, scanAllAudioFolders, allLocalSongs) {
+    val displayFolders = remember(customFolders, detectedFolders, scanAllAudioFolders, allLocalSongs, excludedFolders) {
         val list = mutableListOf<LocalMediaRepository.DeviceFolder>()
         // 1. All custom folders rendered immediately
         for (uri in customFolders) {
+            if (uri in excludedFolders) continue
             val name = LocalMediaRepository.getFolderDisplayName(context, uri)
             val detectedCount = detectedFolders.firstOrNull { it.path == uri }?.songCount ?: 0
             val matchedSongsCount = allLocalSongs.count {
@@ -187,6 +169,7 @@ fun LocalMusicManagerDialog(
         // 2. If scanAllAudioFolders is enabled, also list detected MediaStore folders
         if (scanAllAudioFolders) {
             for (df in detectedFolders) {
+                if (df.path in excludedFolders) continue
                 if (!df.isCustom && list.none { it.path == df.path }) {
                     list.add(df)
                 }
@@ -391,6 +374,9 @@ fun LocalMusicManagerDialog(
                             onClick = {
                                 val keys = filteredFolderSongs.flatMap { listOfNotNull(it.localPath, it.localUri, it.videoId) }
                                 AppSettings.includeLocalSongs(keys)
+                                scope.launch(Dispatchers.IO) {
+                                    LocalMediaRepository.refreshLocalMusic(context)
+                                }
                             },
                         ) {
                             Text(
@@ -403,6 +389,9 @@ fun LocalMusicManagerDialog(
                             onClick = {
                                 val keys = filteredFolderSongs.flatMap { listOfNotNull(it.localPath, it.localUri, it.videoId) }
                                 AppSettings.excludeLocalSongs(keys)
+                                scope.launch(Dispatchers.IO) {
+                                    LocalMediaRepository.refreshLocalMusic(context)
+                                }
                             },
                         ) {
                             Text(
@@ -436,6 +425,9 @@ fun LocalMusicManagerDialog(
                                         AppSettings.excludeLocalSongs(songKeys)
                                     } else {
                                         AppSettings.includeLocalSongs(songKeys)
+                                    }
+                                    scope.launch(Dispatchers.IO) {
+                                        LocalMediaRepository.refreshLocalMusic(context)
                                     }
                                 }
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -498,6 +490,9 @@ fun LocalMusicManagerDialog(
                                             AppSettings.includeLocalSongs(songKeys)
                                         } else {
                                             AppSettings.excludeLocalSongs(songKeys)
+                                        }
+                                        scope.launch(Dispatchers.IO) {
+                                            LocalMediaRepository.refreshLocalMusic(context)
                                         }
                                     },
                                     colors = CheckboxDefaults.colors(
@@ -588,76 +583,38 @@ fun LocalMusicManagerDialog(
 
                 Spacer(Modifier.height(14.dp))
 
-                // Actions: Add Custom Storage Folder & Add Audio Files
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth(),
+                // Action: Add Custom Storage Folder
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.04f))
+                        .border(0.6.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
+                        .clickable { onAddFolder?.invoke() ?: folderPicker.launch(null) }
+                        .padding(horizontal = 14.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Row(
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color.White.copy(alpha = 0.04f))
-                            .border(0.6.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
-                            .clickable { onAddFolder?.invoke() ?: folderPicker.launch(null) }
-                            .padding(horizontal = 14.dp, vertical = 11.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(30.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.CreateNewFolder,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                        Text(
-                            text = if (isBn) "+ পছন্দমতো সিস্টেম ফোল্ডার যোগ করুন..." else "+ Add custom storage folder...",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.primary,
+                        Icon(
+                            imageVector = Icons.Rounded.CreateNewFolder,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp),
                         )
                     }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color.White.copy(alpha = 0.03f))
-                            .border(0.6.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
-                            .clickable { onAddSongs?.invoke() ?: songPicker.launch(arrayOf("audio/*")) }
-                            .padding(horizontal = 14.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.08f)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.MusicNote,
-                                contentDescription = null,
-                                tint = Color.White.copy(alpha = 0.75f),
-                                modifier = Modifier.size(16.dp),
-                            )
-                        }
-                        Text(
-                            text = if (isBn) "+ নির্দিষ্ট অডিও ফাইল যোগ করুন..." else "+ Add individual audio files...",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Medium,
-                            color = Color.White.copy(alpha = 0.75f),
-                        )
-                    }
+                    Text(
+                        text = if (isBn) "+ পছন্দমতো সিস্টেম ফোল্ডার যোগ করুন..." else "+ Add custom storage folder...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
                 }
 
                 Spacer(Modifier.height(10.dp))
@@ -673,8 +630,8 @@ fun LocalMusicManagerDialog(
                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
                 )
 
-                // List of folders and individual files
-                if (displayFolders.isEmpty() && selectedSongs.isEmpty() && !loading) {
+                // List of folders
+                if (displayFolders.isEmpty() && !loading) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -683,8 +640,8 @@ fun LocalMusicManagerDialog(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            text = if (isBn) "কোনো ফোল্ডার বা ফাইল যোগ করা হয়নি। উপরে '+ পছন্দমতো সিস্টেম ফোল্ডার যোগ করুন...' বা '+ নির্দিষ্ট অডিও ফাইল যোগ করুন...' এ ট্যাপ করুন।"
-                            else "No folders or files added. Tap '+ Add custom storage folder...' or '+ Add individual audio files...' above.",
+                            text = if (isBn) "কোনো ফোল্ডার যোগ করা হয়নি। উপরে '+ পছন্দমতো সিস্টেম ফোল্ডার যোগ করুন...' এ ট্যাপ করুন।"
+                            else "No folders added. Tap '+ Add custom storage folder...' above to add your music folders.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = Color.White.copy(alpha = 0.5f),
                             textAlign = TextAlign.Center,
@@ -697,170 +654,83 @@ fun LocalMusicManagerDialog(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(bottom = 16.dp),
                     ) {
-                        // Section 1: Folders
-                        if (displayFolders.isNotEmpty()) {
-                            items(displayFolders, key = { it.path }) { folder ->
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(Color.White.copy(alpha = 0.06f))
-                                        .border(0.6.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(16.dp))
-                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                        items(displayFolders, key = { it.path }) { folder ->
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Color.White.copy(alpha = 0.06f))
+                                    .border(0.6.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(16.dp))
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
                                 ) {
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { drilledFolder = folder },
                                     ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clickable { drilledFolder = folder },
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Folder,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(24.dp),
+                                        Icon(
+                                            imageVector = Icons.Rounded.Folder,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(24.dp),
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = folder.name,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color.White,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
                                             )
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = folder.name,
-                                                    style = MaterialTheme.typography.titleMedium,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = Color.White,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
-                                                Text(
-                                                    text = "${folder.songCount} ${if (isBn) "টি গান" else "tracks"} · ${if (isBn) "গান দেখতে স্পর্শ করুন" else "tap to view tracks"}",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = Color.White.copy(alpha = 0.55f),
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
-                                            }
-                                            Icon(
-                                                imageVector = Icons.Rounded.ChevronRight,
-                                                contentDescription = "View tracks",
-                                                tint = Color.White.copy(alpha = 0.40f),
-                                                modifier = Modifier.size(20.dp),
+                                            Text(
+                                                text = "${folder.songCount} ${if (isBn) "টি গান" else "tracks"} · ${if (isBn) "গান দেখতে স্পর্শ করুন" else "tap to view tracks"}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = Color.White.copy(alpha = 0.55f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
                                             )
                                         }
-                                        if (folder.isCustom) {
-                                            Spacer(Modifier.width(8.dp))
-                                            IconButton(
-                                                onClick = {
-                                                    runCatching {
-                                                        context.contentResolver.releasePersistableUriPermission(
-                                                            Uri.parse(folder.path),
-                                                            Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                                                        )
-                                                    }
-                                                    AppSettings.removeLocalMusicCustomFolder(folder.path)
-                                                    scope.launch(Dispatchers.IO) {
-                                                        LocalMediaRepository.refreshLocalMusic(context)
-                                                    }
-                                                },
-                                                modifier = Modifier.size(36.dp),
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Rounded.DeleteOutline,
-                                                    contentDescription = if (isBn) "মুছে ফেলুন" else "Remove",
-                                                    tint = Color.White.copy(alpha = 0.6f),
-                                                    modifier = Modifier.size(20.dp),
-                                                )
-                                            }
-                                        }
+                                        Icon(
+                                            imageVector = Icons.Rounded.ChevronRight,
+                                            contentDescription = "View tracks",
+                                            tint = Color.White.copy(alpha = 0.40f),
+                                            modifier = Modifier.size(20.dp),
+                                        )
                                     }
-                                }
-                            }
-                        }
-
-                        // Section 2: Individual Files
-                        if (selectedSongs.isNotEmpty()) {
-                            item {
-                                Spacer(Modifier.height(10.dp))
-                                Text(
-                                    text = if (isBn) "যুক্ত করা নির্দিষ্ট ফাইলসমূহ (${selectedSongs.size})" else "Selected Individual Files (${selectedSongs.size})",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = Color.White.copy(alpha = 0.50f),
-                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
-                                )
-                            }
-                            items(selectedSongs.toList(), key = { it }) { fileUriStr ->
-                                val cleanFileName = remember(fileUriStr) {
-                                    val uri = Uri.parse(fileUriStr)
-                                    LocalMediaRepository.getFileNameFromUri(context, uri)
-                                        ?: fileUriStr.substringAfterLast('%').substringAfterLast('/').ifBlank { "Audio file" }
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(Color.White.copy(alpha = 0.06f))
-                                        .border(0.6.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(16.dp))
-                                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                            modifier = Modifier.weight(1f),
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.MusicNote,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(22.dp),
-                                            )
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = cleanFileName,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    fontWeight = FontWeight.Medium,
-                                                    color = Color.White,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
-                                                Text(
-                                                    text = if (isBn) "ম্যানুয়ালি যুক্ত ফাইল" else "Manually added file",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = Color.White.copy(alpha = 0.50f),
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
-                                            }
-                                        }
-                                        IconButton(
-                                            onClick = {
+                                    Spacer(Modifier.width(8.dp))
+                                    IconButton(
+                                        onClick = {
+                                            if (folder.isCustom) {
                                                 runCatching {
                                                     context.contentResolver.releasePersistableUriPermission(
-                                                        Uri.parse(fileUriStr),
+                                                        Uri.parse(folder.path),
                                                         Intent.FLAG_GRANT_READ_URI_PERMISSION,
                                                     )
                                                 }
-                                                AppSettings.removeLocalMusicIndividualFile(fileUriStr)
-                                                scope.launch(Dispatchers.IO) {
-                                                    LocalMediaRepository.refreshLocalMusic(context)
-                                                }
-                                            },
-                                            modifier = Modifier.size(36.dp),
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.DeleteOutline,
-                                                contentDescription = if (isBn) "মুছে ফেলুন" else "Remove",
-                                                tint = Color.White.copy(alpha = 0.6f),
-                                                modifier = Modifier.size(20.dp),
-                                            )
-                                        }
+                                                AppSettings.removeLocalMusicCustomFolder(folder.path)
+                                            } else {
+                                                AppSettings.addLocalMusicExcludedFolder(folder.path)
+                                            }
+                                            scope.launch(Dispatchers.IO) {
+                                                LocalMediaRepository.refreshLocalMusic(context)
+                                            }
+                                        },
+                                        modifier = Modifier.size(36.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.DeleteOutline,
+                                            contentDescription = if (isBn) "মুছে ফেলুন" else "Remove",
+                                            tint = Color.White.copy(alpha = 0.6f),
+                                            modifier = Modifier.size(20.dp),
+                                        )
                                     }
                                 }
                             }

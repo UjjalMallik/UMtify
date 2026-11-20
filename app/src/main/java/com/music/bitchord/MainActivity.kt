@@ -4312,9 +4312,18 @@ private fun BitChordApp(
                 Box(
                     Modifier
                         .fillMaxSize()
-                        // Where the app is holding the player, if it is — see
-                        // [PlayerSheetMotion.contentOffsetPx]. Placement only.
-                        .offset { IntOffset(0, playerSheetMotion.contentOffsetPx()) }
+                        // GPU-accelerated slide transition with clean fixed top corner radius
+                        .graphicsLayer {
+                            val offset = playerSheetMotion.contentOffsetPx().toFloat()
+                            translationY = offset
+                            val isDragging = offset > 0f
+                            val progress = if (playerDock.sheetTravel > 0f) {
+                                (offset / playerDock.sheetTravel).coerceIn(0f, 1f)
+                            } else 0f
+                            alpha = 1f - 0.2f * progress
+                            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                            clip = isDragging
+                        }
                         // The dim behind the player, from the window's top to
                         // its bottom whatever the player's offset, and as deep
                         // as the player is open.

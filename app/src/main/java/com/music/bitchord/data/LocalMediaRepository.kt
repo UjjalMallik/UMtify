@@ -810,10 +810,12 @@ object LocalMediaRepository {
             val foldersList = mutableListOf<DeviceFolder>()
             val seenKeys = mutableSetOf<String>()
             val excludedSongs = AppSettings.localMusicExcludedSongs.value
+            val excludedFolders = AppSettings.localMusicExcludedFolders.value.map { it.normalizedPath() }.toSet()
             val filterNonMusic = AppSettings.filterNonMusicAudio.value
 
             // 1. Scan custom SAF folders
             for (uriStr in customUris) {
+                if (uriStr in excludedFolders || uriStr.normalizedPath() in excludedFolders) continue
                 val safSongs = scanSafFolderFast(context, uriStr)
                 val displayName = getFolderDisplayName(context, uriStr)
                 foldersList.add(DeviceFolder(name = displayName, path = uriStr, songCount = safSongs.size, isCustom = true))
@@ -933,6 +935,7 @@ object LocalMediaRepository {
 
                             val folderPath = path?.let { File(it).parent }
                             if (folderPath != null) {
+                                if (folderPath in excludedFolders || folderPath.normalizedPath() in excludedFolders) continue
                                 mediaStoreFolderCounts[folderPath] = (mediaStoreFolderCounts[folderPath] ?: 0) + 1
                             }
 
@@ -986,7 +989,7 @@ object LocalMediaRepository {
 
                 mediaStoreFolderCounts.forEach { (path, count) ->
                     val norm = path.normalizedPath()
-                    if (foldersList.none { it.path.normalizedPath() == norm }) {
+                    if (path !in excludedFolders && norm !in excludedFolders && foldersList.none { it.path.normalizedPath() == norm }) {
                         val name = path.substringAfterLast('/').ifBlank { "Storage" }
                         foldersList.add(DeviceFolder(name, path, count, isCustom = false))
                     }
