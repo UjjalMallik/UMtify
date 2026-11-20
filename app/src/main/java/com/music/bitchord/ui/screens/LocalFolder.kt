@@ -267,15 +267,11 @@ internal fun LazyListScope.localFolderItems(
         if (folder.selectable && group.type != BrowseType.OTHER) state.select(group) else folder.onGroupLongPress(group)
     }
 
-    val isCurrentRow = remember(songs, currentSong?.videoId, currentSong?.localUri) {
-        playingRowMatcher(songs, currentSong)
-    }
-    val stableSongKeys = remember(songs) {
-        val seenSongIds = HashSet<String>()
-        songs.mapIndexed { idx, song ->
-            val id = song.videoId
-            if (seenSongIds.add(id)) id else "${id}_$idx"
-        }
+    val isCurrentRow = playingRowMatcher(songs, currentSong)
+    val seenSongIds = HashSet<String>()
+    val stableSongKeys = songs.mapIndexed { idx, song ->
+        val id = song.videoId
+        if (seenSongIds.add(id)) id else "${id}_$idx"
     }
     when (state.tab) {
         LocalFolderTab.SONGS -> if (grid) {
