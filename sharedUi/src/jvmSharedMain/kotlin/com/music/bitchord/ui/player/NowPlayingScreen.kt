@@ -3251,6 +3251,7 @@ fun NowPlayingScreen(
                                         url = art.url,
                                         contentDescription = null,
                                         contentScale = ContentScale.Crop,
+                                        maxSizePx = 1080,
                                         onLoadingStateChanged = { _, success ->
                                             if (success) art.loaded = true
                                         },

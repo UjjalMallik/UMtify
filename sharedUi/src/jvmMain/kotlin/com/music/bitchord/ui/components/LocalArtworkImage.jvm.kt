@@ -17,8 +17,8 @@ import java.util.concurrent.ConcurrentHashMap
 
 object JvmLocalArtworkCache {
     private val map = ConcurrentHashMap<String, ImageBitmap>()
-    fun get(path: String): ImageBitmap? = map[path]
-    fun put(path: String, bmp: ImageBitmap) { map[path] = bmp }
+    fun get(path: String, maxSizePx: Int = 160): ImageBitmap? = map["${cleanLocalArtPath(path)}:$maxSizePx"]
+    fun put(path: String, maxSizePx: Int = 160, bmp: ImageBitmap) { map["${cleanLocalArtPath(path)}:$maxSizePx"] = bmp }
 }
 
 @Composable
@@ -27,19 +27,14 @@ actual fun LocalArtworkImage(
     contentDescription: String?,
     modifier: Modifier,
     contentScale: ContentScale,
+    maxSizePx: Int,
     onLoadingStateChanged: ((isLoading: Boolean, isSuccess: Boolean) -> Unit)?,
     fallback: @Composable () -> Unit,
 ) {
-    val cleanPath = when {
-        url.startsWith("file://") -> url.removePrefix("file://")
-        url.startsWith("local_art://file://") -> url.removePrefix("local_art://file://")
-        url.startsWith("local_art://") -> url.removePrefix("local_art://")
-        else -> url
-    }
+    val cleanPath = cleanLocalArtPath(url)
+    val cached = remember(cleanPath, maxSizePx) { JvmLocalArtworkCache.get(cleanPath, maxSizePx) }
 
-    val cached = remember(cleanPath) { JvmLocalArtworkCache.get(cleanPath) }
-
-    val bitmapState by produceState<ImageBitmap?>(initialValue = cached, key1 = cleanPath) {
+    val bitmapState by produceState<ImageBitmap?>(initialValue = cached, key1 = cleanPath, key2 = maxSizePx) {
         if (cached != null) {
             value = cached
             onLoadingStateChanged?.invoke(false, true)
@@ -52,7 +47,7 @@ actual fun LocalArtworkImage(
                     val bytes = file.readBytes()
                     val skia = SkiaImage.makeFromEncoded(bytes)
                     skia.asComposeImageBitmap().also {
-                        JvmLocalArtworkCache.put(cleanPath, it)
+                        JvmLocalArtworkCache.put(cleanPath, maxSizePx, it)
                     }
                 } else null
             }.getOrNull()

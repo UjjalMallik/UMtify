@@ -19,9 +19,13 @@ import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.download.DownloadStore
 import com.music.bitchord.download.Downloads
+import com.music.bitchord.ui.components.LocalArtworkCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -352,6 +356,12 @@ object LocalMediaRepository {
             }
         }
 
+        if (artUri != null) {
+            runCatching {
+                LocalArtworkCache.prewarm(artUri, 160)
+            }
+        }
+
         return ExtractedMeta(
             title = metaTitle?.cleanTag(),
             artist = metaArtist?.cleanTag(),
@@ -366,6 +376,9 @@ object LocalMediaRepository {
         val appContext = context.applicationContext
         enrichmentJob?.cancel()
         enrichmentJob = repositoryScope.launch {
+            // Pre-warm any already-cached artwork so scrolling is instant immediately
+            prewarmCachedThumbnails(appContext, songs)
+
             val toEnrich = songs.filter { song ->
                 val uriStr = song.localUri ?: song.videoId
                 val cachedArt = getCachedLocalArtUri(appContext, uriStr)
@@ -374,40 +387,73 @@ object LocalMediaRepository {
             }
             if (toEnrich.isEmpty()) return@launch
 
-            val updatedMap = mutableMapOf<String, Song>()
+            val dispatcher = Dispatchers.IO.limitedParallelism(4)
 
-            for (song in toEnrich) {
+            // Batch in chunks of 8 so the UI receives fast progressive updates
+            for (chunk in toEnrich.chunked(8)) {
                 if (!isActive) break
-                val uriStr = song.localUri ?: song.videoId
-                val parsedUri = Uri.parse(uriStr)
-                val meta = extractMetadataAndArt(appContext, parsedUri, uriStr)
-                if (meta != null) {
-                    val newTitle = meta.title ?: song.title
-                    val newArtist = meta.artist ?: song.artist
-                    val newAlbum = meta.album ?: song.albumName
-                    val newDuration = meta.durationMs?.takeIf { it > 0 }?.let(::formatDuration) ?: song.durationText
-                    val newArt = meta.artworkUri ?: song.thumbnailUrl
-                    val newTrackNum = meta.trackNumber ?: song.trackNumber
 
-                    val enriched = song.copy(
-                        title = newTitle,
-                        artist = newArtist,
-                        albumName = newAlbum,
-                        durationText = newDuration,
-                        thumbnailUrl = newArt,
-                        trackNumber = newTrackNum,
-                    )
-                    if (enriched != song) {
-                        updatedMap[song.videoId] = enriched
+                val batchResults = coroutineScope {
+                    chunk.map { song ->
+                        async(dispatcher) {
+                            if (!isActive) return@async null
+                            val uriStr = song.localUri ?: song.videoId
+                            val parsedUri = Uri.parse(uriStr)
+                            val meta = extractMetadataAndArt(appContext, parsedUri, uriStr)
+                            if (meta != null) {
+                                val newTitle = meta.title ?: song.title
+                                val newArtist = meta.artist ?: song.artist
+                                val newAlbum = meta.album ?: song.albumName
+                                val newDuration = meta.durationMs?.takeIf { it > 0 }?.let(::formatDuration) ?: song.durationText
+                                val newArt = meta.artworkUri ?: song.thumbnailUrl
+                                val newTrackNum = meta.trackNumber ?: song.trackNumber
+
+                                if (newArt != null && newArt.startsWith("file://")) {
+                                    runCatching {
+                                        LocalArtworkCache.prewarm(newArt, 160)
+                                    }
+                                }
+
+                                val enriched = song.copy(
+                                    title = newTitle,
+                                    artist = newArtist,
+                                    albumName = newAlbum,
+                                    durationText = newDuration,
+                                    thumbnailUrl = newArt,
+                                    trackNumber = newTrackNum,
+                                )
+                                if (enriched != song) song.videoId to enriched else null
+                            } else null
+                        }
+                    }.awaitAll().filterNotNull().toMap()
+                }
+
+                if (batchResults.isNotEmpty() && isActive) {
+                    val current = allLocalSongsFlow.value
+                    val hasChanges = current.any { batchResults.containsKey(it.videoId) && batchResults[it.videoId] != it }
+                    if (hasChanges) {
+                        allLocalSongsFlow.value = current.map { batchResults[it.videoId] ?: it }
                     }
                 }
             }
 
-            if (updatedMap.isNotEmpty() && isActive) {
-                val current = allLocalSongsFlow.value
-                val hasChanges = current.any { updatedMap.containsKey(it.videoId) && updatedMap[it.videoId] != it }
-                if (hasChanges) {
-                    allLocalSongsFlow.value = current.map { updatedMap[it.videoId] ?: it }
+            if (isActive) {
+                prewarmCachedThumbnails(appContext, allLocalSongsFlow.value)
+            }
+        }
+    }
+
+    private fun prewarmCachedThumbnails(context: Context, songs: List<Song>) {
+        repositoryScope.launch(Dispatchers.IO.limitedParallelism(2)) {
+            for (song in songs) {
+                if (!isActive) break
+                val uriStr = song.localUri ?: song.videoId
+                val cachedArt = song.thumbnailUrl?.takeIf { it.startsWith("file://") }
+                    ?: getCachedLocalArtUri(context, uriStr)
+                if (cachedArt != null && cachedArt.startsWith("file://")) {
+                    runCatching {
+                        LocalArtworkCache.prewarm(cachedArt, 160)
+                    }
                 }
             }
         }

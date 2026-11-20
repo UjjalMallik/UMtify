@@ -374,7 +374,7 @@ private fun GlassNowPlaying(
                 ),
         ) {
             val artUrl = rememberRemoteArtworkUrl(song)
-            val isLocal = artUrl != null && (artUrl.startsWith("file://") || artUrl.startsWith("/"))
+            val isLocal = isLocalArtUrl(artUrl)
             if (isLocal && artUrl != null) {
                 LocalArtworkImage(
                     url = artUrl,

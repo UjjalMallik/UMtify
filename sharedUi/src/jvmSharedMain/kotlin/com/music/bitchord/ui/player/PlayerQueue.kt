@@ -803,7 +803,7 @@ private fun InlineQueueRow(
             Spacer(Modifier.width(4.dp))
         }
         val remoteArt = rememberRemoteArtworkUrl(song)
-        val isLocal = remoteArt != null && (remoteArt.startsWith("file://") || remoteArt.startsWith("/"))
+        val isLocal = com.music.bitchord.ui.components.isLocalArtUrl(remoteArt)
         val isBrokenOrBlank = remoteArt.isNullOrBlank() || (!isLocal && com.music.bitchord.ui.components.FailedArtworkCache.isFailed(remoteArt))
         if (isBrokenOrBlank) {
             com.music.bitchord.ui.components.DefaultCoverTile(

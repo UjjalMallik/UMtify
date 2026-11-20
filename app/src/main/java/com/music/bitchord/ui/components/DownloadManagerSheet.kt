@@ -303,7 +303,7 @@ private fun DownloadManagerRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(ART_SIZE), contentAlignment = Alignment.Center) {
-            val isLocal = art != null && (art.startsWith("file://") || art.startsWith("/"))
+            val isLocal = isLocalArtUrl(art)
             if (isLocal && art != null) {
                 LocalArtworkImage(
                     url = art,

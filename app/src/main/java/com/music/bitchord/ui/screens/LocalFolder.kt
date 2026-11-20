@@ -426,12 +426,13 @@ private fun SongGridCard(
         ) {
             CoverPlaceholder(Icons.Rounded.MusicNote, Modifier.fillMaxSize())
             if (art != null) {
-                val isLocal = art.startsWith("file://") || art.startsWith("/")
+                val isLocal = com.music.bitchord.ui.components.isLocalArtUrl(art)
                 if (isLocal) {
                     com.music.bitchord.ui.components.LocalArtworkImage(
                         url = art,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
+                        maxSizePx = CARD_ART_PX,
                         modifier = Modifier.fillMaxSize(),
                         fallback = { CoverPlaceholder(Icons.Rounded.MusicNote, Modifier.fillMaxSize()) },
                     )
@@ -606,12 +607,13 @@ private fun AlbumGridCard(
         ) {
             CoverPlaceholder(group.placeholderIcon(), Modifier.fillMaxSize())
             if (art != null) {
-                val isLocal = art.startsWith("file://") || art.startsWith("/")
+                val isLocal = com.music.bitchord.ui.components.isLocalArtUrl(art)
                 if (isLocal) {
                     com.music.bitchord.ui.components.LocalArtworkImage(
                         url = art,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
+                        maxSizePx = CARD_ART_PX,
                         modifier = Modifier.fillMaxSize(),
                         fallback = { CoverPlaceholder(Icons.Rounded.MusicNote, Modifier.fillMaxSize()) },
                     )

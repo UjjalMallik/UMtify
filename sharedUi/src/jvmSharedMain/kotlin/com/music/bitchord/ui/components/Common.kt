@@ -619,7 +619,7 @@ private fun SongRowContent(
         } else {
             Box(Modifier.size(52.dp)) {
                 val remoteArt = com.music.bitchord.ui.player.rememberRemoteArtworkUrl(song)
-                val isLocal = remoteArt != null && (remoteArt.startsWith("file://") || remoteArt.startsWith("/"))
+                val isLocal = isLocalArtUrl(remoteArt)
                 val isBrokenOrBlank = remoteArt.isNullOrBlank() || (!isLocal && FailedArtworkCache.isFailed(remoteArt))
                 if (isBrokenOrBlank) {
                     DefaultCoverTile(
