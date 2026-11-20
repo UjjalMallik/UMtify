@@ -3161,6 +3161,9 @@ fun NowPlayingScreen(
                                     }
                                 },
                         ) {
+                            val artIsGone = art.url.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url) ||
+                                art.failed
+
                             // Empty state lives on this tile, not the AsyncImage: a
                             // background *and* a painter both trying to fill the same
                             // clipped shape is what read as two overlapping squares
@@ -3229,8 +3232,6 @@ fun NowPlayingScreen(
                                 // the sleeve flashed over the real artwork on
                                 // every one of them; it shows now only when the
                                 // URL was never there, or the retries used it up.
-                                val artIsGone = art.url.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url) ||
-                                    art.failed
                                 if (artIsGone && !canvasRendered) {
                                     DefaultCoverTile(
                                         modifier = Modifier.graphicsLayer {
