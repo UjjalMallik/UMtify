@@ -106,7 +106,7 @@ internal class PlayerArtwork(
      * can set it back to true.
      */
     var loaded by mutableStateOf(false)
-        private set
+        internal set
 
     /**
      * Which go at this cover we are on, and the reason there is more than one.
@@ -161,6 +161,8 @@ internal class PlayerArtwork(
 
     /** Fed from each painter drawing [request]. */
     fun onState(state: AsyncImagePainter.State) {
+        val isLocal = url != null && (url.startsWith("file://") || url.startsWith("/"))
+        if (isLocal) return
         loaded = state is AsyncImagePainter.State.Success
         // Only the failure is latched, and only upwards: the retry that clears
         // it is [failed]'s own effect, and clearing it from a Loading state here

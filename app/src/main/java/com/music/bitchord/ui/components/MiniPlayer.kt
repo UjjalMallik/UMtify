@@ -417,7 +417,8 @@ fun MiniPlayer(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val remoteArt = rememberRemoteArtworkUrl(song)
-            val isBrokenOrBlank = remoteArt.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(remoteArt)
+            val isLocal = remoteArt != null && (remoteArt.startsWith("file://") || remoteArt.startsWith("/"))
+            val isBrokenOrBlank = remoteArt.isNullOrBlank() || (!isLocal && com.music.bitchord.ui.components.FailedArtworkCache.isFailed(remoteArt))
             if (isBrokenOrBlank) {
                 com.music.bitchord.ui.components.DefaultCoverTile(
                     modifier = Modifier
@@ -426,6 +427,28 @@ fun MiniPlayer(
                         .clip(RoundedCornerShape(ART_CORNER))
                         .thumbnailBorder(RoundedCornerShape(ART_CORNER)),
                     contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                )
+            } else if (isLocal && remoteArt != null) {
+                com.music.bitchord.ui.components.LocalArtworkImage(
+                    url = remoteArt,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .playerDockArt(dock, ART_CORNER)
+                        .clip(RoundedCornerShape(ART_CORNER))
+                        .thumbnailBorder(RoundedCornerShape(ART_CORNER))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    fallback = {
+                        com.music.bitchord.ui.components.DefaultCoverTile(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .playerDockArt(dock, ART_CORNER)
+                                .clip(RoundedCornerShape(ART_CORNER))
+                                .thumbnailBorder(RoundedCornerShape(ART_CORNER)),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        )
+                    },
                 )
             } else {
                 val context = coil3.compose.LocalPlatformContext.current

@@ -803,7 +803,8 @@ private fun InlineQueueRow(
             Spacer(Modifier.width(4.dp))
         }
         val remoteArt = rememberRemoteArtworkUrl(song)
-        val isBrokenOrBlank = remoteArt.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(remoteArt)
+        val isLocal = remoteArt != null && (remoteArt.startsWith("file://") || remoteArt.startsWith("/"))
+        val isBrokenOrBlank = remoteArt.isNullOrBlank() || (!isLocal && com.music.bitchord.ui.components.FailedArtworkCache.isFailed(remoteArt))
         if (isBrokenOrBlank) {
             com.music.bitchord.ui.components.DefaultCoverTile(
                 modifier = Modifier
@@ -811,6 +812,26 @@ private fun InlineQueueRow(
                     .clip(RoundedCornerShape(6.dp))
                     .thumbnailBorder(RoundedCornerShape(6.dp)),
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            )
+        } else if (isLocal && remoteArt != null) {
+            com.music.bitchord.ui.components.LocalArtworkImage(
+                url = remoteArt,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .thumbnailBorder(RoundedCornerShape(6.dp))
+                    .background(Color.White.copy(alpha = 0.08f)),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                fallback = {
+                    com.music.bitchord.ui.components.DefaultCoverTile(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .thumbnailBorder(RoundedCornerShape(6.dp)),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    )
+                },
             )
         } else {
             val context = coil3.compose.LocalPlatformContext.current

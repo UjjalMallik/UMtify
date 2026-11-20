@@ -303,15 +303,38 @@ private fun DownloadManagerRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(ART_SIZE), contentAlignment = Alignment.Center) {
-            AsyncImage(
-                model = art?.artworkAt(ROW_ART_PX),
-                contentDescription = null,
-                modifier = Modifier
-                    .size(ART_SIZE)
-                    .clip(RoundedCornerShape(8.dp))
-                    .thumbnailBorder(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-            )
+            val isLocal = art != null && (art.startsWith("file://") || art.startsWith("/"))
+            if (isLocal && art != null) {
+                LocalArtworkImage(
+                    url = art,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(ART_SIZE)
+                        .clip(RoundedCornerShape(8.dp))
+                        .thumbnailBorder(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    fallback = {
+                        DefaultCoverTile(
+                            modifier = Modifier
+                                .size(ART_SIZE)
+                                .clip(RoundedCornerShape(8.dp))
+                                .thumbnailBorder(RoundedCornerShape(8.dp)),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        )
+                    },
+                )
+            } else {
+                AsyncImage(
+                    model = art?.artworkAt(ROW_ART_PX),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(ART_SIZE)
+                        .clip(RoundedCornerShape(8.dp))
+                        .thumbnailBorder(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                )
+            }
             // A finished or failed track is stated over its own cover rather
             // than in a fourth column: the list is scanned for the odd one out,
             // and a mark on the artwork is what the eye actually lands on.

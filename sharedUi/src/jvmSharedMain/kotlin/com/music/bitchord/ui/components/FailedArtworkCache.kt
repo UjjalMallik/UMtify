@@ -11,25 +11,22 @@ import java.util.concurrent.ConcurrentHashMap
 object FailedArtworkCache {
     private val failed = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
 
+    fun isLocal(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        val clean = url.trim()
+        return clean.startsWith("file://") || clean.startsWith("/") ||
+            clean.startsWith("local_art://") || clean.startsWith("content://")
+    }
+
     fun markFailed(url: String?) {
-        if (!url.isNullOrBlank()) {
-            if (url.startsWith("file://") || url.startsWith("/") ||
-                url.startsWith("local_art://") || url.startsWith("content://")
-            ) {
-                return
-            }
-            failed.add(url)
+        if (!url.isNullOrBlank() && !isLocal(url)) {
+            failed.add(url.trim())
         }
     }
 
     fun isFailed(url: String?): Boolean {
-        if (url.isNullOrBlank()) return false
-        if (url.startsWith("file://") || url.startsWith("/") ||
-            url.startsWith("local_art://") || url.startsWith("content://")
-        ) {
-            return false
-        }
-        return failed.contains(url)
+        if (url.isNullOrBlank() || isLocal(url)) return false
+        return failed.contains(url.trim())
     }
 
     fun clear() {

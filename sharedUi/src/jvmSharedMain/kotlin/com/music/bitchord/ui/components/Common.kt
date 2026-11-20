@@ -619,7 +619,8 @@ private fun SongRowContent(
         } else {
             Box(Modifier.size(52.dp)) {
                 val remoteArt = com.music.bitchord.ui.player.rememberRemoteArtworkUrl(song)
-                val isBrokenOrBlank = remoteArt.isNullOrBlank() || FailedArtworkCache.isFailed(remoteArt)
+                val isLocal = remoteArt != null && (remoteArt.startsWith("file://") || remoteArt.startsWith("/"))
+                val isBrokenOrBlank = remoteArt.isNullOrBlank() || (!isLocal && FailedArtworkCache.isFailed(remoteArt))
                 if (isBrokenOrBlank) {
                     DefaultCoverTile(
                         modifier = Modifier
@@ -627,6 +628,26 @@ private fun SongRowContent(
                             .clip(RoundedCornerShape(8.dp))
                             .thumbnailBorder(RoundedCornerShape(8.dp)),
                         contentScale = ContentScale.Crop,
+                    )
+                } else if (isLocal && remoteArt != null) {
+                    LocalArtworkImage(
+                        url = remoteArt,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .matchParentSize()
+                            .clip(RoundedCornerShape(8.dp))
+                            .thumbnailBorder(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentScale = ContentScale.Crop,
+                        fallback = {
+                            DefaultCoverTile(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .thumbnailBorder(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop,
+                            )
+                        },
                     )
                 } else {
                     val context = coil3.compose.LocalPlatformContext.current

@@ -426,12 +426,23 @@ private fun SongGridCard(
         ) {
             CoverPlaceholder(Icons.Rounded.MusicNote, Modifier.fillMaxSize())
             if (art != null) {
-                AsyncImage(
-                    model = art.artworkAt(CARD_ART_PX),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                val isLocal = art.startsWith("file://") || art.startsWith("/")
+                if (isLocal) {
+                    com.music.bitchord.ui.components.LocalArtworkImage(
+                        url = art,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                        fallback = { CoverPlaceholder(Icons.Rounded.MusicNote, Modifier.fillMaxSize()) },
+                    )
+                } else {
+                    AsyncImage(
+                        model = art.artworkAt(CARD_ART_PX),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
             if (isCurrent && isPlaying) {
                 SearchPlayingBars(Modifier.align(Alignment.Center))
@@ -595,12 +606,23 @@ private fun AlbumGridCard(
         ) {
             CoverPlaceholder(group.placeholderIcon(), Modifier.fillMaxSize())
             if (art != null) {
-                AsyncImage(
-                    model = art.artworkAt(CARD_ART_PX),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                val isLocal = art.startsWith("file://") || art.startsWith("/")
+                if (isLocal) {
+                    com.music.bitchord.ui.components.LocalArtworkImage(
+                        url = art,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                        fallback = { CoverPlaceholder(Icons.Rounded.MusicNote, Modifier.fillMaxSize()) },
+                    )
+                } else {
+                    AsyncImage(
+                        model = art.artworkAt(CARD_ART_PX),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
         Spacer(Modifier.height(8.dp))

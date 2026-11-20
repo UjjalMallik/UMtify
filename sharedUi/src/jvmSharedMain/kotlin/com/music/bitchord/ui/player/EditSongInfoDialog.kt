@@ -156,13 +156,32 @@ fun EditSongInfoDialog(
                             .background(MaterialTheme.colorScheme.surfaceVariant),
                         contentAlignment = Alignment.Center,
                     ) {
+                        val coverStr = coverModel?.toString()
+                        val isLocalCover = coverStr != null && (coverStr.startsWith("file://") || coverStr.startsWith("/"))
                         if (coverModel != null) {
-                            AsyncImage(
-                                model = coverModel,
-                                contentDescription = stringResource(Res.string.cover_art),
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.size(112.dp),
-                            )
+                            if (isLocalCover && coverStr != null) {
+                                com.music.bitchord.ui.components.LocalArtworkImage(
+                                    url = coverStr,
+                                    contentDescription = stringResource(Res.string.cover_art),
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.size(112.dp),
+                                    fallback = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.MusicNote,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(36.dp),
+                                        )
+                                    },
+                                )
+                            } else {
+                                AsyncImage(
+                                    model = coverModel,
+                                    contentDescription = stringResource(Res.string.cover_art),
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.size(112.dp),
+                                )
+                            }
                         } else {
                             Icon(
                                 imageVector = Icons.Rounded.MusicNote,

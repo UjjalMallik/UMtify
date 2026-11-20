@@ -373,17 +373,40 @@ private fun GlassNowPlaying(
                     vertical = if (isInline) 4.dp else 8.dp,
                 ),
         ) {
-            AsyncImage(
-                model = rememberRemoteArtworkUrl(song)?.artworkAt(ROW_ART_PX),
-                contentDescription = null,
-                modifier = Modifier
-                    .size(artSize)
-                    // Whichever of the two densities is on screen is the one
-                    // the player flies to: only one is composed at rest.
-                    .playerDockArt(dock, if (isInline) 6.dp else 8.dp)
-                    .clip(RoundedCornerShape(if (isInline) 6.dp else 8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-            )
+            val artUrl = rememberRemoteArtworkUrl(song)
+            val isLocal = artUrl != null && (artUrl.startsWith("file://") || artUrl.startsWith("/"))
+            if (isLocal && artUrl != null) {
+                LocalArtworkImage(
+                    url = artUrl,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(artSize)
+                        .playerDockArt(dock, if (isInline) 6.dp else 8.dp)
+                        .clip(RoundedCornerShape(if (isInline) 6.dp else 8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    fallback = {
+                        DefaultCoverTile(
+                            modifier = Modifier
+                                .size(artSize)
+                                .playerDockArt(dock, if (isInline) 6.dp else 8.dp)
+                                .clip(RoundedCornerShape(if (isInline) 6.dp else 8.dp)),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        )
+                    },
+                )
+            } else {
+                AsyncImage(
+                    model = artUrl?.artworkAt(ROW_ART_PX),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(artSize)
+                        // Whichever of the two densities is on screen is the one
+                        // the player flies to: only one is composed at rest.
+                        .playerDockArt(dock, if (isInline) 6.dp else 8.dp)
+                        .clip(RoundedCornerShape(if (isInline) 6.dp else 8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                )
+            }
             Spacer(Modifier.width(if (isInline) 8.dp else 10.dp))
             if (isInline) {
                 Text(

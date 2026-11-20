@@ -258,85 +258,108 @@ object LocalMediaRepository {
 
     fun extractMetadataAndArt(context: Context, fileUri: Uri, trackKey: String): ExtractedMeta? {
         val uriStr = fileUri.toString()
-        val directPath = safUriToStoragePath(fileUri)
+        val directPath = if (uriStr.startsWith("/")) uriStr else safUriToStoragePath(fileUri)
         val localFile = directPath?.let { File(it) }?.takeIf { it.exists() }
 
-        val pfd = if (localFile == null && !uriStr.startsWith("/")) {
-            runCatching { context.contentResolver.openFileDescriptor(fileUri, "r") }.getOrNull()
-        } else null
+        var metaTitle: String? = null
+        var metaArtist: String? = null
+        var metaAlbum: String? = null
+        var metaDur: Long? = null
+        var metaTrack: String? = null
+        var picBytes: ByteArray? = null
 
-        return runCatching {
-            val retriever = MediaMetadataRetriever()
-            try {
-                if (pfd != null) {
-                    retriever.setDataSource(pfd.fileDescriptor)
-                } else if (localFile != null) {
-                    retriever.setDataSource(localFile.path)
-                } else if (uriStr.startsWith("/")) {
-                    retriever.setDataSource(uriStr)
-                } else {
-                    retriever.setDataSource(context, fileUri)
+        // If localFile exists, try direct path first
+        if (localFile != null) {
+            runCatching {
+                val r = MediaMetadataRetriever()
+                try {
+                    r.setDataSource(localFile.path)
+                    metaTitle = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+                    metaArtist = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                    metaAlbum = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
+                    metaDur = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+                    metaTrack = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)
+                    picBytes = r.embeddedPicture
+                } finally {
+                    r.release()
                 }
-
-                val metaTitle = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
-                val metaArtist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
-                val metaAlbum = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
-                val metaDur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
-                val metaTrack = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)
-
-                var picBytes = retriever.embeddedPicture
-                if ((picBytes == null || picBytes.isEmpty()) && pfd != null) {
-                    runCatching {
-                        val fallbackRetriever = MediaMetadataRetriever()
-                        try {
-                            fallbackRetriever.setDataSource(context, fileUri)
-                            picBytes = fallbackRetriever.embeddedPicture
-                        } finally {
-                            fallbackRetriever.release()
-                        }
-                    }
-                }
-
-                // Tier 2: ContentResolver.loadThumbnail for Android Q+ if Tier 1 returned no picture
-                if ((picBytes == null || picBytes.isEmpty()) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    runCatching {
-                        val bm = context.contentResolver.loadThumbnail(fileUri, Size(512, 512), null)
-                        val stream = ByteArrayOutputStream()
-                        bm.compress(Bitmap.CompressFormat.JPEG, 90, stream)
-                        val bytes = stream.toByteArray()
-                        if (bytes.isNotEmpty()) {
-                            picBytes = bytes
-                        }
-                    }
-                }
-
-                var artUri: String? = null
-                val artFile = getLocalArtFile(context, trackKey)
-                if (artFile.exists() && artFile.length() > 0) {
-                    artUri = "file://${artFile.absolutePath}"
-                } else if (picBytes != null && picBytes.isNotEmpty()) {
-                    runCatching {
-                        val tmp = File(artFile.parentFile, "${artFile.name}.tmp")
-                        tmp.writeBytes(picBytes)
-                        if (tmp.renameTo(artFile) || runCatching { tmp.copyTo(artFile, overwrite = true); tmp.delete() }.isSuccess) {
-                            artUri = "file://${artFile.absolutePath}"
-                        }
-                    }
-                }
-
-                ExtractedMeta(
-                    title = metaTitle?.cleanTag(),
-                    artist = metaArtist?.cleanTag(),
-                    album = metaAlbum?.cleanTag(),
-                    durationMs = metaDur,
-                    trackNumber = trackNumberFromTag(metaTrack),
-                    artworkUri = artUri,
-                )
-            } finally {
-                retriever.release()
-                pfd?.close()
             }
-        }.getOrNull()
+        }
+
+        // 1. Try context.contentResolver.openFileDescriptor(audioUri, "r")?.use { pfd -> retriever.setDataSource(pfd.fileDescriptor) } -> retriever.embeddedPicture
+        if (picBytes == null && !uriStr.startsWith("/")) {
+            runCatching {
+                context.contentResolver.openFileDescriptor(fileUri, "r")?.use { pfd ->
+                    val r = MediaMetadataRetriever()
+                    try {
+                        r.setDataSource(pfd.fileDescriptor)
+                        if (metaTitle == null) metaTitle = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+                        if (metaArtist == null) metaArtist = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                        if (metaAlbum == null) metaAlbum = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
+                        if (metaDur == null) metaDur = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+                        if (metaTrack == null) metaTrack = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)
+                        picBytes = r.embeddedPicture
+                    } finally {
+                        r.release()
+                    }
+                }
+            }
+        }
+
+        // 2. If null, try retriever.setDataSource(context, audioUri) -> retriever.embeddedPicture
+        if (picBytes == null && !uriStr.startsWith("/")) {
+            runCatching {
+                val r = MediaMetadataRetriever()
+                try {
+                    r.setDataSource(context, fileUri)
+                    if (metaTitle == null) metaTitle = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+                    if (metaArtist == null) metaArtist = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                    if (metaAlbum == null) metaAlbum = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
+                    if (metaDur == null) metaDur = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+                    if (metaTrack == null) metaTrack = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)
+                    picBytes = r.embeddedPicture
+                } finally {
+                    r.release()
+                }
+            }
+        }
+
+        // 3. If still null and Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q, try context.contentResolver.loadThumbnail(audioUri, Size(512, 512), null)
+        if ((picBytes == null || picBytes.isEmpty()) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !uriStr.startsWith("/")) {
+            runCatching {
+                val bm = context.contentResolver.loadThumbnail(fileUri, Size(512, 512), null)
+                val stream = ByteArrayOutputStream()
+                bm.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+                val bytes = stream.toByteArray()
+                if (bytes.isNotEmpty()) {
+                    picBytes = bytes
+                }
+            }
+        }
+
+        // 4. Write bytes atomically to cacheDir/local_art/<hash>.jpg
+        var artUri: String? = null
+        val artFile = getLocalArtFile(context, trackKey)
+        if (artFile.exists() && artFile.length() > 0) {
+            artUri = "file://${artFile.absolutePath}"
+        } else if (picBytes != null && picBytes.isNotEmpty()) {
+            runCatching {
+                val tmp = File(artFile.parentFile, "${artFile.name}.tmp")
+                tmp.writeBytes(picBytes)
+                if (tmp.renameTo(artFile) || runCatching { tmp.copyTo(artFile, overwrite = true); tmp.delete() }.isSuccess) {
+                    artUri = "file://${artFile.absolutePath}"
+                }
+            }
+        }
+
+        return ExtractedMeta(
+            title = metaTitle?.cleanTag(),
+            artist = metaArtist?.cleanTag(),
+            album = metaAlbum?.cleanTag(),
+            durationMs = metaDur,
+            trackNumber = trackNumberFromTag(metaTrack),
+            artworkUri = artUri,
+        )
     }
 
     private fun triggerEnrichmentPass(context: Context, songs: List<Song>) {

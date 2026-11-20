@@ -3161,8 +3161,9 @@ fun NowPlayingScreen(
                                     }
                                 },
                         ) {
-                            val artIsGone = art.url.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url) ||
-                                art.failed
+                            val isLocal = art.url != null && (art.url.startsWith("file://") || art.url.startsWith("/"))
+                            val artIsGone = art.url.isNullOrBlank() || (!isLocal && com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url)) ||
+                                (!isLocal && art.failed)
 
                             // Empty state lives on this tile, not the AsyncImage: a
                             // background *and* a painter both trying to fill the same
@@ -3245,31 +3246,53 @@ fun NowPlayingScreen(
                             }
 
                             if (!artIsGone) {
-                                AsyncImage(
-                                    // Decode at the sleeve's *expanded* size, always.
-                                    // Coil otherwise sizes the decode to however large
-                                    // this is when the request goes out — and changing
-                                    // track from the queue does that while the sleeve is
-                                    // collapsed to a thumbnail, leaving a thumbnail-sized
-                                    // bitmap to be blown back up when the queue closes.
-                                    // Skipping tracks with the transport keeps it sharp
-                                    // only because the sleeve happens to be full size at
-                                    // that moment.
-                                    //
-                                    // Asked for at a fixed rung rather than the sleeve's
-                                    // current layout size: the banner needs the source's
-                                    // own pixels because it is taller than the card is
-                                    // wide, while the photocard asks for [CARD_ART_PX] —
-                                    // enough for a phone-width square, and two thirds the
-                                    // memory of the banner's decode.
-                                    model = art.request,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    onState = art::onState,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .drawWithContent { if (art.loaded || !canvasRendered) drawContent() },
-                                )
+                                if (isLocal && art.url != null) {
+                                    com.music.bitchord.ui.components.LocalArtworkImage(
+                                        url = art.url,
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        onLoadingStateChanged = { _, success ->
+                                            if (success) art.loaded = true
+                                        },
+                                        fallback = {
+                                            if (!canvasRendered) {
+                                                DefaultCoverTile(
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    contentScale = ContentScale.Crop,
+                                                )
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .drawWithContent { if (art.loaded || !canvasRendered) drawContent() },
+                                    )
+                                } else {
+                                    AsyncImage(
+                                        // Decode at the sleeve's *expanded* size, always.
+                                        // Coil otherwise sizes the decode to however large
+                                        // this is when the request goes out — and changing
+                                        // track from the queue does that while the sleeve is
+                                        // collapsed to a thumbnail, leaving a thumbnail-sized
+                                        // bitmap to be blown back up when the queue closes.
+                                        // Skipping tracks with the transport keeps it sharp
+                                        // only because the sleeve happens to be full size at
+                                        // that moment.
+                                        //
+                                        // Asked for at a fixed rung rather than the sleeve's
+                                        // current layout size: the banner needs the source's
+                                        // own pixels because it is taller than the card is
+                                        // wide, while the photocard asks for [CARD_ART_PX] —
+                                        // enough for a phone-width square, and two thirds the
+                                        // memory of the banner's decode.
+                                        model = art.request,
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        onState = art::onState,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .drawWithContent { if (art.loaded || !canvasRendered) drawContent() },
+                                    )
+                                }
                             }
 
                             // Where the clip plays when it can't have the banner:
