@@ -230,6 +230,80 @@ object LocalMediaRepository {
     val detectedAudioFolders = MutableStateFlow<List<DeviceFolder>>(emptyList())
     val allLocalSongsFlow = MutableStateFlow<List<Song>>(emptyList())
 
+    private const val LOCAL_TRACKS_INDEX_FILE = "local_tracks_index.json"
+
+    fun getIndexFile(context: Context): File = File(context.filesDir, LOCAL_TRACKS_INDEX_FILE)
+
+    fun loadCachedIndex(context: Context): List<Song> {
+        return runCatching {
+            val file = getIndexFile(context)
+            if (!file.exists() || file.length() == 0L) return emptyList()
+            val text = file.readText()
+            val jsonArray = org.json.JSONArray(text)
+            val list = ArrayList<Song>(jsonArray.length())
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                val videoId = obj.optString("id").ifBlank { obj.optString("videoId") }
+                if (videoId.isBlank()) continue
+                list.add(
+                    Song(
+                        videoId = videoId,
+                        title = obj.optString("title", "Unknown Title"),
+                        artist = obj.optString("artist", "Unknown Artist"),
+                        thumbnailUrl = obj.optString("thumbnailUrl").takeIf { it.isNotBlank() },
+                        durationText = obj.optString("durationText").takeIf { it.isNotBlank() },
+                        albumName = obj.optString("albumName").takeIf { it.isNotBlank() },
+                        localUri = obj.optString("localUri").takeIf { it.isNotBlank() } ?: videoId,
+                        localPath = obj.optString("localPath").takeIf { it.isNotBlank() },
+                        localDateAddedSeconds = if (obj.has("dateAdded")) obj.optLong("dateAdded") else null,
+                        localDateModifiedSeconds = if (obj.has("dateModified")) obj.optLong("dateModified") else null,
+                        trackNumber = if (obj.has("trackNumber")) obj.optInt("trackNumber") else null,
+                        folderUri = obj.optString("folderUri").takeIf { it.isNotBlank() },
+                    )
+                )
+            }
+            list
+        }.getOrDefault(emptyList())
+    }
+
+    fun saveCachedIndex(context: Context, songs: List<Song>) {
+        runCatching {
+            val file = getIndexFile(context)
+            val jsonArray = org.json.JSONArray()
+            for (song in songs) {
+                val obj = org.json.JSONObject()
+                obj.put("id", song.videoId)
+                obj.put("title", song.title)
+                obj.put("artist", song.artist)
+                song.thumbnailUrl?.let { obj.put("thumbnailUrl", it) }
+                song.durationText?.let { obj.put("durationText", it) }
+                song.albumName?.let { obj.put("albumName", it) }
+                song.localUri?.let { obj.put("localUri", it) }
+                song.localPath?.let { obj.put("localPath", it) }
+                song.localDateAddedSeconds?.let { obj.put("dateAdded", it) }
+                song.localDateModifiedSeconds?.let { obj.put("dateModified", it) }
+                song.trackNumber?.let { obj.put("trackNumber", it) }
+                song.folderUri?.let { obj.put("folderUri", it) }
+                jsonArray.put(obj)
+            }
+            val tmp = File(context.filesDir, "$LOCAL_TRACKS_INDEX_FILE.tmp")
+            tmp.writeText(jsonArray.toString())
+            if (!tmp.renameTo(file)) {
+                tmp.copyTo(file, overwrite = true)
+                tmp.delete()
+            }
+        }.onFailure { Log.w(TAG, "Failed saving local tracks index: ${it.message}") }
+    }
+
+    fun init(context: Context) {
+        if (allLocalSongsFlow.value.isEmpty()) {
+            val cached = loadCachedIndex(context)
+            if (cached.isNotEmpty()) {
+                allLocalSongsFlow.value = cached
+            }
+        }
+    }
+
     private val scanMutex = Mutex()
     private val repositoryScope = CoroutineScope(Dispatchers.IO)
     private var enrichmentJob: Job? = null
@@ -376,9 +450,6 @@ object LocalMediaRepository {
         val appContext = context.applicationContext
         enrichmentJob?.cancel()
         enrichmentJob = repositoryScope.launch {
-            // Pre-warm any already-cached artwork so scrolling is instant immediately
-            prewarmCachedThumbnails(appContext, songs)
-
             val toEnrich = songs.filter { song ->
                 val uriStr = song.localUri ?: song.videoId
                 val cachedArt = getCachedLocalArtUri(appContext, uriStr)
@@ -408,12 +479,6 @@ object LocalMediaRepository {
                                 val newArt = meta.artworkUri ?: song.thumbnailUrl
                                 val newTrackNum = meta.trackNumber ?: song.trackNumber
 
-                                if (newArt != null && newArt.startsWith("file://")) {
-                                    runCatching {
-                                        LocalArtworkCache.prewarm(newArt, 160)
-                                    }
-                                }
-
                                 val enriched = song.copy(
                                     title = newTitle,
                                     artist = newArtist,
@@ -432,27 +497,9 @@ object LocalMediaRepository {
                     val current = allLocalSongsFlow.value
                     val hasChanges = current.any { batchResults.containsKey(it.videoId) && batchResults[it.videoId] != it }
                     if (hasChanges) {
-                        allLocalSongsFlow.value = current.map { batchResults[it.videoId] ?: it }
-                    }
-                }
-            }
-
-            if (isActive) {
-                prewarmCachedThumbnails(appContext, allLocalSongsFlow.value)
-            }
-        }
-    }
-
-    private fun prewarmCachedThumbnails(context: Context, songs: List<Song>) {
-        repositoryScope.launch(Dispatchers.IO.limitedParallelism(2)) {
-            for (song in songs) {
-                if (!isActive) break
-                val uriStr = song.localUri ?: song.videoId
-                val cachedArt = song.thumbnailUrl?.takeIf { it.startsWith("file://") }
-                    ?: getCachedLocalArtUri(context, uriStr)
-                if (cachedArt != null && cachedArt.startsWith("file://")) {
-                    runCatching {
-                        LocalArtworkCache.prewarm(cachedArt, 160)
+                        val updated = current.map { batchResults[it.videoId] ?: it }
+                        allLocalSongsFlow.value = updated
+                        saveCachedIndex(appContext, updated)
                     }
                 }
             }
@@ -461,19 +508,10 @@ object LocalMediaRepository {
 
     fun hasCustomFolders(): Boolean =
         AppSettings.localMusicCustomFolders.value.isNotEmpty() ||
-        AppSettings.localMusicFolderUri.value.startsWith("content://") ||
-        AppSettings.localMusicFolders.value.any { it.startsWith("content://") }
+        AppSettings.localMusicSelectedSongs.value.isNotEmpty()
 
-    fun getCustomFolderUris(): Set<String> {
-        val result = mutableSetOf<String>()
-        result.addAll(AppSettings.localMusicCustomFolders.value)
-        val single = AppSettings.localMusicFolderUri.value
-        if (single.startsWith("content://")) {
-            result.add(single)
-        }
-        result.addAll(AppSettings.localMusicFolders.value.filter { it.startsWith("content://") })
-        return result
-    }
+    fun getCustomFolderUris(): Set<String> =
+        AppSettings.localMusicCustomFolders.value
 
     fun getFolderDisplayName(context: Context, uriOrPath: String): String {
         if (uriOrPath.startsWith("content://")) {
@@ -525,17 +563,22 @@ object LocalMediaRepository {
 
     fun scanSafFolderFast(context: Context, treeUriString: String): List<Song> {
         val songs = mutableListOf<Song>()
+        val seenInFolder = mutableSetOf<String>()
+        val visitedDirs = mutableSetOf<String>()
+
         runCatching {
             val treeUri = Uri.parse(treeUriString)
             val parentDocId = DocumentsContract.getTreeDocumentId(treeUri)
             val queue = ArrayDeque<String>()
             queue.add(parentDocId)
+            visitedDirs.add(parentDocId)
 
             val projection = arrayOf(
                 DocumentsContract.Document.COLUMN_DOCUMENT_ID,
                 DocumentsContract.Document.COLUMN_DISPLAY_NAME,
                 DocumentsContract.Document.COLUMN_MIME_TYPE,
                 DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+                DocumentsContract.Document.COLUMN_SIZE,
             )
 
             while (queue.isNotEmpty()) {
@@ -546,19 +589,27 @@ object LocalMediaRepository {
                     val nameCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
                     val mimeCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
                     val modCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                    val sizeCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
 
                     while (cursor.moveToNext()) {
                         val docId = cursor.getString(idCol) ?: continue
                         val mime = cursor.getString(mimeCol).orEmpty()
                         val name = cursor.getString(nameCol).orEmpty()
+                        val size = if (sizeCol >= 0 && !cursor.isNull(sizeCol)) cursor.getLong(sizeCol) else 0L
 
                         if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
-                            queue.add(docId)
+                            if (visitedDirs.add(docId)) {
+                                queue.add(docId)
+                            }
                         } else {
                             val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
                             if (ext in safVideoExtensions || mime.startsWith("video/")) continue
                             val isAudio = mime.startsWith("audio/") || ext in safAudioExtensions
                             if (isAudio) {
+                                val normName = name.lowercase().trim()
+                                val dedupKey = if (size > 0) "$normName:$size" else "$docId:$normName"
+                                if (!seenInFolder.add(docId) || !seenInFolder.add(dedupKey)) continue
+
                                 val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
                                 val modTime = if (modCol >= 0 && !cursor.isNull(modCol)) cursor.getLong(modCol) / 1000 else null
                                 songs.add(buildSongFast(context, fileUri, docId, name, modTime, folderUri = treeUriString))
@@ -569,11 +620,9 @@ object LocalMediaRepository {
             }
         }.onFailure {
             Log.w(TAG, "Fast SAF query failed for $treeUriString: ${it.message}")
-            songs.addAll(scanSafTreeFallback(context, treeUriString))
-        }
-
-        if (songs.isEmpty()) {
-            songs.addAll(scanSafTreeFallback(context, treeUriString))
+            if (songs.isEmpty()) {
+                songs.addAll(scanSafTreeFallback(context, treeUriString))
+            }
         }
 
         return songs
@@ -587,6 +636,7 @@ object LocalMediaRepository {
         val uri = Uri.parse(treeUriString)
         val root = runCatching { DocumentFile.fromTreeUri(context, uri) }.getOrNull() ?: return emptyList()
         val songs = mutableListOf<Song>()
+        val seenInFolder = mutableSetOf<String>()
         val queue = ArrayDeque<DocumentFile>()
         queue.add(root)
 
@@ -604,6 +654,11 @@ object LocalMediaRepository {
                     if (ext in safVideoExtensions || mime?.startsWith("video/") == true) continue
                     val isAudio = (mime?.startsWith("audio/") == true) || (ext in safAudioExtensions)
                     if (!isAudio) continue
+
+                    val size = file.length()
+                    val normName = name.lowercase().trim()
+                    val dedupKey = if (size > 0) "$normName:$size" else "${file.uri}:$normName"
+                    if (!seenInFolder.add(file.uri.toString()) || !seenInFolder.add(dedupKey)) continue
 
                     val modified = file.lastModified().takeIf { it > 0 }?.div(1000)
                     songs.add(buildSongFast(context, file.uri, file.uri.toString(), name, modified, folderUri = treeUriString))
@@ -652,7 +707,7 @@ object LocalMediaRepository {
         )
     }
 
-    private fun getFileNameFromUri(context: Context, uri: Uri): String? {
+    fun getFileNameFromUri(context: Context, uri: Uri): String? {
         if (uri.scheme == "file") return uri.lastPathSegment
         return runCatching {
             context.contentResolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { cursor ->
@@ -664,8 +719,16 @@ object LocalMediaRepository {
     suspend fun refreshFoldersAndSongs(context: Context): List<Song> =
         refreshLocalMusic(context)
 
-    suspend fun getLocalMusic(context: Context): List<Song> =
+    suspend fun getLocalMusic(context: Context): List<Song> = withContext(Dispatchers.IO) {
+        val current = allLocalSongsFlow.value
+        if (current.isNotEmpty()) return@withContext current
+        val cached = loadCachedIndex(context)
+        if (cached.isNotEmpty()) {
+            allLocalSongsFlow.value = cached
+            return@withContext cached
+        }
         refreshLocalMusic(context)
+    }
 
     suspend fun refreshLocalMusic(context: Context): List<Song> = scanMutex.withLock {
         withContext(Dispatchers.IO) {
@@ -677,11 +740,13 @@ object LocalMediaRepository {
             if (!scanAll && customUris.isEmpty() && selectedIndividualSongs.isEmpty()) {
                 detectedAudioFolders.value = emptyList()
                 allLocalSongsFlow.value = emptyList()
+                saveCachedIndex(context, emptyList())
                 return@withContext emptyList()
             }
             if (!hasPerm && customUris.isEmpty() && selectedIndividualSongs.isEmpty()) {
                 val extra = extraLocalMusic?.invoke(context, emptyList()) ?: emptyList()
                 allLocalSongsFlow.value = extra
+                saveCachedIndex(context, extra)
                 return@withContext extra
             }
 
@@ -703,6 +768,7 @@ object LocalMediaRepository {
 
                     if (normPath != null && normPath in seenKeys) continue
                     if (safSong.localUri != null && safSong.localUri in seenKeys) continue
+                    if (safSong.videoId in seenKeys) continue
 
                     if (excludedSongs.isNotEmpty() && (songIdentifier in excludedSongs || safSong.localUri in excludedSongs || safSong.videoId in excludedSongs)) {
                         continue
@@ -711,6 +777,7 @@ object LocalMediaRepository {
                     collectedSongs.add(safSong)
                     normPath?.let { seenKeys.add(it) }
                     safSong.localUri?.let { seenKeys.add(it) }
+                    seenKeys.add(safSong.videoId)
                 }
             }
 
@@ -718,7 +785,7 @@ object LocalMediaRepository {
             for (songUriStr in selectedIndividualSongs) {
                 val normPath = songUriStr.normalizedPath()
                 if (normPath in seenKeys || songUriStr in seenKeys) continue
-                if (excludedSongs.isNotEmpty() && songUriStr in excludedSongs) continue
+                if (excludedSongs.isNotEmpty() && (songUriStr in excludedSongs || normPath in excludedSongs)) continue
 
                 runCatching {
                     val uri = Uri.parse(songUriStr)
@@ -727,6 +794,7 @@ object LocalMediaRepository {
                     collectedSongs.add(song)
                     seenKeys.add(normPath)
                     seenKeys.add(songUriStr)
+                    seenKeys.add(song.videoId)
                 }
             }
 
@@ -874,6 +942,7 @@ object LocalMediaRepository {
                     .thenByDescending { it.songCount }
             )
             allLocalSongsFlow.value = collectedSongs
+            saveCachedIndex(context, collectedSongs)
 
             // Trigger background Pass 2 enrichment
             triggerEnrichmentPass(context, collectedSongs)

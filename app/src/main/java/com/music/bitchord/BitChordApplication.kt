@@ -16,6 +16,7 @@ import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import okhttp3.OkHttpClient
 import com.music.bitchord.auth.AuthStore
 import com.music.bitchord.data.DebugLog
+import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.SongEditStore
 import com.music.bitchord.data.lyrics.LyricsTranslation
 import androidx.appcompat.app.AppCompatDelegate
@@ -96,6 +97,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
         // nothing that runs after startup can see any of them half open.
         val backgroundInit = thread(name = "startup-init") {
             SourceRegistry.init(this)
+            LocalMediaRepository.init(this)
             AndroidStreamHooks.initInnerTubeX(this)
             // Its own directory: canvas clips are looping video, not audio, and
             // belong in a cache AudioCache's own limit and eviction policy were

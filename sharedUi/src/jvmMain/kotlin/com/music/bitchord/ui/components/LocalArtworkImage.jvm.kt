@@ -21,6 +21,8 @@ object JvmLocalArtworkCache {
     fun put(path: String, maxSizePx: Int = 160, bmp: ImageBitmap) { map["${cleanLocalArtPath(path)}:$maxSizePx"] = bmp }
 }
 
+private val jvmImageDispatcher = Dispatchers.IO.limitedParallelism(2)
+
 @Composable
 actual fun LocalArtworkImage(
     url: String,
@@ -32,15 +34,26 @@ actual fun LocalArtworkImage(
     fallback: @Composable () -> Unit,
 ) {
     val cleanPath = cleanLocalArtPath(url)
-    val cached = remember(cleanPath, maxSizePx) { JvmLocalArtworkCache.get(cleanPath, maxSizePx) }
+    val initialCached = remember(cleanPath, maxSizePx) {
+        JvmLocalArtworkCache.get(cleanPath, maxSizePx)
+            ?: if (maxSizePx > 256) JvmLocalArtworkCache.get(cleanPath, 160) else null
+    }
 
-    val bitmapState by produceState<ImageBitmap?>(initialValue = cached, key1 = cleanPath, key2 = maxSizePx) {
-        if (cached != null) {
-            value = cached
+    val bitmapState by produceState<ImageBitmap?>(initialValue = initialCached, key1 = cleanPath, key2 = maxSizePx) {
+        val exactCached = JvmLocalArtworkCache.get(cleanPath, maxSizePx)
+        if (exactCached != null) {
+            value = exactCached
             onLoadingStateChanged?.invoke(false, true)
             return@produceState
         }
-        val loaded = withContext(Dispatchers.IO) {
+
+        if (initialCached != null) {
+            onLoadingStateChanged?.invoke(false, true)
+        } else {
+            onLoadingStateChanged?.invoke(true, false)
+        }
+
+        val loaded = withContext(jvmImageDispatcher) {
             runCatching {
                 val file = File(cleanPath)
                 if (file.exists() && file.length() > 0) {
@@ -52,8 +65,12 @@ actual fun LocalArtworkImage(
                 } else null
             }.getOrNull()
         }
-        value = loaded
-        onLoadingStateChanged?.invoke(false, loaded != null)
+        if (loaded != null) {
+            value = loaded
+            onLoadingStateChanged?.invoke(false, true)
+        } else if (initialCached == null) {
+            onLoadingStateChanged?.invoke(false, false)
+        }
     }
 
     val bmp = bitmapState

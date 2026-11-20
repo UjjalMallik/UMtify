@@ -696,6 +696,7 @@ object AppSettings {
 
     /** Explicitly selected local songs (empty means all are eligible unless in excluded set). */
     val localMusicSelectedSongs = MutableStateFlow<Set<String>>(emptySet())
+    val localMusicIndividualFiles: MutableStateFlow<Set<String>> get() = localMusicSelectedSongs
 
     /** Explicitly excluded local songs. */
     val localMusicExcludedSongs = MutableStateFlow<Set<String>>(emptySet())
@@ -2040,6 +2041,20 @@ object AppSettings {
     fun setLocalMusicSelectedSongs(songs: Set<String>) {
         localMusicSelectedSongs.value = songs
         prefs.edit().putStringSet(KEY_LOCAL_MUSIC_SELECTED_SONGS, songs).commit()
+    }
+
+    fun setLocalMusicIndividualFiles(files: Set<String>) {
+        setLocalMusicSelectedSongs(files)
+    }
+
+    fun addLocalMusicIndividualFiles(uris: Collection<String>) {
+        val current = localMusicSelectedSongs.value
+        setLocalMusicSelectedSongs(current + uris)
+    }
+
+    fun removeLocalMusicIndividualFile(uri: String) {
+        val current = localMusicSelectedSongs.value
+        setLocalMusicSelectedSongs(current - uri)
     }
 
     fun setLocalMusicExcludedSongs(songs: Set<String>) {

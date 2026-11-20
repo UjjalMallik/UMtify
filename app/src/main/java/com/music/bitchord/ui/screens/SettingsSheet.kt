@@ -310,6 +310,7 @@ fun SettingsScreen(
     val filterNonMusicAudio by AppSettings.filterNonMusicAudio.collectAsStateWithLifecycle()
     val localMusicFolderUri by AppSettings.localMusicFolderUri.collectAsStateWithLifecycle()
     val localMusicFolders by AppSettings.localMusicFolders.collectAsStateWithLifecycle()
+    val localMusicCustomFolders by AppSettings.localMusicCustomFolders.collectAsStateWithLifecycle()
     val scanAllAudioFolders by AppSettings.scanAllAudioFolders.collectAsStateWithLifecycle()
     val localMusicSelectedSongs by AppSettings.localMusicSelectedSongs.collectAsStateWithLifecycle()
     val localMusicExcludedSongs by AppSettings.localMusicExcludedSongs.collectAsStateWithLifecycle()
@@ -1535,14 +1536,19 @@ fun SettingsScreen(
             forceExpanded = searchQuery.isNotBlank(),
         ) {
             val localMusicFolderTitle = stringResource(R.string.local_music_folder)
-            val foldersLabel = LocalMediaRepository.foldersSummaryLabel(localMusicFolders, localMusicFolderUri)
+            val customFolderCount = localMusicCustomFolders.size
+            val fileCount = localMusicSelectedSongs.size
+            val excludedCount = localMusicExcludedSongs.size
+            val excludedSuffix = if (excludedCount > 0) " · $excludedCount excluded" else ""
+
             val subtitleText = when {
-                foldersLabel != null && localMusicExcludedSongs.isNotEmpty() ->
-                    "$foldersLabel · ${localMusicExcludedSongs.size} excluded"
-                foldersLabel != null -> foldersLabel
-                scanAllAudioFolders && localMusicExcludedSongs.isNotEmpty() ->
-                    "${stringResource(R.string.all_audio_folders)} · ${localMusicExcludedSongs.size} excluded"
-                scanAllAudioFolders -> stringResource(R.string.all_audio_folders)
+                scanAllAudioFolders -> "${stringResource(R.string.all_audio_folders)}$excludedSuffix"
+                customFolderCount > 0 || fileCount > 0 -> {
+                    val parts = mutableListOf<String>()
+                    if (customFolderCount > 0) parts.add("$customFolderCount " + if (customFolderCount == 1) "folder" else "folders")
+                    if (fileCount > 0) parts.add("$fileCount " + if (fileCount == 1) "file" else "files")
+                    "${parts.joinToString(" · ")}$excludedSuffix"
+                }
                 else -> stringResource(R.string.local_music_folder)
             }
             row(localMusicFolderTitle, "folder", "offline", "files", "local music") {
@@ -1553,7 +1559,7 @@ fun SettingsScreen(
                     onClick = { showLocalMusicManager = true },
                 )
             }
-            if (localMusicFolders.isNotEmpty() || localMusicFolderUri.isNotBlank()) {
+            if (!scanAllAudioFolders && (localMusicCustomFolders.isNotEmpty() || localMusicSelectedSongs.isNotEmpty())) {
                 val useAllAudioFoldersTitle = stringResource(R.string.use_all_audio_folders)
                 row(useAllAudioFoldersTitle, "folder") {
                     SettingsRow(
@@ -1561,8 +1567,7 @@ fun SettingsScreen(
                         title = useAllAudioFoldersTitle,
                         subtitle = stringResource(R.string.use_all_audio_folders_subtitle),
                         onClick = {
-                            AppSettings.setLocalMusicFolders(emptySet())
-                            AppSettings.setLocalMusicFolderUri("")
+                            AppSettings.setScanAllAudioFolders(true)
                         },
                     )
                 }
