@@ -268,9 +268,14 @@ internal fun LazyListScope.localFolderItems(
     }
 
     val isCurrentRow = playingRowMatcher(songs, currentSong)
+    val seenSongIds = HashSet<String>()
+    val stableSongKeys = songs.mapIndexed { idx, song ->
+        val id = song.videoId
+        if (seenSongIds.add(id)) id else "${id}_$idx"
+    }
     when (state.tab) {
         LocalFolderTab.SONGS -> if (grid) {
-            gridRows(songs.indices.toList(), columns, key = { "song-${songs[it].videoId}-$it" }) { index ->
+            gridRows(songs.indices.toList(), columns, key = { stableSongKeys[it] }) { index ->
                 val song = songs[index]
                 SongGridCard(
                     song = song,
@@ -285,7 +290,7 @@ internal fun LazyListScope.localFolderItems(
         } else {
             itemsIndexed(
                 items = songs,
-                key = { index, song -> "song-${song.videoId}-$index" },
+                key = { index, _ -> stableSongKeys[index] },
                 contentType = { _, _ -> "local_song_row" },
             ) { index, song ->
                 SongRow(

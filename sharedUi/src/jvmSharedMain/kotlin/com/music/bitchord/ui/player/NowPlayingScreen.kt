@@ -3161,7 +3161,7 @@ fun NowPlayingScreen(
                                     }
                                 },
                         ) {
-                            val isLocal = art.url != null && (art.url.startsWith("file://") || art.url.startsWith("/"))
+                            val isLocal = com.music.bitchord.ui.components.isLocalArtUrl(art.url)
                             val artIsGone = art.url.isNullOrBlank() || (!isLocal && com.music.bitchord.ui.components.FailedArtworkCache.isFailed(art.url)) ||
                                 (!isLocal && art.failed)
 
@@ -3233,7 +3233,7 @@ fun NowPlayingScreen(
                                 // the sleeve flashed over the real artwork on
                                 // every one of them; it shows now only when the
                                 // URL was never there, or the retries used it up.
-                                if (artIsGone && !canvasRendered) {
+                                if (artIsGone && song != null && !canvasRendered) {
                                     DefaultCoverTile(
                                         modifier = Modifier.graphicsLayer {
                                             val scale = 1f - 0.5f * p()

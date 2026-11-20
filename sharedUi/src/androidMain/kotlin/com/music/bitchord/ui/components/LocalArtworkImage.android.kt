@@ -6,11 +6,14 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.LruCache
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -71,21 +74,90 @@ fun decodeSampledBitmapFromUri(context: Context, uri: Uri, maxSizePx: Int): Bitm
     }.getOrNull()
 }
 
+fun findLocalArtThumbFile(context: Context, clean: String): File? {
+    val thumbDir = File(context.cacheDir, "local_art_thumb")
+    if (!thumbDir.exists()) return null
+
+    val name = File(clean).name
+    if (name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) || name.endsWith(".png", ignoreCase = true)) {
+        val directThumb = File(thumbDir, name)
+        if (directThumb.exists() && directThumb.length() > 0) return directThumb
+    }
+
+    val hash = clean.hashCode().toUInt().toString()
+    val hashThumb = File(thumbDir, "$hash.jpg")
+    if (hashThumb.exists() && hashThumb.length() > 0) return hashThumb
+
+    return null
+}
+
+fun saveThumbnailFileIfMissing(context: Context, clean: String, bmp: Bitmap) {
+    runCatching {
+        val thumbDir = File(context.cacheDir, "local_art_thumb").apply { if (!exists()) mkdirs() }
+        val name = File(clean).name
+        val targetFile = if (name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) || name.endsWith(".png", ignoreCase = true)) {
+            File(thumbDir, name)
+        } else {
+            val hash = clean.hashCode().toUInt().toString()
+            File(thumbDir, "$hash.jpg")
+        }
+        if (!targetFile.exists() || targetFile.length() == 0L) {
+            val tmp = File(thumbDir, "${targetFile.name}.tmp")
+            val scaled = if (bmp.width > 128 || bmp.height > 128) {
+                Bitmap.createScaledBitmap(bmp, 128, 128, true)
+            } else {
+                bmp
+            }
+            java.io.FileOutputStream(tmp).use { out ->
+                scaled.compress(Bitmap.CompressFormat.JPEG, 80, out)
+            }
+            if (scaled != bmp) scaled.recycle()
+            if (!tmp.renameTo(targetFile)) {
+                tmp.copyTo(targetFile, overwrite = true)
+                tmp.delete()
+            }
+        }
+    }
+}
+
 fun decodeSampledBitmap(context: Context, source: String, maxSizePx: Int): Bitmap? {
     val clean = cleanLocalArtPath(source)
+    if (clean.isBlank()) return null
+
+    // For thumbnails (list items / mini-player), check 128px disk thumbnail cache first (<2ms load)
+    if (maxSizePx <= 200) {
+        val thumbFile = findLocalArtThumbFile(context, clean)
+        if (thumbFile != null) {
+            val thumbBmp = decodeSampledBitmapFromFile(thumbFile.absolutePath, maxSizePx)
+            if (thumbBmp != null) return thumbBmp
+        }
+    }
+
     val file = File(clean)
     if (file.exists() && file.length() > 0) {
-        return decodeSampledBitmapFromFile(file.absolutePath, maxSizePx)
+        val bmp = decodeSampledBitmapFromFile(file.absolutePath, maxSizePx)
+        if (bmp != null && maxSizePx <= 200) {
+            saveThumbnailFileIfMissing(context, clean, bmp)
+        }
+        return bmp
     }
 
     if (clean.startsWith("content://")) {
         val hash = clean.hashCode().toUInt().toString()
         val cachedFile = File(File(context.cacheDir, "local_art"), "$hash.jpg")
         if (cachedFile.exists() && cachedFile.length() > 0) {
-            return decodeSampledBitmapFromFile(cachedFile.absolutePath, maxSizePx)
+            val bmp = decodeSampledBitmapFromFile(cachedFile.absolutePath, maxSizePx)
+            if (bmp != null && maxSizePx <= 200) {
+                saveThumbnailFileIfMissing(context, clean, bmp)
+            }
+            return bmp
         }
         val uri = Uri.parse(clean)
-        return decodeSampledBitmapFromUri(context, uri, maxSizePx)
+        val bmp = decodeSampledBitmapFromUri(context, uri, maxSizePx)
+        if (bmp != null && maxSizePx <= 200) {
+            saveThumbnailFileIfMissing(context, clean, bmp)
+        }
+        return bmp
     }
 
     return null
@@ -93,7 +165,7 @@ fun decodeSampledBitmap(context: Context, source: String, maxSizePx: Int): Bitma
 
 object LocalArtworkCache {
     private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
-    private val cacheSize = (maxMemory / 8).coerceIn(16 * 1024, 64 * 1024) // in KB
+    private val cacheSize = (maxMemory / 6).coerceIn(32 * 1024, 96 * 1024) // in KB (32MB - 96MB for 500+ thumbnails)
 
     private val lruCache = object : LruCache<String, ImageBitmap>(cacheSize) {
         override fun sizeOf(key: String, value: ImageBitmap): Int {
@@ -132,7 +204,7 @@ object LocalArtworkCache {
     }
 }
 
-private val localImageDispatcher = Dispatchers.IO.limitedParallelism(2)
+private val localImageDispatcher = Dispatchers.IO.limitedParallelism(6)
 
 @Composable
 actual fun LocalArtworkImage(
@@ -145,24 +217,35 @@ actual fun LocalArtworkImage(
     fallback: @Composable () -> Unit,
 ) {
     val cleanPath = cleanLocalArtPath(url)
-    // For large player sleeves (maxSizePx > 256), instantly fall back to the 160px thumbnail if available
+    if (cleanPath.isBlank()) {
+        fallback()
+        return
+    }
+
+    // Synchronously check RAM LruCache first (exact size, then any size if large)
     val initialCached = remember(cleanPath, maxSizePx) {
         LocalArtworkCache.get(cleanPath, maxSizePx)
             ?: if (maxSizePx > 256) LocalArtworkCache.get(cleanPath, 160) else null
     }
     val context = LocalContext.current.applicationContext
 
-    val bitmapState by produceState<ImageBitmap?>(initialValue = initialCached, key1 = cleanPath, key2 = maxSizePx) {
+    val state by produceState<LocalArtState>(
+        initialValue = if (initialCached != null) LocalArtState.Loaded(initialCached) else LocalArtState.Loading,
+        key1 = cleanPath,
+        key2 = maxSizePx,
+    ) {
         val exactCached = LocalArtworkCache.get(cleanPath, maxSizePx)
         if (exactCached != null) {
-            value = exactCached
+            value = LocalArtState.Loaded(exactCached)
             onLoadingStateChanged?.invoke(false, true)
             return@produceState
         }
 
         if (initialCached != null) {
+            value = LocalArtState.Loaded(initialCached)
             onLoadingStateChanged?.invoke(false, true)
         } else {
+            value = LocalArtState.Loading
             onLoadingStateChanged?.invoke(true, false)
         }
 
@@ -173,22 +256,34 @@ actual fun LocalArtworkImage(
             }
         }
         if (loaded != null) {
-            value = loaded
+            value = LocalArtState.Loaded(loaded)
             onLoadingStateChanged?.invoke(false, true)
-        } else if (initialCached == null) {
+        } else if (initialCached != null) {
+            value = LocalArtState.Loaded(initialCached)
+            onLoadingStateChanged?.invoke(false, true)
+        } else {
+            value = LocalArtState.Missing
             onLoadingStateChanged?.invoke(false, false)
         }
     }
 
-    val bmp = bitmapState
-    if (bmp != null) {
-        Image(
-            bitmap = bmp,
-            contentDescription = contentDescription,
-            modifier = modifier,
-            contentScale = contentScale,
-        )
-    } else {
-        fallback()
+    when (val s = state) {
+        is LocalArtState.Loaded -> {
+            Image(
+                bitmap = s.bitmap,
+                contentDescription = contentDescription,
+                modifier = modifier,
+                contentScale = contentScale,
+            )
+        }
+        is LocalArtState.Loading -> {
+            // Clean, subtle dark surface placeholder with ZERO bright neon flash!
+            Box(
+                modifier = modifier.background(Color.White.copy(alpha = 0.06f)),
+            )
+        }
+        is LocalArtState.Missing -> {
+            fallback()
+        }
     }
 }

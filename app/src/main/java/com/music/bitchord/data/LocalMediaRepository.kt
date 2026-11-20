@@ -5,6 +5,7 @@ import android.content.ContentUris
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
@@ -34,6 +35,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.util.Locale
 
 object LocalMediaRepository {
@@ -309,11 +311,30 @@ object LocalMediaRepository {
     private var enrichmentJob: Job? = null
 
     private const val LOCAL_ART_DIR = "local_art"
+    private const val LOCAL_ART_THUMB_DIR = "local_art_thumb"
 
     fun getLocalArtFile(context: Context, key: String): File {
         val dir = File(context.cacheDir, LOCAL_ART_DIR).apply { if (!exists()) mkdirs() }
         val hash = key.hashCode().toUInt().toString()
         return File(dir, "$hash.jpg")
+    }
+
+    fun getLocalArtThumbFile(context: Context, key: String): File {
+        val dir = File(context.cacheDir, LOCAL_ART_THUMB_DIR).apply { if (!exists()) mkdirs() }
+        val hash = key.hashCode().toUInt().toString()
+        return File(dir, "$hash.jpg")
+    }
+
+    private fun calculateThumbSampleSize(width: Int, height: Int, maxSize: Int): Int {
+        var inSampleSize = 1
+        if (width > maxSize || height > maxSize) {
+            val halfHeight = height / 2
+            val halfWidth = width / 2
+            while ((halfHeight / inSampleSize) >= maxSize && (halfWidth / inSampleSize) >= maxSize) {
+                inSampleSize *= 2
+            }
+        }
+        return inSampleSize.coerceAtLeast(1)
     }
 
     fun getCachedLocalArtUri(context: Context, key: String): String? {
@@ -418,6 +439,7 @@ object LocalMediaRepository {
         // 4. Write bytes atomically to cacheDir/local_art/<hash>.jpg
         var artUri: String? = null
         val artFile = getLocalArtFile(context, trackKey)
+        val thumbFile = getLocalArtThumbFile(context, trackKey)
         if (artFile.exists() && artFile.length() > 0) {
             artUri = "file://${artFile.absolutePath}"
         } else if (picBytes != null && picBytes.isNotEmpty()) {
@@ -430,9 +452,43 @@ object LocalMediaRepository {
             }
         }
 
+        // Generate tiny 128x128 disk thumbnail (~5KB)
+        if (!thumbFile.exists() || thumbFile.length() == 0L) {
+            runCatching {
+                val rawBytes = picBytes ?: if (artFile.exists()) artFile.readBytes() else null
+                if (rawBytes != null && rawBytes.isNotEmpty()) {
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, bounds)
+                    val sampleSize = calculateThumbSampleSize(bounds.outWidth, bounds.outHeight, 128)
+                    val opts = BitmapFactory.Options().apply {
+                        inSampleSize = sampleSize
+                        inPreferredConfig = Bitmap.Config.RGB_565
+                    }
+                    val bmp = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, opts)
+                    if (bmp != null) {
+                        val scaled = if (bmp.width > 128 || bmp.height > 128) {
+                            Bitmap.createScaledBitmap(bmp, 128, 128, true)
+                        } else {
+                            bmp
+                        }
+                        val tmpThumb = File(thumbFile.parentFile, "${thumbFile.name}.tmp")
+                        FileOutputStream(tmpThumb).use { out ->
+                            scaled.compress(Bitmap.CompressFormat.JPEG, 80, out)
+                        }
+                        if (scaled != bmp) bmp.recycle()
+                        scaled.recycle()
+                        if (!tmpThumb.renameTo(thumbFile)) {
+                            tmpThumb.copyTo(thumbFile, overwrite = true)
+                            tmpThumb.delete()
+                        }
+                    }
+                }
+            }
+        }
+
         if (artUri != null) {
             runCatching {
-                LocalArtworkCache.prewarm(artUri, 160)
+                LocalArtworkCache.prewarm(artUri, 160, context)
             }
         }
 

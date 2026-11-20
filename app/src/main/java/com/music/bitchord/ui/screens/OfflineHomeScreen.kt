@@ -541,7 +541,11 @@ private fun LazyListScope.songRows(
     }
     // No keys on the rows: two files can share a video id, and a device folder
     // is full of the duplicates a key would have to be unique over.
-    items(shown) { song ->
+    itemsIndexed(
+        items = shown,
+        key = { idx, song -> "$title-${song.videoId}-$idx" },
+        contentType = { _, _ -> "offline_song_row" },
+    ) { _, song ->
         val isCurrent = playingRowMatcher(shown, currentSong)(song)
         SongRow(
             song = song,

@@ -547,6 +547,8 @@ private fun QueueSwipeLabel(playNext: Boolean) {
     }
 }
 
+private val SONG_ROW_ART_SHAPE = RoundedCornerShape(8.dp)
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SongRowContent(
@@ -625,8 +627,8 @@ private fun SongRowContent(
                     DefaultCoverTile(
                         modifier = Modifier
                             .matchParentSize()
-                            .clip(RoundedCornerShape(8.dp))
-                            .thumbnailBorder(RoundedCornerShape(8.dp)),
+                            .clip(SONG_ROW_ART_SHAPE)
+                            .thumbnailBorder(SONG_ROW_ART_SHAPE),
                         contentScale = ContentScale.Crop,
                     )
                 } else if (isLocal && remoteArt != null) {
@@ -635,16 +637,16 @@ private fun SongRowContent(
                         contentDescription = null,
                         modifier = Modifier
                             .matchParentSize()
-                            .clip(RoundedCornerShape(8.dp))
-                            .thumbnailBorder(RoundedCornerShape(8.dp))
+                            .clip(SONG_ROW_ART_SHAPE)
+                            .thumbnailBorder(SONG_ROW_ART_SHAPE)
                             .background(MaterialTheme.colorScheme.surfaceVariant),
                         contentScale = ContentScale.Crop,
                         fallback = {
                             DefaultCoverTile(
                                 modifier = Modifier
                                     .matchParentSize()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .thumbnailBorder(RoundedCornerShape(8.dp)),
+                                    .clip(SONG_ROW_ART_SHAPE)
+                                    .thumbnailBorder(SONG_ROW_ART_SHAPE),
                                 contentScale = ContentScale.Crop,
                             )
                         },
@@ -668,8 +670,8 @@ private fun SongRowContent(
                         },
                         modifier = Modifier
                             .matchParentSize()
-                            .clip(RoundedCornerShape(8.dp))
-                            .thumbnailBorder(RoundedCornerShape(8.dp))
+                            .clip(SONG_ROW_ART_SHAPE)
+                            .thumbnailBorder(SONG_ROW_ART_SHAPE)
                             .background(MaterialTheme.colorScheme.surfaceVariant),
                     )
                 }

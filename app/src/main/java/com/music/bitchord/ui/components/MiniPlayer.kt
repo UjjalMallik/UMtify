@@ -420,14 +420,25 @@ fun MiniPlayer(
             val isLocal = com.music.bitchord.ui.components.isLocalArtUrl(remoteArt)
             val isBrokenOrBlank = remoteArt.isNullOrBlank() || (!isLocal && com.music.bitchord.ui.components.FailedArtworkCache.isFailed(remoteArt))
             if (isBrokenOrBlank) {
-                com.music.bitchord.ui.components.DefaultCoverTile(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .playerDockArt(dock, ART_CORNER)
-                        .clip(RoundedCornerShape(ART_CORNER))
-                        .thumbnailBorder(RoundedCornerShape(ART_CORNER)),
-                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                )
+                if (song != null) {
+                    com.music.bitchord.ui.components.DefaultCoverTile(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .playerDockArt(dock, ART_CORNER)
+                            .clip(RoundedCornerShape(ART_CORNER))
+                            .thumbnailBorder(RoundedCornerShape(ART_CORNER)),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    )
+                } else {
+                    androidx.compose.foundation.layout.Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .playerDockArt(dock, ART_CORNER)
+                            .clip(RoundedCornerShape(ART_CORNER))
+                            .thumbnailBorder(RoundedCornerShape(ART_CORNER))
+                            .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.06f)),
+                    )
+                }
             } else if (isLocal && remoteArt != null) {
                 com.music.bitchord.ui.components.LocalArtworkImage(
                     url = remoteArt,

@@ -38,15 +38,21 @@ fun rememberRemoteArtworkUrl(song: Song?, ignoreCustom: Boolean = false): String
     val custom = if (ignoreCustom) null else song?.let { edits[it.videoId]?.coverPath }?.let { "file://$it" }
 
     val localKey = song?.localUri ?: song?.videoId
-    val isLocal = localKey != null && (localKey.startsWith("content://") || localKey.startsWith("/") || localKey.startsWith("file://"))
+    val isLocal = localKey != null && (localKey.startsWith("content://") || localKey.startsWith("/") || localKey.startsWith("file://") || localKey.startsWith("local_art://"))
     val cachedLocal = remember(localKey) {
         if (isLocal && localKey != null) {
             LocalMediaRepository.getCachedLocalArtUri(context, localKey)
         } else null
     }
 
+    val initialArt = if (isLocal && localKey != null) {
+        cachedLocal ?: song?.thumbnailUrl?.takeIf { isLocalArtUrl(it) } ?: "local_art://$localKey"
+    } else {
+        cachedLocal ?: song?.thumbnailUrl
+    }
+
     var resolved by remember(key, song?.thumbnailUrl, cachedLocal) {
-        mutableStateOf(cachedLocal ?: song?.thumbnailUrl)
+        mutableStateOf(initialArt)
     }
 
     LaunchedEffect(key, custom, song?.thumbnailUrl, cachedLocal) {
