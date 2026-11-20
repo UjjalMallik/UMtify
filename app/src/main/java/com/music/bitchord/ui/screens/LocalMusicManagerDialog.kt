@@ -119,8 +119,7 @@ fun LocalMusicManagerDialog(
     ) { granted ->
         if (granted) {
             scope.launch(Dispatchers.IO) {
-                LocalMediaRepository.refreshFoldersAndSongs(context)
-                LocalMediaRepository.getLocalMusic(context)
+                LocalMediaRepository.refreshLocalMusic(context)
             }
         }
     }
@@ -140,8 +139,7 @@ fun LocalMusicManagerDialog(
         AppSettings.addLocalMusicCustomFolder(uriStr)
 
         scope.launch(Dispatchers.IO) {
-            LocalMediaRepository.refreshFoldersAndSongs(context)
-            LocalMediaRepository.getLocalMusic(context)
+            LocalMediaRepository.refreshLocalMusic(context)
         }
     }
 
@@ -160,8 +158,7 @@ fun LocalMusicManagerDialog(
         val current = AppSettings.localMusicSelectedSongs.value
         AppSettings.setLocalMusicSelectedSongs(current + uris.map { it.toString() })
         scope.launch(Dispatchers.IO) {
-            LocalMediaRepository.refreshFoldersAndSongs(context)
-            LocalMediaRepository.getLocalMusic(context)
+            LocalMediaRepository.refreshLocalMusic(context)
         }
     }
 
@@ -169,7 +166,7 @@ fun LocalMusicManagerDialog(
         if (scanAllAudioFolders && !LocalMediaRepository.hasStoragePermission(context)) {
             storagePermissionLauncher.launch(storagePermission)
         }
-        LocalMediaRepository.refreshFoldersAndSongs(context)
+        LocalMediaRepository.refreshLocalMusic(context)
     }
 
     // Display folders: custom folders are computed immediately from AppSettings.localMusicCustomFolders
@@ -178,10 +175,13 @@ fun LocalMusicManagerDialog(
         // 1. All custom folders rendered immediately
         for (uri in customFolders) {
             val name = LocalMediaRepository.getFolderDisplayName(context, uri)
-            val count = allLocalSongs.count {
+            val detectedCount = detectedFolders.firstOrNull { it.path == uri }?.songCount ?: 0
+            val matchedSongsCount = allLocalSongs.count {
+                it.folderUri == uri ||
                 LocalMediaRepository.isInSelectedFolder(it.localPath, uri) ||
                 LocalMediaRepository.isInSelectedFolder(it.localUri, uri)
             }
+            val count = maxOf(detectedCount, matchedSongsCount)
             list.add(LocalMediaRepository.DeviceFolder(name = name, path = uri, songCount = count, isCustom = true))
         }
         // 2. If scanAllAudioFolders is enabled, also list detected MediaStore folders
@@ -263,6 +263,7 @@ fun LocalMusicManagerDialog(
 
                 LaunchedEffect(currentDrill, allLocalSongs) {
                     val inMemory = allLocalSongs.filter {
+                        it.folderUri == currentDrill.path ||
                         LocalMediaRepository.isInSelectedFolder(it.localPath, currentDrill.path) ||
                         LocalMediaRepository.isInSelectedFolder(it.localUri, currentDrill.path)
                     }
@@ -274,6 +275,7 @@ fun LocalMusicManagerDialog(
                                 LocalMediaRepository.scanSafFolderFast(context, currentDrill.path)
                             } else {
                                 LocalMediaRepository.getAllLocalSongsRaw(context).filter {
+                                    it.folderUri == currentDrill.path ||
                                     LocalMediaRepository.isInSelectedFolder(it.localPath, currentDrill.path) ||
                                     LocalMediaRepository.isInSelectedFolder(it.localUri, currentDrill.path)
                                 }
@@ -522,8 +524,7 @@ fun LocalMusicManagerDialog(
                                 storagePermissionLauncher.launch(storagePermission)
                             }
                             scope.launch(Dispatchers.IO) {
-                                LocalMediaRepository.refreshFoldersAndSongs(context)
-                                LocalMediaRepository.getLocalMusic(context)
+                                LocalMediaRepository.refreshLocalMusic(context)
                             }
                         }
                         .padding(horizontal = 16.dp, vertical = 14.dp),
@@ -574,8 +575,7 @@ fun LocalMusicManagerDialog(
                                     storagePermissionLauncher.launch(storagePermission)
                                 }
                                 scope.launch(Dispatchers.IO) {
-                                    LocalMediaRepository.refreshFoldersAndSongs(context)
-                                    LocalMediaRepository.getLocalMusic(context)
+                                    LocalMediaRepository.refreshLocalMusic(context)
                                 }
                             },
                             colors = SwitchDefaults.colors(
@@ -760,8 +760,7 @@ fun LocalMusicManagerDialog(
                                                 }
                                                 AppSettings.removeLocalMusicCustomFolder(folder.path)
                                                 scope.launch(Dispatchers.IO) {
-                                                    LocalMediaRepository.refreshFoldersAndSongs(context)
-                                                    LocalMediaRepository.getLocalMusic(context)
+                                                    LocalMediaRepository.refreshLocalMusic(context)
                                                 }
                                             },
                                             modifier = Modifier.size(36.dp),
@@ -785,8 +784,7 @@ fun LocalMusicManagerDialog(
             Button(
                 onClick = {
                     scope.launch(Dispatchers.IO) {
-                        LocalMediaRepository.refreshFoldersAndSongs(context)
-                        LocalMediaRepository.getLocalMusic(context)
+                        LocalMediaRepository.refreshLocalMusic(context)
                     }
                     onDismiss()
                 },

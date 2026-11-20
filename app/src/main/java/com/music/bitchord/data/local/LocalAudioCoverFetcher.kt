@@ -35,9 +35,31 @@ class LocalAudioCoverFetcher(
             rawData.startsWith(SCHEME_PREFIX) -> rawData.removePrefix(SCHEME_PREFIX)
             else -> rawData
         }
+
+        // 1. Check if cached .jpg exists on disk
+        val artFile = LocalMediaRepository.getLocalArtFile(context, audioUriStr)
+        if (artFile.exists() && artFile.length() > 0) {
+            return@withContext SourceFetchResult(
+                source = ImageSource(artFile.source().buffer(), FileSystem.SYSTEM),
+                mimeType = "image/jpeg",
+                dataSource = DataSource.DISK,
+            )
+        }
+
+        // 2. Extract and cache to disk
+        LocalMediaRepository.extractAndCacheLocalArt(context, audioUriStr, audioUriStr)
+        if (artFile.exists() && artFile.length() > 0) {
+            return@withContext SourceFetchResult(
+                source = ImageSource(artFile.source().buffer(), FileSystem.SYSTEM),
+                mimeType = "image/jpeg",
+                dataSource = DataSource.DISK,
+            )
+        }
+
+        // 3. Fallback direct extraction
         val bytes = extractEmbeddedPicture(context, audioUriStr) ?: return@withContext null
 
-        val mime = detectMimeType(bytes)
+        val mime = detectMimeType(bytes) ?: "image/jpeg"
         SourceFetchResult(
             source = ImageSource(bytes.inputStream().source().buffer(), FileSystem.SYSTEM),
             mimeType = mime,

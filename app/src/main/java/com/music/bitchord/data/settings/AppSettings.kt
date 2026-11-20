@@ -2001,12 +2001,12 @@ object AppSettings {
 
     fun setLocalMusicFolders(values: Set<String>) {
         localMusicFolders.value = values
-        prefs.edit().putStringSet(KEY_LOCAL_MUSIC_FOLDERS, values).apply()
+        prefs.edit().putStringSet(KEY_LOCAL_MUSIC_FOLDERS, values).commit()
     }
 
     fun setScanAllAudioFolders(enabled: Boolean) {
         scanAllAudioFolders.value = enabled
-        prefs.edit().putBoolean(KEY_SCAN_ALL_AUDIO_FOLDERS, enabled).apply()
+        prefs.edit().putBoolean(KEY_SCAN_ALL_AUDIO_FOLDERS, enabled).commit()
     }
 
     fun toggleLocalMusicFolder(folderUriOrPath: String) {
@@ -2017,7 +2017,7 @@ object AppSettings {
 
     fun setLocalMusicCustomFolders(values: Set<String>) {
         localMusicCustomFolders.value = values
-        prefs.edit().putStringSet(KEY_LOCAL_MUSIC_CUSTOM_FOLDERS, values).apply()
+        prefs.edit().putStringSet(KEY_LOCAL_MUSIC_CUSTOM_FOLDERS, values).commit()
     }
 
     fun addLocalMusicCustomFolder(uri: String) {
@@ -2039,12 +2039,12 @@ object AppSettings {
 
     fun setLocalMusicSelectedSongs(songs: Set<String>) {
         localMusicSelectedSongs.value = songs
-        prefs.edit().putStringSet(KEY_LOCAL_MUSIC_SELECTED_SONGS, songs).apply()
+        prefs.edit().putStringSet(KEY_LOCAL_MUSIC_SELECTED_SONGS, songs).commit()
     }
 
     fun setLocalMusicExcludedSongs(songs: Set<String>) {
         localMusicExcludedSongs.value = songs
-        prefs.edit().putStringSet(KEY_LOCAL_MUSIC_EXCLUDED_SONGS, songs).apply()
+        prefs.edit().putStringSet(KEY_LOCAL_MUSIC_EXCLUDED_SONGS, songs).commit()
     }
 
     fun toggleLocalMusicExcludedSong(songIdentifier: String) {

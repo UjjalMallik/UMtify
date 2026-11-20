@@ -137,6 +137,8 @@ data class Song(
     val playbackSourceType: PlaybackSourceType? = null,
     /** Browse id for an album, playlist, or other source page. */
     val playbackSourceId: String? = null,
+    /** Source folder URI or identifier for local device tracks. */
+    val folderUri: String? = null,
 ) {
     /** Legacy derived property: true if and only if [queueTier] is [QueueTier.AUTOPLAY]. */
     val fromAutoplay: Boolean get() = queueTier == QueueTier.AUTOPLAY
@@ -168,6 +170,7 @@ data class Song(
         playbackSource: String? = null,
         playbackSourceType: PlaybackSourceType? = null,
         playbackSourceId: String? = null,
+        folderUri: String? = null,
     ) : this(
         videoId = videoId,
         title = title,
@@ -195,6 +198,7 @@ data class Song(
         playbackSource = playbackSource,
         playbackSourceType = playbackSourceType,
         playbackSourceId = playbackSourceId,
+        folderUri = folderUri,
     )
 }
 

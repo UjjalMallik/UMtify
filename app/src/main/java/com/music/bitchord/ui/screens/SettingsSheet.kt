@@ -386,8 +386,7 @@ fun SettingsScreen(
             AppSettings.setLocalMusicFolders(AppSettings.localMusicFolders.value + folder.toString())
         }
         backupScope.launch(Dispatchers.IO) {
-            LocalMediaRepository.refreshFoldersAndSongs(context)
-            LocalMediaRepository.getLocalMusic(context)
+            LocalMediaRepository.refreshLocalMusic(context)
         }
     }
 
@@ -406,8 +405,7 @@ fun SettingsScreen(
         val current = AppSettings.localMusicSelectedSongs.value
         AppSettings.setLocalMusicSelectedSongs(current + uris.map { it.toString() })
         backupScope.launch(Dispatchers.IO) {
-            LocalMediaRepository.refreshFoldersAndSongs(context)
-            LocalMediaRepository.getLocalMusic(context)
+            LocalMediaRepository.refreshLocalMusic(context)
         }
     }
 
