@@ -595,10 +595,8 @@ internal fun CurrentLyricStrip(
             modifier = Modifier
                 .fillMaxWidth()
                 // The slider's touch target reaches ~13dp above the drawn bar, so
-                // the strip reads as further off it than it is. Nudged down into
-                // that dead space, the same way the timestamps below are pulled
-                // back up into it.
-                .offset(y = 6.dp),
+                // the strip reads as further off it than it is.
+                .offset(y = 0.dp),
         ) {
             if (lines.isNotEmpty()) {
                 CurrentLyricLine(

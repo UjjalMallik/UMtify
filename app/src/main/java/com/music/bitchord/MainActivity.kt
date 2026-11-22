@@ -1436,6 +1436,14 @@ private fun BitChordApp(
         if (allSongs.getOrNull(allIndex)?.isUnresolvedSpotify == true) return
         val songs = allSongs.filterNot { it.isUnresolvedSpotify }
         val index = songs.indexOf(allSongs.getOrNull(allIndex)).coerceAtLeast(0)
+        val selectedSong = songs.getOrNull(index) ?: allSongs.getOrNull(allIndex)
+
+        if (isSameSong(selectedSong, player.song)) {
+            if (!player.isPlaying) controller?.play()
+            if (reducePlayerMotion) showNowPlaying = true else playerSheetMotion.open()
+            return
+        }
+
         playRequestGeneration++
         activeRadioSeed = null
         scope.launch {
@@ -1562,22 +1570,27 @@ private fun BitChordApp(
      * where the surrounding list *is* the thing the user asked for.
      */
     val playRadio: (Song, QueueSource) -> Unit = { song, source ->
-        playRequestGeneration++
-        activeRadioSeed = null
-        scope.launch {
-            if (refusedByHost()) return@launch
-            val c = controller ?: return@launch
-            val currentTimeline = player.queue.takeIf { it.size == c.mediaItemCount }
-                ?: (0 until c.mediaItemCount).map { c.getMediaItemAt(it).toSong() }
-            val currentIndex = c.currentMediaItemIndex
-            val oneOffQueue = QueueCoordinator.buildOneOffQueue(
-                currentTimeline = currentTimeline,
-                currentIndex = currentIndex,
-                tappedSong = song,
-                source = source,
-            )
-            c.playSongs(oneOffQueue, 0)
-            // Start radio in the mini-player; the user opens the full view by tapping it.
+        if (isSameSong(song, player.song)) {
+            if (!player.isPlaying) controller?.play()
+            if (reducePlayerMotion) showNowPlaying = true else playerSheetMotion.open()
+        } else {
+            playRequestGeneration++
+            activeRadioSeed = null
+            scope.launch {
+                if (refusedByHost()) return@launch
+                val c = controller ?: return@launch
+                val currentTimeline = player.queue.takeIf { it.size == c.mediaItemCount }
+                    ?: (0 until c.mediaItemCount).map { c.getMediaItemAt(it).toSong() }
+                val currentIndex = c.currentMediaItemIndex
+                val oneOffQueue = QueueCoordinator.buildOneOffQueue(
+                    currentTimeline = currentTimeline,
+                    currentIndex = currentIndex,
+                    tappedSong = song,
+                    source = source,
+                )
+                c.playSongs(oneOffQueue, 0)
+                // Start radio in the mini-player; the user opens the full view by tapping it.
+            }
         }
     }
 
@@ -3108,6 +3121,12 @@ private fun BitChordApp(
                             // listener tapped while the host owns playback.
                             if (ListenTogether.state.value.controlsLocked) {
                                 refusedByHost()
+                                return
+                            }
+                            val selected = songs.getOrNull(index)
+                            if (isSameSong(selected, player.song)) {
+                                if (!player.isPlaying) controller?.play()
+                                if (reducePlayerMotion) showNowPlaying = true else playerSheetMotion.open()
                                 return
                             }
                             val source = QueueSource(
@@ -5808,6 +5827,30 @@ private const val PLAYER_SCRIM_ALPHA = 0.32f
 private object PlayerSheetShape : Shape {
     override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
         Outline.Rectangle(Rect(0f, -size.height, size.width, size.height))
+}
+
+private fun isSameSong(a: Song?, b: Song?): Boolean {
+    if (a == null || b == null) return false
+    val aId = a.videoId.trim()
+    val bId = b.videoId.trim()
+    if (aId.isNotEmpty() && aId == bId) return true
+
+    val aUri = a.localUri?.trim()
+    val bUri = b.localUri?.trim()
+    if (!aUri.isNullOrEmpty() && (aUri == bUri || aUri == bId)) return true
+    if (!bUri.isNullOrEmpty() && (bUri == aId || bUri == aUri)) return true
+
+    val aPath = a.localPath?.trim()
+    val bPath = b.localPath?.trim()
+    if (!aPath.isNullOrEmpty() && (aPath == bPath || aPath == bUri || aPath == bId)) return true
+    if (!bPath.isNullOrEmpty() && (bPath == aUri || bPath == aId)) return true
+
+    if (a.title.isNotBlank() && a.title.equals(b.title, ignoreCase = true) &&
+        a.artist.isNotBlank() && a.artist.equals(b.artist, ignoreCase = true)
+    ) {
+        return true
+    }
+    return false
 }
 
 private const val TAB_HOME = 0

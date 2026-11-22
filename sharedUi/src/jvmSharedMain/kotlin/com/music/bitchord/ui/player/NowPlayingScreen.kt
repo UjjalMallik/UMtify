@@ -2682,8 +2682,8 @@ fun NowPlayingScreen(
                                 // so a short window gives up air under the credits
                                 // rather than artwork.
                                 bottom = when {
-                                    densePortrait -> (8.dp - controlTighten / 6).coerceAtLeast(0.dp)
-                                    else -> (18.dp - controlTighten / 6).coerceAtLeast(0.dp)
+                                    densePortrait -> (2.dp - controlTighten / 6).coerceAtLeast(0.dp)
+                                    else -> (4.dp - controlTighten / 6).coerceAtLeast(0.dp)
                                 },
                             ),
                     ) {
@@ -2774,7 +2774,7 @@ fun NowPlayingScreen(
                         // the controls couldn't take, which on all but the tallest
                         // screens is nothing.
                         val groupTop = (maxHeight - fullArt - ART_TITLE_GAP - HEADER_HEIGHT - statsSlot)
-                            .coerceAtLeast(0.dp) / 2
+                            .coerceAtLeast(0.dp)
                         // Functions of the collapse, called at placement and measure
                         // — see [p]. Composition never reads them.
                         fun artSize(): Dp = lerp(fullArt, THUMB_SIZE, p())
@@ -3255,7 +3255,7 @@ fun NowPlayingScreen(
                                         localUri = localUri,
                                         contentDescription = null,
                                         contentScale = ContentScale.Crop,
-                                        maxSizePx = 1080,
+                                        maxSizePx = 1440,
                                         onLoadingStateChanged = { _, success ->
                                             if (success) art.loaded = true
                                         },
