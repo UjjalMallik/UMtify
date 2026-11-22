@@ -803,8 +803,9 @@ private fun InlineQueueRow(
             Spacer(Modifier.width(4.dp))
         }
         val remoteArt = rememberRemoteArtworkUrl(song)
-        val isLocal = com.music.bitchord.ui.components.isLocalArtUrl(remoteArt)
-        val isBrokenOrBlank = remoteArt.isNullOrBlank() || (!isLocal && com.music.bitchord.ui.components.FailedArtworkCache.isFailed(remoteArt))
+        val localUri = song?.localUri ?: song?.localPath
+        val isLocal = com.music.bitchord.ui.components.isLocalArtUrl(remoteArt) || !localUri.isNullOrBlank()
+        val isBrokenOrBlank = (remoteArt.isNullOrBlank() && localUri.isNullOrBlank()) || (!isLocal && com.music.bitchord.ui.components.FailedArtworkCache.isFailed(remoteArt))
         if (isBrokenOrBlank) {
             com.music.bitchord.ui.components.DefaultCoverTile(
                 modifier = Modifier
@@ -813,9 +814,10 @@ private fun InlineQueueRow(
                     .thumbnailBorder(RoundedCornerShape(6.dp)),
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
             )
-        } else if (isLocal && remoteArt != null) {
+        } else if (isLocal) {
             com.music.bitchord.ui.components.LocalArtworkImage(
-                url = remoteArt,
+                url = remoteArt ?: localUri.orEmpty(),
+                localUri = localUri,
                 contentDescription = null,
                 modifier = Modifier
                     .size(44.dp)

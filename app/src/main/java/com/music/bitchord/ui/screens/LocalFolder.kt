@@ -430,18 +430,19 @@ private fun SongGridCard(
             contentAlignment = Alignment.Center,
         ) {
             CoverPlaceholder(Icons.Rounded.MusicNote, Modifier.fillMaxSize())
-            if (art != null) {
-                val isLocal = com.music.bitchord.ui.components.isLocalArtUrl(art)
-                if (isLocal) {
-                    com.music.bitchord.ui.components.LocalArtworkImage(
-                        url = art,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        maxSizePx = CARD_ART_PX,
-                        modifier = Modifier.fillMaxSize(),
-                        fallback = { CoverPlaceholder(Icons.Rounded.MusicNote, Modifier.fillMaxSize()) },
-                    )
-                } else {
+            val localUri = song.localUri ?: song.localPath
+            val isLocal = com.music.bitchord.ui.components.isLocalArtUrl(art) || !localUri.isNullOrBlank()
+            if (isLocal) {
+                com.music.bitchord.ui.components.LocalArtworkImage(
+                    url = art ?: localUri.orEmpty(),
+                    localUri = localUri,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    maxSizePx = CARD_ART_PX,
+                    modifier = Modifier.fillMaxSize(),
+                    fallback = { CoverPlaceholder(Icons.Rounded.MusicNote, Modifier.fillMaxSize()) },
+                )
+            } else if (art != null) {
                     AsyncImage(
                         model = art.artworkAt(CARD_ART_PX),
                         contentDescription = null,
@@ -480,10 +481,23 @@ private fun SongGridCard(
 /** An artist's avatar: the first of their tracks that has a picture, in a circle. */
 @Composable
 private fun ArtistAvatar(group: LocalGroup, modifier: Modifier) {
-    val art = remember(group.songs) { group.songs.firstNotNullOfOrNull { it.thumbnailUrl } }
+    val firstSong = remember(group.songs) { group.songs.firstOrNull { !it.thumbnailUrl.isNullOrBlank() || !it.localUri.isNullOrBlank() } }
+    val art = firstSong?.thumbnailUrl
+    val localUri = firstSong?.localUri ?: firstSong?.localPath
+    val isLocal = com.music.bitchord.ui.components.isLocalArtUrl(art) || !localUri.isNullOrBlank()
     Box(modifier.clip(CircleShape).thumbnailBorder(CircleShape)) {
         CoverPlaceholder(Icons.Rounded.Person, Modifier.fillMaxSize(), iconFraction = 0.5f)
-        if (art != null) {
+        if (isLocal) {
+            com.music.bitchord.ui.components.LocalArtworkImage(
+                url = art ?: localUri.orEmpty(),
+                localUri = localUri,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                maxSizePx = CARD_ART_PX,
+                modifier = Modifier.fillMaxSize(),
+                fallback = { CoverPlaceholder(Icons.Rounded.Person, Modifier.fillMaxSize(), iconFraction = 0.5f) },
+            )
+        } else if (art != null) {
             AsyncImage(
                 model = art.artworkAt(CARD_ART_PX),
                 contentDescription = null,
@@ -611,18 +625,20 @@ private fun AlbumGridCard(
                 .thumbnailBorder(CARD_SHAPE),
         ) {
             CoverPlaceholder(group.placeholderIcon(), Modifier.fillMaxSize())
-            if (art != null) {
-                val isLocal = com.music.bitchord.ui.components.isLocalArtUrl(art)
-                if (isLocal) {
-                    com.music.bitchord.ui.components.LocalArtworkImage(
-                        url = art,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        maxSizePx = CARD_ART_PX,
-                        modifier = Modifier.fillMaxSize(),
-                        fallback = { CoverPlaceholder(Icons.Rounded.MusicNote, Modifier.fillMaxSize()) },
-                    )
-                } else {
+            val firstSong = group.songs.firstOrNull()
+            val localUri = firstSong?.localUri ?: firstSong?.localPath
+            val isLocal = com.music.bitchord.ui.components.isLocalArtUrl(art) || !localUri.isNullOrBlank()
+            if (isLocal) {
+                com.music.bitchord.ui.components.LocalArtworkImage(
+                    url = art ?: localUri.orEmpty(),
+                    localUri = localUri,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    maxSizePx = CARD_ART_PX,
+                    modifier = Modifier.fillMaxSize(),
+                    fallback = { CoverPlaceholder(group.placeholderIcon(), Modifier.fillMaxSize()) },
+                )
+            } else if (art != null) {
                     AsyncImage(
                         model = art.artworkAt(CARD_ART_PX),
                         contentDescription = null,
@@ -671,7 +687,20 @@ private fun AlbumRow(
     ) {
         Box(Modifier.size(52.dp).clip(shape).thumbnailBorder(shape)) {
             CoverPlaceholder(group.placeholderIcon(), Modifier.fillMaxSize(), iconFraction = 0.46f)
-            if (art != null) {
+            val firstSong = group.songs.firstOrNull()
+            val localUri = firstSong?.localUri ?: firstSong?.localPath
+            val isLocal = com.music.bitchord.ui.components.isLocalArtUrl(art) || !localUri.isNullOrBlank()
+            if (isLocal) {
+                com.music.bitchord.ui.components.LocalArtworkImage(
+                    url = art ?: localUri.orEmpty(),
+                    localUri = localUri,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    maxSizePx = ROW_ART_PX,
+                    modifier = Modifier.fillMaxSize(),
+                    fallback = { CoverPlaceholder(group.placeholderIcon(), Modifier.fillMaxSize(), iconFraction = 0.46f) },
+                )
+            } else if (art != null) {
                 AsyncImage(
                     model = art.artworkAt(ROW_ART_PX),
                     contentDescription = null,

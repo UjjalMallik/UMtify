@@ -303,10 +303,12 @@ private fun DownloadManagerRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(ART_SIZE), contentAlignment = Alignment.Center) {
-            val isLocal = isLocalArtUrl(art)
-            if (isLocal && art != null) {
+            val localUri = item.song.localUri ?: item.song.localPath
+            val isLocal = isLocalArtUrl(art) || !localUri.isNullOrBlank()
+            if (isLocal) {
                 LocalArtworkImage(
-                    url = art,
+                    url = art ?: localUri.orEmpty(),
+                    localUri = localUri,
                     contentDescription = null,
                     modifier = Modifier
                         .size(ART_SIZE)

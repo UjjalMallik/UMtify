@@ -924,6 +924,30 @@ class PlaybackService : MediaLibraryService() {
                             }
                         }
                     }
+                    // Sync 128x128 thumbnail back to permanent filesDir and shared LocalArtworkCache
+                    com.music.bitchord.ui.components.LocalArtworkCache.saveAndCacheThumbnail(
+                        this@PlaybackService,
+                        key,
+                        picBytes,
+                    )
+                    currentSong?.videoId?.let { vId ->
+                        if (vId != key) {
+                            com.music.bitchord.ui.components.LocalArtworkCache.saveAndCacheThumbnail(
+                                this@PlaybackService,
+                                vId,
+                                picBytes,
+                            )
+                        }
+                    }
+                    currentSong?.localUri?.let { lUri ->
+                        if (lUri != key) {
+                            com.music.bitchord.ui.components.LocalArtworkCache.saveAndCacheThumbnail(
+                                this@PlaybackService,
+                                lUri,
+                                picBytes,
+                            )
+                        }
+                    }
                     val artUri = "file://${artFile.absolutePath}"
                     if (exoPlayer.mediaMetadata.artworkUri == null || exoPlayer.mediaMetadata.artworkUri?.scheme == "local_art") {
                         val metaBuilder = exoPlayer.mediaMetadata.buildUpon()

@@ -33,6 +33,7 @@ actual fun LocalArtworkImage(
     modifier: Modifier,
     contentScale: ContentScale,
     maxSizePx: Int,
+    localUri: String?,
     onLoadingStateChanged: ((isLoading: Boolean, isSuccess: Boolean) -> Unit)?,
     fallback: @Composable () -> Unit,
 ) {

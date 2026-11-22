@@ -621,8 +621,9 @@ private fun SongRowContent(
         } else {
             Box(Modifier.size(52.dp)) {
                 val remoteArt = com.music.bitchord.ui.player.rememberRemoteArtworkUrl(song)
-                val isLocal = isLocalArtUrl(remoteArt)
-                val isBrokenOrBlank = remoteArt.isNullOrBlank() || (!isLocal && FailedArtworkCache.isFailed(remoteArt))
+                val localUri = song.localUri ?: song.localPath
+                val isLocal = isLocalArtUrl(remoteArt) || !localUri.isNullOrBlank()
+                val isBrokenOrBlank = (remoteArt.isNullOrBlank() && localUri.isNullOrBlank()) || (!isLocal && FailedArtworkCache.isFailed(remoteArt))
                 if (isBrokenOrBlank) {
                     DefaultCoverTile(
                         modifier = Modifier
@@ -631,9 +632,10 @@ private fun SongRowContent(
                             .thumbnailBorder(SONG_ROW_ART_SHAPE),
                         contentScale = ContentScale.Crop,
                     )
-                } else if (isLocal && remoteArt != null) {
+                } else if (isLocal) {
                     LocalArtworkImage(
-                        url = remoteArt,
+                        url = remoteArt ?: localUri.orEmpty(),
+                        localUri = localUri,
                         contentDescription = null,
                         modifier = Modifier
                             .matchParentSize()

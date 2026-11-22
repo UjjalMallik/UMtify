@@ -207,7 +207,7 @@ object AppSettings {
      * HLS downloads always stay private because they are a playlist package,
      * not one portable audio file.
      */
-    val exportDownloads = MutableStateFlow(false)
+    val exportDownloads = MutableStateFlow(true)
 
     /** Whether the active network charges for data. `null` while offline. */
     val meteredConnection = MutableStateFlow<Boolean?>(null)
@@ -942,7 +942,7 @@ object AppSettings {
         migrateDownloadQuality()
         downloadQuality.value = readDownloadQuality()
         wifiOnlyDownloads.value = prefs.getBoolean(KEY_WIFI_ONLY_DOWNLOADS, true)
-        exportDownloads.value = prefs.getBoolean(KEY_EXPORT_DOWNLOADS, false)
+        exportDownloads.value = prefs.getBoolean(KEY_EXPORT_DOWNLOADS, true)
         crossfadeSeconds.value = prefs.getInt(KEY_CROSSFADE, 0)
         smartFadeEnabled.value = prefs.getBoolean(KEY_SMART_FADE, false)
         automixPerformanceMode.value = runCatching {

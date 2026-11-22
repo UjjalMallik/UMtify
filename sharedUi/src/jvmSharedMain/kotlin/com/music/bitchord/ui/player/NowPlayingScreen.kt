@@ -3248,9 +3248,11 @@ fun NowPlayingScreen(
                             }
 
                             if (!artIsGone) {
-                                if (isLocal && art.url != null) {
+                                val localUri = song?.localUri ?: song?.localPath
+                                if ((isLocal && art.url != null) || !localUri.isNullOrBlank()) {
                                     com.music.bitchord.ui.components.LocalArtworkImage(
-                                        url = art.url,
+                                        url = art.url ?: localUri.orEmpty(),
+                                        localUri = localUri,
                                         contentDescription = null,
                                         contentScale = ContentScale.Crop,
                                         maxSizePx = 1080,

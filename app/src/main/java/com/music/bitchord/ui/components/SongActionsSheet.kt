@@ -1056,10 +1056,12 @@ internal fun SheetTrackHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val artUrl = rememberRemoteArtworkUrl(song)
-        val isLocal = isLocalArtUrl(artUrl)
-        if (isLocal && artUrl != null) {
+        val localUri = song.localUri ?: song.localPath
+        val isLocal = isLocalArtUrl(artUrl) || !localUri.isNullOrBlank()
+        if (isLocal) {
             LocalArtworkImage(
-                url = artUrl,
+                url = artUrl ?: localUri.orEmpty(),
+                localUri = localUri,
                 contentDescription = null,
                 modifier = Modifier
                     .size(52.dp)

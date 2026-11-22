@@ -32,6 +32,7 @@ expect fun LocalArtworkImage(
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
     maxSizePx: Int = 160,
+    localUri: String? = null,
     onLoadingStateChanged: ((isLoading: Boolean, isSuccess: Boolean) -> Unit)? = null,
     fallback: @Composable () -> Unit = { DefaultCoverTile(modifier = modifier, contentScale = contentScale) },
 )

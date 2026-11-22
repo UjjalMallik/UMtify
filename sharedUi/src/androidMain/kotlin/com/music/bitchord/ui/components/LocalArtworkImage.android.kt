@@ -3,8 +3,11 @@ package com.music.bitchord.ui.components
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.util.LruCache
+import android.util.Size
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -18,9 +21,16 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
+import java.util.concurrent.ConcurrentHashMap
+
+fun localArtHash(key: String): String = key.hashCode().toUInt().toString()
 
 fun calculateInSampleSize(width: Int, height: Int, maxSizePx: Int): Int {
     var inSampleSize = 1
@@ -75,30 +85,39 @@ fun decodeSampledBitmapFromUri(context: Context, uri: Uri, maxSizePx: Int): Bitm
 }
 
 fun findLocalArtThumbFile(context: Context, clean: String): File? {
-    val thumbDir = File(context.cacheDir, "local_art_thumb")
-    if (!thumbDir.exists()) return null
-
+    val thumbDir = File(context.filesDir, "local_art_thumb")
     val name = File(clean).name
     if (name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) || name.endsWith(".png", ignoreCase = true)) {
         val directThumb = File(thumbDir, name)
         if (directThumb.exists() && directThumb.length() > 0) return directThumb
     }
 
-    val hash = clean.hashCode().toUInt().toString()
+    val hash = localArtHash(clean)
     val hashThumb = File(thumbDir, "$hash.jpg")
     if (hashThumb.exists() && hashThumb.length() > 0) return hashThumb
+
+    // Legacy migration check from cacheDir
+    val legacyThumbDir = File(context.cacheDir, "local_art_thumb")
+    val legacyThumb = File(legacyThumbDir, "$hash.jpg")
+    if (legacyThumb.exists() && legacyThumb.length() > 0) {
+        runCatching {
+            if (!thumbDir.exists()) thumbDir.mkdirs()
+            legacyThumb.copyTo(hashThumb, overwrite = true)
+        }
+        return hashThumb
+    }
 
     return null
 }
 
 fun saveThumbnailFileIfMissing(context: Context, clean: String, bmp: Bitmap) {
     runCatching {
-        val thumbDir = File(context.cacheDir, "local_art_thumb").apply { if (!exists()) mkdirs() }
+        val thumbDir = File(context.filesDir, "local_art_thumb").apply { if (!exists()) mkdirs() }
         val name = File(clean).name
         val targetFile = if (name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) || name.endsWith(".png", ignoreCase = true)) {
             File(thumbDir, name)
         } else {
-            val hash = clean.hashCode().toUInt().toString()
+            val hash = localArtHash(clean)
             File(thumbDir, "$hash.jpg")
         }
         if (!targetFile.exists() || targetFile.length() == 0L) {
@@ -108,7 +127,7 @@ fun saveThumbnailFileIfMissing(context: Context, clean: String, bmp: Bitmap) {
             } else {
                 bmp
             }
-            java.io.FileOutputStream(tmp).use { out ->
+            FileOutputStream(tmp).use { out ->
                 scaled.compress(Bitmap.CompressFormat.JPEG, 80, out)
             }
             if (scaled != bmp) scaled.recycle()
@@ -143,10 +162,18 @@ fun decodeSampledBitmap(context: Context, source: String, maxSizePx: Int): Bitma
     }
 
     if (clean.startsWith("content://")) {
-        val hash = clean.hashCode().toUInt().toString()
-        val cachedFile = File(File(context.cacheDir, "local_art"), "$hash.jpg")
-        if (cachedFile.exists() && cachedFile.length() > 0) {
-            val bmp = decodeSampledBitmapFromFile(cachedFile.absolutePath, maxSizePx)
+        val hash = localArtHash(clean)
+        val fullFile = File(File(context.filesDir, "local_art_full"), "$hash.jpg")
+        if (fullFile.exists() && fullFile.length() > 0) {
+            val bmp = decodeSampledBitmapFromFile(fullFile.absolutePath, maxSizePx)
+            if (bmp != null && maxSizePx <= 200) {
+                saveThumbnailFileIfMissing(context, clean, bmp)
+            }
+            return bmp
+        }
+        val legacyFullFile = File(File(context.cacheDir, "local_art"), "$hash.jpg")
+        if (legacyFullFile.exists() && legacyFullFile.length() > 0) {
+            val bmp = decodeSampledBitmapFromFile(legacyFullFile.absolutePath, maxSizePx)
             if (bmp != null && maxSizePx <= 200) {
                 saveThumbnailFileIfMissing(context, clean, bmp)
             }
@@ -173,6 +200,14 @@ object LocalArtworkCache {
         }
     }
 
+    private val noArtHashes = ConcurrentHashMap.newKeySet<String>()
+    @Volatile
+    private var noArtFileLoaded = false
+    private val noArtLock = Any()
+
+    val extractionJobs = ConcurrentHashMap<String, Deferred<Bitmap?>>()
+    val extractionDispatcher = Dispatchers.IO.limitedParallelism(2)
+
     private fun cacheKey(path: String, maxSizePx: Int): String {
         return "${cleanLocalArtPath(path)}:$maxSizePx"
     }
@@ -185,6 +220,93 @@ object LocalArtworkCache {
 
     fun clear() {
         lruCache.evictAll()
+    }
+
+    fun initNoArt(context: Context) {
+        if (noArtFileLoaded) return
+        synchronized(noArtLock) {
+            if (noArtFileLoaded) return
+            val file = File(File(context.filesDir, "local_art_thumb"), "no_art.txt")
+            if (file.exists()) {
+                runCatching {
+                    file.readLines().forEach { line ->
+                        val trimmed = line.trim()
+                        if (trimmed.isNotEmpty()) noArtHashes.add(trimmed)
+                    }
+                }
+            }
+            noArtFileLoaded = true
+        }
+    }
+
+    fun isNoArt(context: Context, key: String): Boolean {
+        initNoArt(context)
+        val hash = localArtHash(cleanLocalArtPath(key))
+        return noArtHashes.contains(hash)
+    }
+
+    fun markNoArt(context: Context, key: String) {
+        initNoArt(context)
+        val hash = localArtHash(cleanLocalArtPath(key))
+        if (noArtHashes.add(hash)) {
+            runCatching {
+                val thumbDir = File(context.filesDir, "local_art_thumb").apply { if (!exists()) mkdirs() }
+                File(thumbDir, "no_art.txt").appendText("$hash\n")
+            }
+        }
+    }
+
+    fun removeNoArt(context: Context, key: String) {
+        initNoArt(context)
+        val hash = localArtHash(cleanLocalArtPath(key))
+        if (noArtHashes.remove(hash)) {
+            runCatching {
+                val file = File(File(context.filesDir, "local_art_thumb"), "no_art.txt")
+                if (file.exists()) {
+                    val remaining = noArtHashes.joinToString("\n")
+                    file.writeText(remaining)
+                }
+            }
+        }
+    }
+
+    fun saveAndCacheThumbnail(context: Context, key: String, picBytes: ByteArray) {
+        val clean = cleanLocalArtPath(key)
+        val hash = localArtHash(clean)
+        val thumbDir = File(context.filesDir, "local_art_thumb").apply { if (!exists()) mkdirs() }
+        val targetFile = File(thumbDir, "$hash.jpg")
+        runCatching {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(picBytes, 0, picBytes.size, bounds)
+            val sampleSize = calculateInSampleSize(bounds.outWidth, bounds.outHeight, 128)
+            val opts = BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = Bitmap.Config.RGB_565
+            }
+            val bmp = BitmapFactory.decodeByteArray(picBytes, 0, picBytes.size, opts)
+            if (bmp != null) {
+                val scaled = if (bmp.width > 128 || bmp.height > 128) {
+                    Bitmap.createScaledBitmap(bmp, 128, 128, true)
+                } else bmp
+
+                val tmp = File(thumbDir, "$hash.tmp")
+                FileOutputStream(tmp).use { out ->
+                    scaled.compress(Bitmap.CompressFormat.JPEG, 80, out)
+                }
+                if (!tmp.renameTo(targetFile)) {
+                    tmp.copyTo(targetFile, overwrite = true)
+                    tmp.delete()
+                }
+
+                val imageBitmap = scaled.asImageBitmap()
+                put(clean, 128, imageBitmap)
+                put(clean, 160, imageBitmap)
+                put(key, 128, imageBitmap)
+                put(key, 160, imageBitmap)
+                if (scaled != bmp) bmp.recycle()
+                removeNoArt(context, key)
+            }
+        }
     }
 
     fun prewarm(path: String, maxSizePx: Int = 160, context: Context? = null) {
@@ -204,6 +326,143 @@ object LocalArtworkCache {
     }
 }
 
+suspend fun extractThumbnailOnDemand(
+    context: Context,
+    key: String,
+    audioUriStr: String,
+): Bitmap? = coroutineScope {
+    val cleanAudioUri = cleanLocalArtPath(audioUriStr)
+    val hash = localArtHash(cleanAudioUri)
+
+    // Check disk first
+    val thumbFile = findLocalArtThumbFile(context, cleanAudioUri) ?: findLocalArtThumbFile(context, key)
+    if (thumbFile != null && thumbFile.length() > 0) {
+        val bmp = decodeSampledBitmapFromFile(thumbFile.absolutePath, 160)
+        if (bmp != null) {
+            val img = bmp.asImageBitmap()
+            LocalArtworkCache.put(key, 160, img)
+            LocalArtworkCache.put(cleanAudioUri, 160, img)
+            return@coroutineScope bmp
+        }
+    }
+
+    if (LocalArtworkCache.isNoArt(context, cleanAudioUri)) return@coroutineScope null
+
+    val deferred = LocalArtworkCache.extractionJobs.computeIfAbsent(hash) {
+        async(LocalArtworkCache.extractionDispatcher) {
+            try {
+                // Secondary disk check within worker
+                val diskFile = findLocalArtThumbFile(context, cleanAudioUri) ?: findLocalArtThumbFile(context, key)
+                if (diskFile != null && diskFile.length() > 0) {
+                    return@async decodeSampledBitmapFromFile(diskFile.absolutePath, 160)
+                }
+
+                var picBytes: ByteArray? = null
+                var loadedBmp: Bitmap? = null
+
+                val directFile = if (cleanAudioUri.startsWith("/")) File(cleanAudioUri).takeIf { it.exists() } else null
+                if (directFile != null) {
+                    runCatching {
+                        val r = MediaMetadataRetriever()
+                        try {
+                            r.setDataSource(directFile.path)
+                            picBytes = r.embeddedPicture
+                        } finally {
+                            r.release()
+                        }
+                    }
+                }
+
+                val uri = runCatching { Uri.parse(cleanAudioUri) }.getOrNull()
+                // 1. Try context.contentResolver.openFileDescriptor(audioUri, "r")
+                if (picBytes == null && uri != null && !cleanAudioUri.startsWith("/")) {
+                    runCatching {
+                        context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                            val r = MediaMetadataRetriever()
+                            try {
+                                r.setDataSource(pfd.fileDescriptor)
+                                picBytes = r.embeddedPicture
+                            } finally {
+                                r.release()
+                            }
+                        }
+                    }
+                }
+
+                // 2. Try retriever.setDataSource(context, uri)
+                if (picBytes == null && uri != null && !cleanAudioUri.startsWith("/")) {
+                    runCatching {
+                        val r = MediaMetadataRetriever()
+                        try {
+                            r.setDataSource(context, uri)
+                            picBytes = r.embeddedPicture
+                        } finally {
+                            r.release()
+                        }
+                    }
+                }
+
+                // 3. Android 10+ (Q) loadThumbnail fallback
+                if (picBytes == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && uri != null && !cleanAudioUri.startsWith("/")) {
+                    runCatching {
+                        loadedBmp = context.contentResolver.loadThumbnail(uri, Size(128, 128), null)
+                    }
+                }
+
+                val finalBmp: Bitmap? = when {
+                    loadedBmp != null -> {
+                        if (loadedBmp.width != 128 || loadedBmp.height != 128) {
+                            val scaled = Bitmap.createScaledBitmap(loadedBmp, 128, 128, true)
+                            if (scaled != loadedBmp) loadedBmp.recycle()
+                            scaled
+                        } else loadedBmp
+                    }
+                    picBytes != null && picBytes.isNotEmpty() -> {
+                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeByteArray(picBytes, 0, picBytes.size, bounds)
+                        val sampleSize = calculateInSampleSize(bounds.outWidth, bounds.outHeight, 128)
+                        val opts = BitmapFactory.Options().apply {
+                            inSampleSize = sampleSize
+                            inPreferredConfig = Bitmap.Config.RGB_565
+                        }
+                        val decoded = BitmapFactory.decodeByteArray(picBytes, 0, picBytes.size, opts)
+                        if (decoded != null && (decoded.width > 128 || decoded.height > 128)) {
+                            val scaled = Bitmap.createScaledBitmap(decoded, 128, 128, true)
+                            if (scaled != decoded) decoded.recycle()
+                            scaled
+                        } else decoded
+                    }
+                    else -> null
+                }
+
+                if (finalBmp != null) {
+                    val thumbDir = File(context.filesDir, "local_art_thumb").apply { if (!exists()) mkdirs() }
+                    val targetFile = File(thumbDir, "$hash.jpg")
+                    val tmp = File(thumbDir, "$hash.tmp")
+                    runCatching {
+                        FileOutputStream(tmp).use { out ->
+                            finalBmp.compress(Bitmap.CompressFormat.JPEG, 80, out)
+                        }
+                        if (!tmp.renameTo(targetFile)) {
+                            tmp.copyTo(targetFile, overwrite = true)
+                            tmp.delete()
+                        }
+                    }
+                    LocalArtworkCache.removeNoArt(context, cleanAudioUri)
+                    finalBmp
+                } else {
+                    LocalArtworkCache.markNoArt(context, cleanAudioUri)
+                    null
+                }
+            } finally {
+                LocalArtworkCache.extractionJobs.remove(hash)
+            }
+        }
+    }
+
+    deferred.await()
+}
+
 private val localImageDispatcher = Dispatchers.IO.limitedParallelism(6)
 
 @Composable
@@ -213,28 +472,32 @@ actual fun LocalArtworkImage(
     modifier: Modifier,
     contentScale: ContentScale,
     maxSizePx: Int,
+    localUri: String?,
     onLoadingStateChanged: ((isLoading: Boolean, isSuccess: Boolean) -> Unit)?,
     fallback: @Composable () -> Unit,
 ) {
-    val cleanPath = cleanLocalArtPath(url)
-    if (cleanPath.isBlank()) {
+    val primaryKey = localUri?.takeIf { it.isNotBlank() } ?: cleanLocalArtPath(url)
+    val fallbackKey = cleanLocalArtPath(url)
+    if (primaryKey.isBlank() && fallbackKey.isBlank()) {
         fallback()
         return
     }
 
-    // Synchronously check RAM LruCache first (exact size, then any size if large)
-    val initialCached = remember(cleanPath, maxSizePx) {
-        LocalArtworkCache.get(cleanPath, maxSizePx)
-            ?: if (maxSizePx > 256) LocalArtworkCache.get(cleanPath, 160) else null
+    // Step A (Instant RAM): Synchronously check RAM LruCache first
+    val initialCached = remember(primaryKey, fallbackKey, maxSizePx) {
+        LocalArtworkCache.get(primaryKey, maxSizePx)
+            ?: LocalArtworkCache.get(fallbackKey, maxSizePx)
+            ?: if (maxSizePx > 256) (LocalArtworkCache.get(primaryKey, 160) ?: LocalArtworkCache.get(fallbackKey, 160)) else null
     }
     val context = LocalContext.current.applicationContext
 
     val state by produceState<LocalArtState>(
         initialValue = if (initialCached != null) LocalArtState.Loaded(initialCached) else LocalArtState.Loading,
-        key1 = cleanPath,
-        key2 = maxSizePx,
+        key1 = primaryKey,
+        key2 = fallbackKey,
+        key3 = maxSizePx,
     ) {
-        val exactCached = LocalArtworkCache.get(cleanPath, maxSizePx)
+        val exactCached = LocalArtworkCache.get(primaryKey, maxSizePx) ?: LocalArtworkCache.get(fallbackKey, maxSizePx)
         if (exactCached != null) {
             value = LocalArtState.Loaded(exactCached)
             onLoadingStateChanged?.invoke(false, true)
@@ -250,11 +513,33 @@ actual fun LocalArtworkImage(
         }
 
         val loaded = withContext(localImageDispatcher) {
-            val bmp = decodeSampledBitmap(context, cleanPath, maxSizePx)
+            // Step B (Instant Disk): Check filesDir/local_art_thumb/<hash>.jpg
+            var bmp = decodeSampledBitmap(context, fallbackKey, maxSizePx)
+            if (bmp == null && primaryKey != fallbackKey) {
+                bmp = decodeSampledBitmap(context, primaryKey, maxSizePx)
+            }
+
+            // Step C (One-Time Lazy Fallback): On-demand extraction if thumbnail missing
+            if (bmp == null) {
+                val candidateAudioUri = when {
+                    localUri?.isNotBlank() == true -> localUri
+                    url.startsWith("local_art://") -> cleanLocalArtPath(url)
+                    url.startsWith("content://") -> url
+                    url.startsWith("/") -> url
+                    url.startsWith("file://") -> cleanLocalArtPath(url)
+                    else -> null
+                }
+                if (candidateAudioUri != null) {
+                    bmp = extractThumbnailOnDemand(context, primaryKey, candidateAudioUri)
+                }
+            }
+
             bmp?.asImageBitmap()?.also {
-                LocalArtworkCache.put(cleanPath, maxSizePx, it)
+                LocalArtworkCache.put(primaryKey, maxSizePx, it)
+                LocalArtworkCache.put(fallbackKey, maxSizePx, it)
             }
         }
+
         if (loaded != null) {
             value = LocalArtState.Loaded(loaded)
             onLoadingStateChanged?.invoke(false, true)
@@ -277,7 +562,6 @@ actual fun LocalArtworkImage(
             )
         }
         is LocalArtState.Loading -> {
-            // Clean, subtle dark surface placeholder with ZERO bright neon flash!
             Box(
                 modifier = modifier.background(Color.White.copy(alpha = 0.06f)),
             )

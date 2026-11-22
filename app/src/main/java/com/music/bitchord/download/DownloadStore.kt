@@ -1,5 +1,6 @@
 package com.music.bitchord.download
 
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.media.MediaScannerConnection
@@ -18,38 +19,16 @@ import java.util.Locale
 /**
  * Where a downloaded track goes, and how it gets there.
  *
- * The destination is the device's own Music folder, in a `BitChord`
- * subfolder — somewhere the file manager lists, other players can open, and a
- * user can back up or delete without going through this app. That choice is
- * what makes this class necessary at all: an app-private directory would be
- * four lines of [File], but a shared one crosses the scoped-storage line and
- * the two sides of that line have nothing in common.
+ * The destination is the device's own public Music folder, in a `UMtify`
+ * subfolder ("Music/UMtify/") — somewhere the file manager lists, other players can open,
+ * and a user can access, play, share or backup directly without going through this app.
  *
- * It goes through the audio collection rather than Downloads because that is
- * where audio belongs and where every other player on the device looks. What
- * first ruled Downloads out was narrower and is worth keeping on the record:
- * the files were `.webm` then — a container extension Android's own mime table
- * ties to video regardless of what MIME type this class declares for it — and a
- * Gallery app crawling Downloads for video-looking files does not care what a
- * column says otherwise. Nothing writes `.webm` any more (see [storable] and
- * `StreamResolver.resolveForDownload`), so that particular trap is behind us;
- * the conclusion it led to is still the right one.
- *
- *  - **API 29+** goes through [MediaStore]. There is no filesystem path to
- *    write to; the store mints a row, hands back a content uri, and the file
- *    exists at a location it chooses. `IS_PENDING` keeps the row invisible to
- *    everything else until the bytes are all there, so a cancelled download is
- *    never a half-file somebody can find and play.
- *  - **API 26–28** is a real path and a runtime permission. The file is written
- *    beside its final name with a `.part` suffix and renamed on completion,
- *    which is the same guarantee `IS_PENDING` gives for free above, and the
- *    media scanner is told afterwards or the file stays invisible to everything
- *    that reads the index rather than the disk.
- *
- * Neither side writes tags — this class only ever copies the bytes the server
- * on the other end sent. [MediaTagger] rewrites the finished file afterwards to
- * add them; the filename below is what every downloaded track carries
- * regardless of whether that rewrite finds a layout it recognises.
+ *  - **API 29+ (Android 10+)** writes to the public `Music/UMtify/` folder through [MediaStore].
+ *    `IS_PENDING` keeps the row invisible to everything else until the bytes are all there.
+ *    `TITLE`, `ARTIST`, `ALBUM`, and `IS_MUSIC = 1` are set on the record.
+ *  - **API 26–28 (Android 9 and below)** writes directly to `File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "UMtify")`
+ *    and triggers [MediaScannerConnection.scanFile] upon completion so files appear immediately
+ *    in device file managers and external music players.
  */
 object DownloadStore {
 
@@ -60,19 +39,6 @@ object DownloadStore {
 
     private val relativePath = "${Environment.DIRECTORY_MUSIC}/$FOLDER"
 
-    /**
-     * Whether saving needs `WRITE_EXTERNAL_STORAGE` asked for at runtime.
-     *
-     * Only below API 29. From there on the app writes through the media store,
-     * which grants access to rows it created and needs no permission for them —
-     * and the permission it would ask for isn't grantable anyway.
-     *
-     * Every version check in this file is written out inline rather than
-     * routed through this, deliberately: lint reads an inline `SDK_INT`
-     * comparison as a guard around the API-29 calls beside it and does not
-     * read a boolean property the same way, so hiding the check behind a name
-     * costs a `NewApi` error on the release build.
-     */
     fun needsLegacyPermission(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
 
     // ---- Naming -------------------------------------------------------------
@@ -95,10 +61,6 @@ object DownloadStore {
         return "${stem.take(MAX_STEM_CHARS).trimEnd()}.$extension"
     }
 
-    /**
-     * Everything a FAT32 volume, the media store or a shell would each object
-     * to for its own reasons, plus the whitespace that survives them.
-     */
     private fun sanitise(raw: String): String = raw
         .replace(ILLEGAL, " ")
         .replace(WHITESPACE, " ")
@@ -114,48 +76,28 @@ object DownloadStore {
     /** What a file of some codec is called and what the store is told it is. */
     class Storable(val extension: String, val mimeType: String)
 
-    /**
-     * How to file a track of [codec], or null if this device won't have it.
-     *
-     * A source that can serve lossless does not thereby serve something Android
-     * will keep: the media store's audio collection accepts a closed list of
-     * MIME types, and one it doesn't recognise is refused outright at [begin] —
-     * which is a download that cannot start rather than one that sounds worse
-     * than hoped. Anything not answered for here falls the caller back to
-     * YouTube's AAC, so an unfamiliar codec costs quality and not the download.
-     *
-     * Kept as a table rather than derived from the codec string because two of
-     * these are not the identity mapping they look like. WAV's registered type
-     * is `audio/x-wav` on Android, and ALAC ships inside an MP4 container, so an
-     * ALAC file is an `.m4a` as far as both the store and [Mp4Tagger] are
-     * concerned — the tagger works on the box tree and never asks what the
-     * samples inside are.
-     */
     fun storable(codec: String?): Storable? = when (codec?.lowercase(Locale.ROOT)?.trim()) {
         "flac", "x-flac" -> Storable("flac", "audio/flac")
         "wav", "x-wav", "wave" -> Storable("wav", "audio/x-wav")
         "alac", "m4a", "mp4", "eac3-joc", "ec3-joc", "dolby-atmos" -> Storable("m4a", "audio/mp4")
+        "mp3" -> Storable("mp3", "audio/mpeg")
+        "ogg" -> Storable("ogg", "audio/ogg")
         else -> null
     }
 
     // ---- Lookup -------------------------------------------------------------
 
-    /**
-     * The uri of a file already saved under this name, or null.
-     *
-     * Worth asking before every download because the media store does not
-     * refuse a duplicate — it silently renames it to `… (1)`, and a user who
-     * taps download twice gets two copies rather than being told they already
-     * have one.
-     */
-    fun existing(context: Context, name: String): Uri? =
-        if (!AppSettings.exportDownloads.value) {
-            privateFile(context, name).takeIf { it.exists() }?.let(Uri::fromFile)
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            mediaStoreEntry(context, name)
-        } else {
-            legacyFile(name).takeIf { it.exists() }?.let(Uri::fromFile)
+    fun existing(context: Context, name: String): Uri? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val entry = mediaStoreEntry(context, name)
+            if (entry != null) return entry
         }
+        val legacy = legacyFile(name)
+        if (legacy.exists() && legacy.length() > 0) return Uri.fromFile(legacy)
+        val priv = privateFile(context, name)
+        if (priv.exists() && priv.length() > 0) return Uri.fromFile(priv)
+        return null
+    }
 
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun mediaStoreEntry(context: Context, name: String): Uri? = runCatching {
@@ -168,21 +110,10 @@ object DownloadStore {
             null,
         )?.use { cursor ->
             if (!cursor.moveToFirst()) return@use null
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI.buildUpon()
-                .appendPath(cursor.getLong(0).toString())
-                .build()
+            ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, cursor.getLong(0))
         }
     }.onFailure { Log.w(TAG, "media store lookup failed for $name: ${it.message}") }.getOrNull()
 
-    /**
-     * Whether [uri] still names a file that is there.
-     *
-     * The record of what has been downloaded is kept by this app, but the files
-     * are not this app's to keep: they sit in a folder built for the user to
-     * manage, and one deleted from a file manager leaves the record behind
-     * claiming a download that no longer exists. Cheap to ask, and the answer
-     * is what stops the menu offering to delete nothing.
-     */
     fun exists(context: Context, uri: Uri): Boolean = runCatching {
         if (uri.scheme == "file") return uri.path?.let { File(it).exists() } == true
         context.contentResolver.openFileDescriptor(uri, "r")?.use { true } == true
@@ -203,23 +134,14 @@ object DownloadStore {
 
     // ---- Writing ------------------------------------------------------------
 
-    /**
-     * A destination that exists but is not yet a file anyone else can see.
-     *
-     * Every path out of here is either [commit] or [abort]; there is no third
-     * option, because the thing being protected against is a partial file
-     * surviving a failure and looking like a whole one.
-     */
     class Pending internal constructor(
         private val context: Context,
         val uri: Uri,
         val name: String,
-        /** Set on the legacy path only: the `.part` file being written. */
         private val part: File?,
-        /** Set on the legacy path only: what [part] is renamed to. */
         private val target: File?,
+        private val song: Song? = null,
     ) {
-        /** The bytes being built, whether this is a MediaStore row or a legacy `.part` file. */
         val tagUri: Uri get() = part?.let(Uri::fromFile) ?: uri
 
         fun openStream(): OutputStream =
@@ -227,12 +149,10 @@ object DownloadStore {
                 ?: context.contentResolver.openOutputStream(uri)
                 ?: error("Could not open $name for writing")
 
-        /** @return the uri the finished file can be reached at. */
+        /** @return the public uri the finished file can be reached at. */
         fun commit(): Uri {
             if (part != null && target != null) {
                 if (!part.renameTo(target)) error("Could not finish writing $name")
-                // Nothing indexes a file that simply appeared; without this it
-                // is on disk and invisible to every app that lists media.
                 MediaScannerConnection.scanFile(
                     context,
                     arrayOf(target.absolutePath),
@@ -241,9 +161,16 @@ object DownloadStore {
                 )
                 return Uri.fromFile(target)
             }
+            val updateValues = ContentValues().apply {
+                put(MediaStore.Audio.Media.IS_PENDING, 0)
+                song?.title?.takeIf { it.isNotBlank() }?.let { put(MediaStore.Audio.Media.TITLE, it) }
+                song?.artist?.takeIf { it.isNotBlank() }?.let { put(MediaStore.Audio.Media.ARTIST, it) }
+                song?.albumName?.takeIf { it.isNotBlank() }?.let { put(MediaStore.Audio.Media.ALBUM, it) }
+                put(MediaStore.Audio.Media.IS_MUSIC, 1)
+            }
             context.contentResolver.update(
                 uri,
-                ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) },
+                updateValues,
                 null,
                 null,
             )
@@ -257,42 +184,32 @@ object DownloadStore {
     }
 
     /**
-     * Reserve [name] and return somewhere to write it.
-     *
-     * @throws IllegalStateException if the folder or the store row can't be
-     *   made — a failure worth surfacing, since every one of them means the
-     *   download cannot start rather than that it might not finish.
+     * Reserve [name] in public "Music/UMtify/" folder and return somewhere to write it.
      */
-    fun begin(context: Context, name: String, mimeType: String): Pending {
-        if (!AppSettings.exportDownloads.value) {
-            val target = privateFile(context, name)
-            val folder = target.parentFile ?: error("No download folder")
-            if (!folder.exists() && !folder.mkdirs()) error("Could not create ${folder.path}")
-            val part = File(folder, ".$name.part")
-            part.delete()
-            return Pending(context, Uri.fromFile(target), name, part = part, target = target)
-        }
+    fun begin(
+        context: Context,
+        name: String,
+        mimeType: String,
+        song: Song? = null,
+    ): Pending {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-                put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
+                put(MediaStore.Audio.Media.DISPLAY_NAME, name)
+                put(MediaStore.Audio.Media.MIME_TYPE, mimeType)
+                put(MediaStore.Audio.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MUSIC}/$FOLDER")
+                song?.title?.takeIf { it.isNotBlank() }?.let { put(MediaStore.Audio.Media.TITLE, it) }
+                song?.artist?.takeIf { it.isNotBlank() }?.let { put(MediaStore.Audio.Media.ARTIST, it) }
+                song?.albumName?.takeIf { it.isNotBlank() }?.let { put(MediaStore.Audio.Media.ALBUM, it) }
+                put(MediaStore.Audio.Media.IS_MUSIC, 1)
+                put(MediaStore.Audio.Media.IS_PENDING, 1)
             }
-            // A MIME type the audio collection doesn't recognise is not a null
-            // return but an IllegalArgumentException thrown from inside the
-            // resolver, several frames away from anything that names the
-            // download it belongs to. Every type written here came from
-            // [storable] or from the stream resolver, so landing in this branch
-            // means one of those two is wrong about this device — worth saying
-            // in those words the first time it happens again.
             val uri = runCatching {
                 context.contentResolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
             }.getOrElse { cause ->
                 Log.w(TAG, "the media store refused $mimeType for $name: ${cause.message}")
                 error("Android won't store ${name.substringAfterLast('.', mimeType)} files in Music")
             } ?: error("Could not create $name in Music")
-            return Pending(context, uri, name, part = null, target = null)
+            return Pending(context, uri, name, part = null, target = null, song = song)
         }
 
         val target = legacyFile(name)
@@ -300,7 +217,7 @@ object DownloadStore {
         if (!folder.exists() && !folder.mkdirs()) error("Could not create ${folder.path}")
         val part = File(folder, "$name.part")
         part.delete()
-        return Pending(context, Uri.fromFile(target), name, part = part, target = target)
+        return Pending(context, Uri.fromFile(target), name, part = part, target = target, song = song)
     }
 
     @Suppress("DEPRECATION")

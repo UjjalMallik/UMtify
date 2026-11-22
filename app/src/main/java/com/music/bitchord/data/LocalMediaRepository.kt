@@ -135,11 +135,7 @@ object LocalMediaRepository {
                         val albumId = cursor.getLong(albumIdCol)
                         val tags = ScannedTags(
                             albumName = cursor.getString(albumCol).cleanTag(),
-                            artworkUrl = if (albumId > 0) {
-                                ContentUris.withAppendedId(albumArtBaseUri, albumId).toString()
-                            } else {
-                                null
-                            },
+                            artworkUrl = getCachedLocalArtThumbUri(context, contentUri) ?: getCachedLocalArtUri(context, contentUri) ?: "local_art://$contentUri",
                             dateAddedSeconds = cursor.getLong(dateAddedCol),
                             dateModifiedSeconds = cursor.getLong(dateModifiedCol),
                         )
@@ -310,34 +306,47 @@ object LocalMediaRepository {
     private val repositoryScope = CoroutineScope(Dispatchers.IO)
     private var enrichmentJob: Job? = null
 
-    private const val LOCAL_ART_DIR = "local_art"
+    private const val LOCAL_ART_DIR = "local_art_full"
     private const val LOCAL_ART_THUMB_DIR = "local_art_thumb"
 
     fun getLocalArtFile(context: Context, key: String): File {
-        val dir = File(context.cacheDir, LOCAL_ART_DIR).apply { if (!exists()) mkdirs() }
+        val dir = File(context.filesDir, LOCAL_ART_DIR).apply { if (!exists()) mkdirs() }
         val hash = key.hashCode().toUInt().toString()
-        return File(dir, "$hash.jpg")
+        val file = File(dir, "$hash.jpg")
+        if (!file.exists()) {
+            val legacy = File(File(context.cacheDir, "local_art"), "$hash.jpg")
+            if (legacy.exists() && legacy.length() > 0) {
+                runCatching { legacy.copyTo(file, overwrite = true) }
+            }
+        }
+        return file
     }
 
     fun getLocalArtThumbFile(context: Context, key: String): File {
-        val dir = File(context.cacheDir, LOCAL_ART_THUMB_DIR).apply { if (!exists()) mkdirs() }
+        val dir = File(context.filesDir, LOCAL_ART_THUMB_DIR).apply { if (!exists()) mkdirs() }
         val hash = key.hashCode().toUInt().toString()
-        return File(dir, "$hash.jpg")
-    }
-
-    private fun calculateThumbSampleSize(width: Int, height: Int, maxSize: Int): Int {
-        var inSampleSize = 1
-        if (width > maxSize || height > maxSize) {
-            val halfHeight = height / 2
-            val halfWidth = width / 2
-            while ((halfHeight / inSampleSize) >= maxSize && (halfWidth / inSampleSize) >= maxSize) {
-                inSampleSize *= 2
+        val file = File(dir, "$hash.jpg")
+        if (!file.exists()) {
+            val legacy = File(File(context.cacheDir, "local_art_thumb"), "$hash.jpg")
+            if (legacy.exists() && legacy.length() > 0) {
+                runCatching { legacy.copyTo(file, overwrite = true) }
             }
         }
-        return inSampleSize.coerceAtLeast(1)
+        return file
+    }
+
+    fun getCachedLocalArtThumbUri(context: Context, key: String): String? {
+        val file = getLocalArtThumbFile(context, key)
+        return if (file.exists() && file.length() > 0) {
+            "file://${file.absolutePath}"
+        } else {
+            null
+        }
     }
 
     fun getCachedLocalArtUri(context: Context, key: String): String? {
+        val thumb = getCachedLocalArtThumbUri(context, key)
+        if (thumb != null) return thumb
         val file = getLocalArtFile(context, key)
         return if (file.exists() && file.length() > 0) {
             "file://${file.absolutePath}"
@@ -347,12 +356,12 @@ object LocalMediaRepository {
     }
 
     fun extractAndCacheLocalArt(context: Context, audioUriStr: String, key: String): String? {
-        val cached = getCachedLocalArtUri(context, key)
+        val cached = getCachedLocalArtThumbUri(context, key) ?: getCachedLocalArtUri(context, key)
         if (cached != null) return cached
 
         val parsedUri = Uri.parse(audioUriStr)
         val meta = extractMetadataAndArt(context, parsedUri, key)
-        return meta?.artworkUri ?: getCachedLocalArtUri(context, key)
+        return meta?.artworkUri ?: getCachedLocalArtThumbUri(context, key) ?: getCachedLocalArtUri(context, key)
     }
 
     fun extractMetadataAndArt(context: Context, fileUri: Uri, trackKey: String): ExtractedMeta? {
@@ -436,11 +445,14 @@ object LocalMediaRepository {
             }
         }
 
-        // 4. Write bytes atomically to cacheDir/local_art/<hash>.jpg
+        // 4. Write bytes atomically to filesDir/local_art_full/<hash>.jpg and filesDir/local_art_thumb/<hash>.jpg
         var artUri: String? = null
         val artFile = getLocalArtFile(context, trackKey)
         val thumbFile = getLocalArtThumbFile(context, trackKey)
-        if (artFile.exists() && artFile.length() > 0) {
+
+        if (thumbFile.exists() && thumbFile.length() > 0) {
+            artUri = "file://${thumbFile.absolutePath}"
+        } else if (artFile.exists() && artFile.length() > 0) {
             artUri = "file://${artFile.absolutePath}"
         } else if (picBytes != null && picBytes.isNotEmpty()) {
             runCatching {
@@ -452,14 +464,14 @@ object LocalMediaRepository {
             }
         }
 
-        // Generate tiny 128x128 disk thumbnail (~5KB)
+        // Generate tiny 128x128 disk thumbnail (~5KB) permanently in filesDir/local_art_thumb
         if (!thumbFile.exists() || thumbFile.length() == 0L) {
             runCatching {
                 val rawBytes = picBytes ?: if (artFile.exists()) artFile.readBytes() else null
                 if (rawBytes != null && rawBytes.isNotEmpty()) {
                     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, bounds)
-                    val sampleSize = calculateThumbSampleSize(bounds.outWidth, bounds.outHeight, 128)
+                    val sampleSize = com.music.bitchord.ui.components.calculateInSampleSize(bounds.outWidth, bounds.outHeight, 128)
                     val opts = BitmapFactory.Options().apply {
                         inSampleSize = sampleSize
                         inPreferredConfig = Bitmap.Config.RGB_565
@@ -481,6 +493,7 @@ object LocalMediaRepository {
                             tmpThumb.copyTo(thumbFile, overwrite = true)
                             tmpThumb.delete()
                         }
+                        artUri = "file://${thumbFile.absolutePath}"
                     }
                 }
             }
@@ -957,8 +970,8 @@ object LocalMediaRepository {
                                 ?: "Track $id"
                             val artist = rawArtist.takeUnless { it.isNullOrBlank() || it == "<unknown>" } ?: "Unknown Artist"
                             val albumName = rawAlbum.takeUnless { it.isNullOrBlank() || it == "<unknown>" }
-                            val cachedArt = getCachedLocalArtUri(context, contentUri)
-                            val artworkUrl = cachedArt ?: if (albumId > 0) ContentUris.withAppendedId(albumArtBaseUri, albumId).toString() else "local_art://$contentUri"
+                            val cachedArt = getCachedLocalArtThumbUri(context, contentUri) ?: getCachedLocalArtUri(context, contentUri)
+                            val artworkUrl = cachedArt ?: "local_art://$contentUri"
                             val durationText = durationMs.takeIf { it > 0 }?.let(::formatDuration)
                             val trackNumber = if (trackCol >= 0 && !cursor.isNull(trackCol)) {
                                 trackNumberFromMediaStore(cursor.getInt(trackCol))
