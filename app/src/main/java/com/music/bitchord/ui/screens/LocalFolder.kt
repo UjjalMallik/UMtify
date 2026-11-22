@@ -443,13 +443,12 @@ private fun SongGridCard(
                     fallback = { CoverPlaceholder(Icons.Rounded.MusicNote, Modifier.fillMaxSize()) },
                 )
             } else if (art != null) {
-                    AsyncImage(
-                        model = art.artworkAt(CARD_ART_PX),
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
+                AsyncImage(
+                    model = art.artworkAt(CARD_ART_PX),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
             if (isCurrent && isPlaying) {
                 SearchPlayingBars(Modifier.align(Alignment.Center))
@@ -639,13 +638,12 @@ private fun AlbumGridCard(
                     fallback = { CoverPlaceholder(group.placeholderIcon(), Modifier.fillMaxSize()) },
                 )
             } else if (art != null) {
-                    AsyncImage(
-                        model = art.artworkAt(CARD_ART_PX),
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
+                AsyncImage(
+                    model = art.artworkAt(CARD_ART_PX),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
         }
         Spacer(Modifier.height(8.dp))
