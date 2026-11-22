@@ -3134,7 +3134,6 @@ private fun BitChordApp(
                                 PlaybackSourceType.BROWSE,
                                 page.browseId,
                             )
-                            val selected = songs.getOrNull(index)
                             val pageSongKeys =
                                 (page.songs as? UiState.Success)?.data.orEmpty().mapTo(HashSet()) { it.contextEntryKey() }
                             val useBounded =
