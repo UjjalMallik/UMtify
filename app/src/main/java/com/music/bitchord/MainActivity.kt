@@ -4634,8 +4634,8 @@ private fun BitChordApp(
                         songActions = null
                         val allIds = listOfNotNull(song.localPath, song.localUri, song.videoId).filter { it.isNotBlank() }
                         AppSettings.excludeLocalSongs(allIds)
-                        LocalMediaRepository.removeSong(this@MainActivity, song)
-                        Toast.makeText(this@MainActivity, "Removed from app (file preserved in storage)", Toast.LENGTH_SHORT).show()
+                        LocalMediaRepository.removeSong(context, song)
+                        Toast.makeText(context, "Removed from app (file preserved in storage)", Toast.LENGTH_SHORT).show()
                     }
                 } else null,
             )
