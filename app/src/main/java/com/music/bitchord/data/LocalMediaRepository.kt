@@ -64,6 +64,20 @@ object LocalMediaRepository {
         "/whatsapp voice notes/",
     )
 
+    fun isUmtifyPath(path: String?): Boolean {
+        if (path.isNullOrBlank()) return false
+        val lower = path.replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT)
+        return lower.endsWith("/umtify") ||
+            lower.endsWith("/bitchord") ||
+            lower.contains("/music/umtify") ||
+            lower.contains("/music/bitchord") ||
+            lower.contains("/music%2fumtify") ||
+            lower.contains("/music%2fbitchord") ||
+            lower.contains("/storage/emulated/0/music/umtify") ||
+            lower.contains("/storage/emulated/0/music/bitchord") ||
+            (lower.contains("umtify") && (lower.contains("music") || lower.contains("audio") || lower.contains("download")))
+    }
+
     /** Check if storage/audio permission is granted to query device local music. */
     fun hasStoragePermission(context: Context): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -92,7 +106,7 @@ object LocalMediaRepository {
      * downloaded before that field existed.
      */
     suspend fun getDownloadedSongs(context: Context): List<Song> = withContext(Dispatchers.IO) {
-        val appDownloads = Downloads.getDownloadedSongs(context)
+        val appDownloads = Downloads.syncPublicDownloadsFolder(context)
         val knownUris = appDownloads.mapNotNull { it.localUri }.toSet()
         val extraSongs = mutableListOf<Song>()
 
@@ -243,6 +257,11 @@ object LocalMediaRepository {
                 val obj = jsonArray.getJSONObject(i)
                 val videoId = obj.optString("id").ifBlank { obj.optString("videoId") }
                 if (videoId.isBlank()) continue
+                val localUri = obj.optString("localUri").takeIf { it.isNotBlank() } ?: videoId
+                val localPath = obj.optString("localPath").takeIf { it.isNotBlank() }
+                val folderUri = obj.optString("folderUri").takeIf { it.isNotBlank() }
+                if (isUmtifyPath(localUri) || isUmtifyPath(localPath) || isUmtifyPath(folderUri)) continue
+                if (localPath != null && localPath.startsWith("/") && !File(localPath).exists()) continue
                 list.add(
                     Song(
                         videoId = videoId,
@@ -251,17 +270,35 @@ object LocalMediaRepository {
                         thumbnailUrl = obj.optString("thumbnailUrl").takeIf { it.isNotBlank() },
                         durationText = obj.optString("durationText").takeIf { it.isNotBlank() },
                         albumName = obj.optString("albumName").takeIf { it.isNotBlank() },
-                        localUri = obj.optString("localUri").takeIf { it.isNotBlank() } ?: videoId,
-                        localPath = obj.optString("localPath").takeIf { it.isNotBlank() },
+                        localUri = localUri,
+                        localPath = localPath,
                         localDateAddedSeconds = if (obj.has("dateAdded")) obj.optLong("dateAdded") else null,
                         localDateModifiedSeconds = if (obj.has("dateModified")) obj.optLong("dateModified") else null,
                         trackNumber = if (obj.has("trackNumber")) obj.optInt("trackNumber") else null,
-                        folderUri = obj.optString("folderUri").takeIf { it.isNotBlank() },
+                        folderUri = folderUri,
                     )
                 )
             }
             list
         }.getOrDefault(emptyList())
+    }
+
+    fun removeSongFromCache(context: Context, songOrUriOrId: String, optionalUri: String? = null) {
+        val current = allLocalSongsFlow.value
+        val updated = current.filterNot { song ->
+            song.videoId == songOrUriOrId ||
+                song.localUri == songOrUriOrId ||
+                song.localPath == songOrUriOrId ||
+                (optionalUri != null && (song.localUri == optionalUri || song.localPath == optionalUri || song.videoId == optionalUri))
+        }
+        if (updated.size != current.size) {
+            allLocalSongsFlow.value = updated
+            saveCachedIndex(context, updated)
+        }
+    }
+
+    fun removeSong(context: Context, song: Song) {
+        removeSongFromCache(context, song.videoId, song.localUri ?: song.localPath)
     }
 
     fun saveCachedIndex(context: Context, songs: List<Song>) {
@@ -828,9 +865,12 @@ object LocalMediaRepository {
 
             // 1. Scan custom SAF folders
             for (uriStr in customUris) {
-                if (uriStr in excludedFolders || uriStr.normalizedPath() in excludedFolders) continue
-                val safSongs = scanSafFolderFast(context, uriStr)
+                if (isUmtifyPath(uriStr) || uriStr in excludedFolders || uriStr.normalizedPath() in excludedFolders) continue
                 val displayName = getFolderDisplayName(context, uriStr)
+                if (displayName.equals("UMtify", ignoreCase = true) || displayName.equals("BitChord", ignoreCase = true)) continue
+                val safSongs = scanSafFolderFast(context, uriStr).filterNot {
+                    isUmtifyPath(it.localPath) || isUmtifyPath(it.localUri)
+                }
                 foldersList.add(DeviceFolder(name = displayName, path = uriStr, songCount = safSongs.size, isCustom = true))
 
                 for (safSong in safSongs) {
@@ -854,6 +894,7 @@ object LocalMediaRepository {
 
             // 2. Scan individually selected songs (if any)
             for (songUriStr in selectedIndividualSongs) {
+                if (isUmtifyPath(songUriStr)) continue
                 val normPath = songUriStr.normalizedPath()
                 if (normPath in seenKeys || songUriStr in seenKeys) continue
                 if (excludedSongs.isNotEmpty() && (songUriStr in excludedSongs || normPath in excludedSongs)) continue
@@ -943,11 +984,12 @@ object LocalMediaRepository {
                             val albumId = cursor.getLong(albumIdCol)
                             val durationMs = cursor.getLong(durationCol)
                             val path = cursor.getString(dataCol)
-
+                            if (isUmtifyPath(path)) continue
                             if (filterNonMusic && !isEligibleLocalMusic(durationMs, displayName, path)) continue
 
                             val folderPath = path?.let { File(it).parent }
                             if (folderPath != null) {
+                                if (isUmtifyPath(folderPath) || File(folderPath).name.equals("UMtify", ignoreCase = true) || File(folderPath).name.equals("BitChord", ignoreCase = true)) continue
                                 if (folderPath in excludedFolders || folderPath.normalizedPath() in excludedFolders) continue
                                 mediaStoreFolderCounts[folderPath] = (mediaStoreFolderCounts[folderPath] ?: 0) + 1
                             }
@@ -1001,6 +1043,7 @@ object LocalMediaRepository {
                 }.onFailure { Log.w(TAG, "Failed scanning device local music: ${it.message}") }
 
                 mediaStoreFolderCounts.forEach { (path, count) ->
+                    if (isUmtifyPath(path) || path.substringAfterLast('/').equals("UMtify", ignoreCase = true) || path.substringAfterLast('/').equals("BitChord", ignoreCase = true)) return@forEach
                     val norm = path.normalizedPath()
                     if (path !in excludedFolders && norm !in excludedFolders && foldersList.none { it.path.normalizedPath() == norm }) {
                         val name = path.substringAfterLast('/').ifBlank { "Storage" }
@@ -1009,12 +1052,24 @@ object LocalMediaRepository {
                 }
             }
 
-            detectedAudioFolders.value = foldersList.sortedWith(
+            val currentFolders = detectedAudioFolders.value
+            val newFolders = foldersList.sortedWith(
                 compareByDescending<DeviceFolder> { it.isCustom }
                     .thenByDescending { it.songCount }
             )
-            allLocalSongsFlow.value = collectedSongs
-            saveCachedIndex(context, collectedSongs)
+            if (currentFolders != newFolders) {
+                detectedAudioFolders.value = newFolders
+            }
+
+            val currentSongs = allLocalSongsFlow.value
+            val hasSongsChanged = currentSongs.size != collectedSongs.size ||
+                currentSongs.zip(collectedSongs).any { (old, new) ->
+                    old.videoId != new.videoId || old.title != new.title || old.thumbnailUrl != new.thumbnailUrl
+                }
+            if (hasSongsChanged || currentSongs.isEmpty()) {
+                allLocalSongsFlow.value = collectedSongs
+                saveCachedIndex(context, collectedSongs)
+            }
 
             // Trigger background Pass 2 enrichment
             triggerEnrichmentPass(context, collectedSongs)
@@ -1128,6 +1183,7 @@ object LocalMediaRepository {
      * of scanner metadata so the same bad rows stay out across Android vendors.
      */
     internal fun isEligibleLocalMusic(durationMs: Long, displayName: String, path: String?): Boolean {
+        if (isUmtifyPath(path) || displayName.equals("UMtify", ignoreCase = true) || displayName.equals("BitChord", ignoreCase = true)) return false
         if (durationMs in 1..MIN_LOCAL_MUSIC_DURATION_MS) return false
 
         val fileName = path?.substringAfterLast('/')?.takeIf { it.isNotBlank() }

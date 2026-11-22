@@ -1,12 +1,17 @@
 package com.music.bitchord.download
 
+import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import com.music.bitchord.data.DebugLog as Log
 import androidx.core.content.ContextCompat
+import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.durationMillis
@@ -623,6 +628,176 @@ object Downloads {
     }
 
     private val recordLock = Any()
+
+    private fun isAudioFileName(name: String): Boolean {
+        val lower = name.lowercase(Locale.ROOT)
+        return lower.endsWith(".mp3") || lower.endsWith(".m4a") ||
+            lower.endsWith(".flac") || lower.endsWith(".wav") ||
+            lower.endsWith(".ogg") || lower.endsWith(".opus") ||
+            lower.endsWith(".aac") || lower.endsWith(".webm")
+    }
+
+    /**
+     * Synchronizes the public `Music/UMtify` folder into the app's Downloads database.
+     * Discovers external additions or restored downloads after clear data / reinstall,
+     * and auto-prunes ghost tracks whose files no longer exist on storage.
+     */
+    suspend fun syncPublicDownloadsFolder(context: Context): List<Song> = withContext(Dispatchers.IO) {
+        if (!::prefs.isInitialized) {
+            init(context)
+        }
+        val currentMeta = _savedMetadata.value
+        val existingUris = currentMeta.values.map { it.uri }.toSet()
+        val discoveredNew = mutableMapOf<String, SavedSongMetadata>()
+
+        // 1. Scan MediaStore on Android 10+ (Q+)
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val projection = arrayOf(
+                    MediaStore.Audio.Media._ID,
+                    MediaStore.Audio.Media.DISPLAY_NAME,
+                    MediaStore.Audio.Media.TITLE,
+                    MediaStore.Audio.Media.ARTIST,
+                    MediaStore.Audio.Media.ALBUM,
+                    MediaStore.Audio.Media.DURATION,
+                    MediaStore.Audio.Media.DATE_ADDED,
+                    MediaStore.Audio.Media.DATE_MODIFIED,
+                )
+                val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? OR ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
+                val selectionArgs = arrayOf("%${DownloadStore.FOLDER}%", "%BitChord%")
+
+                context.contentResolver.query(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    null,
+                )?.use { cursor ->
+                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                    val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
+                    val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                    val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                    val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                    val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                    val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+
+                    while (cursor.moveToNext()) {
+                        val id = cursor.getLong(idCol)
+                        val name = cursor.getString(nameCol) ?: continue
+                        val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id).toString()
+                        if (contentUri in existingUris || contentUri in discoveredNew) continue
+
+                        val rawTitle = cursor.getString(titleCol)
+                        val rawArtist = cursor.getString(artistCol)
+                        val rawAlbum = cursor.getString(albumCol)
+                        val durationMs = cursor.getLong(durationCol)
+
+                        var title = rawTitle?.takeUnless { it.isBlank() || it == "<unknown>" }
+                            ?: name.substringBeforeLast('.').ifBlank { "Track $id" }
+                        var artist = rawArtist?.takeUnless { it.isBlank() || it == "<unknown>" } ?: "Unknown Artist"
+                        if (title == name.substringBeforeLast('.') && name.contains(" - ")) {
+                            val parts = name.substringBeforeLast('.').split(" - ", limit = 2)
+                            if (parts[0].isNotBlank()) artist = parts[0].trim()
+                            if (parts[1].isNotBlank()) title = parts[1].trim()
+                        }
+                        val album = rawAlbum?.takeUnless { it.isBlank() || it == "<unknown>" }
+                        val durationText = durationMs.takeIf { it > 0 }?.let { ms ->
+                            val totalSecs = ms / 1000
+                            val mins = totalSecs / 60
+                            val secs = totalSecs % 60
+                            String.format(Locale.ROOT, "%d:%02d", mins, secs)
+                        }
+
+                        val cachedArt = LocalMediaRepository.getCachedLocalArtThumbUri(context, contentUri)
+                            ?: LocalMediaRepository.getCachedLocalArtUri(context, contentUri)
+                            ?: LocalMediaRepository.extractAndCacheLocalArt(context, contentUri, contentUri)
+
+                        val dateAdded = cursor.getLong(dateAddedCol).takeIf { it > 0 }
+                            ?: (System.currentTimeMillis() / 1000L)
+
+                        discoveredNew[contentUri] = SavedSongMetadata(
+                            videoId = contentUri,
+                            title = title,
+                            artist = artist,
+                            thumbnailUrl = cachedArt,
+                            durationText = durationText,
+                            albumName = album,
+                            uri = contentUri,
+                            downloadFormat = "OFFLINE",
+                            dateAddedSeconds = dateAdded,
+                        )
+                    }
+                }
+            }
+        }.onFailure { Log.w(TAG, "MediaStore scan in syncPublicDownloadsFolder failed: ${it.message}") }
+
+        // 2. Scan public Music/UMtify directory for legacy/direct file access
+        runCatching {
+            val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+            listOf(File(musicDir, DownloadStore.FOLDER), File(musicDir, "BitChord")).forEach { folder ->
+                if (folder.exists() && folder.isDirectory) {
+                    folder.listFiles()?.forEach { file ->
+                        if (file.isFile && file.length() > 0 && isAudioFileName(file.name)) {
+                            val fileUri = Uri.fromFile(file).toString()
+                            if (fileUri !in existingUris && fileUri !in discoveredNew) {
+                                val meta = LocalMediaRepository.extractMetadataAndArt(context, Uri.fromFile(file), fileUri)
+                                var title = meta?.title ?: file.nameWithoutExtension
+                                var artist = meta?.artist ?: "Unknown Artist"
+                                if (title == file.nameWithoutExtension && file.nameWithoutExtension.contains(" - ")) {
+                                    val parts = file.nameWithoutExtension.split(" - ", limit = 2)
+                                    if (parts[0].isNotBlank()) artist = parts[0].trim()
+                                    if (parts[1].isNotBlank()) title = parts[1].trim()
+                                }
+                                val durationText = meta?.durationMs?.takeIf { it > 0 }?.let { ms ->
+                                    val totalSecs = ms / 1000
+                                    val mins = totalSecs / 60
+                                    val secs = totalSecs % 60
+                                    String.format(Locale.ROOT, "%d:%02d", mins, secs)
+                                }
+                                val dateAdded = file.lastModified().takeIf { it > 0 }?.div(1000L)
+                                    ?: (System.currentTimeMillis() / 1000L)
+
+                                discoveredNew[fileUri] = SavedSongMetadata(
+                                    videoId = fileUri,
+                                    title = title,
+                                    artist = artist,
+                                    thumbnailUrl = meta?.artworkUri,
+                                    durationText = durationText,
+                                    albumName = meta?.album,
+                                    uri = fileUri,
+                                    downloadFormat = "OFFLINE",
+                                    dateAddedSeconds = dateAdded,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }.onFailure { Log.w(TAG, "Directory scan in syncPublicDownloadsFolder failed: ${it.message}") }
+
+        // 3. Prune ghost downloads whose files no longer exist
+        val toRemove = mutableSetOf<String>()
+        for ((id, meta) in currentMeta) {
+            val uri = runCatching { Uri.parse(meta.uri) }.getOrNull()
+            if (uri == null || !DownloadStore.exists(context, uri)) {
+                toRemove.add(id)
+            }
+        }
+
+        // 4. Atomically persist additions and pruning if any change occurred
+        if (discoveredNew.isNotEmpty() || toRemove.isNotEmpty()) {
+            record(
+                saved = { current ->
+                    (current - toRemove) + discoveredNew.mapValues { (_, meta) -> meta.uri }
+                },
+                meta = { current ->
+                    (current - toRemove) + discoveredNew
+                },
+            )
+        }
+
+        getDownloadedSongs(context)
+    }
 
     /** Returns all downloaded songs whose files still exist on disk. */
     suspend fun getDownloadedSongs(context: Context): List<Song> = withContext(Dispatchers.IO) {

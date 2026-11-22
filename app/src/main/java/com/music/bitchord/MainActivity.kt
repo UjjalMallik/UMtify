@@ -130,6 +130,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.music.bitchord.auth.DiscordLoginScreen
 import com.music.bitchord.auth.SpotifyLoginScreen
@@ -549,6 +550,24 @@ class MainActivity : AppCompatActivity() {
         PlayerDeepLink.consume(intent)
         JamInviteLink.consume(intent)
         MusicLink.consume(intent)
+    }
+
+    private var lastBackgroundSyncTime = 0L
+
+    override fun onResume() {
+        super.onResume()
+        val now = System.currentTimeMillis()
+        if (now - lastBackgroundSyncTime > 30_000L) {
+            lastBackgroundSyncTime = now
+            val appContext = applicationContext
+            lifecycleScope.launch(Dispatchers.IO) {
+                delay(1200L)
+                runCatching {
+                    Downloads.syncPublicDownloadsFolder(appContext)
+                    LocalMediaRepository.refreshLocalMusic(appContext)
+                }
+            }
+        }
     }
 }
 
@@ -4607,6 +4626,18 @@ private fun BitChordApp(
                 } else {
                     null
                 },
+                onRemoveFromApp = if (song.localUri != null || song.localPath != null ||
+                    song.videoId.startsWith("content://") || song.videoId.startsWith("file://") ||
+                    LocalMediaRepository.allLocalSongsFlow.value.any { it.videoId == song.videoId }
+                ) {
+                    {
+                        songActions = null
+                        val allIds = listOfNotNull(song.localPath, song.localUri, song.videoId).filter { it.isNotBlank() }
+                        AppSettings.excludeLocalSongs(allIds)
+                        LocalMediaRepository.removeSong(this@MainActivity, song)
+                        Toast.makeText(this@MainActivity, "Removed from app (file preserved in storage)", Toast.LENGTH_SHORT).show()
+                    }
+                } else null,
             )
         }
         songActions?.takeIf { songMenuOrigin == null }?.let { song ->

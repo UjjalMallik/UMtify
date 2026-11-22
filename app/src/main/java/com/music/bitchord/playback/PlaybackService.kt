@@ -4029,9 +4029,11 @@ class PlaybackService : MediaLibraryService() {
         // stream, and dropping the record is what stops the next play walking
         // into the same hole. Deliberately ahead of the verdict and the attempt
         // budget below: this is not an attempt spent, it is a different source.
-        if (error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND &&
-            restreamMissingLocalFile(player, item, uri, position)
-        ) {
+        val isMissingFile = error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ||
+            error.errorCode == PlaybackException.ERROR_CODE_IO_NO_PERMISSION ||
+            error.cause is java.io.FileNotFoundException ||
+            error.cause is SecurityException
+        if (isMissingFile && restreamMissingLocalFile(player, item, uri, position)) {
             return
         }
         // A manifest read as audio is not a broken stream, and everything below
@@ -4269,6 +4271,7 @@ class PlaybackService : MediaLibraryService() {
         val mediaId = item.mediaId
 
         Downloads.forgetMissing(mediaId)
+        LocalMediaRepository.removeSongFromCache(this, mediaId, uri?.toString())
         val restreamed = item.toSong().copy(localUri = null, localPath = null).toMediaItem()
         if (restreamed.localConfiguration?.uri == uri) {
             TrackLog.w(
@@ -4276,7 +4279,14 @@ class PlaybackService : MediaLibraryService() {
                 "$mediaId is a local file that is gone and has no stream behind it",
                 about = mediaId,
             )
-            return false
+            scope.launch(Dispatchers.Main) {
+                val currentIndex = player.currentMediaItemIndex
+                if (currentIndex in 0 until player.mediaItemCount) {
+                    player.removeMediaItem(currentIndex)
+                }
+                android.widget.Toast.makeText(this@PlaybackService, "File not found on device storage", android.widget.Toast.LENGTH_SHORT).show()
+            }
+            return true
         }
 
         TrackLog.w(

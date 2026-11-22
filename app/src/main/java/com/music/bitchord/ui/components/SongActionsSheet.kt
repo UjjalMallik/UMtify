@@ -34,6 +34,7 @@ import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Downloading
@@ -198,6 +199,11 @@ fun SongActionsSheet(
      */
     resolvingLinks: Boolean = false,
     /**
+     * Removes this track from the app's local music index (adding to excluded list)
+     * without deleting the underlying file from device storage.
+     */
+    onRemoveFromApp: (() -> Unit)? = null,
+    /**
      * Where the rows are drawn. [SongActionsPresentation.Sheet] is the tinted
      * bottom sheet with its own track header; [SongActionsPresentation.Menu]
      * is only the rows, compact and in the theme's own colours, for the
@@ -304,6 +310,14 @@ fun SongActionsSheet(
                 ActionRow(
                     icon = Icons.Rounded.Edit,
                     label = stringResource(R.string.edit_song_info),
+                    accent = palette.accent,
+                    onClick = it,
+                )
+            }
+            onRemoveFromApp?.let {
+                ActionRow(
+                    icon = Icons.Rounded.DeleteOutline,
+                    label = "Remove from app",
                     accent = palette.accent,
                     onClick = it,
                 )
