@@ -243,7 +243,7 @@ object LocalMediaRepository {
     val allLocalSongsFlow = MutableStateFlow<List<Song>>(emptyList())
 
     private const val LOCAL_TRACKS_INDEX_FILE = "local_tracks_index.json"
-    private const val LOCAL_TRACKS_INDEX_VERSION = 2
+    private const val LOCAL_TRACKS_INDEX_VERSION = 3
 
     fun getIndexFile(context: Context): File = File(context.filesDir, LOCAL_TRACKS_INDEX_FILE)
 
@@ -266,17 +266,7 @@ object LocalMediaRepository {
 
         // 1. Prioritize Embedded Audio Tags First:
         if (hasValidTitle && hasValidArtist) {
-            val titleCues = listOf("(from ", "[from ", "(official", "[official", "(video", "[video", "(remix", "[remix", "(lyrical", "[lyrical", "(audio", "[audio", "(feat.", "[feat.", "(ft.", "[ft.")
-            val cleanTitleLower = cleanTitle.lowercase(Locale.ROOT)
-            val cleanArtistLower = cleanArtist.lowercase(Locale.ROOT)
-            val titleHasCue = titleCues.any { cleanTitleLower.contains(it) }
-            val artistHasCue = titleCues.any { cleanArtistLower.contains(it) }
-
-            return if (artistHasCue && !titleHasCue) {
-                cleanArtist to cleanTitle
-            } else {
-                cleanTitle to cleanArtist
-            }
+            return cleanTitle to cleanArtist
         }
 
         // 2. If title tag contains " - " and artist is missing/unknown:
@@ -284,7 +274,7 @@ object LocalMediaRepository {
             return splitCompound(cleanTitle)
         }
 
-        // 3. Fallback to filename parsing
+        // 3. Fallback to filename parsing: "Song Title - Artist Name"
         if (baseName.contains(" - ")) {
             val (fileTitle, fileArtist) = splitCompound(baseName)
             val finalTitle = if (hasValidTitle) cleanTitle!! else fileTitle
@@ -303,24 +293,10 @@ object LocalMediaRepository {
             return text.trim() to "Unknown Artist"
         }
         val parts = text.split(" - ", limit = 2)
-        val part0 = parts[0].trim()
-        val part1 = parts[1].trim()
-
-        val titleCues = listOf("(from ", "[from ", "(official", "[official", "(video", "[video", "(remix", "[remix", "(lyrical", "[lyrical", "(audio", "[audio", "(feat.", "[feat.", "(ft.", "[ft.")
-        val part0Lower = part0.lowercase(Locale.ROOT)
-        val part1Lower = part1.lowercase(Locale.ROOT)
-
-        val part0HasTitleCue = titleCues.any { part0Lower.contains(it) }
-        val part1HasTitleCue = titleCues.any { part1Lower.contains(it) }
-
-        // Only invert if parts[0] clearly has title cues and parts[1] does not
-        return if (part0HasTitleCue && !part1HasTitleCue) {
-            part0 to part1 // title = part0, artist = part1
-        } else {
-            // Default standard: "Artist - Title" (fixes files like "Arijit Singh - Asatoma Sadgamaya")
-            // artist = part0, title = part1
-            part1 to part0 // title = part1, artist = part0
-        }
+        val title = parts[0].trim()
+        val artist = parts[1].trim()
+        return (if (title.isNotBlank()) title else "Unknown Title") to
+            (if (artist.isNotBlank()) artist else "Unknown Artist")
     }
 
     fun loadCachedIndex(context: Context): List<Song> {
