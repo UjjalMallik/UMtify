@@ -13,6 +13,7 @@ import com.music.bitchord.data.DebugLog as Log
 import androidx.core.content.ContextCompat
 import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.innertube.StreamResolver
+import com.music.bitchord.playback.AudioCache
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.durationMillis
 import com.music.bitchord.data.settings.AppSettings
@@ -183,7 +184,8 @@ object Downloads {
      */
     fun enqueue(context: Context, song: Song, from: String? = null) {
         val id = song.videoId
-        if (!AppSettings.downloadsAllowedNow) {
+        val isCached = AudioCache.isSongFullyCached(id)
+        if (!AppSettings.downloadsAllowedNow && !isCached) {
             // Distinct from the duplicate-tap no-op below: nothing is in flight
             // here to leave alone, and a refusal nobody is told about reads as a
             // dead button. A download already queued or running started on a
@@ -692,14 +694,7 @@ object Downloads {
                         val rawAlbum = cursor.getString(albumCol)
                         val durationMs = cursor.getLong(durationCol)
 
-                        var title = rawTitle?.takeUnless { it.isBlank() || it == "<unknown>" }
-                            ?: name.substringBeforeLast('.').ifBlank { "Track $id" }
-                        var artist = rawArtist?.takeUnless { it.isBlank() || it == "<unknown>" } ?: "Unknown Artist"
-                        if (title == name.substringBeforeLast('.') && name.contains(" - ")) {
-                            val parts = name.substringBeforeLast('.').split(" - ", limit = 2)
-                            if (parts[0].isNotBlank()) artist = parts[0].trim()
-                            if (parts[1].isNotBlank()) title = parts[1].trim()
-                        }
+                        val (title, artist) = LocalMediaRepository.resolveTitleAndArtist(rawTitle, rawArtist, name)
                         val album = rawAlbum?.takeUnless { it.isBlank() || it == "<unknown>" }
                         val durationText = durationMs.takeIf { it > 0 }?.let { ms ->
                             val totalSecs = ms / 1000
@@ -741,13 +736,7 @@ object Downloads {
                             val fileUri = Uri.fromFile(file).toString()
                             if (fileUri !in existingUris && fileUri !in discoveredNew) {
                                 val meta = LocalMediaRepository.extractMetadataAndArt(context, Uri.fromFile(file), fileUri)
-                                var title = meta?.title ?: file.nameWithoutExtension
-                                var artist = meta?.artist ?: "Unknown Artist"
-                                if (title == file.nameWithoutExtension && file.nameWithoutExtension.contains(" - ")) {
-                                    val parts = file.nameWithoutExtension.split(" - ", limit = 2)
-                                    if (parts[0].isNotBlank()) artist = parts[0].trim()
-                                    if (parts[1].isNotBlank()) title = parts[1].trim()
-                                }
+                                val (title, artist) = LocalMediaRepository.resolveTitleAndArtist(meta?.title, meta?.artist, file.name)
                                 val durationText = meta?.durationMs?.takeIf { it > 0 }?.let { ms ->
                                     val totalSecs = ms / 1000
                                     val mins = totalSecs / 60
@@ -1047,6 +1036,43 @@ object Downloads {
      * running for a track that is still queued — or for one that gets cancelled
      * before its turn — and a preparation is not a download.
      */
+    private data class DetectedFormat(val extension: String, val mimeType: String)
+
+    private fun detectAudioFormat(file: File): DetectedFormat {
+        return runCatching {
+            val header = ByteArray(16)
+            file.inputStream().use { it.read(header) }
+            when {
+                // ID3 tag or MP3 frame
+                (header[0] == 'I'.code.toByte() && header[1] == 'D'.code.toByte() && header[2] == '3'.code.toByte()) ||
+                    (header[0] == 0xFF.toByte() && (header[1].toInt() and 0xE0) == 0xE0) ->
+                    DetectedFormat("mp3", "audio/mpeg")
+
+                // ftyp (MP4 / M4A)
+                header[4] == 'f'.code.toByte() && header[5] == 't'.code.toByte() && header[6] == 'y'.code.toByte() && header[7] == 'p'.code.toByte() ->
+                    DetectedFormat("m4a", "audio/mp4")
+
+                // fLaC
+                header[0] == 'f'.code.toByte() && header[1] == 'L'.code.toByte() && header[2] == 'a'.code.toByte() && header[3] == 'C'.code.toByte() ->
+                    DetectedFormat("flac", "audio/flac")
+
+                // OggS (Opus or Vorbis)
+                header[0] == 'O'.code.toByte() && header[1] == 'g'.code.toByte() && header[2] == 'g'.code.toByte() && header[3] == 'S'.code.toByte() ->
+                    DetectedFormat("ogg", "audio/ogg")
+
+                // RIFF WAV
+                header[0] == 'R'.code.toByte() && header[1] == 'I'.code.toByte() && header[2] == 'F'.code.toByte() && header[3] == 'F'.code.toByte() ->
+                    DetectedFormat("wav", "audio/wav")
+
+                // EBML (WebM / Opus)
+                header[0] == 0x1A.toByte() && header[1] == 0x45.toByte() && header[2] == 0xDF.toByte() && header[3] == 0xA3.toByte() ->
+                    DetectedFormat("ogg", "audio/ogg")
+
+                else -> DetectedFormat("m4a", "audio/mp4")
+            }
+        }.getOrDefault(DetectedFormat("m4a", "audio/mp4"))
+    }
+
     internal suspend fun prepare(context: Context, song: Song): Prepared = withContext(Dispatchers.IO) {
         // Downloads preserve the exact item the listener picked. Catalogue
         // matching is a manual playback action and must not silently change a
@@ -1076,6 +1102,42 @@ object Downloads {
             }
         }
 
+        // 0. Check if track is 100% cached in AudioCache -> export directly without network!
+        val cachedEntry = AudioCache.findFullyCachedEntry(song.videoId)
+        if (cachedEntry != null && cachedEntry.spans.isNotEmpty()) {
+            val format = detectAudioFormat(cachedEntry.spans.first())
+            val effectiveTrack = track.copy(
+                title = track.title.takeIf { it.isNotBlank() && it != "Unknown Title" } ?: cachedEntry.title ?: track.title,
+                artist = track.artist.takeIf { it.isNotBlank() && it != "Unknown Artist" } ?: cachedEntry.artist ?: track.artist,
+                albumName = track.albumName ?: cachedEntry.album,
+                thumbnailUrl = track.thumbnailUrl ?: cachedEntry.artUri,
+            )
+            val route = Route(
+                extension = format.extension,
+                mimeType = format.mimeType,
+                describe = "Offline cache export (${cachedEntry.totalBytes / 1024} KB)",
+                downloadFormat = "OFFLINE",
+                taggable = true,
+                write = { sink, onProgress ->
+                    var written = 0L
+                    val total = cachedEntry.totalBytes.coerceAtLeast(1L)
+                    val buffer = ByteArray(64 * 1024)
+                    for (file in cachedEntry.spans) {
+                        file.inputStream().use { input ->
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read <= 0) break
+                                sink.write(buffer, 0, read)
+                                written += read
+                                onProgress(written, total)
+                            }
+                        }
+                    }
+                }
+            )
+            return@withContext Prepared(song.videoId, effectiveTrack, route = route, alreadyAt = null, isFromCache = true)
+        }
+
         val route = routeFor(context, track, quality)
         Log.d(TAG, "downloading ${song.videoId} as .${route.extension} (${route.describe}, ${quality.label})")
         Prepared(song.videoId, track, route = route, alreadyAt = null)
@@ -1097,6 +1159,7 @@ object Downloads {
         val route: Route?,
         /** A file already in Music that is this download, if there is one. */
         val alreadyAt: Uri?,
+        val isFromCache: Boolean = false,
     )
 
     /**
@@ -1114,6 +1177,9 @@ object Downloads {
         // rather than writing a second copy beside it.
         plan.alreadyAt?.let { uri ->
             remember(song, track, uri)
+            if (plan.isFromCache) {
+                AudioCache.discardMediaId(id)
+            }
             DownloadSession.done(id)
             clear(id)
             return
@@ -1150,6 +1216,9 @@ object Downloads {
                 if (alreadyThere != null) {
                     Log.d(TAG, "$name is already in Music; adopting it")
                     remember(song, track, alreadyThere)
+                    if (plan.isFromCache) {
+                        AudioCache.discardMediaId(id)
+                    }
                     DownloadSession.done(id)
                     clear(id)
                     return@coroutineScope
@@ -1208,6 +1277,9 @@ object Downloads {
                 val savedUri = destination.commit()
                 pending = null
                 remember(song, track, savedUri, route.downloadFormat, artworkUri)
+                if (plan.isFromCache) {
+                    AudioCache.discardMediaId(id)
+                }
                 DownloadSession.done(id)
                 clear(id)
                 Log.d(TAG, "saved $name")

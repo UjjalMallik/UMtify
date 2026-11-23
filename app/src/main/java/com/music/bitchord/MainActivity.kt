@@ -2173,7 +2173,8 @@ private fun BitChordApp(
         // after this check for the connection to have changed under it. This is
         // the one place that knows the tap was for forty tracks and can say so
         // once, rather than leaving forty identical failed rows to be read.
-        val blocked = songs.isNotEmpty() && !AppSettings.downloadsAllowedNow
+        val blocked = songs.isNotEmpty() && !AppSettings.downloadsAllowedNow &&
+            songs.none { com.music.bitchord.playback.AudioCache.isSongFullyCached(it.videoId) }
         if (songs.isNotEmpty() && !blocked) {
             val needsStorage = AppSettings.exportDownloads.value && DownloadStore.needsLegacyPermission() &&
                 ContextCompat.checkSelfPermission(

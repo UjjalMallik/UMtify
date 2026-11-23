@@ -637,7 +637,7 @@ private fun DownloadRow(song: Song, palette: ArtworkPalette, isOffline: Boolean,
                 tint = palette.accent,
                 accent = palette.accent,
             ) { scope.launch { Downloads.delete(context, song.videoId) } }
-        } else if (!isOffline) {
+        } else if (!isOffline || com.music.bitchord.playback.AudioCache.isSongFullyCached(song.videoId)) {
             ActionRow(
                 icon = Icons.Rounded.Download,
                 label = stringResource(R.string.download),

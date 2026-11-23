@@ -1645,6 +1645,76 @@ object AudioCache {
         return cachedPrefixBytes(uri) >= contentLength
     }
 
+    data class FullyCachedEntry(
+        val key: String,
+        val mediaId: String,
+        val spans: List<File>,
+        val totalBytes: Long,
+        val title: String?,
+        val artist: String?,
+        val album: String?,
+        val artUri: String?,
+    )
+
+    fun isSongFullyCached(videoId: String): Boolean {
+        return findFullyCachedEntry(videoId) != null
+    }
+
+    fun findFullyCachedEntry(videoId: String): FullyCachedEntry? {
+        if (!::cache.isInitialized) return null
+        val cleanId = videoId.trim()
+        val candidateKeys = cache.keys.filter { key ->
+            key == cleanId || key.startsWith("$cleanId#") ||
+                runCatching { cache.getContentMetadata(key).get(META_MEDIA_ID, null as String?) == cleanId }.getOrDefault(false)
+        }
+        for (key in candidateKeys) {
+            val meta = runCatching { cache.getContentMetadata(key) }.getOrNull() ?: continue
+            val contentLength = ContentMetadata.getContentLength(meta)
+            if (contentLength <= 0L) continue
+            val spans = cache.getCachedSpans(key).filter { it.isCached && it.file?.exists() == true }.sortedBy { it.position }
+            val bytes = spans.sumOf { it.length }
+            if (bytes <= 0L) continue
+            val cachedBytes = cache.getCachedBytes(key, 0, contentLength)
+            val isFull = cache.isCached(key, 0, contentLength) || (cachedBytes >= (contentLength * 0.99).toLong())
+            if (!isFull) continue
+
+            val spanFiles = spans.mapNotNull { it.file }
+            if (spanFiles.isEmpty()) continue
+
+            val noted = notedSongs[cleanId]
+            val title = meta.get(META_TITLE, null as String?) ?: noted?.title
+            val artist = meta.get(META_ARTIST, null as String?) ?: noted?.artist
+            val album = meta.get(META_ALBUM, null as String?) ?: noted?.albumName
+            val art = meta.get(META_ART, null as String?) ?: noted?.thumbnailUrl
+
+            return FullyCachedEntry(
+                key = key,
+                mediaId = cleanId,
+                spans = spanFiles,
+                totalBytes = bytes,
+                title = title,
+                artist = artist,
+                album = album,
+                artUri = art,
+            )
+        }
+        return null
+    }
+
+    fun discardMediaId(videoId: String) {
+        if (!::cache.isInitialized) return
+        val cleanId = videoId.trim()
+        val candidateKeys = cache.keys.filter { key ->
+            key == cleanId || key.startsWith("$cleanId#") ||
+                runCatching { cache.getContentMetadata(key).get(META_MEDIA_ID, null as String?) == cleanId }.getOrDefault(false)
+        }
+        candidateKeys.forEach { key ->
+            runCatching { cache.removeResource(key) }
+                .onSuccess { TrackLog.d(TAG, "discarded cache entry $key", about = cleanId) }
+                .onFailure { TrackLog.d(TAG, "cache entry $key still in use: ${it.message}", about = cleanId) }
+        }
+    }
+
     /**
      * The full size of [uri]'s rendition in bytes, or 0 when it isn't known yet.
      *

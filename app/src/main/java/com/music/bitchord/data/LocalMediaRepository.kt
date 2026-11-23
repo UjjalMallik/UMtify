@@ -243,15 +243,103 @@ object LocalMediaRepository {
     val allLocalSongsFlow = MutableStateFlow<List<Song>>(emptyList())
 
     private const val LOCAL_TRACKS_INDEX_FILE = "local_tracks_index.json"
+    private const val LOCAL_TRACKS_INDEX_VERSION = 2
 
     fun getIndexFile(context: Context): File = File(context.filesDir, LOCAL_TRACKS_INDEX_FILE)
+
+    fun resolveTitleAndArtist(
+        rawTitle: String?,
+        rawArtist: String?,
+        fileNameOrPath: String,
+    ): Pair<String, String> {
+        val baseName = fileNameOrPath
+            .substringAfterLast('/')
+            .substringAfterLast('\\')
+            .substringBeforeLast('.')
+            .trim()
+
+        val cleanTitle = rawTitle?.cleanTag()?.removeAudioExtension()?.trim()
+        val cleanArtist = rawArtist?.cleanTag()?.trim()
+
+        val hasValidTitle = !cleanTitle.isNullOrBlank() && !cleanTitle.equals(baseName, ignoreCase = true)
+        val hasValidArtist = !cleanArtist.isNullOrBlank() && !cleanArtist.equals("Unknown Artist", ignoreCase = true)
+
+        // 1. Prioritize Embedded Audio Tags First:
+        if (hasValidTitle && hasValidArtist) {
+            val titleCues = listOf("(from ", "[from ", "(official", "[official", "(video", "[video", "(remix", "[remix", "(lyrical", "[lyrical", "(audio", "[audio", "(feat.", "[feat.", "(ft.", "[ft.")
+            val cleanTitleLower = cleanTitle.lowercase(Locale.ROOT)
+            val cleanArtistLower = cleanArtist.lowercase(Locale.ROOT)
+            val titleHasCue = titleCues.any { cleanTitleLower.contains(it) }
+            val artistHasCue = titleCues.any { cleanArtistLower.contains(it) }
+
+            return if (artistHasCue && !titleHasCue) {
+                cleanArtist to cleanTitle
+            } else {
+                cleanTitle to cleanArtist
+            }
+        }
+
+        // 2. If title tag contains " - " and artist is missing/unknown:
+        if (!cleanTitle.isNullOrBlank() && cleanTitle.contains(" - ") && !hasValidArtist) {
+            return splitCompound(cleanTitle)
+        }
+
+        // 3. Fallback to filename parsing
+        if (baseName.contains(" - ")) {
+            val (fileTitle, fileArtist) = splitCompound(baseName)
+            val finalTitle = if (hasValidTitle) cleanTitle!! else fileTitle
+            val finalArtist = if (hasValidArtist) cleanArtist!! else fileArtist
+            return finalTitle to finalArtist
+        }
+
+        // 4. Default fallback when no " - " exists
+        val finalTitle = cleanTitle?.ifBlank { null } ?: baseName.ifBlank { "Unknown Title" }
+        val finalArtist = cleanArtist?.ifBlank { null } ?: "Unknown Artist"
+        return finalTitle to finalArtist
+    }
+
+    fun splitCompound(text: String): Pair<String, String> {
+        if (!text.contains(" - ")) {
+            return text.trim() to "Unknown Artist"
+        }
+        val parts = text.split(" - ", limit = 2)
+        val part0 = parts[0].trim()
+        val part1 = parts[1].trim()
+
+        val titleCues = listOf("(from ", "[from ", "(official", "[official", "(video", "[video", "(remix", "[remix", "(lyrical", "[lyrical", "(audio", "[audio", "(feat.", "[feat.", "(ft.", "[ft.")
+        val part0Lower = part0.lowercase(Locale.ROOT)
+        val part1Lower = part1.lowercase(Locale.ROOT)
+
+        val part0HasTitleCue = titleCues.any { part0Lower.contains(it) }
+        val part1HasTitleCue = titleCues.any { part1Lower.contains(it) }
+
+        // Only invert if parts[0] clearly has title cues and parts[1] does not
+        return if (part0HasTitleCue && !part1HasTitleCue) {
+            part0 to part1 // title = part0, artist = part1
+        } else {
+            // Default standard: "Artist - Title" (fixes files like "Arijit Singh - Asatoma Sadgamaya")
+            // artist = part0, title = part1
+            part1 to part0 // title = part1, artist = part0
+        }
+    }
 
     fun loadCachedIndex(context: Context): List<Song> {
         return runCatching {
             val file = getIndexFile(context)
             if (!file.exists() || file.length() == 0L) return emptyList()
-            val text = file.readText()
-            val jsonArray = org.json.JSONArray(text)
+            val text = file.readText().trim()
+            if (!text.startsWith("{")) {
+                // Version 1 (legacy unversioned array) -> invalidate to re-scan and fix swapped metadata
+                file.delete()
+                return emptyList()
+            }
+            val root = org.json.JSONObject(text)
+            val version = root.optInt("version", 1)
+            if (version < LOCAL_TRACKS_INDEX_VERSION) {
+                file.delete()
+                return emptyList()
+            }
+            val jsonArray = root.optJSONArray("tracks") ?: return emptyList()
             val list = ArrayList<Song>(jsonArray.length())
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
@@ -304,6 +392,8 @@ object LocalMediaRepository {
     fun saveCachedIndex(context: Context, songs: List<Song>) {
         runCatching {
             val file = getIndexFile(context)
+            val root = org.json.JSONObject()
+            root.put("version", LOCAL_TRACKS_INDEX_VERSION)
             val jsonArray = org.json.JSONArray()
             for (song in songs) {
                 val obj = org.json.JSONObject()
@@ -321,8 +411,9 @@ object LocalMediaRepository {
                 song.folderUri?.let { obj.put("folderUri", it) }
                 jsonArray.put(obj)
             }
+            root.put("tracks", jsonArray)
             val tmp = File(context.filesDir, "$LOCAL_TRACKS_INDEX_FILE.tmp")
-            tmp.writeText(jsonArray.toString())
+            tmp.writeText(root.toString())
             if (!tmp.renameTo(file)) {
                 tmp.copyTo(file, overwrite = true)
                 tmp.delete()
@@ -578,8 +669,13 @@ object LocalMediaRepository {
                             val parsedUri = Uri.parse(uriStr)
                             val meta = extractMetadataAndArt(appContext, parsedUri, uriStr)
                             if (meta != null) {
-                                val newTitle = meta.title ?: song.title
-                                val newArtist = meta.artist ?: song.artist
+                                val (resolvedTitle, resolvedArtist) = resolveTitleAndArtist(
+                                    meta.title,
+                                    meta.artist,
+                                    song.localPath ?: song.localUri ?: song.title,
+                                )
+                                val newTitle = resolvedTitle
+                                val newArtist = resolvedArtist
                                 val newAlbum = meta.album ?: song.albumName
                                 val newDuration = meta.durationMs?.takeIf { it > 0 }?.let(::formatDuration) ?: song.durationText
                                 val newArt = meta.artworkUri ?: song.thumbnailUrl
@@ -783,15 +879,7 @@ object LocalMediaRepository {
         folderUri: String? = null,
     ): Song {
         val uriStr = fileUri.toString()
-        val nameWithoutExt = fileName.substringBeforeLast('.').ifBlank { fileName }
-
-        var title = nameWithoutExt
-        var artist = "Unknown Artist"
-        if (nameWithoutExt.contains(" - ")) {
-            val parts = nameWithoutExt.split(" - ", limit = 2)
-            if (parts[0].isNotBlank()) artist = parts[0].trim()
-            if (parts[1].isNotBlank()) title = parts[1].trim()
-        }
+        val (title, artist) = resolveTitleAndArtist(null, null, fileName)
 
         val directPath = safUriToStoragePath(fileUri)
         val cachedArt = getCachedLocalArtUri(context, uriStr)
@@ -1007,10 +1095,7 @@ object LocalMediaRepository {
                                 continue
                             }
 
-                            val title = rawTitle.cleanTag()?.removeAudioExtension()
-                                ?: displayName.substringBeforeLast('.').takeIf { it.isNotBlank() }
-                                ?: "Track $id"
-                            val artist = rawArtist.takeUnless { it.isNullOrBlank() || it == "<unknown>" } ?: "Unknown Artist"
+                            val (title, artist) = resolveTitleAndArtist(rawTitle, rawArtist, path ?: displayName)
                             val albumName = rawAlbum.takeUnless { it.isNullOrBlank() || it == "<unknown>" }
                             val cachedArt = getCachedLocalArtThumbUri(context, contentUri) ?: getCachedLocalArtUri(context, contentUri)
                             val artworkUrl = cachedArt ?: "local_art://$contentUri"
@@ -1229,8 +1314,8 @@ object LocalMediaRepository {
         fileName: String,
         scanned: ScannedTags? = null,
     ): Song {
-        var title = fileName.substringBeforeLast(".")
-        var artist = "Unknown Artist"
+        var metaTitle: String? = null
+        var metaArtist: String? = null
         var albumName: String? = null
         var durationText: String? = null
         var trackNumber: Int? = null
@@ -1239,14 +1324,12 @@ object LocalMediaRepository {
             val retriever = MediaMetadataRetriever()
             try {
                 retriever.setDataSource(context, Uri.parse(uriStr))
-                val metaTitle = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
-                val metaArtist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                metaTitle = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+                metaArtist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
                 val metaAlbum = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
                 val metaDur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
                 val metaTrack = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)
 
-                if (!metaTitle.isNullOrBlank()) title = metaTitle
-                if (!metaArtist.isNullOrBlank()) artist = metaArtist
                 albumName = metaAlbum.cleanTag()
                 if (metaDur != null && metaDur > 0) durationText = formatDuration(metaDur)
                 trackNumber = trackNumberFromTag(metaTrack)
@@ -1254,6 +1337,8 @@ object LocalMediaRepository {
                 retriever.release()
             }
         }
+
+        val (title, artist) = resolveTitleAndArtist(metaTitle, metaArtist, fileName)
 
         return Song(
             videoId = uriStr,
