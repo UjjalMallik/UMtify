@@ -78,7 +78,14 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Storage
 import com.music.bitchord.ui.icons.BitChordIcons
 import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
+import coil3.compose.LocalPlatformContext
+import coil3.request.ImageRequest
 import coil3.request.crossfade
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
+import com.music.bitchord.ui.components.DefaultCoverTile
+import com.music.bitchord.ui.components.FailedArtworkCache
 import com.music.bitchord.data.model.CARD_ART_PX
 import com.music.bitchord.data.model.HEADER_ART_PX
 import com.music.bitchord.data.model.HomeShelf
@@ -301,23 +308,422 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedShelves(
     shelves.forEachIndexed { index, shelf ->
         item(key = shelf.title + index, contentType = "shelf") {
             val openItem: (ShelfItem) -> Unit = { item -> onItemClick(item, shelf.title) }
-            if (shelf.title.equals(RECENTS_TITLE, ignoreCase = true)) {
-                RecentShelf(
-                    shelf = shelf,
-                    onItemClick = openItem,
-                    onItemLongPress = onItemLongPress,
-                    currentSong = currentSong,
-                    isPlaying = isPlaying,
-                    viewType = recentsViewType,
-                    onViewTypeToggle = onRecentsViewTypeToggle,
+            val isSparseSection = (shelf.items.size in 1..2 && !shelf.title.equals("Your Top Artists", ignoreCase = true) && !shelf.title.equals("Top Artists", ignoreCase = true)) ||
+                shelf.title.equals("Forgotten favorites", ignoreCase = true) ||
+                shelf.title.equals("Archive Mix", ignoreCase = true) ||
+                isTimeOfDayShelf(shelf.title)
+
+            when {
+                shelf.title.equals(RECENTS_TITLE, ignoreCase = true) -> {
+                    RecentShelf(
+                        shelf = shelf,
+                        onItemClick = openItem,
+                        onItemLongPress = onItemLongPress,
+                        currentSong = currentSong,
+                        isPlaying = isPlaying,
+                        viewType = recentsViewType,
+                        onViewTypeToggle = onRecentsViewTypeToggle,
+                    )
+                }
+                shelf.title.equals("Your Top Artists", ignoreCase = true) ||
+                shelf.title.equals("Top Artists", ignoreCase = true) -> {
+                    CircularTopArtistsShelf(
+                        shelf = shelf,
+                        onItemClick = openItem,
+                    )
+                }
+                isSparseSection && shelf.items.isNotEmpty() -> {
+                    WideFeatureShelf(
+                        shelf = shelf,
+                        onItemClick = openItem,
+                        onItemLongPress = onItemLongPress,
+                        currentSong = currentSong,
+                        isPlaying = isPlaying,
+                    )
+                }
+                else -> {
+                    Shelf(
+                        shelf = shelf,
+                        onItemClick = openItem,
+                        onItemLongPress = onItemLongPress,
+                        currentSong = currentSong,
+                        isPlaying = isPlaying,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Check if shelf is a Time-of-Day smart mix */
+internal fun isTimeOfDayShelf(title: String): Boolean {
+    val t = title.trim().lowercase(Locale.ROOT)
+    return t.contains("morning energy") ||
+        t.contains("afternoon flow") ||
+        t.contains("evening chill") ||
+        t.contains("late night mix")
+}
+
+/**
+ * Sleek circular avatar carousel for "Your Top Artists".
+ * Built from the user's most-played artists across local and online listening history.
+ */
+@Composable
+private fun CircularTopArtistsShelf(
+    shelf: HomeShelf,
+    onItemClick: (ShelfItem) -> Unit,
+) {
+    Column(Modifier.padding(bottom = 26.dp)) {
+        SectionHeader(shelf.title, shelf.subtitle)
+        ShelfRow(
+            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            itemsIndexed(
+                shelf.items,
+                key = { position, item -> "top-artist-$position-${item.browseId ?: item.title}" },
+                contentType = { _, _ -> "circular_artist" },
+            ) { _, item ->
+                CircularArtistItem(
+                    item = item,
+                    onClick = { onItemClick(item) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CircularArtistItem(
+    item: ShelfItem,
+    onClick: () -> Unit,
+) {
+    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val ringBorder = remember(isLight) {
+        if (isLight) Color.Black.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.22f)
+    }
+
+    Column(
+        modifier = Modifier
+            .width(88.dp)
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(84.dp)
+                .clip(CircleShape)
+                .border(1.5.dp, ringBorder, CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            val isBrokenOrBlank = item.thumbnailUrl.isNullOrBlank() || FailedArtworkCache.isFailed(item.thumbnailUrl)
+            if (isBrokenOrBlank) {
+                DefaultCoverTile(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop,
                 )
             } else {
-                Shelf(
-                    shelf = shelf,
-                    onItemClick = openItem,
-                    onItemLongPress = onItemLongPress,
-                    currentSong = currentSong,
-                    isPlaying = isPlaying,
+                val context = LocalPlatformContext.current
+                val imageRequest = remember(item.thumbnailUrl) {
+                    ImageRequest.Builder(context)
+                        .data(item.thumbnailUrl.artworkAt(HEADER_ART_PX))
+                        .crossfade(true)
+                        .build()
+                }
+                AsyncImage(
+                    model = imageRequest,
+                    contentDescription = item.title,
+                    contentScale = ContentScale.Crop,
+                    onState = { state ->
+                        if (state is AsyncImagePainter.State.Error) {
+                            FailedArtworkCache.markFailed(item.thumbnailUrl)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape),
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = item.title,
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 2.dp),
+        )
+        if (item.subtitle.isNotBlank() && !item.subtitle.equals("Artist", ignoreCase = true)) {
+            Text(
+                text = item.subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 2.dp),
+            )
+        }
+    }
+}
+
+/**
+ * Full-Width Glassy Wide Feature Card for sparse sections (1-2 items)
+ * such as Forgotten Favorites, Time-of-Day Smart Mixes, and Local-to-Online highlights.
+ */
+@Composable
+private fun WideFeatureShelf(
+    shelf: HomeShelf,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: ((ShelfItem) -> Unit)? = null,
+    currentSong: Song? = null,
+    isPlaying: Boolean = false,
+) {
+    Column(Modifier.padding(bottom = 26.dp)) {
+        SectionHeader(shelf.title, shelf.subtitle)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = PAGE_GUTTER),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            val isCurrentItem = shelf.items.playingItemMatcher(currentSong)
+            shelf.items.forEachIndexed { _, item ->
+                WideFeatureCard(
+                    item = item,
+                    sectionTitle = shelf.title,
+                    onClick = { onItemClick(item) },
+                    onLongPress = onItemLongPress?.let { { it(item) } },
+                    isCurrent = isCurrentItem(item),
+                    isPlaying = isCurrentItem(item) && isPlaying,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WideFeatureCard(
+    item: ShelfItem,
+    sectionTitle: String,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+    isCurrent: Boolean = false,
+    isPlaying: Boolean = false,
+) {
+    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val cardShape = RoundedCornerShape(20.dp)
+    val glassBorder = if (isLight) Color.Black.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.22f)
+
+    val badgeText = when {
+        sectionTitle.contains("Forgotten", ignoreCase = true) || sectionTitle.contains("Archive", ignoreCase = true) -> "Rediscover"
+        sectionTitle.contains("Because you play", ignoreCase = true) || sectionTitle.contains("Local", ignoreCase = true) -> "Local → Online"
+        isTimeOfDayShelf(sectionTitle) || item.title.contains("Mix", ignoreCase = true) -> "Smart Mix"
+        else -> "Featured"
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(128.dp)
+            .clip(cardShape)
+            .border(1.dp, glassBorder, cardShape)
+            .background(if (isLight) Color(0xFFF2F4F8).copy(alpha = 0.95f) else Color(0xFF10141D).copy(alpha = 0.90f))
+            .clickable(onClick = onClick),
+    ) {
+        // Subtle ambient blurred background from cover thumbnail
+        if (!item.thumbnailUrl.isNullOrBlank() && !FailedArtworkCache.isFailed(item.thumbnailUrl)) {
+            val context = LocalPlatformContext.current
+            val bgRequest = remember(item.thumbnailUrl) {
+                ImageRequest.Builder(context)
+                    .data(item.thumbnailUrl.artworkAt(HEADER_ART_PX))
+                    .crossfade(false)
+                    .build()
+            }
+            AsyncImage(
+                model = bgRequest,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = if (isLight) 0.18f else 0.28f },
+            )
+        }
+
+        // Dark frosted glass overlay gradient
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        if (isLight) {
+                            listOf(
+                                Color.White.copy(alpha = 0.88f),
+                                Color(0xFFF0F4FA).copy(alpha = 0.80f),
+                                Color.White.copy(alpha = 0.92f),
+                            )
+                        } else {
+                            listOf(
+                                Color(0xFF0C0F17).copy(alpha = 0.94f),
+                                Color(0xFF121724).copy(alpha = 0.82f),
+                                Color(0xFF0C0F17).copy(alpha = 0.96f),
+                            )
+                        },
+                    ),
+                ),
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 14.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Left: Crisp 96.dp rounded cover thumbnail
+            Box(
+                modifier = Modifier
+                    .size(96.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .border(0.8.dp, if (isLight) Color.Black.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.20f), RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) {
+                val isBrokenOrBlank = item.thumbnailUrl.isNullOrBlank() || FailedArtworkCache.isFailed(item.thumbnailUrl)
+                if (isBrokenOrBlank) {
+                    DefaultCoverTile(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(14.dp)),
+                        contentScale = ContentScale.Crop,
+                    )
+                } else {
+                    val context = LocalPlatformContext.current
+                    val thumbRequest = remember(item.thumbnailUrl) {
+                        ImageRequest.Builder(context)
+                            .data(item.thumbnailUrl.artworkAt(CARD_ART_PX))
+                            .crossfade(false)
+                            .build()
+                    }
+                    AsyncImage(
+                        model = thumbRequest,
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Crop,
+                        onState = { state ->
+                            if (state is AsyncImagePainter.State.Error) {
+                                FailedArtworkCache.markFailed(item.thumbnailUrl)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(14.dp)),
+                    )
+                }
+
+                if (isCurrent) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.Black.copy(alpha = 0.35f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (isPlaying) {
+                            SearchPlayingBars()
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.Pause,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.width(14.dp))
+
+            // Middle: Badge, Mix Title, Subtitle
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 8.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(
+                            if (isLight) Color(0xFF1E88E5).copy(alpha = 0.14f) else Color(0xFF64B5F6).copy(alpha = 0.22f),
+                        )
+                        .border(
+                            0.6.dp,
+                            if (isLight) Color(0xFF1E88E5).copy(alpha = 0.35f) else Color(0xFF90CAF9).copy(alpha = 0.40f),
+                            RoundedCornerShape(50),
+                        )
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        text = badgeText,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.4.sp,
+                        ),
+                        color = if (isLight) Color(0xFF1565C0) else Color(0xFF90CAF9),
+                    )
+                }
+
+                Spacer(Modifier.height(6.dp))
+
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = if (isCurrent) PlayingAccent else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Spacer(Modifier.height(3.dp))
+
+                Text(
+                    text = if (item.subtitle.isNotBlank()) item.subtitle else "Rediscover this curated mix",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            // Right: Circular glassy Play button for instant one-tap playback
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isLight) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.18f),
+                    )
+                    .border(
+                        1.dp,
+                        if (isLight) Color.Black.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.35f),
+                        CircleShape,
+                    )
+                    .clickable(onClick = onClick),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (isCurrent && isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    contentDescription = "Play",
+                    tint = if (isLight) Color(0xFF1E1E1E) else Color.White,
+                    modifier = Modifier.size(26.dp),
                 )
             }
         }

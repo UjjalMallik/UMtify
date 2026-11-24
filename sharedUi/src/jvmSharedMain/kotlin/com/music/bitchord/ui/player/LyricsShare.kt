@@ -85,6 +85,9 @@ data class LyricsShareRequest(
  * instead: the line is not added, and the bar says why. Nothing already picked
  * is ever dropped.
  */
+/** Maximum number of lines that can be selected for sharing. */
+const val MAX_SHARE_LINES = 4
+
 const val SHARE_CARD_CHAR_BUDGET = 250
 
 /**
@@ -190,6 +193,11 @@ internal fun rememberLyricsPicker(
             index in picks -> {
                 picks = picks - index
                 overBudget = false
+            }
+
+            picks.size >= MAX_SHARE_LINES -> {
+                overBudget = true
+                PlayerPlatform.host.showMessage("Select up to 4 lines")
             }
 
             fitsOnCard(usedChars(), text) -> {
@@ -326,7 +334,7 @@ internal fun LyricsPickBar(
             },
         )
         PickAction(
-            label = stringResource(Res.string.share),
+            label = "Create Lyrics Card",
             icon = Icons.Rounded.Share,
             accent = true,
             enabled = shareEnabled,

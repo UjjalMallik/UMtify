@@ -2124,12 +2124,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                                     // Cache is valid (<30 min) on startup: silently update disk cache for next launch
                                     // without replacing visible songs on screen so the feed never jumps!
                                     viewModelScope.launch(Dispatchers.IO) {
-                                        HomeCache.save(getApplication(), shelvesWithRecents)
+                                        val withSmart = injectSmartShelves(shelvesWithRecents)
+                                        HomeCache.save(getApplication(), withSmart)
                                     }
                                 } else {
-                                    _home.value = UiState.Success(shelvesWithRecents)
+                                    val withSmart = injectSmartShelves(shelvesWithRecents)
+                                    _home.value = UiState.Success(withSmart)
                                     viewModelScope.launch(Dispatchers.IO) {
-                                        HomeCache.save(getApplication(), shelvesWithRecents)
+                                        HomeCache.save(getApplication(), withSmart)
+                                    }
+                                }
+                                viewModelScope.launch(Dispatchers.IO) {
+                                    com.music.bitchord.playback.smart.RecommendationEngine.refreshSmartShelvesAsync(getApplication()) {
+                                        val current = (_home.value as? UiState.Success)?.data.orEmpty()
+                                        if (current.isNotEmpty()) {
+                                            val withUpdated = injectSmartShelves(current)
+                                            _home.value = UiState.Success(withUpdated)
+                                        }
                                     }
                                 }
                             }
@@ -2185,6 +2196,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun isCurrentHomeLoad(identity: String?, generation: Long) =
         identity == listenerKey() && generation == homeLoadGeneration.get()
 
+    private fun injectSmartShelves(shelves: List<HomeShelf>): List<HomeShelf> {
+        val smartShelves = com.music.bitchord.playback.smart.RecommendationEngine.getSmartShelves(getApplication())
+        if (smartShelves.isEmpty()) return shelves
+        val result = shelves.toMutableList()
+        var insertIdx = if (result.isNotEmpty() && result[0].title.equals("Recents", ignoreCase = true)) 1 else 0
+        for (shelf in smartShelves) {
+            val titleLower = shelf.title.lowercase(Locale.ROOT)
+            if (result.none { it.title.lowercase(Locale.ROOT) == titleLower }) {
+                if (insertIdx <= result.size) {
+                    result.add(insertIdx, shelf)
+                    insertIdx++
+                } else {
+                    result.add(shelf)
+                }
+            }
+        }
+        return result
+    }
+
     private fun publishHomeShelves(shelves: List<HomeShelf>, prepend: Boolean = false) {
         val existing = (_home.value as? UiState.Success)?.data.orEmpty()
         val updated = if (prepend) {
@@ -2196,9 +2226,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (added.isEmpty()) return
             existing + added
         }
-        _home.value = UiState.Success(updated)
+        val withSmart = injectSmartShelves(updated)
+        _home.value = UiState.Success(withSmart)
         viewModelScope.launch(Dispatchers.IO) {
-            HomeCache.save(getApplication(), updated)
+            HomeCache.save(getApplication(), withSmart)
         }
     }
     private suspend fun refreshHome(identity: String?) = coroutineScope {
@@ -2216,7 +2247,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 } else {
                     shelves
                 }
-                _home.value = UiState.Success(shelvesWithRecents)
+                val withSmart = injectSmartShelves(shelvesWithRecents)
+                _home.value = UiState.Success(withSmart)
             }
         }
         recent?.await()?.onSuccess { shelf ->

@@ -47,6 +47,7 @@ object ListeningRecorder {
     private var lastSampleAt: Long = 0L
     private var playedThisTrack: Long = 0L
     private var playCounted = false
+    private var recorded30s = false
     private var samplesSinceFlush = 0
 
     /**
@@ -66,12 +67,18 @@ object ListeningRecorder {
             lastSampleAt = now
             playedThisTrack = 0L
             playCounted = false
+            recorded30s = false
             return
         }
         val step = (now - lastSampleAt).coerceIn(0L, MAX_STEP_MS)
         lastSampleAt = now
         if (step <= 0L) return
         playedThisTrack += step
+
+        if (playedThisTrack >= 30_000L && !recorded30s) {
+            recorded30s = true
+            com.music.bitchord.playback.smart.RecommendationEngine.record30SecondPlay(enriched(song))
+        }
 
         val length = durationMs.takeIf { it > 0 } ?: song.durationMillis()
         val threshold = if (length > 0) {
@@ -80,7 +87,12 @@ object ListeningRecorder {
             PLAY_FLOOR_MS
         }
         val counts = !playCounted && playedThisTrack >= threshold
-        if (counts) playCounted = true
+        if (counts) {
+            playCounted = true
+            if (song.localUri != null || song.localPath != null || song.videoId.startsWith("local:")) {
+                com.music.bitchord.playback.smart.RecommendationEngine.recordLocalPlay(song)
+            }
+        }
 
         ListeningStats.record(enriched(song), step, counts)
 
@@ -105,6 +117,7 @@ object ListeningRecorder {
         currentId = null
         playedThisTrack = 0L
         playCounted = false
+        recorded30s = false
         samplesSinceFlush = 0
         ListeningStats.flush()
     }

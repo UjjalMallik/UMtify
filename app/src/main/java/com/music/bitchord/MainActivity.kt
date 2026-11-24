@@ -3294,6 +3294,33 @@ private fun BitChordApp(
                                     signedIn = signedIn,
                                     onSignIn = { webSession = WebSessionMode.SIGN_IN },
                                     onItemClick = { item, shelfTitle ->
+                                        if (com.music.bitchord.playback.smart.RecommendationEngine.isTimeOfDayTitle(shelfTitle) ||
+                                            com.music.bitchord.playback.smart.RecommendationEngine.isTimeOfDayTitle(item.title)
+                                        ) {
+                                            val mix = com.music.bitchord.playback.smart.RecommendationEngine.getTimeOfDayTracks()
+                                            if (mix.isNotEmpty()) {
+                                                playFrom(mix, 0, QueueSource(shelfTitle, PlaybackSourceType.HOME))
+                                                return@HomeScreen
+                                            }
+                                        }
+                                        if (shelfTitle.equals("Your Top Artists", ignoreCase = true) ||
+                                            shelfTitle.equals("Top Artists", ignoreCase = true)
+                                        ) {
+                                            val browseId = item.browseId
+                                            if (!browseId.isNullOrBlank()) {
+                                                viewModel.openDetail(
+                                                    browseId = browseId,
+                                                    title = item.title,
+                                                    subtitle = "Artist",
+                                                    thumbnailUrl = item.thumbnailUrl,
+                                                    type = BrowseType.ARTIST,
+                                                )
+                                            } else {
+                                                onTabSelected(TAB_SEARCH)
+                                                viewModel.search(item.title)
+                                            }
+                                            return@HomeScreen
+                                        }
                                         val song = shelfSong(item)
                                         // Hoisted because ShelfItem lives in :shared, and
                                         // Kotlin will not smart-cast a public nullable

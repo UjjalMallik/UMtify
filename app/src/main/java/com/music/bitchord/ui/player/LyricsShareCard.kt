@@ -4,11 +4,14 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.RadialGradient
+import android.graphics.RectF
+import android.graphics.Shader
 import com.music.bitchord.ui.replay.Fonts
 import com.music.bitchord.ui.replay.drawArtwork
 import com.music.bitchord.ui.replay.drawBackdrop
-import com.music.bitchord.ui.replay.drawWordmark
 import com.music.bitchord.ui.replay.ellipsised
 import com.music.bitchord.ui.replay.loadBitmap
 import kotlin.math.roundToInt
@@ -16,104 +19,154 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * The picked lines as one picture, drawn to a bitmap you can send.
- *
- * ## Why this is drawn rather than screenshotted
- *
- * The same reason the Replay is. A screenshot of the lyrics panel carries the
- * scrubber, the glow falloff, whichever lines happened to be on screen and the
- * status bar of that particular phone, so two people sharing the same verse
- * would send two different-looking pictures. A card laid out here is the verse,
- * the sleeve and this app's mark, and nothing else — and it is only as tall as
- * that verse needs, which holds it inside 1080×1920 (9:16): the shape a story
- * or a chat head expects. Keeping it there is the player's job, by refusing
- * more words at the pick rather than by shrinking them here.
- *
- * ## Why it isn't Compose
- *
- * `Bitmap` + `android.graphics.Canvas`, exactly as
- * [com.music.bitchord.ui.replay.ReplayPoster] does it, and for the same
- * reasons written up there: Compose offscreen on minSdk 26 is a cascade of
- * hardware bitmaps and layers that fails differently per device, while a
- * software canvas draws identically from API 26 up. The backdrop, the logo, the
- * fonts and the sleeve are shared with the Replay by importing them rather than
- * by copying, so the two cards cannot drift apart.
- *
- * ## Fitting the type
- *
- * A passage can be one line or twenty, so both the size and the height are
- * chosen rather than fixed: the layout is retried down a fixed ladder of sizes
- * until the rows stop overflowing, and the card is then grown to exactly the
- * room those rows take. The bottom rung of that ladder is a floor rather than a
- * last resort — no card ever sets type smaller than it to squeeze a passage
- * in, so a passage too long for the frame lengthens the card instead of being
- * cut, or made small enough to hold a phone at arm's length to read.
+ * 3 quick background styles for the Liquid Crystal Glass story card.
+ */
+enum class LyricsCardStyle(val label: String) {
+    AMBIENT_BLUR("Ambient Blur"),
+    DEEP_GLASS("Deep Glass"),
+    MINIMAL_DARK("Minimal Dark"),
+}
+
+/**
+ * Liquid Crystal Glass Story Image Generator:
+ * Generates a 9:16 Story-ready (1080x1920) or 1:1 Square (1080x1080) card with:
+ *  - Rich blurred / styled ambient backdrop
+ *  - Centered translucent frosted-glass card (28.dp rounded corners, 1.5.dp border)
+ *  - Top row: Album cover thumbnail + bold Song Title + Artist Name
+ *  - Middle: Selected 1-4 lyric lines in large high-contrast typography
+ *  - Bottom: Minimalist UMtify branding watermark
  */
 internal suspend fun renderLyricsShareCard(
     context: Context,
     card: LyricsShareRequest,
-    /** Pad out to the full 1080×1920 frame, the passage centred in the room. */
-    story: Boolean = false,
+    /** True for 9:16 Story (1080x1920), false for 1:1 Square (1080x1080) format. */
+    story: Boolean = true,
+    style: LyricsCardStyle = LyricsCardStyle.AMBIENT_BLUR,
 ): Bitmap = withContext(Dispatchers.Default) {
     val type = Fonts(context)
     val cover = card.artworkUrl?.let { loadBitmap(context, it) }
 
-    // ── Sizing ──────────────────────────────────────────────────────────────
-    // No room is reserved for the words to sit in: they get their own height,
-    // and the card is built down from that number. A chorus comes out a strip
-    // barely taller than its own text instead of a 9:16 sheet with a paragraph
-    // floating in the middle of it, and the size comes down only as far as the
-    // ladder goes — past that the frame gives rather than the type does.
-    val headTop = HEADER_BOTTOM + GAP_ABOVE_BODY
-    val frameRoom = MAX_CARD_H - FOOTER_THUMB - FOOTER_PAD - GAP_BELOW_BODY - headTop
-    val plan = fittestPlan(type, card.lines, frameRoom)
-    // A story is always the whole frame, so the spare room is split above and
-    // below the passage; otherwise the card is only as tall as its words.
-    val spare = if (story) (frameRoom - plan.content).coerceAtLeast(0f) else 0f
-    val bodyTop = headTop + spare / 2
-    // The passage ends where its own rows end, and everything under it — the
-    // gap, the sleeve credit, the foot — hangs off that. Because the card is
-    // measured from the same sum the rows are drawn from, no line can ever
-    // land past the bottom by a rounding error and be replaced by a mark
-    // saying something was left out.
-    val bodyBottom = bodyTop + plan.content
-    val cardH = bodyBottom + spare / 2 + GAP_BELOW_BODY + FOOTER_THUMB + FOOTER_PAD
-
-    val bitmap = Bitmap.createBitmap(CARD_W, cardH.roundToInt(), Bitmap.Config.ARGB_8888)
+    val cardW = CARD_W
+    val cardH = if (story) 1920 else 1080
+    val bitmap = Bitmap.createBitmap(cardW, cardH, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
-    drawBackdrop(canvas, cover, 0f, cardH)
 
-    // ── Header ──────────────────────────────────────────────────────────────
-    // The wordmark alone, at the top right — the same one the Replay poster
-    // carries, so two of these cards still read as one family. It spells the
-    // name, so the name no longer has to be written next to it as well.
-    // Nothing else goes above the passage: the picture is the verse, not a
-    // caption for it.
-    drawWordmark(canvas, context, CARD_W - CARD_MARGIN, HEADER_BASELINE)
+    // ── 1. Background style rendering ──────────────────────────────────────────
+    when (style) {
+        LyricsCardStyle.AMBIENT_BLUR -> {
+            drawBackdrop(canvas, cover, 0f, cardH.toFloat())
+            val darkOverlay = Paint().apply { color = Color.argb(90, 8, 10, 16) }
+            canvas.drawRect(0f, 0f, cardW.toFloat(), cardH.toFloat(), darkOverlay)
+        }
+        LyricsCardStyle.DEEP_GLASS -> {
+            val bgPaint = Paint().apply {
+                shader = LinearGradient(
+                    0f, 0f, 0f, cardH.toFloat(),
+                    Color.rgb(14, 18, 30),
+                    Color.rgb(6, 8, 14),
+                    Shader.TileMode.CLAMP,
+                )
+            }
+            canvas.drawRect(0f, 0f, cardW.toFloat(), cardH.toFloat(), bgPaint)
+            val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = RadialGradient(
+                    cardW / 2f, cardH * 0.38f, cardW * 0.72f,
+                    Color.argb(75, 45, 95, 190),
+                    Color.TRANSPARENT,
+                    Shader.TileMode.CLAMP,
+                )
+            }
+            canvas.drawPaint(glowPaint)
+        }
+        LyricsCardStyle.MINIMAL_DARK -> {
+            val bgPaint = Paint().apply {
+                shader = LinearGradient(
+                    0f, 0f, 0f, cardH.toFloat(),
+                    Color.rgb(18, 18, 24),
+                    Color.rgb(8, 8, 10),
+                    Shader.TileMode.CLAMP,
+                )
+            }
+            canvas.drawRect(0f, 0f, cardW.toFloat(), cardH.toFloat(), bgPaint)
+            val accentPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = RadialGradient(
+                    cardW / 2f, cardH * 0.5f, cardW * 0.65f,
+                    Color.argb(28, 255, 255, 255),
+                    Color.TRANSPARENT,
+                    Shader.TileMode.CLAMP,
+                )
+            }
+            canvas.drawPaint(accentPaint)
+        }
+    }
 
-    // ── The passage ─────────────────────────────────────────────────────────
-    // Every row that exists is drawn: the frame below is measured from
-    // wherever these rows end, so there is never room to be short of and
-    // nothing that has to be cut to make it.
-    var y = bodyTop
+    // ── 2. Centered Translucent Frosted Glass Card ─────────────────────────────
+    val marginX = 64f
+    val glassW = cardW - 2 * marginX
+    val glassH = if (story) 1360f else 860f
+    val glassTop = (cardH - glassH) / 2f
+    val glassBottom = glassTop + glassH
+    val glassRect = RectF(marginX, glassTop, cardW - marginX, glassBottom)
+    val glassRadius = 56f // 28.dp
+
+    // Frosted body
+    val glassPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(135, 18, 22, 32)
+        style = Paint.Style.FILL
+    }
+    canvas.drawRoundRect(glassRect, glassRadius, glassRadius, glassPaint)
+
+    // Glass rim border: 1.5.dp = 4.5f
+    val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 4.5f
+        shader = LinearGradient(
+            glassRect.left, glassRect.top, glassRect.left, glassRect.bottom,
+            Color.argb(150, 255, 255, 255),
+            Color.argb(35, 255, 255, 255),
+            Shader.TileMode.CLAMP,
+        )
+    }
+    canvas.drawRoundRect(glassRect, glassRadius, glassRadius, borderPaint)
+
+    // ── 3. Top Row: Crisp Thumbnail + Song Title + Artist Name ─────────────────
+    val innerPad = 48f
+    val topY = glassTop + innerPad
+    val thumbSize = if (story) 128f else 104f
+    val thumbX = glassRect.left + innerPad
+
+    drawArtwork(canvas, cover, card.song.title, thumbX, topY, thumbSize, false)
+
+    val textX = thumbX + thumbSize + 28f
+    val textRoom = glassRect.right - innerPad - textX
+    val titlePaint = type.heading(if (story) 46f else 38f, Color.WHITE, bold = true)
+    val artistPaint = type.body(if (story) 36f else 30f, 0xCCFFFFFF.toInt())
+    canvas.drawText(ellipsised(card.song.title, titlePaint, textRoom), textX, topY + thumbSize * 0.44f, titlePaint)
+    canvas.drawText(ellipsised(card.song.artist, artistPaint, textRoom), textX, topY + thumbSize * 0.84f, artistPaint)
+
+    // ── 4. Middle: Selected Lyric Lines ───────────────────────────────────────
+    val lyricsTop = topY + thumbSize + (if (story) 48f else 32f)
+    val lyricsBottom = glassBottom - (if (story) 100f else 76f)
+    val availableHeight = lyricsBottom - lyricsTop
+    val plan = fittestPlan(type, card.lines, availableHeight)
+    val spareRoom = (availableHeight - plan.content).coerceAtLeast(0f)
+    var y = lyricsTop + spareRoom / 2f
+
     for (row in plan.rows) {
         val baseline = y + row.gapBefore - row.paint.ascent() +
             if (row.isGap) row.paint.textSize * GAP_MARKER_OFFSET else 0f
-        val x = if (row.centered) CARD_W / 2f else CARD_MARGIN
+        val x = if (row.centered) cardW / 2f else (glassRect.left + innerPad)
         canvas.drawText(row.text, x, baseline, row.paint)
         y += row.gapBefore + row.height
     }
 
-    // ── Footer ──────────────────────────────────────────────────────────────
-    // Which song this is — which only the backdrop had been saying until now.
-    val thumbY = cardH - FOOTER_PAD - FOOTER_THUMB
-    drawArtwork(canvas, cover, card.song.title, CARD_MARGIN, thumbY, FOOTER_THUMB, false)
-    val textX = CARD_MARGIN + FOOTER_THUMB + 34f
-    val room = CARD_W - CARD_MARGIN - textX
-    val title = type.body(50f, Color.WHITE, bold = true)
-    canvas.drawText(ellipsised(card.song.title, title, room), textX, thumbY + 74f, title)
-    val artist = type.body(42f, 0x99FFFFFF.toInt())
-    canvas.drawText(ellipsised(card.song.artist, artist, room), textX, thumbY + 132f, artist)
+    // ── 5. Bottom: Subtle Minimalist UMtify Branding Watermark ────────────────
+    val watermarkPaint = type.heading(32f, 0x88FFFFFF.toInt(), bold = true).apply {
+        letterSpacing = 0.08f
+    }
+    val wmText = "UMtify"
+    val wmWidth = watermarkPaint.measureText(wmText)
+    canvas.drawText(wmText, (cardW - wmWidth) / 2f, glassBottom - (if (story) 38f else 28f), watermarkPaint)
 
     bitmap
 }

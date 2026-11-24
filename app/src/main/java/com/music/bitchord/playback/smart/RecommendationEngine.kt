@@ -1,8 +1,12 @@
 package com.music.bitchord.playback.smart
 
+import android.content.Context
 import android.os.SystemClock
 import com.music.bitchord.data.LanguageTrackFilter
+import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.YtMusicRepository
+import com.music.bitchord.data.cache.AudioCache
+import com.music.bitchord.data.download.Downloads
 import com.music.bitchord.data.model.HomeShelf
 import com.music.bitchord.data.model.PlaybackSourceType
 import com.music.bitchord.data.model.QueueTier
@@ -10,16 +14,26 @@ import com.music.bitchord.data.model.SearchFilter
 import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.ShelfItem
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.stats.ListeningStats
 import com.music.bitchord.data.stats.ReplayPeriod
 import com.music.bitchord.playback.MAX_QUEUED_AUTOPLAY
 import com.music.bitchord.playback.QueueBuilder
 import com.music.bitchord.playback.QueueCoordinator.asQueueEntry
 import com.music.bitchord.playback.youtubeSeedFor
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.io.File
+import java.util.Calendar
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.math.min
 
 /**
@@ -198,5 +212,467 @@ object RecommendationEngine {
             .filter { it.second > 0.0 }
             .sortedByDescending { it.second }
             .map { it.first }
+    }
+
+    // ── Time-of-Day Smart Mix & Local-to-Online Smart Bridge ─────────────
+
+    @Serializable
+    data class TimeOfDayLogEntry(
+        val trackId: String,
+        val title: String,
+        val artist: String,
+        val artworkUrl: String? = null,
+        val hourOfDay: Int,
+        val timestamp: Long = System.currentTimeMillis(),
+    )
+
+    @Serializable
+    data class LocalPlayRecord(
+        val id: String,
+        val title: String,
+        val artist: String,
+        val artworkUrl: String? = null,
+        val localUri: String? = null,
+        var plays: Int = 0,
+        var lastPlayed: Long = 0L,
+    )
+
+    @Serializable
+    private data class BridgeCacheData(
+        val timestamp: Long,
+        val shelfTitle: String,
+        val items: List<ShelfItem>,
+    )
+
+    enum class TimeSlot(
+        val title: String,
+        val subtitle: String,
+        val startHour: Int,
+        val endHour: Int,
+    ) {
+        MORNING("Morning Energy", "Start your day with high-vibe tunes", 5, 11),
+        AFTERNOON("Afternoon Flow", "Keep your daytime momentum going", 12, 16),
+        EVENING("Evening Chill", "Unwind and relax after a busy day", 17, 21),
+        LATE_NIGHT("Your Late Night Mix", "Atmospheric sounds for the late hours", 22, 4);
+    }
+
+    private val json = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var baseDir: File? = null
+
+    private val timeOfDayLogs = CopyOnWriteArrayList<TimeOfDayLogEntry>()
+    private val localPlayMap = ConcurrentHashMap<String, LocalPlayRecord>()
+
+    private var cachedBridgeShelf: HomeShelf? = null
+    private var cachedBridgeTimestamp: Long = 0L
+    private const val BRIDGE_CACHE_DURATION_MS = 6 * 60 * 60 * 1000L // 6 hours
+
+    @Volatile
+    private var currentTimeOfDayTracks: List<Song> = emptyList()
+
+    @Volatile
+    private var cachedTimeOfDayShelf: HomeShelf? = null
+
+    @Volatile
+    private var cachedTopArtistsShelf: HomeShelf? = null
+
+    fun init(context: Context) {
+        val dir = File(context.filesDir, "recommendations").apply { mkdirs() }
+        baseDir = dir
+        scope.launch {
+            loadPersistedLogs(dir)
+            refreshSmartShelves(context)
+        }
+    }
+
+    private fun loadPersistedLogs(dir: File) {
+        runCatching {
+            val timeLogFile = File(dir, "time_of_day_log.json")
+            if (timeLogFile.exists()) {
+                val list = json.decodeFromString<List<TimeOfDayLogEntry>>(timeLogFile.readText())
+                timeOfDayLogs.clear()
+                timeOfDayLogs.addAll(list.takeLast(500))
+            }
+
+            val localPlayFile = File(dir, "local_plays.json")
+            if (localPlayFile.exists()) {
+                val list = json.decodeFromString<List<LocalPlayRecord>>(localPlayFile.readText())
+                list.forEach { localPlayMap[it.id] = it }
+            }
+
+            val bridgeFile = File(dir, "bridge_cache.json")
+            if (bridgeFile.exists()) {
+                val cache = json.decodeFromString<BridgeCacheData>(bridgeFile.readText())
+                if (System.currentTimeMillis() - cache.timestamp < BRIDGE_CACHE_DURATION_MS) {
+                    cachedBridgeTimestamp = cache.timestamp
+                    cachedBridgeShelf = HomeShelf(
+                        title = cache.shelfTitle,
+                        subtitle = "Local → Online",
+                        items = cache.items,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Records a track played for > 30 seconds into the lightweight time-of-day listening log.
+     */
+    fun record30SecondPlay(song: Song) {
+        if (song.videoId.isBlank()) return
+        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val entry = TimeOfDayLogEntry(
+            trackId = song.videoId,
+            title = song.title,
+            artist = song.artist,
+            artworkUrl = song.thumbnailUrl,
+            hourOfDay = hour,
+        )
+        timeOfDayLogs.add(entry)
+        if (timeOfDayLogs.size > 500) {
+            timeOfDayLogs.removeAt(0)
+        }
+
+        // Also track local track plays if it's local
+        if (song.localUri != null || song.localPath != null || song.videoId.startsWith("local:")) {
+            recordLocalPlay(song)
+        }
+
+        scope.launch {
+            baseDir?.let { dir ->
+                runCatching {
+                    val file = File(dir, "time_of_day_log.json")
+                    file.writeText(json.encodeToString(timeOfDayLogs.toList().takeLast(300)))
+                }
+            }
+        }
+    }
+
+    /**
+     * Tracks play counts for local/offline tracks in local storage.
+     */
+    fun recordLocalPlay(song: Song) {
+        val key = song.localUri ?: song.localPath ?: song.videoId
+        if (key.isBlank()) return
+        val now = System.currentTimeMillis()
+        val record = localPlayMap.getOrPut(key) {
+            LocalPlayRecord(
+                id = key,
+                title = song.title,
+                artist = song.artist,
+                artworkUrl = song.thumbnailUrl,
+                localUri = song.localUri ?: song.localPath,
+            )
+        }
+        record.plays++
+        record.lastPlayed = now
+
+        scope.launch {
+            baseDir?.let { dir ->
+                runCatching {
+                    val file = File(dir, "local_plays.json")
+                    file.writeText(json.encodeToString(localPlayMap.values.toList()))
+                }
+            }
+        }
+    }
+
+    fun getCurrentTimeSlot(hour: Int = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)): TimeSlot = when (hour) {
+        in 5..11 -> TimeSlot.MORNING
+        in 12..16 -> TimeSlot.AFTERNOON
+        in 17..21 -> TimeSlot.EVENING
+        else -> TimeSlot.LATE_NIGHT
+    }
+
+    fun isTimeOfDayTitle(title: String): Boolean {
+        val trimmed = title.trim()
+        return TimeSlot.values().any { it.title.equals(trimmed, ignoreCase = true) }
+    }
+
+    fun getTimeOfDayTracks(): List<Song> = currentTimeOfDayTracks
+
+    /**
+     * Synchronously returns whatever smart shelves are ready in memory/cache
+     * so that Home screen loads with ZERO delay.
+     */
+    fun getSmartShelves(context: Context): List<HomeShelf> {
+        val result = mutableListOf<HomeShelf>()
+        // 1. Time-of-Day Smart Mix
+        cachedTimeOfDayShelf?.let { result.add(it) }
+        // 2. Your Top Artists
+        cachedTopArtistsShelf?.let { result.add(it) }
+        // 3. Local-to-Online Smart Bridge (from memory/disk cache)
+        if (cachedBridgeShelf != null && System.currentTimeMillis() - cachedBridgeTimestamp < BRIDGE_CACHE_DURATION_MS) {
+            cachedBridgeShelf?.let { result.add(it) }
+        }
+        return result
+    }
+
+    suspend fun refreshSmartShelves(context: Context) = withContext(Dispatchers.IO) {
+        cachedTimeOfDayShelf = generateTimeOfDayShelf(context)
+        cachedTopArtistsShelf = generateTopArtistsShelf(context)
+        val needsBridgeUpdate = cachedBridgeShelf == null ||
+            (System.currentTimeMillis() - cachedBridgeTimestamp >= BRIDGE_CACHE_DURATION_MS)
+        if (needsBridgeUpdate && !AppSettings.isOffline) {
+            cachedBridgeShelf = generateLocalToOnlineBridgeShelf(context)
+        }
+    }
+
+    /**
+     * Background refresh for Smart Shelves (e.g. queries YouTube for Local-to-Online bridge if expired).
+     */
+    fun refreshSmartShelvesAsync(context: Context, onNewShelves: (List<HomeShelf>) -> Unit) {
+        scope.launch {
+            refreshSmartShelves(context)
+            val smart = getSmartShelves(context)
+            withContext(Dispatchers.Main) {
+                onNewShelves(smart)
+            }
+        }
+    }
+
+    /**
+     * Generates active Time-of-Day mix shelf.
+     */
+    suspend fun generateTimeOfDayShelf(context: Context): HomeShelf? = withContext(Dispatchers.IO) {
+        val slot = getCurrentTimeSlot()
+        val inSlotEntries = timeOfDayLogs.filter { entry ->
+            when (slot) {
+                TimeSlot.MORNING -> entry.hourOfDay in 5..11
+                TimeSlot.AFTERNOON -> entry.hourOfDay in 12..16
+                TimeSlot.EVENING -> entry.hourOfDay in 17..21
+                TimeSlot.LATE_NIGHT -> entry.hourOfDay >= 22 || entry.hourOfDay <= 4
+            }
+        }
+
+        val trackCountMap = inSlotEntries.groupingBy { it.trackId }.eachCount()
+        val sortedSlotEntries = inSlotEntries.distinctBy { it.trackId }
+            .sortedByDescending { trackCountMap[it.trackId] ?: 0 }
+
+        val mixSongs = mutableListOf<Song>()
+        sortedSlotEntries.take(15).forEach { entry ->
+            mixSongs.add(
+                Song(
+                    videoId = entry.trackId,
+                    title = entry.title,
+                    artist = entry.artist,
+                    thumbnailUrl = entry.artworkUrl,
+                )
+            )
+        }
+
+        // Fallback gracefully if history in this window is still small (< 5 tracks)
+        if (mixSongs.size < 5) {
+            val recentSongs = runCatching {
+                ListeningStats.summary(ReplayPeriod.THIS_MONTH)?.songs?.map { it.song }.orEmpty()
+            }.getOrDefault(emptyList())
+
+            val extra = (recentSongs + AudioCache.cachedSongs().map { it.song })
+                .filter { candidate -> mixSongs.none { it.videoId == candidate.videoId } }
+
+            mixSongs.addAll(extra.take(15 - mixSongs.size))
+        }
+
+        if (mixSongs.isEmpty()) {
+            val localSongs = runCatching {
+                LocalMediaRepository.getLocalMusic(context).take(10)
+            }.getOrDefault(emptyList())
+            mixSongs.addAll(localSongs)
+        }
+
+        if (mixSongs.isEmpty()) return@withContext null
+
+        currentTimeOfDayTracks = mixSongs
+
+        val leadCover = mixSongs.firstOrNull { !it.thumbnailUrl.isNullOrBlank() }?.thumbnailUrl
+            ?: mixSongs.firstOrNull()?.thumbnailUrl
+
+        HomeShelf(
+            title = slot.title,
+            subtitle = slot.subtitle,
+            items = listOf(
+                ShelfItem(
+                    title = slot.title,
+                    subtitle = "${mixSongs.size} songs • ${slot.subtitle}",
+                    thumbnailUrl = leadCover,
+                    videoId = mixSongs.firstOrNull()?.videoId,
+                    browseId = null,
+                ),
+            ),
+        )
+    }
+
+    /**
+     * Generates "Your Top Artists" row from online and local listening history.
+     */
+    suspend fun generateTopArtistsShelf(context: Context): HomeShelf? = withContext(Dispatchers.IO) {
+        val artistPlays = mutableMapOf<String, Int>()
+        val artistArtwork = mutableMapOf<String, String?>()
+        val artistBrowseIds = mutableMapOf<String, String?>()
+
+        // 1. From ListeningStats
+        runCatching {
+            val summary = ListeningStats.summary(ReplayPeriod.ALL_TIME)
+            summary?.artists?.forEach { entry ->
+                val name = entry.title.trim()
+                if (name.isNotBlank()) {
+                    val key = name.lowercase(Locale.ROOT)
+                    artistPlays[key] = (artistPlays[key] ?: 0) + entry.plays
+                    if (artistArtwork[key].isNullOrBlank()) artistArtwork[key] = entry.artworkUrl
+                    if (artistBrowseIds[key].isNullOrBlank()) artistBrowseIds[key] = entry.browseId
+                }
+            }
+        }
+
+        // 2. From Local play records & local music
+        localPlayMap.values.forEach { record ->
+            val name = record.artist.trim()
+            if (name.isNotBlank() && !name.equals("Unknown Artist", ignoreCase = true)) {
+                val key = name.lowercase(Locale.ROOT)
+                artistPlays[key] = (artistPlays[key] ?: 0) + record.plays + 1
+                if (artistArtwork[key].isNullOrBlank()) artistArtwork[key] = record.artworkUrl
+            }
+        }
+
+        if (artistPlays.isEmpty()) {
+            runCatching {
+                val local = LocalMediaRepository.getLocalMusic(context)
+                local.forEach { song ->
+                    val name = song.artist.trim()
+                    if (name.isNotBlank() && !name.equals("Unknown Artist", ignoreCase = true)) {
+                        val key = name.lowercase(Locale.ROOT)
+                        artistPlays[key] = (artistPlays[key] ?: 0) + 1
+                        if (artistArtwork[key].isNullOrBlank()) artistArtwork[key] = song.thumbnailUrl
+                    }
+                }
+            }
+        }
+
+        if (artistPlays.isEmpty()) return@withContext null
+
+        val topKeys = artistPlays.entries
+            .sortedByDescending { it.value }
+            .take(15)
+            .map { it.key }
+
+        val shelfItems = topKeys.map { key ->
+            val displayName = key.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+
+            ShelfItem(
+                title = displayName,
+                subtitle = "Artist",
+                thumbnailUrl = artistArtwork[key],
+                videoId = null,
+                browseId = artistBrowseIds[key],
+            )
+        }
+
+        HomeShelf(
+            title = "Your Top Artists",
+            subtitle = "Based on your listening history",
+            items = shelfItems,
+        )
+    }
+
+    /**
+     * Local-to-Online Smart Bridge: "Because you play [Local Song] often"
+     */
+    suspend fun generateLocalToOnlineBridgeShelf(context: Context): HomeShelf? = withContext(Dispatchers.IO) {
+        if (AppSettings.isOffline) return@withContext null
+
+        if (cachedBridgeShelf != null && System.currentTimeMillis() - cachedBridgeTimestamp < BRIDGE_CACHE_DURATION_MS) {
+            return@withContext cachedBridgeShelf
+        }
+
+        // Find top played local track
+        val topLocal = localPlayMap.values.maxByOrNull { it.plays }
+            ?: runCatching {
+                val downloads = Downloads.getDownloadedSongs(context)
+                downloads.firstOrNull { it.title.isNotBlank() }?.let {
+                    LocalPlayRecord(
+                        id = it.videoId,
+                        title = it.title,
+                        artist = it.artist,
+                        artworkUrl = it.thumbnailUrl,
+                        localUri = it.localUri,
+                        plays = 3,
+                    )
+                }
+            }.getOrNull()
+            ?: runCatching {
+                val local = LocalMediaRepository.getLocalMusic(context)
+                local.firstOrNull { it.title.isNotBlank() }?.let {
+                    LocalPlayRecord(
+                        id = it.localUri ?: it.videoId,
+                        title = it.title,
+                        artist = it.artist,
+                        artworkUrl = it.thumbnailUrl,
+                        localUri = it.localUri,
+                        plays = 1,
+                    )
+                }
+            }.getOrNull()
+
+        if (topLocal == null) return@withContext null
+
+        val cleanTitle = cleanSearchTerm(topLocal.title)
+        val cleanArtist = cleanSearchTerm(topLocal.artist)
+        val query = "$cleanTitle $cleanArtist".trim()
+        if (query.isBlank()) return@withContext null
+
+        val candidates = runCatching {
+            YtMusicRepository.searchPage(query, SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
+        }.getOrDefault(emptyList()).mapNotNull { sr ->
+            (sr as? SearchResult.Track)?.song ?: (sr as? SearchResult.TopTrack)?.song
+        }.filter { it.title.isNotBlank() && it.videoId != topLocal.id }
+
+        if (candidates.isEmpty()) return@withContext null
+
+        val shelfItems = candidates.take(12).map { song ->
+            ShelfItem(
+                title = song.title,
+                subtitle = song.artist,
+                thumbnailUrl = song.thumbnailUrl,
+                videoId = song.videoId,
+                browseId = null,
+            )
+        }
+
+        val shelf = HomeShelf(
+            title = "Because you play ${topLocal.title}",
+            subtitle = "Local → Online",
+            items = shelfItems,
+        )
+
+        cachedBridgeShelf = shelf
+        cachedBridgeTimestamp = System.currentTimeMillis()
+
+        baseDir?.let { dir ->
+            runCatching {
+                val file = File(dir, "bridge_cache.json")
+                file.writeText(
+                    json.encodeToString(
+                        BridgeCacheData(
+                            timestamp = cachedBridgeTimestamp,
+                            shelfTitle = shelf.title,
+                            items = shelfItems,
+                        ),
+                    ),
+                )
+            }
+        }
+
+        shelf
+    }
+
+    private fun cleanSearchTerm(text: String): String {
+        return text
+            .replace(Regex("(?i)\\.(mp3|flac|m4a|wav|aac|opus|ogg)$"), "")
+            .replace(Regex("(?i)\\s*[\\[(](official video|official audio|lyrics|audio|video|hq|hd)[\\])]"), "")
+            .trim()
     }
 }

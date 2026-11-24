@@ -23,6 +23,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.animateScrollBy
@@ -2240,18 +2241,26 @@ internal fun LyricsPanel(
                         }
                     }
                     .blur(blur, BlurredEdgeTreatment.Unbounded)
-                    .clip(RoundedCornerShape(10.dp))
-                    // The chosen lines are marked on the row itself rather
-                    // than with a mark beside it: a lane down the side would
-                    // have to be reserved for every line whether or not
-                    // anybody was picking, and this panel is words from edge
-                    // to edge. Everything else dims a little instead, so what
-                    // is picked is read against what isn't.
-                    .background(
-                        when {
-                            index in picked -> Color.White.copy(alpha = 0.16f)
-                            picking -> Color.White.copy(alpha = 0.05f)
-                            else -> Color.Transparent
+                    .clip(RoundedCornerShape(12.dp))
+                    .then(
+                        if (index in picked) {
+                            Modifier
+                                .border(
+                                    width = 1.5.dp,
+                                    brush = Brush.horizontalGradient(
+                                        listOf(
+                                            Color.White.copy(alpha = 0.75f),
+                                            Color(0xFF64B5F6).copy(alpha = 0.6f),
+                                            Color.White.copy(alpha = 0.45f),
+                                        ),
+                                    ),
+                                    shape = RoundedCornerShape(12.dp),
+                                )
+                                .background(Color.White.copy(alpha = 0.18f), RoundedCornerShape(12.dp))
+                        } else if (picking) {
+                            Modifier.background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
+                        } else {
+                            Modifier
                         },
                     )
                     // A combined click because long-press is the way in: a list

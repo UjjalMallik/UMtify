@@ -355,7 +355,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         hazeState: HazeState,
         request: LyricsShareRequest,
         onDismiss: () -> Unit,
-    ) = AndroidLyricsShareSheet(hazeState = hazeState, request = request, onDismiss = onDismiss)
+    ) = LyricsCardShareSheet(hazeState = hazeState, request = request, onDismiss = onDismiss)
 }
 
 private fun AudioOutputStatus.Snapshot.toOutputFormat(): OutputFormatUi {
