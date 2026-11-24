@@ -86,9 +86,9 @@ data class LyricsShareRequest(
  * is ever dropped.
  */
 /** Maximum number of lines that can be selected for sharing. */
-const val MAX_SHARE_LINES = 4
+const val MAX_SHARE_LINES = 8
 
-const val SHARE_CARD_CHAR_BUDGET = 250
+const val SHARE_CARD_CHAR_BUDGET = 500
 
 /**
  * Whether a line of [text] can still join a card already holding [taken]
@@ -197,7 +197,7 @@ internal fun rememberLyricsPicker(
 
             picks.size >= MAX_SHARE_LINES -> {
                 overBudget = true
-                PlayerPlatform.host.showMessage("Select up to 4 lines")
+                PlayerPlatform.host.showMessage("Select up to 8 lines")
             }
 
             fitsOnCard(usedChars(), text) -> {

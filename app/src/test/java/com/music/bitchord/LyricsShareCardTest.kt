@@ -15,16 +15,16 @@ class LyricsShareCardTest {
     /** At the length a line of a song usually has. */
     private val shortLine = "Nie dzwoń do mnie teraz, nie przeszkadzaj mi"
 
-    @Test fun fiveShortLinesStillFit() {
+    @Test fun eightShortLinesStillFit() {
         var taken = 0
-        repeat(5) {
+        repeat(8) {
             assertTrue("line ${it + 1} must be pickable", fitsOnCard(taken, shortLine))
             taken += shortLine.length
         }
     }
 
-    @Test fun theSixthLineIsRefusedRatherThanShrinkingTheType() {
-        val taken = shortLine.length * 5
+    @Test fun excessiveLinesAreRefusedRatherThanShrinkingTheType() {
+        val taken = shortLine.length * 12
         assertFalse(fitsOnCard(taken, shortLine))
     }
 

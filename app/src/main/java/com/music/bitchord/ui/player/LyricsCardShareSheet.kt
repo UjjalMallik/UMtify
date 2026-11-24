@@ -416,7 +416,6 @@ internal fun shareToInstagramStory(context: Context, uri: Uri) {
     val storyIntent = Intent("com.instagram.share.ADD_TO_STORY").apply {
         setDataAndType(uri, "image/png")
         flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
-        putExtra("interactive_asset_uri", uri)
     }
     val directIntent = Intent(Intent.ACTION_SEND).apply {
         type = "image/png"
@@ -459,7 +458,6 @@ internal fun shareToFacebook(context: Context, uri: Uri) {
     val storyIntent = Intent("com.facebook.stories.ADD_TO_STORY").apply {
         setDataAndType(uri, "image/png")
         flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
-        putExtra("interactive_asset_uri", uri)
     }
     val directIntent = Intent(Intent.ACTION_SEND).apply {
         type = "image/png"

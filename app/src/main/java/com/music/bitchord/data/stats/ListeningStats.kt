@@ -148,7 +148,7 @@ object ListeningStats {
         return false
     }
 
-    private fun resolveTopSongsArt(context: Context, trackEntries: Collection<TrackEntry>) {
+    private suspend fun resolveTopSongsArt(context: Context, trackEntries: Collection<TrackEntry>) {
         val candidates = trackEntries.sortedByDescending { it.ms }.take(50)
         val localSongs = LocalMediaRepository.allLocalSongsFlow.value
         for (entry in candidates) {
@@ -181,7 +181,7 @@ object ListeningStats {
                     }
                 }
 
-                val downloads = runCatching { Downloads.getDownloadedSongs(context) }.getOrDefault(emptyList())
+                val downloads = try { Downloads.getDownloadedSongs(context) } catch (_: Throwable) { emptyList() }
                 val dlMatch = downloads.firstOrNull {
                     it.videoId == entry.id ||
                         (it.title.equals(entry.title, ignoreCase = true) && it.artist.equals(entry.artist, ignoreCase = true))
@@ -670,7 +670,7 @@ object ListeningStats {
             }
         }
 
-        fun toSummary(period: ReplayPeriod, today: LocalDate): ReplaySummary {
+        suspend fun toSummary(period: ReplayPeriod, today: LocalDate): ReplaySummary {
             if (::appContext.isInitialized) {
                 resolveTopSongsArt(appContext, tracks.values)
             }

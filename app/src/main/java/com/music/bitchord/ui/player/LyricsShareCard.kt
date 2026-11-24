@@ -148,7 +148,8 @@ internal suspend fun renderLyricsShareCard(
     val lyricsTop = topY + thumbSize + (if (story) 48f else 32f)
     val lyricsBottom = glassBottom - (if (story) 100f else 76f)
     val availableHeight = lyricsBottom - lyricsTop
-    val plan = fittestPlan(type, card.lines, availableHeight)
+    val contentWidth = glassRect.width() - innerPad * 2
+    val plan = fittestPlan(type, card.lines, availableHeight, contentWidth)
     val spareRoom = (availableHeight - plan.content).coerceAtLeast(0f)
     var y = lyricsTop + spareRoom / 2f
 
@@ -191,49 +192,55 @@ private class Plan(val rows: List<Row>, val ascent: Float) {
 }
 
 /**
- * The largest size on [FIT_LADDER] whose rows still fit in [room], or the
- * bottom rung when none of them do.
- *
- * The bottom rung is a floor rather than a last resort: under it the type stops
- * being worth sharing, so the frame grows to hold the words instead of the
- * words shrinking to hold the frame. That the player budgets characters at the
- * pick is what keeps this branch from ever being reached in practice.
+ * The largest size on [FIT_LADDER] whose rows still fit in [room], or continuously
+ * scales down to [MIN_FONT_SIZE] for dense multi-line verses.
  */
 private fun fittestPlan(
     type: Fonts,
     lines: List<LyricsShareLine>,
     room: Float,
+    contentWidth: Float = CARD_CONTENT_W,
 ): Plan {
     for (size in FIT_LADDER) {
-        val plan = planAt(type, lines, size)
+        val plan = planAt(type, lines, size, contentWidth)
         if (plan.content <= room) return plan
     }
-    return planAt(type, lines, FIT_LADDER.last())
+    var fallback = FIT_LADDER.last() - 2f
+    while (fallback >= MIN_FONT_SIZE) {
+        val plan = planAt(type, lines, fallback, contentWidth)
+        if (plan.content <= room) return plan
+        fallback -= 2f
+    }
+    return planAt(type, lines, MIN_FONT_SIZE, contentWidth)
 }
 
 /**
  * The rows at one [size], set in the face the lyrics panel draws with.
  *
  * SF Pro Display Heavy with the panel's tight tracking and its line advance,
- * carried over as the same ratios the panel's 34sp headline uses — so the card
- * reads as a still of that panel rather than as a different app quoting it.
- * Compose's tracking is absolute and `Paint`'s is a fraction of the size, hence
- * the divisions: -0.7 over 34 for the words, -0.7 over 20 for the smaller line
- * the panel hangs underneath them.
+ * carried over as the same ratios the panel's 34sp headline uses.
  */
-private fun planAt(type: Fonts, lines: List<LyricsShareLine>, size: Float): Plan {
+private fun planAt(
+    type: Fonts,
+    lines: List<LyricsShareLine>,
+    size: Float,
+    contentWidth: Float = CARD_CONTENT_W,
+): Plan {
     val primary = type.heading(size, Color.WHITE).apply { letterSpacing = TRACKING }
     val subSize = (size * SUB_RATIO).coerceAtLeast(SUB_FLOOR)
     val secondary = type.heading(subSize, SUB_COLOR).apply { letterSpacing = SUB_TRACKING }
 
+    // Adaptive gap based on line count so 1-8 lines have balanced breathing room
+    val gapFactor = when {
+        lines.size <= 2 -> 0.55f
+        lines.size <= 4 -> 0.45f
+        lines.size <= 6 -> 0.34f
+        else -> 0.26f
+    }
+
     val rows = mutableListOf<Row>()
     lines.forEachIndexed { index, line ->
         if (line.isGap) {
-            // The skipped lines, as "(...)" — the conventional editorial mark
-            // for an omission. Hung off the left edge with the words, smaller
-            // and a dim grey. Keep its row compact so the marker follows the
-            // preceding lyric closely; the regular gap on the next lyric line
-            // provides the separation below it.
             val marker = type.body(size * 0.65f, 0x66FFFFFF.toInt())
             val markerHeight = marker.descent() - marker.ascent()
             rows += Row("(...)", marker, markerHeight, 0f, isGap = true)
@@ -241,21 +248,18 @@ private fun planAt(type: Fonts, lines: List<LyricsShareLine>, size: Float): Plan
         }
         var firstOfLine = true
         fun add(text: String, paint: Paint, height: Float) {
-            // One verse line is one paragraph: its first row carries the space
-            // above it and its wraps sit tight underneath, so a phrase reads as
-            // a block rather than as a list of separate sentences.
             val gap = when {
                 rows.isEmpty() -> 0f
-                firstOfLine && index > 0 -> size * 0.55f
+                firstOfLine && index > 0 -> size * gapFactor
                 else -> 0f
             }
             rows += Row(text, paint, height, gap)
             firstOfLine = false
         }
-        wrap(line.text, primary, CARD_CONTENT_W).forEach { add(it, primary, size * LEAD) }
+        wrap(line.text, primary, contentWidth).forEach { add(it, primary, size * LEAD) }
         val sub = line.subText
         if (!sub.isNullOrBlank() && sub != line.text) {
-            wrap(sub, secondary, CARD_CONTENT_W).forEach { add(it, secondary, subSize * SUB_LEAD) }
+            wrap(sub, secondary, contentWidth).forEach { add(it, secondary, subSize * SUB_LEAD) }
         }
     }
     return Plan(rows, -primary.ascent())
@@ -309,8 +313,7 @@ private const val CARD_W = 1080
  */
 private const val MAX_CARD_H = 1920f
 
-private const val CARD_MARGIN = 72f
-private const val CARD_CONTENT_W = CARD_W - CARD_MARGIN * 2
+private const val CARD_CONTENT_W = 856f
 
 /** Baseline of the mark at the top right, and just under it where the gap starts. */
 private const val HEADER_BASELINE = 132f
@@ -325,22 +328,20 @@ private const val FOOTER_THUMB = 160f
 private const val FOOTER_PAD = 96f
 
 /** Smallest the translation line is allowed to get before it stops being legible. */
-private const val SUB_FLOOR = 24f
+private const val SUB_FLOOR = 16f
+
+/** Absolute floor for primary font size when scaling dense multi-line lyrics. */
+private const val MIN_FONT_SIZE = 16f
 
 /** Small visual correction so the omission marker sits below the line above. */
 private const val GAP_MARKER_OFFSET = 0.18f
 
 /**
- * The sizes tried, largest first.
- *
- * A ladder rather than a search: a dozen candidates is nothing to lay out, and
- * stepping by a visible amount keeps two cards with adjacent line counts from
- * coming out nearly the same size and reading as a mistake.
- *
- * The last rung doubles as the floor — see [fittestPlan] for why the frame is
- * what gives way under it rather than the type.
+ * The sizes tried, largest first. Smoothly adapts typography from 1 to 8 lines.
  */
-private val FIT_LADDER = floatArrayOf(96f, 88f, 80f, 72f, 64f, 56f, 50f, 44f, 38f, 32f)
+private val FIT_LADDER = floatArrayOf(
+    96f, 88f, 80f, 72f, 66f, 60f, 54f, 48f, 42f, 38f, 34f, 30f, 26f, 22f, 20f
+)
 
 // ── The panel's type, as ratios ────────────────────────────────────────────
 // Every number here is one the lyrics panel uses, divided by the size it uses
