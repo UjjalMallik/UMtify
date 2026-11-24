@@ -141,17 +141,40 @@ suspend fun renderReplayPoster(
         )
 
         if (page == null) {
-            var y = drawEditorialHeader(canvas, context, type, summary, holder, memberSince, 100f)
-            y = drawHeroBentoRow(canvas, context, type, summary, artists, covers, y)
-            y = drawColumns(canvas, context, type, songs, artists, covers, y)
-            y = drawAlbums(canvas, context, type, albums, covers, y)
-            drawGenres(canvas, context, type, summary, y)
+            val gap = 24f
+            val headerH = 100f
+            val heroH = 286f
+            val rows = maxOf(songs.size, artists.size).coerceAtMost(POSTER_ROWS).coerceAtLeast(1)
+            val rowH = 92f
+            val columnsH = 68f + rows * rowH + 16f
+            val hasAlbums = albums.isNotEmpty()
+            val albumsH = if (hasAlbums) 324f else 0f
+            val footerH = 96f
+
+            val totalHeight = headerH + gap + heroH + gap + columnsH + (if (hasAlbums) gap + albumsH else 0f) + gap + footerH
+            val startY = ((POSTER_H - totalHeight) / 2f).coerceAtLeast(64f)
+
+            val leadCover = covers[lit] ?: covers[songs.firstOrNull()?.key]
+            val palette = paletteOf(leadCover)
+            val accentColor = palette.firstOrNull() ?: 0xFFFA2D48.toInt()
+
+            var y = drawEditorialHeader(canvas, context, type, summary, holder, memberSince, startY, headerH)
+            y += gap
+            y = drawUnifiedHeroCard(canvas, context, type, summary, accentColor, y, heroH)
+            y += gap
+            y = drawColumns(canvas, context, type, songs, artists, covers, y, columnsH, rows, rowH)
+            if (hasAlbums) {
+                y += gap
+                y = drawAlbums(canvas, context, type, albums, covers, y, albumsH)
+            }
+            y += gap
+            drawSignatureFooterCard(canvas, context, type, y, footerH)
         } else {
-            var y = drawEditorialHeader(canvas, context, type, summary, holder, memberSince, 100f)
+            var y = drawEditorialHeader(canvas, context, type, summary, holder, memberSince, 120f, 100f)
             y = drawRuns(canvas, type, summary.storyHeadline(context, page), MARGIN, y, CONTENT_W)
             drawCard(canvas, context, type, summary, page, covers, y + 56f)
+            drawSignatureFooterCard(canvas, context, type, POSTER_H - 140f, 96f)
         }
-        drawFooter(canvas, context, type)
         bitmap
     }
 }
@@ -485,8 +508,8 @@ private fun drawLiquidGlassCard(
     bounds: RectF,
     cornerRadius: Float = 32f,
     fillAlpha: Int = 0x22,
-    borderAlphaTop: Int = 0x65,
-    borderAlphaBottom: Int = 0x20,
+    borderAlphaTop: Int = 61,
+    borderAlphaBottom: Int = 15,
     accentGlow: Int? = null,
 ) {
     // 1. Subtle glow orb behind card
@@ -551,6 +574,7 @@ private fun drawEditorialHeader(
     holder: String,
     memberSince: String?,
     top: Float = 100f,
+    height: Float = 100f,
 ): Float {
     val locale = context.resources.configuration.locales[0]
     val label = summary.localizedLabel(context)
@@ -594,29 +618,30 @@ private fun drawEditorialHeader(
     // UMtify logo on the right
     drawWordmark(canvas, context, POSTER_W - MARGIN, top + 44f)
 
-    return top + 116f
+    return top + height
 }
 
-private fun drawHeroBentoRow(
+private fun drawUnifiedHeroCard(
     canvas: Canvas,
     context: Context,
     type: Fonts,
     summary: ReplaySummary,
-    artists: List<ReplayRow>,
-    covers: Map<String, Bitmap?>,
+    accentColor: Int,
     top: Float,
+    heroH: Float = 286f,
 ): Float {
-    val bentoH = 296f
-    val leftW = 580f
-    val gap = 18f
-    val rightW = CONTENT_W - leftW - gap
-    val leftBounds = RectF(MARGIN, top, MARGIN + leftW, top + bentoH)
-    val rightBounds = RectF(MARGIN + leftW + gap, top, POSTER_W - MARGIN, top + bentoH)
-
-    // ── LEFT BENTO: Minutes Listened + 3 Stat Chips ─────────────────────────────
-    drawLiquidGlassCard(canvas, leftBounds, cornerRadius = 32f, fillAlpha = 0x24)
+    val bounds = RectF(MARGIN, top, POSTER_W - MARGIN, top + heroH)
+    drawLiquidGlassCard(
+        canvas,
+        bounds,
+        cornerRadius = 56f, // RoundedCornerShape(28.dp)
+        fillAlpha = 0x24,
+        accentGlow = accentColor,
+    )
 
     val locale = context.resources.configuration.locales[0]
+
+    // 1. "MINUTES LISTENED" pill
     val pillText = context.getString(R.string.minutes_listened).uppercase(locale)
     val pillFont = type.label(17f, Color.WHITE, tracking = 0.16f).apply {
         textAlign = Paint.Align.CENTER
@@ -624,7 +649,7 @@ private fun drawHeroBentoRow(
     val pillTextW = pillFont.measureText(pillText)
     val pillW = pillTextW + 36f
     val pillH = 34f
-    val pillBounds = RectF(MARGIN + 24f, top + 22f, MARGIN + 24f + pillW, top + 22f + pillH)
+    val pillBounds = RectF(MARGIN + 28f, top + 24f, MARGIN + 28f + pillW, top + 24f + pillH)
     val pillFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x22FFFFFF }
     val pillBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0x48FFFFFF
@@ -635,18 +660,20 @@ private fun drawHeroBentoRow(
     canvas.drawRoundRect(pillBounds, 17f, 17f, pillBorder)
     canvas.drawText(pillText, pillBounds.centerX(), pillBounds.centerY() + 6f, pillFont)
 
-    // Giant bold number
+    // 2. Massive bold minutes listened with subtle soft glow
     val numberText = formatMinutes(summary.totalMs)
-    val numberPaint = type.heading(100f, Color.WHITE)
-    canvas.drawText(numberText, MARGIN + 24f, top + 152f, numberPaint)
+    val numberPaint = type.heading(104f, Color.WHITE)
+    val glowPaint = type.heading(104f, ColorUtils.setAlphaComponent(accentColor, 110))
+    canvas.drawText(numberText, MARGIN + 28f + 1f, top + 152f, glowPaint)
+    canvas.drawText(numberText, MARGIN + 28f, top + 150f, numberPaint)
 
-    // Compact stat chips below (Plays, Songs, Artists)
+    // 3. Compact row of 3 frosted stat pills underneath (Plays, Songs, Artists)
     val chips = listOf(
         context.replayCount(summary.totalPlays, R.plurals.replay_play_count),
         context.replayCount(summary.distinctSongs, R.plurals.replay_song_count),
         context.replayCount(summary.distinctArtists, R.plurals.replay_artist_count),
     )
-    val chipFont = type.body(20f, 0xDDFFFFFF.toInt(), bold = true).apply {
+    val chipFont = type.body(20f, 0xEEFFFFFF.toInt(), bold = true).apply {
         textAlign = Paint.Align.CENTER
     }
     val chipFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x1AFFFFFF }
@@ -656,75 +683,75 @@ private fun drawHeroBentoRow(
         strokeWidth = 1.2f
     }
     val chipH = 38f
-    val chipGap = 10f
-    val totalAvailableW = leftW - 48f
-    val chipW = (totalAvailableW - chipGap * (chips.size - 1)) / chips.size
-    val chipY = top + 232f
+    val chipGap = 12f
+    val maxChipsW = 540f
+    val chipW = (maxChipsW - chipGap * (chips.size - 1)) / chips.size
+    val chipY = top + 224f
 
     chips.forEachIndexed { i, labelText ->
-        val cx = MARGIN + 24f + i * (chipW + chipGap)
+        val cx = MARGIN + 28f + i * (chipW + chipGap)
         val cBounds = RectF(cx, chipY, cx + chipW, chipY + chipH)
         canvas.drawRoundRect(cBounds, 14f, 14f, chipFill)
         canvas.drawRoundRect(cBounds, 14f, 14f, chipBorder)
-        canvas.drawText(ellipsised(labelText, chipFont, chipW - 12f), cBounds.centerX(), cBounds.centerY() + 7f, chipFont)
+        canvas.drawText(ellipsised(labelText, chipFont, chipW - 14f), cBounds.centerX(), cBounds.centerY() + 7f, chipFont)
     }
 
-    // ── RIGHT BENTO: #1 Top Artist Spotlight ──────────────────────────────────
-    val topArtist = artists.firstOrNull()
-    drawLiquidGlassCard(canvas, rightBounds, cornerRadius = 32f, fillAlpha = 0x24, accentGlow = 0xFFFA2D48.toInt())
+    // 4. Right side: Decorative translucent Audio Waveform / Equalizer Bars graphic
+    val waveW = 240f
+    val waveRight = POSTER_W - MARGIN - 32f
+    val waveLeft = waveRight - waveW
+    val waveCenterY = top + heroH / 2f
+    val waveH = 190f
+    drawAudioWaveform(canvas, waveLeft, waveCenterY, waveW, waveH, accentColor)
 
-    // Top spotlight pill
-    val spotlightText = "#1 TOP ARTIST"
-    val spotlightFont = type.label(17f, 0xFFFF7088.toInt(), tracking = 0.16f).apply {
-        textAlign = Paint.Align.CENTER
-    }
-    val spotTextW = spotlightFont.measureText(spotlightText)
-    val spotW = spotTextW + 36f
-    val spotH = 34f
-    val spotBounds = RectF(rightBounds.centerX() - spotW / 2f, top + 22f, rightBounds.centerX() + spotW / 2f, top + 22f + spotH)
-    val spotFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x33FA2D48.toInt() }
-    val spotBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x88FA2D48.toInt()
-        style = Paint.Style.STROKE
-        strokeWidth = 1.2f
-    }
-    canvas.drawRoundRect(spotBounds, 17f, 17f, spotFill)
-    canvas.drawRoundRect(spotBounds, 17f, 17f, spotBorder)
-    canvas.drawText(spotlightText, spotBounds.centerX(), spotBounds.centerY() + 6f, spotlightFont)
+    return top + heroH
+}
 
-    // Center circular avatar with glowing ring
-    val avatarSize = 104f
-    val avatarX = rightBounds.centerX() - avatarSize / 2f
-    val avatarY = top + 74f
-    val art = topArtist?.artworkUrl?.let { covers[it] } ?: topArtist?.key?.let { covers[it] }
-    drawArtwork(canvas, art, topArtist?.title ?: "Artist", avatarX, avatarY, avatarSize, circular = true)
+private fun drawAudioWaveform(
+    canvas: Canvas,
+    x: Float,
+    centerY: Float,
+    width: Float,
+    height: Float,
+    accentColor: Int,
+) {
+    val barRatios = floatArrayOf(0.25f, 0.50f, 0.85f, 0.62f, 0.95f, 0.74f, 1.0f, 0.76f, 0.48f, 0.70f, 0.35f)
+    val barCount = barRatios.size
+    val barWidth = 11f
+    val gap = (width - barWidth * barCount) / (barCount - 1).coerceAtLeast(1)
 
-    val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 2.8f
-        shader = android.graphics.LinearGradient(
-            avatarX, avatarY, avatarX + avatarSize, avatarY + avatarSize,
-            intArrayOf(0xFFFFB300.toInt(), 0xFFFA2D48.toInt(), 0xFFFF7088.toInt()),
-            floatArrayOf(0f, 0.5f, 1f),
+    val barPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+
+    barRatios.forEachIndexed { i, ratio ->
+        val barH = (height * ratio).coerceAtLeast(14f)
+        val bx = x + i * (barWidth + gap)
+        val bTop = centerY - barH / 2f
+        val bBottom = centerY + barH / 2f
+        val rect = RectF(bx, bTop, bx + barWidth, bBottom)
+        val corner = barWidth / 2f
+
+        // Soft accent glow around peaks
+        if (ratio > 0.65f) {
+            val glowRect = RectF(bx - 3f, bTop - 3f, bx + barWidth + 3f, bBottom + 3f)
+            glowPaint.color = ColorUtils.setAlphaComponent(accentColor, (48 * ratio).toInt())
+            canvas.drawRoundRect(glowRect, corner + 2f, corner + 2f, glowPaint)
+        }
+
+        // Translucent gradient bar tinted with dominant album accent color
+        barPaint.shader = android.graphics.LinearGradient(
+            bx, bTop, bx, bBottom,
+            intArrayOf(
+                0xEEFFFFFF.toInt(),
+                ColorUtils.setAlphaComponent(accentColor, 225),
+                ColorUtils.setAlphaComponent(accentColor, 120),
+            ),
+            floatArrayOf(0f, 0.45f, 1f),
             Shader.TileMode.CLAMP,
         )
+        canvas.drawRoundRect(rect, corner, corner, barPaint)
+        barPaint.shader = null
     }
-    canvas.drawCircle(rightBounds.centerX(), avatarY + avatarSize / 2f, avatarSize / 2f + 1.4f, ringPaint)
-
-    // Artist name and time below avatar
-    val artistName = topArtist?.title ?: "Top Artist"
-    val artistNamePaint = type.body(23f, Color.WHITE, bold = true).apply {
-        textAlign = Paint.Align.CENTER
-    }
-    canvas.drawText(ellipsised(artistName, artistNamePaint, rightW - 24f), rightBounds.centerX(), avatarY + avatarSize + 32f, artistNamePaint)
-
-    val artistTime = topArtist?.let { formatListening(context, it.ms) } ?: ""
-    val artistTimePaint = type.body(19f, 0xAAFFFFFF.toInt()).apply {
-        textAlign = Paint.Align.CENTER
-    }
-    canvas.drawText(artistTime, rightBounds.centerX(), avatarY + avatarSize + 56f, artistTimePaint)
-
-    return top + bentoH + 20f
 }
 
 /**
@@ -738,21 +765,20 @@ private fun drawColumns(
     artists: List<ReplayRow>,
     covers: Map<String, Bitmap?>,
     top: Float,
+    cardH: Float = 544f,
+    rows: Int = 5,
+    rowH: Float = 92f,
 ): Float {
     val columnGap = 18f
     val colWidth = (CONTENT_W - columnGap) / 2f
     val leftX = MARGIN
     val rightX = MARGIN + colWidth + columnGap
 
-    val rows = maxOf(songs.size, artists.size).coerceAtMost(POSTER_ROWS)
-    val rowH = 96f
-    val cardH = 68f + rows * rowH + 16f
-
     val leftBounds = RectF(leftX, top, leftX + colWidth, top + cardH)
     val rightBounds = RectF(rightX, top, rightX + colWidth, top + cardH)
 
-    drawLiquidGlassCard(canvas, leftBounds, cornerRadius = 30f, fillAlpha = 0x22)
-    drawLiquidGlassCard(canvas, rightBounds, cornerRadius = 30f, fillAlpha = 0x22)
+    drawLiquidGlassCard(canvas, leftBounds, cornerRadius = 32f, fillAlpha = 0x22)
+    drawLiquidGlassCard(canvas, rightBounds, cornerRadius = 32f, fillAlpha = 0x22)
 
     val locale = context.resources.configuration.locales[0]
     canvas.drawText(
@@ -768,7 +794,7 @@ private fun drawColumns(
         type.label(21f, 0xEEFFFFFF.toInt(), tracking = 0.14f),
     )
 
-    var rowY = top + 72f
+    var rowY = top + 68f
     repeat(rows) { index ->
         songs.getOrNull(index)?.let {
             drawRow(canvas, context, type, it, covers, leftX + 18f, rowY, colWidth - 36f, false)
@@ -778,7 +804,7 @@ private fun drawColumns(
         }
         rowY += rowH
     }
-    return top + cardH + 20f
+    return top + cardH
 }
 
 private fun drawRow(
@@ -838,9 +864,9 @@ private fun drawAlbums(
     albums: List<ReplayRow>,
     covers: Map<String, Bitmap?>,
     top: Float,
+    cardHeight: Float = 324f,
 ): Float {
     if (albums.isEmpty()) return top
-    val cardHeight = 320f
     val cardBounds = RectF(MARGIN, top, POSTER_W - MARGIN, top + cardHeight)
     drawLiquidGlassCard(canvas, cardBounds, cornerRadius = 32f, fillAlpha = 0x22)
 
@@ -889,69 +915,75 @@ private fun drawAlbums(
             sub,
         )
     }
-    return top + cardHeight + 20f
+    return top + cardHeight
 }
 
-private fun drawGenres(canvas: Canvas, context: Context, type: Fonts, summary: ReplaySummary, top: Float) {
-    val genres = summary.genreRows(POSTER_GENRES)
-    if (genres.isEmpty()) return
-    val locale = context.resources.configuration.locales[0]
+private fun drawSignatureFooterCard(
+    canvas: Canvas,
+    context: Context,
+    type: Fonts,
+    top: Float,
+    stripH: Float = 96f,
+): Float {
+    val bounds = RectF(MARGIN, top, POSTER_W - MARGIN, top + stripH)
+    drawLiquidGlassCard(canvas, bounds, cornerRadius = 48f, fillAlpha = 0x22)
 
-    val headerText = context.getString(R.string.top_genres).uppercase(locale)
-    val headerFont = type.label(22f, 0xEEFFFFFF.toInt(), tracking = 0.14f).apply {
+    val logoLeft = MARGIN + 28f
+    val centerY = top + stripH / 2f
+    val logoBaseline = centerY + 10f
+
+    // UMtify logo on the left
+    val mark = runCatching {
+        ResourcesCompat.getDrawable(context.resources, R.drawable.ic_umtify_wordmark, null)
+    }.getOrNull()
+
+    var textStartX = logoLeft
+    if (mark != null) {
+        val wordmarkW = 32f * 800f / 275f // ~93f
+        val wordmarkH = 32f
+        val wmTop = centerY - wordmarkH / 2f
+        mark.setTint(Color.WHITE)
+        mark.setBounds(logoLeft.toInt(), wmTop.toInt(), (logoLeft + wordmarkW).toInt(), (wmTop + wordmarkH).toInt())
+        mark.draw(canvas)
+        textStartX = logoLeft + wordmarkW + 20f
+    } else {
+        val brandPaint = type.heading(28f, Color.WHITE)
+        canvas.drawText("UMtify", textStartX, logoBaseline, brandPaint)
+        textStartX += brandPaint.measureText("UMtify") + 16f
+    }
+
+    // Divider dot
+    val dotPaint = type.body(20f, 0x66FFFFFF)
+    canvas.drawText("·", textStartX, centerY + 6f, dotPaint)
+    val afterDotX = textStartX + dotPaint.measureText("·") + 14f
+
+    // Tagline: "Music. Style. Experience."
+    val taglinePaint = type.label(18f, 0xCCFFFFFF.toInt(), tracking = 0.12f)
+    canvas.drawText("Music. Style. Experience.", afterDotX, centerY + 6f, taglinePaint)
+
+    // Right side: Subtle frosted pill "Liquid Glass · 2026"
+    val pillText = "Liquid Glass · 2026"
+    val pillFont = type.label(17f, 0xEEFFFFFF.toInt(), tracking = 0.10f).apply {
         textAlign = Paint.Align.CENTER
     }
-    val centerX = POSTER_W / 2f
-    canvas.drawText(headerText, centerX, top + 28f, headerFont)
+    val pillW = pillFont.measureText(pillText) + 38f
+    val pillH = 42f
+    val pillRight = POSTER_W - MARGIN - 24f
+    val pillLeft = pillRight - pillW
+    val pillTop = top + (stripH - pillH) / 2f
+    val pillBounds = RectF(pillLeft, pillTop, pillRight, pillTop + pillH)
 
-    val paint = type.body(24f, Color.WHITE, bold = true)
-    val chipFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x22FFFFFF }
-    val chipBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x44FFFFFF
-        style = Paint.Style.STROKE
-        strokeWidth = 1.5f
-    }
-
-    val chipWidths = genres.map { paint.measureText(it.title) + 40f }
-    val totalW = chipWidths.sum() + (genres.size - 1) * 14f
-    var x = if (totalW <= POSTER_W - MARGIN * 2) (POSTER_W - totalW) / 2f else MARGIN
-    val y = top + 46f
-
-    genres.forEachIndexed { i, genre ->
-        val width = chipWidths[i]
-        if (x + width > POSTER_W - MARGIN) return@forEachIndexed
-        val pillRect = RectF(x, y, x + width, y + 46f)
-        canvas.drawRoundRect(pillRect, 23f, 23f, chipFill)
-        canvas.drawRoundRect(pillRect, 23f, 23f, chipBorder)
-        canvas.drawText(genre.title, x + 20f, y + 31f, paint)
-        x += width + 14f
-    }
-}
-
-private fun drawFooter(canvas: Canvas, context: Context, type: Fonts) {
-    val text = "Crafted on UMtify · 2026"
-    val font = type.label(20f, 0xEEFFFFFF.toInt(), tracking = 0.12f).apply {
-        textAlign = Paint.Align.CENTER
-    }
-    val textWidth = font.measureText(text)
-    val pillW = textWidth + 56f
-    val pillH = 46f
-    val centerX = POSTER_W / 2f
-    val pillY = POSTER_H - 96f
-    val pillBounds = RectF(centerX - pillW / 2f, pillY, centerX + pillW / 2f, pillY + pillH)
-
-    val pillFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x22FFFFFF
-        style = Paint.Style.FILL
-    }
+    val pillFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x22FFFFFF }
     val pillBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0x48FFFFFF
         style = Paint.Style.STROKE
-        strokeWidth = 1.5f
+        strokeWidth = 1.2f
     }
-    canvas.drawRoundRect(pillBounds, 23f, 23f, pillFill)
-    canvas.drawRoundRect(pillBounds, 23f, 23f, pillBorder)
-    canvas.drawText(text, centerX, pillBounds.centerY() + 7f, font)
+    canvas.drawRoundRect(pillBounds, 21f, 21f, pillFill)
+    canvas.drawRoundRect(pillBounds, 21f, 21f, pillBorder)
+    canvas.drawText(pillText, pillBounds.centerX(), pillBounds.centerY() + 6f, pillFont)
+
+    return top + stripH
 }
 
 // ── Pieces ──────────────────────────────────────────────────────────────────
