@@ -3317,7 +3317,7 @@ private fun BitChordApp(
                                                 )
                                             } else {
                                                 onTabSelected(TAB_SEARCH)
-                                                viewModel.search(item.title)
+                                                viewModel.searchFor(item.title)
                                             }
                                             return@HomeScreen
                                         }

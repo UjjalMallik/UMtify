@@ -5,8 +5,8 @@ import android.os.SystemClock
 import com.music.bitchord.data.LanguageTrackFilter
 import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.YtMusicRepository
-import com.music.bitchord.data.cache.AudioCache
-import com.music.bitchord.data.download.Downloads
+import com.music.bitchord.playback.AudioCache
+import com.music.bitchord.download.Downloads
 import com.music.bitchord.data.model.HomeShelf
 import com.music.bitchord.data.model.PlaybackSourceType
 import com.music.bitchord.data.model.QueueTier

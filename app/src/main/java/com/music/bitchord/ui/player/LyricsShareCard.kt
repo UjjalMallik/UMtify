@@ -41,7 +41,7 @@ internal suspend fun renderLyricsShareCard(
     card: LyricsShareRequest,
     /** True for 9:16 Story (1080x1920), false for 1:1 Square (1080x1080) format. */
     story: Boolean = true,
-    style: LyricsCardStyle = LyricsCardStyle.AMBIENT_BLUR,
+    cardStyle: LyricsCardStyle = LyricsCardStyle.AMBIENT_BLUR,
 ): Bitmap = withContext(Dispatchers.Default) {
     val type = Fonts(context)
     val cover = card.artworkUrl?.let { loadBitmap(context, it) }
@@ -52,7 +52,7 @@ internal suspend fun renderLyricsShareCard(
     val canvas = Canvas(bitmap)
 
     // ── 1. Background style rendering ──────────────────────────────────────────
-    when (style) {
+    when (cardStyle) {
         LyricsCardStyle.AMBIENT_BLUR -> {
             drawBackdrop(canvas, cover, 0f, cardH.toFloat())
             val darkOverlay = Paint().apply { color = Color.argb(90, 8, 10, 16) }
@@ -139,7 +139,7 @@ internal suspend fun renderLyricsShareCard(
 
     val textX = thumbX + thumbSize + 28f
     val textRoom = glassRect.right - innerPad - textX
-    val titlePaint = type.heading(if (story) 46f else 38f, Color.WHITE, bold = true)
+    val titlePaint = type.heading(if (story) 46f else 38f, Color.WHITE)
     val artistPaint = type.body(if (story) 36f else 30f, 0xCCFFFFFF.toInt())
     canvas.drawText(ellipsised(card.song.title, titlePaint, textRoom), textX, topY + thumbSize * 0.44f, titlePaint)
     canvas.drawText(ellipsised(card.song.artist, artistPaint, textRoom), textX, topY + thumbSize * 0.84f, artistPaint)
@@ -161,7 +161,7 @@ internal suspend fun renderLyricsShareCard(
     }
 
     // ── 5. Bottom: Subtle Minimalist UMtify Branding Watermark ────────────────
-    val watermarkPaint = type.heading(32f, 0x88FFFFFF.toInt(), bold = true).apply {
+    val watermarkPaint = type.heading(32f, 0x88FFFFFF.toInt()).apply {
         letterSpacing = 0.08f
     }
     val wmText = "UMtify"
