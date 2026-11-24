@@ -2,7 +2,9 @@ package com.music.bitchord.data.stats
 
 import android.content.Context
 import android.util.Log
+import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.download.Downloads
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -106,13 +108,89 @@ object ListeningStats {
         val summary: ReplaySummary,
     )
 
+    private lateinit var appContext: Context
+
     fun init(context: Context) {
+        appContext = context.applicationContext
         directory = File(context.filesDir, DIRECTORY)
         // Opening a month means reading and parsing it, and the first thing to
         // ask for one is the playback sampler — on the main thread, a few
         // seconds into the first track. Done here instead, it has happened long
         // before anything is playing.
         writer.launch { synchronized(lock) { bucketFor(YearMonth.now()) } }
+    }
+
+    private fun sanitizePermanentArt(song: Song): String? {
+        val art = song.thumbnailUrl?.takeIf { it.isNotBlank() } ?: return null
+        if (art.startsWith("http://") || art.startsWith("https://")) return art
+        if (art.contains("files/local_art_") || art.contains("filesDir")) return art
+        if (art.contains("/cache/") || art.contains("cacheDir")) {
+            if (::appContext.isInitialized) {
+                val key = song.localUri ?: song.localPath ?: song.videoId
+                val permanent = LocalMediaRepository.getCachedLocalArtThumbUri(appContext, key)
+                    ?: LocalMediaRepository.getCachedLocalArtUri(appContext, key)
+                if (permanent != null) return permanent
+            }
+        }
+        return art
+    }
+
+    private fun isBetterArt(newArt: String, oldArt: String?): Boolean {
+        if (oldArt.isNullOrBlank()) return true
+        if ((newArt.startsWith("https://") || newArt.contains("files/local_art_")) &&
+            (oldArt.contains("/cache/") || oldArt.contains("cacheDir"))
+        ) return true
+        if (newArt.startsWith("file://") || newArt.startsWith("/")) {
+            val newFile = File(newArt.removePrefix("file://"))
+            val oldFile = File(oldArt.removePrefix("file://"))
+            if (newFile.exists() && (!oldFile.exists() || oldFile.length() == 0L)) return true
+        }
+        return false
+    }
+
+    private fun resolveTopSongsArt(context: Context, trackEntries: Collection<TrackEntry>) {
+        val candidates = trackEntries.sortedByDescending { it.ms }.take(50)
+        val localSongs = LocalMediaRepository.allLocalSongsFlow.value
+        for (entry in candidates) {
+            val currentArt = entry.art
+            val isStaleOrMissing = currentArt.isNullOrBlank() ||
+                (currentArt.startsWith("file://") && !File(currentArt.removePrefix("file://")).exists()) ||
+                currentArt.contains("/cache/")
+
+            if (isStaleOrMissing) {
+                val localMatch = localSongs.firstOrNull {
+                    it.videoId == entry.id || it.localUri == entry.id || it.localPath == entry.id
+                } ?: localSongs.firstOrNull {
+                    it.title.equals(entry.title, ignoreCase = true) &&
+                        (entry.artist.isBlank() || it.artist.equals(entry.artist, ignoreCase = true))
+                }
+
+                if (localMatch != null) {
+                    val matchArt = localMatch.thumbnailUrl
+                    if (!matchArt.isNullOrBlank() && !matchArt.contains("/cache/")) {
+                        entry.art = matchArt
+                        continue
+                    }
+                    val key = localMatch.localUri ?: localMatch.localPath ?: localMatch.videoId
+                    val cached = LocalMediaRepository.getCachedLocalArtThumbUri(context, key)
+                        ?: LocalMediaRepository.getCachedLocalArtUri(context, key)
+                        ?: LocalMediaRepository.extractAndCacheLocalArt(context, key, key)
+                    if (cached != null) {
+                        entry.art = cached
+                        continue
+                    }
+                }
+
+                val downloads = runCatching { Downloads.getDownloadedSongs(context) }.getOrDefault(emptyList())
+                val dlMatch = downloads.firstOrNull {
+                    it.videoId == entry.id ||
+                        (it.title.equals(entry.title, ignoreCase = true) && it.artist.equals(entry.artist, ignoreCase = true))
+                }
+                if (dlMatch?.thumbnailUrl != null && !dlMatch.thumbnailUrl!!.contains("/cache/")) {
+                    entry.art = dlMatch.thumbnailUrl
+                }
+            }
+        }
     }
 
     private val ready: Boolean get() = this::directory.isInitialized
@@ -137,6 +215,7 @@ object ListeningStats {
         val dayKey = "${at.year}-${"%02d".format(at.monthValue)}-${"%02d".format(at.dayOfMonth)}"
         synchronized(lock) {
             val bucket = bucketFor(YearMonth.from(at))
+            val permanentArt = sanitizePermanentArt(song)
             val track = bucket.tracks.getOrPut(song.videoId) {
                 TrackEntry(
                     id = song.videoId,
@@ -145,7 +224,7 @@ object ListeningStats {
                     album = song.albumName,
                     albumId = song.albumId,
                     artistId = song.artistId,
-                    art = song.thumbnailUrl,
+                    art = permanentArt,
                 )
             }
             track.ms += playedMs
@@ -156,7 +235,9 @@ object ListeningStats {
             if (track.album == null) track.album = song.albumName
             if (track.albumId == null) track.albumId = song.albumId
             if (track.artistId == null) track.artistId = song.artistId
-            if (track.art == null) track.art = song.thumbnailUrl
+            if (permanentArt != null && (track.art.isNullOrBlank() || isBetterArt(permanentArt, track.art))) {
+                track.art = permanentArt
+            }
             if (countsAsPlay) track.plays++
 
             // Day-level sub-bucket for the track.
@@ -590,6 +671,9 @@ object ListeningStats {
         }
 
         fun toSummary(period: ReplayPeriod, today: LocalDate): ReplaySummary {
+            if (::appContext.isInitialized) {
+                resolveTopSongsArt(appContext, tracks.values)
+            }
             // For weekly mode, compute per-entity totals from day-level sub-buckets.
             val weekRange = if (period.needsDayFilter()) period.range(today) else null
 

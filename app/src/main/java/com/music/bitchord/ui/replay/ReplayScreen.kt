@@ -3,6 +3,7 @@ package com.music.bitchord.ui.replay
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
@@ -55,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.music.bitchord.R
+import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.model.ROW_ART_PX
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.artworkAt
@@ -455,6 +457,48 @@ private fun SectionTitle(text: String, dark: Boolean) {
 }
 
 @Composable
+private fun ReplayRowThumbnail(
+    row: ReplayRow,
+    shape: androidx.compose.ui.graphics.Shape,
+    size: androidx.compose.ui.unit.Dp = 48.dp,
+) {
+    val context = LocalContext.current
+    val localSongs by LocalMediaRepository.allLocalSongsFlow.collectAsStateWithLifecycle()
+    val artUrl = remember(row.key, row.artworkUrl, localSongs) {
+        row.artworkUrl?.takeIf { it.isNotBlank() } ?: run {
+            val match = localSongs.firstOrNull { it.videoId == row.key }
+                ?: localSongs.firstOrNull { it.title.equals(row.title, ignoreCase = true) }
+            val matchKey = match?.localUri ?: match?.localPath ?: match?.videoId
+            match?.thumbnailUrl ?: matchKey?.let { LocalMediaRepository.getCachedLocalArtThumbUri(context, it) }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(shape)
+            .background(Color.White.copy(alpha = 0.08f))
+            .border(1.dp, Color.White.copy(alpha = 0.16f), shape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = BitChordIcons.MusicNote,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.55f),
+            modifier = Modifier.size(size * 0.48f),
+        )
+        if (!artUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = artUrl.artworkAt(ROW_ART_PX),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+@Composable
 private fun ReplayChartRow(row: ReplayRow, circular: Boolean, dark: Boolean, onClick: () -> Unit) {
     val textColor = if (dark) Color.White else Color.Black
     val textVariant = if (dark) Color.White.copy(alpha = 0.55f) else Color.Black.copy(alpha = 0.55f)
@@ -467,16 +511,7 @@ private fun ReplayChartRow(row: ReplayRow, circular: Boolean, dark: Boolean, onC
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RankBadge(row.rank, AccentRed)
-        if (row.artworkUrl != null) {
-            AsyncImage(
-                model = row.artworkUrl.artworkAt(ROW_ART_PX),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.size(48.dp).clip(shape),
-            )
-        } else {
-            InitialTile(row.title, 48.dp, shape)
-        }
+        ReplayRowThumbnail(row, shape, 48.dp)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(

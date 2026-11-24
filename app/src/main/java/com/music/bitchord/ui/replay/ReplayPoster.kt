@@ -2,6 +2,7 @@ package com.music.bitchord.ui.replay
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
@@ -20,13 +21,16 @@ import coil3.request.SuccessResult
 import coil3.request.allowHardware
 import coil3.toBitmap
 import com.music.bitchord.R
+import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.model.CARD_ART_PX
 import com.music.bitchord.data.model.artworkAt
 import com.music.bitchord.data.stats.ReplaySummary
+import com.music.bitchord.download.Downloads
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.Locale
 
 /**
@@ -78,15 +82,46 @@ suspend fun renderReplayPoster(
     val songs = summary.songRows(POSTER_ROWS)
     val artists = summary.artistRows(POSTER_ROWS)
     val albums = summary.albumRows(POSTER_ALBUMS)
-    val covers = (songs + artists + albums)
+
+    val rawCovers = (songs + artists + albums)
         .mapNotNull { it.artworkUrl }
         .distinct()
         .associateWith { url -> async(Dispatchers.IO) { loadBitmap(context, url) } }
         .mapValues { it.value.await() }
+        .toMutableMap()
+
+    // Live fallback lookup for local/downloaded tracks with missing artwork
+    val localSongs = LocalMediaRepository.allLocalSongsFlow.value
+    val downloads = runCatching { Downloads.getDownloadedSongs(context) }.getOrDefault(emptyList())
+
+    for (song in songs) {
+        val artUrl = song.artworkUrl
+        if (artUrl == null || rawCovers[artUrl] == null) {
+            val match = localSongs.firstOrNull { it.videoId == song.key }
+                ?: localSongs.firstOrNull { it.title.equals(song.title, ignoreCase = true) }
+                ?: downloads.firstOrNull { it.videoId == song.key }
+                ?: downloads.firstOrNull { it.title.equals(song.title, ignoreCase = true) }
+
+            if (match != null) {
+                val key = match.localUri ?: match.localPath ?: match.videoId
+                val resolvedUrl = match.thumbnailUrl ?: LocalMediaRepository.getCachedLocalArtThumbUri(context, key)
+                if (resolvedUrl != null) {
+                    val bmp = loadBitmap(context, resolvedUrl)
+                    if (bmp != null) {
+                        if (artUrl != null) rawCovers[artUrl] = bmp
+                        rawCovers[song.key] = bmp
+                    }
+                }
+            }
+        }
+    }
+    val covers: Map<String, Bitmap?> = rawCovers
 
     withContext(Dispatchers.Default) {
         val lit = page?.let { summary.storyArtwork(it) }
             ?: songs.firstOrNull()?.artworkUrl
+        val topArtistArt = artists.firstOrNull()?.artworkUrl
+
         val bitmap = Bitmap.createBitmap(POSTER_W, POSTER_H, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val type = Fonts(context)
@@ -97,16 +132,22 @@ suspend fun renderReplayPoster(
         } else {
             glassTheme.argbColors
         }
-        drawBackdrop(canvas, covers[lit], page?.let(::storyHue) ?: 0f, paletteColors = effectivePaletteColors)
+        drawBackdrop(
+            canvas = canvas,
+            lead = covers[lit] ?: covers[songs.firstOrNull()?.key],
+            hue = page?.let(::storyHue) ?: 0f,
+            paletteColors = effectivePaletteColors,
+            secondaryLead = covers[topArtistArt],
+        )
+
         if (page == null) {
-            val startY = 220f
-            var y = drawHeader(canvas, context, type, summary, holder, memberSince, startY)
-            y = drawTotals(canvas, context, type, summary, y)
+            var y = drawEditorialHeader(canvas, context, type, summary, holder, memberSince, 100f)
+            y = drawHeroBentoRow(canvas, context, type, summary, artists, covers, y)
             y = drawColumns(canvas, context, type, songs, artists, covers, y)
             y = drawAlbums(canvas, context, type, albums, covers, y)
             drawGenres(canvas, context, type, summary, y)
         } else {
-            var y = drawHeader(canvas, context, type, summary, holder, memberSince, 116f)
+            var y = drawEditorialHeader(canvas, context, type, summary, holder, memberSince, 100f)
             y = drawRuns(canvas, type, summary.storyHeadline(context, page), MARGIN, y, CONTENT_W)
             drawCard(canvas, context, type, summary, page, covers, y + 56f)
         }
@@ -319,58 +360,76 @@ internal fun drawBackdrop(
     hue: Float,
     height: Float = POSTER_H.toFloat(),
     paletteColors: List<Int>? = null,
+    secondaryLead: Bitmap? = null,
 ) {
-    val colors = paletteColors ?: paletteOf(lead).map { rotated(it, hue) }
-    canvas.drawColor(dimmed(colors.first()))
+    val songColors = paletteColors ?: paletteOf(lead).map { rotated(it, hue) }
+    val artistColors = secondaryLead?.let { paletteOf(it).map { c -> rotated(c, hue) } }.orEmpty()
+    val blendedColors = if (artistColors.isNotEmpty()) {
+        listOf(
+            songColors.first(),
+            artistColors.first(),
+            songColors.getOrElse(1) { songColors.first() },
+            artistColors.getOrElse(1) { artistColors.first() },
+        )
+    } else {
+        songColors
+    }
+    canvas.drawColor(dimmed(blendedColors.first()))
 
     val anchors = listOf(
-        0.20f to 0.16f,
-        0.84f to 0.22f,
-        0.76f to 0.66f,
-        0.18f to 0.78f,
+        0.16f to 0.14f,
+        0.86f to 0.24f,
+        0.50f to 0.50f,
+        0.14f to 0.72f,
+        0.84f to 0.84f,
     )
     val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-    colors.forEachIndexed { index, color ->
-        val (fx, fy) = anchors[index % anchors.size]
+    anchors.forEachIndexed { index, (fx, fy) ->
+        val color = blendedColors[index % blendedColors.size]
         val cx = POSTER_W * fx
         val cy = height * fy
-        val radius = POSTER_W * 0.95f
+        val radius = POSTER_W * 0.92f
         paint.shader = RadialGradient(
             cx,
             cy,
             radius,
             intArrayOf(
                 ColorUtils.setAlphaComponent(color, 215),
+                ColorUtils.setAlphaComponent(color, 75),
                 ColorUtils.setAlphaComponent(color, 0),
             ),
-            floatArrayOf(0f, 1f),
+            floatArrayOf(0f, 0.45f, 1f),
             Shader.TileMode.CLAMP,
         )
         canvas.drawCircle(cx, cy, radius, paint)
     }
     paint.shader = null
 
-    // Specular diagonal aurora overlay for liquid glass depth
+    // Specular diagonal aurora sheen overlay for liquid glass depth
     paint.shader = android.graphics.LinearGradient(
         0f,
         0f,
         POSTER_W.toFloat(),
         height,
-        intArrayOf(0x28FFFFFF, 0x00FFFFFF, 0x14FFFFFF),
-        floatArrayOf(0f, 0.5f, 1f),
+        intArrayOf(0x32FFFFFF, 0x00FFFFFF, 0x18FFFFFF),
+        floatArrayOf(0f, 0.48f, 1f),
         Shader.TileMode.CLAMP,
     )
     canvas.drawRect(0f, 0f, POSTER_W.toFloat(), height, paint)
     paint.shader = null
 
-    // Ink, weighted to the foot where the smaller type is.
-    paint.shader = android.graphics.LinearGradient(
-        0f,
-        0f,
-        0f,
-        height,
-        intArrayOf(0x73000000.toInt(), 0x40000000, 0xB3000000.toInt()),
-        floatArrayOf(0f, 0.42f, 1f),
+    // Rich radial dark glass vignette to pop Bento tiles
+    val vignetteRadius = POSTER_W * 1.15f
+    paint.shader = RadialGradient(
+        POSTER_W / 2f,
+        height * 0.48f,
+        vignetteRadius,
+        intArrayOf(
+            0x2005080E,
+            0x7005080E,
+            0xDE04060A.toInt(),
+        ),
+        floatArrayOf(0f, 0.55f, 1f),
         Shader.TileMode.CLAMP,
     )
     canvas.drawRect(0f, 0f, POSTER_W.toFloat(), height, paint)
@@ -428,31 +487,36 @@ private fun drawLiquidGlassCard(
     fillAlpha: Int = 0x22,
     borderAlphaTop: Int = 0x65,
     borderAlphaBottom: Int = 0x20,
+    accentGlow: Int? = null,
 ) {
-    // 1. Ambient Aurora glow orb behind card center
+    // 1. Subtle glow orb behind card
     val orbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         shader = RadialGradient(
             bounds.centerX(),
             bounds.centerY(),
-            bounds.width() * 0.70f,
-            intArrayOf(0x2EFFFFFF, 0x0EFFFFFF, 0x00FFFFFF),
-            floatArrayOf(0f, 0.45f, 1f),
+            bounds.width() * 0.75f,
+            if (accentGlow != null) {
+                intArrayOf(ColorUtils.setAlphaComponent(accentGlow, 55), ColorUtils.setAlphaComponent(accentGlow, 15), 0x00FFFFFF)
+            } else {
+                intArrayOf(0x28FFFFFF, 0x0DFFFFFF, 0x00FFFFFF)
+            },
+            floatArrayOf(0f, 0.5f, 1f),
             Shader.TileMode.CLAMP,
         )
     }
     canvas.drawRoundRect(bounds, cornerRadius, cornerRadius, orbPaint)
 
-    // 2. Base semi-translucent glass fill
+    // 2. Base semi-translucent glass fill (Liquid Crystal Glass surface)
     val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = (fillAlpha shl 24) or 0x00FFFFFF
+        color = (fillAlpha shl 24) or 0x00121624
         style = Paint.Style.FILL
     }
     canvas.drawRoundRect(bounds, cornerRadius, cornerRadius, fillPaint)
 
-    // 3. Specular outer border
+    // 3. Specular outer border: top-left to bottom-right gradient
     val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 2.2f
+        strokeWidth = 2.4f
         shader = android.graphics.LinearGradient(
             bounds.left,
             bounds.top,
@@ -463,7 +527,7 @@ private fun drawLiquidGlassCard(
                 (borderAlphaBottom shl 24) or 0x00FFFFFF,
                 (borderAlphaTop / 2 shl 24) or 0x00FFFFFF,
             ),
-            floatArrayOf(0f, 0.65f, 1f),
+            floatArrayOf(0f, 0.60f, 1f),
             Shader.TileMode.CLAMP,
         )
     }
@@ -474,115 +538,193 @@ private fun drawLiquidGlassCard(
     val innerRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 1f
-        color = 0x24FFFFFF
+        color = 0x22FFFFFF
     }
     canvas.drawRoundRect(insetBounds, cornerRadius - 2f, cornerRadius - 2f, innerRimPaint)
 }
 
-private fun drawHeader(
+private fun drawEditorialHeader(
     canvas: Canvas,
     context: Context,
     type: Fonts,
     summary: ReplaySummary,
     holder: String,
     memberSince: String?,
-    top: Float = 116f,
+    top: Float = 100f,
 ): Float {
-    val centerX = POSTER_W / 2f
-    val label = summary.localizedLabel(context)
-    val title = if (label.length == 4 && label.all { it.isDigit() }) {
-        "Replay $label"
-    } else {
-        "Replay · $label"
-    }
-
-    val titlePaint = type.heading(54f, 0xFFFFFFFF.toInt()).apply {
-        textAlign = Paint.Align.CENTER
-    }
-    canvas.drawText(title, centerX, top + 52f, titlePaint)
-
-    drawWordmark(canvas, context, POSTER_W - MARGIN, top + 50f)
-
-    val credit = listOfNotNull(
-        holder.ifBlank { context.getString(R.string.default_replay_holder) },
-        memberSince?.let { context.getString(R.string.member_since_value, it) },
-    ).joinToString(" · ")
-
     val locale = context.resources.configuration.locales[0]
-    val creditPaint = type.label(22f, 0xBBFFFFFF.toInt(), tracking = 0.12f).apply {
+    val label = summary.localizedLabel(context)
+    val yearText = if (label.length == 4 && label.all { it.isDigit() }) label else "2026"
+
+    val replayPaint = type.heading(44f, Color.WHITE)
+    val replayW = replayPaint.measureText("REPLAY")
+    canvas.drawText("REPLAY", MARGIN, top + 42f, replayPaint)
+
+    // Glowing accent year pill next to REPLAY
+    val pillFont = type.label(20f, 0xFFFFB300.toInt(), tracking = 0.10f).apply {
         textAlign = Paint.Align.CENTER
     }
-    canvas.drawText(credit.uppercase(locale), centerX, top + 98f, creditPaint)
+    val pillTextW = pillFont.measureText(yearText)
+    val pillW = pillTextW + 34f
+    val pillH = 36f
+    val pillX = MARGIN + replayW + 16f
+    val pillBounds = RectF(pillX, top + 10f, pillX + pillW, top + 10f + pillH)
 
-    return top + 130f
+    val pillFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x33FFB300.toInt()
+        style = Paint.Style.FILL
+    }
+    val pillBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x88FFB300.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 1.5f
+    }
+    canvas.drawRoundRect(pillBounds, 18f, 18f, pillFill)
+    canvas.drawRoundRect(pillBounds, 18f, 18f, pillBorder)
+    canvas.drawText(yearText, pillBounds.centerX(), pillBounds.centerY() + 7f, pillFont)
+
+    // Subtitle below: "UJJAL MALLIK · SINCE 10/26"
+    val credit = listOfNotNull(
+        holder.ifBlank { "UJJAL MALLIK" },
+        memberSince?.let { "SINCE $it" } ?: "MEMBER",
+    ).joinToString(" · ")
+    val creditPaint = type.label(20f, 0xAAFFFFFF.toInt(), tracking = 0.14f)
+    canvas.drawText(credit.uppercase(locale), MARGIN, top + 84f, creditPaint)
+
+    // UMtify logo on the right
+    drawWordmark(canvas, context, POSTER_W - MARGIN, top + 44f)
+
+    return top + 116f
 }
 
-private fun drawTotals(
+private fun drawHeroBentoRow(
     canvas: Canvas,
     context: Context,
     type: Fonts,
     summary: ReplaySummary,
+    artists: List<ReplayRow>,
+    covers: Map<String, Bitmap?>,
     top: Float,
 ): Float {
-    val cardHeight = 264f
-    val cardBounds = RectF(MARGIN, top, POSTER_W - MARGIN, top + cardHeight)
-    drawLiquidGlassCard(canvas, cardBounds, cornerRadius = 32f)
+    val bentoH = 296f
+    val leftW = 580f
+    val gap = 18f
+    val rightW = CONTENT_W - leftW - gap
+    val leftBounds = RectF(MARGIN, top, MARGIN + leftW, top + bentoH)
+    val rightBounds = RectF(MARGIN + leftW + gap, top, POSTER_W - MARGIN, top + bentoH)
 
-    val centerX = POSTER_W / 2f
+    // ── LEFT BENTO: Minutes Listened + 3 Stat Chips ─────────────────────────────
+    drawLiquidGlassCard(canvas, leftBounds, cornerRadius = 32f, fillAlpha = 0x24)
+
     val locale = context.resources.configuration.locales[0]
-
-    // Centered glowing pill badge for MINUTES LISTENED
     val pillText = context.getString(R.string.minutes_listened).uppercase(locale)
-    val pillFont = type.label(18f, 0xFFFFFFFF.toInt(), tracking = 0.16f).apply {
+    val pillFont = type.label(17f, Color.WHITE, tracking = 0.16f).apply {
         textAlign = Paint.Align.CENTER
     }
     val pillTextW = pillFont.measureText(pillText)
-    val pillW = pillTextW + 48f
-    val pillH = 38f
-    val pillBounds = RectF(centerX - pillW / 2f, top + 24f, centerX + pillW / 2f, top + 24f + pillH)
-
-    val pillFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x28FFFFFF
-        style = Paint.Style.FILL
-    }
+    val pillW = pillTextW + 36f
+    val pillH = 34f
+    val pillBounds = RectF(MARGIN + 24f, top + 22f, MARGIN + 24f + pillW, top + 22f + pillH)
+    val pillFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x22FFFFFF }
     val pillBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x55FFFFFF
+        color = 0x48FFFFFF
         style = Paint.Style.STROKE
-        strokeWidth = 1.5f
+        strokeWidth = 1.2f
     }
-    canvas.drawRoundRect(pillBounds, 19f, 19f, pillFill)
-    canvas.drawRoundRect(pillBounds, 19f, 19f, pillBorder)
-    canvas.drawText(pillText, centerX, pillBounds.centerY() + 7f, pillFont)
+    canvas.drawRoundRect(pillBounds, 17f, 17f, pillFill)
+    canvas.drawRoundRect(pillBounds, 17f, 17f, pillBorder)
+    canvas.drawText(pillText, pillBounds.centerX(), pillBounds.centerY() + 6f, pillFont)
 
-    // Large number centered with generous vertical space above & below
+    // Giant bold number
     val numberText = formatMinutes(summary.totalMs)
-    val numberPaint = type.heading(118f, Color.WHITE).apply {
-        textAlign = Paint.Align.CENTER
-    }
-    canvas.drawText(
-        numberText,
-        centerX,
-        top + 168f,
-        numberPaint,
-    )
+    val numberPaint = type.heading(100f, Color.WHITE)
+    canvas.drawText(numberText, MARGIN + 24f, top + 152f, numberPaint)
 
-    // Subtitle stats centered
-    val subStats = listOfNotNull(
+    // Compact stat chips below (Plays, Songs, Artists)
+    val chips = listOf(
         context.replayCount(summary.totalPlays, R.plurals.replay_play_count),
         context.replayCount(summary.distinctSongs, R.plurals.replay_song_count),
         context.replayCount(summary.distinctArtists, R.plurals.replay_artist_count),
-    ).joinToString(" · ")
-    val subStatsPaint = type.body(25f, 0xAAFFFFFF.toInt()).apply {
+    )
+    val chipFont = type.body(20f, 0xDDFFFFFF.toInt(), bold = true).apply {
         textAlign = Paint.Align.CENTER
     }
-    canvas.drawText(
-        subStats,
-        centerX,
-        top + 224f,
-        subStatsPaint,
-    )
+    val chipFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x1AFFFFFF }
+    val chipBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x36FFFFFF
+        style = Paint.Style.STROKE
+        strokeWidth = 1.2f
+    }
+    val chipH = 38f
+    val chipGap = 10f
+    val totalAvailableW = leftW - 48f
+    val chipW = (totalAvailableW - chipGap * (chips.size - 1)) / chips.size
+    val chipY = top + 232f
 
-    return top + cardHeight + 24f
+    chips.forEachIndexed { i, labelText ->
+        val cx = MARGIN + 24f + i * (chipW + chipGap)
+        val cBounds = RectF(cx, chipY, cx + chipW, chipY + chipH)
+        canvas.drawRoundRect(cBounds, 14f, 14f, chipFill)
+        canvas.drawRoundRect(cBounds, 14f, 14f, chipBorder)
+        canvas.drawText(ellipsised(labelText, chipFont, chipW - 12f), cBounds.centerX(), cBounds.centerY() + 7f, chipFont)
+    }
+
+    // ── RIGHT BENTO: #1 Top Artist Spotlight ──────────────────────────────────
+    val topArtist = artists.firstOrNull()
+    drawLiquidGlassCard(canvas, rightBounds, cornerRadius = 32f, fillAlpha = 0x24, accentGlow = 0xFFFA2D48.toInt())
+
+    // Top spotlight pill
+    val spotlightText = "#1 TOP ARTIST"
+    val spotlightFont = type.label(17f, 0xFFFF7088.toInt(), tracking = 0.16f).apply {
+        textAlign = Paint.Align.CENTER
+    }
+    val spotTextW = spotlightFont.measureText(spotlightText)
+    val spotW = spotTextW + 36f
+    val spotH = 34f
+    val spotBounds = RectF(rightBounds.centerX() - spotW / 2f, top + 22f, rightBounds.centerX() + spotW / 2f, top + 22f + spotH)
+    val spotFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x33FA2D48.toInt() }
+    val spotBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x88FA2D48.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 1.2f
+    }
+    canvas.drawRoundRect(spotBounds, 17f, 17f, spotFill)
+    canvas.drawRoundRect(spotBounds, 17f, 17f, spotBorder)
+    canvas.drawText(spotlightText, spotBounds.centerX(), spotBounds.centerY() + 6f, spotlightFont)
+
+    // Center circular avatar with glowing ring
+    val avatarSize = 104f
+    val avatarX = rightBounds.centerX() - avatarSize / 2f
+    val avatarY = top + 74f
+    val art = topArtist?.artworkUrl?.let { covers[it] } ?: topArtist?.key?.let { covers[it] }
+    drawArtwork(canvas, art, topArtist?.title ?: "Artist", avatarX, avatarY, avatarSize, circular = true)
+
+    val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2.8f
+        shader = android.graphics.LinearGradient(
+            avatarX, avatarY, avatarX + avatarSize, avatarY + avatarSize,
+            intArrayOf(0xFFFFB300.toInt(), 0xFFFA2D48.toInt(), 0xFFFF7088.toInt()),
+            floatArrayOf(0f, 0.5f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+    }
+    canvas.drawCircle(rightBounds.centerX(), avatarY + avatarSize / 2f, avatarSize / 2f + 1.4f, ringPaint)
+
+    // Artist name and time below avatar
+    val artistName = topArtist?.title ?: "Top Artist"
+    val artistNamePaint = type.body(23f, Color.WHITE, bold = true).apply {
+        textAlign = Paint.Align.CENTER
+    }
+    canvas.drawText(ellipsised(artistName, artistNamePaint, rightW - 24f), rightBounds.centerX(), avatarY + avatarSize + 32f, artistNamePaint)
+
+    val artistTime = topArtist?.let { formatListening(context, it.ms) } ?: ""
+    val artistTimePaint = type.body(19f, 0xAAFFFFFF.toInt()).apply {
+        textAlign = Paint.Align.CENTER
+    }
+    canvas.drawText(artistTime, rightBounds.centerX(), avatarY + avatarSize + 56f, artistTimePaint)
+
+    return top + bentoH + 20f
 }
 
 /**
@@ -597,36 +739,36 @@ private fun drawColumns(
     covers: Map<String, Bitmap?>,
     top: Float,
 ): Float {
-    val columnGap = 20f
-    val colWidth = (POSTER_W - MARGIN * 2 - columnGap) / 2f
+    val columnGap = 18f
+    val colWidth = (CONTENT_W - columnGap) / 2f
     val leftX = MARGIN
     val rightX = MARGIN + colWidth + columnGap
 
     val rows = maxOf(songs.size, artists.size).coerceAtMost(POSTER_ROWS)
-    val rowH = 92f
-    val cardH = 68f + rows * rowH + 20f
+    val rowH = 96f
+    val cardH = 68f + rows * rowH + 16f
 
     val leftBounds = RectF(leftX, top, leftX + colWidth, top + cardH)
     val rightBounds = RectF(rightX, top, rightX + colWidth, top + cardH)
 
-    drawLiquidGlassCard(canvas, leftBounds, cornerRadius = 28f)
-    drawLiquidGlassCard(canvas, rightBounds, cornerRadius = 28f)
+    drawLiquidGlassCard(canvas, leftBounds, cornerRadius = 30f, fillAlpha = 0x22)
+    drawLiquidGlassCard(canvas, rightBounds, cornerRadius = 30f, fillAlpha = 0x22)
 
     val locale = context.resources.configuration.locales[0]
     canvas.drawText(
         context.getString(R.string.top_songs).uppercase(locale),
         leftX + 24f,
         top + 46f,
-        type.label(22f, 0xEEFFFFFF.toInt(), tracking = 0.14f),
+        type.label(21f, 0xEEFFFFFF.toInt(), tracking = 0.14f),
     )
     canvas.drawText(
         context.getString(R.string.top_artists).uppercase(locale),
         rightX + 24f,
         top + 46f,
-        type.label(22f, 0xEEFFFFFF.toInt(), tracking = 0.14f),
+        type.label(21f, 0xEEFFFFFF.toInt(), tracking = 0.14f),
     )
 
-    var rowY = top + 76f
+    var rowY = top + 72f
     repeat(rows) { index ->
         songs.getOrNull(index)?.let {
             drawRow(canvas, context, type, it, covers, leftX + 18f, rowY, colWidth - 36f, false)
@@ -636,7 +778,7 @@ private fun drawColumns(
         }
         rowY += rowH
     }
-    return top + cardH + 24f
+    return top + cardH + 20f
 }
 
 private fun drawRow(
@@ -656,18 +798,18 @@ private fun drawRow(
 
     val isTopOne = row.rank == 1
     val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = if (isTopOne) 0x3DFA2D48.toInt() else 0x22FFFFFF
+        color = if (isTopOne) 0x44FA2D48.toInt() else 0x20FFFFFF
         style = Paint.Style.FILL
     }
     val badgeBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = if (isTopOne) 0x88FA2D48.toInt() else 0x33FFFFFF
+        color = if (isTopOne) 0x99FA2D48.toInt() else 0x38FFFFFF
         style = Paint.Style.STROKE
-        strokeWidth = 1f
+        strokeWidth = 1.2f
     }
     canvas.drawRoundRect(badgeBounds, 14f, 14f, badgePaint)
     canvas.drawRoundRect(badgeBounds, 14f, 14f, badgeBorder)
 
-    val rankText = type.heading(18f, if (isTopOne) 0xFFFA4D68.toInt() else 0xDDFFFFFF.toInt())
+    val rankText = type.heading(18f, if (isTopOne) 0xFFFF7088.toInt() else 0xEEFFFFFF.toInt())
     rankText.textAlign = Paint.Align.CENTER
     canvas.drawText(
         row.rank.toString(),
@@ -677,16 +819,16 @@ private fun drawRow(
     )
 
     val artX = x + badgeSize + 10f
-    val art = row.artworkUrl?.let { covers[it] }
+    val art = row.artworkUrl?.let { covers[it] } ?: covers[row.key]
     drawArtwork(canvas, art, row.title, artX, y, artSize, circular)
 
     val textX = artX + artSize + 14f
     val textWidth = width - (textX - x)
-    val title = type.body(24f, Color.WHITE, bold = true)
+    val title = type.body(23f, Color.WHITE, bold = true)
     canvas.drawText(ellipsised(row.title, title, textWidth), textX, y + 26f, title)
-    val sub = type.body(19f, 0x99FFFFFF.toInt())
+    val sub = type.body(18f, 0x99FFFFFF.toInt())
     val detail = listOfNotNull(row.subtitle, formatListening(context, row.ms)).joinToString(" · ")
-    canvas.drawText(ellipsised(detail, sub, textWidth), textX, y + 50f, sub)
+    canvas.drawText(ellipsised(detail, sub, textWidth), textX, y + 51f, sub)
 }
 
 private fun drawAlbums(
@@ -698,47 +840,56 @@ private fun drawAlbums(
     top: Float,
 ): Float {
     if (albums.isEmpty()) return top
-    val cardHeight = 310f
+    val cardHeight = 320f
     val cardBounds = RectF(MARGIN, top, POSTER_W - MARGIN, top + cardHeight)
-    drawLiquidGlassCard(canvas, cardBounds, cornerRadius = 32f)
+    drawLiquidGlassCard(canvas, cardBounds, cornerRadius = 32f, fillAlpha = 0x22)
 
     val locale = context.resources.configuration.locales[0]
     canvas.drawText(
         context.getString(R.string.top_albums).uppercase(locale),
-        MARGIN + 28f,
-        top + 46f,
-        type.label(22f, 0xEEFFFFFF.toInt(), tracking = 0.14f),
+        MARGIN + 24f,
+        top + 44f,
+        type.label(21f, 0xEEFFFFFF.toInt(), tracking = 0.14f),
     )
 
     val items = albums.take(POSTER_ALBUMS)
-    val innerMargin = 28f
-    val availableW = POSTER_W - MARGIN * 2 - innerMargin * 2
-    val artSize = 158f
+    val innerMargin = 24f
+    val availableW = CONTENT_W - innerMargin * 2
+    val artSize = 186f
     val gap = if (items.size > 1) (availableW - artSize * items.size) / (items.size - 1) else 0f
-    val artY = top + 68f
+    val artY = top + 64f
 
     items.forEachIndexed { index, album ->
         val x = MARGIN + innerMargin + index * (artSize + gap)
-        drawArtwork(canvas, album.artworkUrl?.let { covers[it] }, album.title, x, artY, artSize, false)
+
+        // Drop shadow behind cover
+        val shadowBounds = RectF(x + 2f, artY + 6f, x + artSize + 2f, artY + artSize + 6f)
+        val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0x66000000
+        }
+        canvas.drawRoundRect(shadowBounds, 20f, 20f, shadowPaint)
+
+        val art = album.artworkUrl?.let { covers[it] } ?: covers[album.key]
+        drawArtwork(canvas, art, album.title, x, artY, artSize, false)
 
         val artBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0x33FFFFFF
+            color = 0x3AFFFFFF
             style = Paint.Style.STROKE
             strokeWidth = 1.5f
         }
-        canvas.drawRoundRect(RectF(x, artY, x + artSize, artY + artSize), 16f, 16f, artBorder)
+        canvas.drawRoundRect(RectF(x, artY, x + artSize, artY + artSize), 18f, 18f, artBorder)
 
-        val name = type.body(22f, Color.WHITE, bold = true)
-        canvas.drawText(ellipsised(album.title, name, artSize), x, artY + artSize + 30f, name)
-        val sub = type.body(19f, 0x8CFFFFFF.toInt())
+        val name = type.body(21f, Color.WHITE, bold = true)
+        canvas.drawText(ellipsised(album.title, name, artSize), x, artY + artSize + 28f, name)
+        val sub = type.body(18f, 0x8CFFFFFF.toInt())
         canvas.drawText(
             ellipsised(album.subtitle ?: formatListening(context, album.ms), sub, artSize),
             x,
-            artY + artSize + 54f,
+            artY + artSize + 50f,
             sub,
         )
     }
-    return top + cardHeight + 24f
+    return top + cardHeight + 20f
 }
 
 private fun drawGenres(canvas: Canvas, context: Context, type: Fonts, summary: ReplaySummary, top: Float) {
@@ -778,21 +929,23 @@ private fun drawGenres(canvas: Canvas, context: Context, type: Fonts, summary: R
 }
 
 private fun drawFooter(canvas: Canvas, context: Context, type: Fonts) {
-    val text = context.getString(R.string.counted_on_device_with_bitchord)
-    val font = type.label(21f, 0xEEFFFFFF.toInt(), tracking = 0.08f)
-    font.textAlign = Paint.Align.CENTER
+    val text = "Crafted on UMtify · 2026"
+    val font = type.label(20f, 0xEEFFFFFF.toInt(), tracking = 0.12f).apply {
+        textAlign = Paint.Align.CENTER
+    }
     val textWidth = font.measureText(text)
     val pillW = textWidth + 56f
     val pillH = 46f
     val centerX = POSTER_W / 2f
-    val pillBounds = RectF(centerX - pillW / 2f, POSTER_H - 100f, centerX + pillW / 2f, POSTER_H - 100f + pillH)
+    val pillY = POSTER_H - 96f
+    val pillBounds = RectF(centerX - pillW / 2f, pillY, centerX + pillW / 2f, pillY + pillH)
 
     val pillFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x1EFFFFFF
+        color = 0x22FFFFFF
         style = Paint.Style.FILL
     }
     val pillBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x3DFFFFFF
+        color = 0x48FFFFFF
         style = Paint.Style.STROKE
         strokeWidth = 1.5f
     }
@@ -818,7 +971,7 @@ internal fun drawArtwork(
     circular: Boolean,
 ) {
     val bounds = RectF(x, y, x + size, y + size)
-    val radius = if (circular) size / 2f else size * 0.12f
+    val radius = if (circular) size / 2f else size * 0.18f
     val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     if (bitmap != null) {
         val scale = size / minOf(bitmap.width, bitmap.height).toFloat()
@@ -834,16 +987,54 @@ internal fun drawArtwork(
         canvas.drawRoundRect(bounds, radius, radius, paint)
         val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            strokeWidth = 2f
+            strokeWidth = 1.5f
             color = 0x33FFFFFF
         }
         canvas.drawRoundRect(bounds, radius, radius, rimPaint)
         paint.shader = null
     } else {
-        val hue = (fallback.hashCode().toFloat() % 360f + 360f) % 360f
-        paint.color = ColorUtils.HSLToColor(floatArrayOf(hue, 0.55f, 0.45f))
-        canvas.drawRoundRect(bounds, radius, radius, paint)
+        // CLEAN MINIMALIST MUSIC NOTE ON DARK FROSTED TILE (NEVER FLAT PINK/GREEN SQUARES!)
+        val tilePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(40, 255, 255, 255)
+            style = Paint.Style.FILL
+        }
+        canvas.drawRoundRect(bounds, radius, radius, tilePaint)
+        val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 1.5f
+            color = Color.argb(60, 255, 255, 255)
+        }
+        canvas.drawRoundRect(bounds, radius, radius, rimPaint)
+        drawMusicNoteGlyph(canvas, bounds.centerX(), bounds.centerY(), size * 0.44f)
     }
+}
+
+private fun drawMusicNoteGlyph(canvas: Canvas, cx: Float, cy: Float, size: Float) {
+    val notePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(175, 255, 255, 255)
+        style = Paint.Style.FILL
+    }
+    val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(175, 255, 255, 255)
+        style = Paint.Style.STROKE
+        strokeWidth = (size * 0.11f).coerceAtLeast(1.8f)
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    val w = size * 0.76f
+    val h = size * 0.86f
+    val left = cx - w / 2f
+    val top = cy - h / 2f
+    val headR = size * 0.16f
+
+    // Note heads
+    canvas.drawCircle(left + headR, top + h - headR, headR, notePaint)
+    canvas.drawCircle(left + w - headR, top + h - headR * 1.3f, headR, notePaint)
+
+    // Stems & Beam
+    canvas.drawLine(left + headR * 1.7f, top + h - headR, left + headR * 1.7f, top + headR, strokePaint)
+    canvas.drawLine(left + w, top + h - headR * 1.3f, left + w, top, strokePaint)
+    canvas.drawLine(left + headR * 1.7f, top + headR, left + w, top, strokePaint)
 }
 
 /**
@@ -964,21 +1155,56 @@ internal class Fonts(context: Context) {
         runCatching { ResourcesCompat.getFont(context, id) }.getOrNull()
 }
 
-internal suspend fun loadBitmap(context: Context, url: String): Bitmap? = runCatching {
-    val request = ImageRequest.Builder(context)
-        .data(url.artworkAt(400))
-        // Palette needs pixel access, and a hardware bitmap cannot be drawn
-        // into a software canvas at all — which is the whole of this file.
-        .allowHardware(false)
-        .build()
-    (SingletonImageLoader.get(context).execute(request) as? SuccessResult)?.image?.toBitmap()
-}.getOrNull()
+internal suspend fun loadBitmap(context: Context, url: String): Bitmap? = withContext(Dispatchers.IO) {
+    runCatching {
+        val cleanPath = when {
+            url.startsWith("file://") -> url.removePrefix("file://")
+            url.startsWith("local_art://") -> url.removePrefix("local_art://")
+            url.startsWith("/") -> url
+            else -> null
+        }
+        if (cleanPath != null) {
+            val file = File(cleanPath)
+            if (file.exists() && file.length() > 0) {
+                val bmp = BitmapFactory.decodeFile(file.absolutePath)
+                if (bmp != null) return@withContext bmp
+            }
+            val hash = cleanPath.hashCode().toUInt().toString()
+            val thumb = File(File(context.filesDir, "local_art_thumb"), "$hash.jpg")
+            if (thumb.exists() && thumb.length() > 0) {
+                val bmp = BitmapFactory.decodeFile(thumb.absolutePath)
+                if (bmp != null) return@withContext bmp
+            }
+            val full = File(File(context.filesDir, "local_art_full"), "$hash.jpg")
+            if (full.exists() && full.length() > 0) {
+                val bmp = BitmapFactory.decodeFile(full.absolutePath)
+                if (bmp != null) return@withContext bmp
+            }
+            val cached = LocalMediaRepository.extractAndCacheLocalArt(context, cleanPath, cleanPath)
+            if (cached != null) {
+                val f = File(cached.removePrefix("file://"))
+                if (f.exists() && f.length() > 0) {
+                    val bmp = BitmapFactory.decodeFile(f.absolutePath)
+                    if (bmp != null) return@withContext bmp
+                }
+            }
+        }
+
+        val request = ImageRequest.Builder(context)
+            .data(url.artworkAt(400))
+            // Palette needs pixel access, and a hardware bitmap cannot be drawn
+            // into a software canvas at all — which is the whole of this file.
+            .allowHardware(false)
+            .build()
+        (SingletonImageLoader.get(context).execute(request) as? SuccessResult)?.image?.toBitmap()
+    }.getOrNull()
+}
 
 /** 9:16, the shape the story cards are held to — see `StoryFrame`. */
 private const val POSTER_W = 1080
 private const val POSTER_H = 1920
 
-private const val MARGIN = 72f
+private const val MARGIN = 64f
 
 /** The wordmark's drawn size: 800×275 in the asset, set to the 46 px heading. */
 private const val WORDMARK_H = 48f

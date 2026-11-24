@@ -5,6 +5,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -74,6 +75,7 @@ import com.music.bitchord.data.model.CARD_ART_PX
 import com.music.bitchord.data.model.HEADER_ART_PX
 import com.music.bitchord.data.model.ROW_ART_PX
 import com.music.bitchord.data.model.artworkAt
+import com.music.bitchord.ui.icons.BitChordIcons
 import com.music.bitchord.data.stats.ReplaySummary
 import com.music.bitchord.ui.player.MeshGradientBackground
 import com.music.bitchord.ui.player.MeshPalette
@@ -810,15 +812,26 @@ private fun Cover(
         .size(size)
         .let { if (elevated) it.shadow(18.dp, shape, clip = false) else it }
         .clip(shape)
-    when {
-        url != null -> AsyncImage(
-            model = url.artworkAt(px),
+    Box(
+        modifier = base
+            .background(Color.White.copy(alpha = 0.08f))
+            .border(1.dp, Color.White.copy(alpha = 0.16f), shape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = BitChordIcons.MusicNote,
             contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = base,
+            tint = Color.White.copy(alpha = 0.55f),
+            modifier = Modifier.size(size * 0.45f),
         )
-        fallbackText.isNotBlank() -> Box(base) { InitialTile(fallbackText, size, shape) }
-        else -> Box(base.background(Color.White.copy(alpha = 0.10f)))
+        if (url != null) {
+            AsyncImage(
+                model = url.artworkAt(px),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
     }
 }
 

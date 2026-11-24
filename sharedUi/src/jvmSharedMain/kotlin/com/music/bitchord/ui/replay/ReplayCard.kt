@@ -351,20 +351,19 @@ fun RankBadge(rank: Int, accent: Color, modifier: Modifier = Modifier) {
  */
 @Composable
 fun InitialTile(text: String, size: Dp, shape: Shape) {
-    val hue = (text.hashCode().toFloat() % 360f + 360f) % 360f
-    val color = Color.hsl(hue, 0.55f, 0.45f)
     Box(
         Modifier
             .size(size)
             .clip(shape)
-            .background(Brush.linearGradient(listOf(color, color.copy(alpha = 0.55f)))),
+            .background(Color.White.copy(alpha = 0.08f))
+            .border(1.dp, Color.White.copy(alpha = 0.16f), shape),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text.take(1).uppercase(Locale.ROOT),
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.W800,
-            color = Color.White,
+            color = Color.White.copy(alpha = 0.85f),
         )
     }
 }
