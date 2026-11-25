@@ -55,6 +55,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import com.music.bitchord.R
 import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.model.ROW_ART_PX
@@ -467,12 +469,15 @@ private fun ReplayRowThumbnail(
     val localSongs by LocalMediaRepository.allLocalSongsFlow.collectAsStateWithLifecycle()
     val universalFile = remember(row.title) { com.music.bitchord.ui.components.findUniversalArtFile(context, row.title) }
     val artUrl = remember(row.key, row.artworkUrl, localSongs, universalFile) {
-        universalFile?.let { "file://${it.absolutePath}" } ?: row.artworkUrl?.takeIf { it.isNotBlank() } ?: run {
-            val match = localSongs.firstOrNull { it.videoId == row.key }
-                ?: localSongs.firstOrNull { it.title.equals(row.title, ignoreCase = true) }
-            val matchKey = match?.localUri ?: match?.localPath ?: match?.videoId
-            match?.thumbnailUrl ?: matchKey?.let { LocalMediaRepository.getCachedLocalArtThumbUri(context, it) }
-        }
+        universalFile?.let { "file://${it.absolutePath}" }
+            ?: row.artworkUrl?.takeIf { it.isNotBlank() }
+            ?: com.music.bitchord.data.stats.ArtistFacts.imageFor(row.title)
+            ?: run {
+                val match = localSongs.firstOrNull { it.videoId == row.key }
+                    ?: localSongs.firstOrNull { it.title.equals(row.title, ignoreCase = true) }
+                val matchKey = match?.localUri ?: match?.localPath ?: match?.videoId
+                match?.thumbnailUrl ?: matchKey?.let { LocalMediaRepository.getCachedLocalArtThumbUri(context, it) }
+            }
     }
 
     Box(
@@ -490,8 +495,14 @@ private fun ReplayRowThumbnail(
             modifier = Modifier.size(size * 0.48f),
         )
         if (!artUrl.isNullOrBlank()) {
+            val imageRequest = remember(artUrl) {
+                ImageRequest.Builder(context)
+                    .data(artUrl.artworkAt(ROW_ART_PX))
+                    .crossfade(250)
+                    .build()
+            }
             AsyncImage(
-                model = artUrl.artworkAt(ROW_ART_PX),
+                model = imageRequest,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),

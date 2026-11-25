@@ -696,9 +696,10 @@ fun LocalMusicManagerDialog(
                                                     )
                                                 }
                                                 AppSettings.removeLocalMusicCustomFolder(folder.path)
-                                            } else {
-                                                AppSettings.addLocalMusicExcludedFolder(folder.path)
                                             }
+                                            AppSettings.addRemovedAudioFolder(folder.path)
+                                            AppSettings.addRemovedAudioFolder(folder.name)
+                                            AppSettings.addLocalMusicExcludedFolder(folder.path)
                                             scope.launch(Dispatchers.IO) {
                                                 LocalMediaRepository.refreshLocalMusic(context)
                                             }

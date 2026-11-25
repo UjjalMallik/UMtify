@@ -177,6 +177,18 @@ suspend fun renderReplayPoster(
         }
     }
 
+    for (artist in artists) {
+        val artUrl = artist.artworkUrl
+        if (artUrl == null || rawCovers[artUrl] == null) {
+            val img = com.music.bitchord.data.stats.ArtistFacts.imageFor(artist.title)
+            val bmp = img?.let { loadBitmap(context, it) }
+            if (bmp != null) {
+                if (artUrl != null) rawCovers[artUrl] = bmp
+                rawCovers[artist.key] = bmp
+            }
+        }
+    }
+
     // Secondary fallback for songs: match against loaded album artwork
     for (song in songs) {
         if (rawCovers[song.key] == null && (song.artworkUrl == null || rawCovers[song.artworkUrl] == null)) {

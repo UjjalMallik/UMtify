@@ -295,6 +295,13 @@ object ListeningStats {
                 artist.ms += playedMs
                 if (countsAsPlay) artist.plays++
                 if (artist.id == null) artist.id = song.artistId
+                if (artist.art.isNullOrBlank() && !song.thumbnailUrl.isNullOrBlank()) {
+                    artist.art = song.thumbnailUrl
+                }
+                val factsImage = ArtistFacts.imageFor(name)
+                if (!factsImage.isNullOrBlank() && (artist.art.isNullOrBlank() || isBetterArt(factsImage, artist.art))) {
+                    artist.art = factsImage
+                }
 
                 // Day-level sub-bucket for the artist.
                 val artistDay = bucket.artistDays.computeIfAbsent(dayKey) { DayStats() }
@@ -938,7 +945,7 @@ data class TrackEntry(
         if (album == null) album = other.album
         if (albumId == null) albumId = other.albumId
         if (artistId == null) artistId = other.artistId
-        if (art == null) art = other.art
+        if (art.isNullOrBlank() && !other.art.isNullOrBlank()) art = other.art
         // Merge per-day sub-buckets.
         if (other.days.isNotEmpty()) {
             other.days.forEach { (dateKey, stats) ->
@@ -998,7 +1005,7 @@ data class NameEntry(
     fun absorb(other: NameEntry) {
         ms += other.ms
         plays += other.plays
-        if (art == null) art = other.art
+        if (art.isNullOrBlank() && !other.art.isNullOrBlank()) art = other.art
         if (id == null) id = other.id
         // Merge per-day sub-buckets.
         if (other.days.isNotEmpty()) {

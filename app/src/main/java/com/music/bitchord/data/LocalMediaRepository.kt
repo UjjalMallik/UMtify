@@ -986,13 +986,17 @@ object LocalMediaRepository {
             val seenKeys = mutableSetOf<String>()
             val excludedSongs = AppSettings.localMusicExcludedSongs.value
             val excludedFolders = AppSettings.localMusicExcludedFolders.value.map { it.normalizedPath() }.toSet()
+            val removedFolders = AppSettings.removedAudioFolders.value.map { it.trim().replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT) }.toSet()
             val filterNonMusic = AppSettings.filterNonMusicAudio.value
 
             // 1. Scan custom SAF folders
             for (uriStr in customUris) {
-                if (isIgnoredAudioFolder(uriStr) || uriStr in excludedFolders || uriStr.normalizedPath() in excludedFolders) continue
                 val displayName = getFolderDisplayName(context, uriStr)
-                if (isIgnoredAudioFolder(displayName)) continue
+                val normU = uriStr.normalizedPath()
+                val lowerU = uriStr.replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT)
+                val nameLower = displayName.lowercase(Locale.ROOT)
+                if (uriStr in excludedFolders || normU in excludedFolders || uriStr in removedFolders || normU in removedFolders || lowerU in removedFolders || nameLower in removedFolders) continue
+                if (isIgnoredAudioFolder(uriStr) || isIgnoredAudioFolder(displayName)) continue
                 val safSongs = scanSafFolderFast(context, uriStr).filterNot {
                     isUmtifyPath(it.localPath) || isUmtifyPath(it.localUri)
                 }
@@ -1129,10 +1133,14 @@ object LocalMediaRepository {
                                 ?: bucketName
                             if (folderPath != null) {
                                 val folderDisplayName = bucketName ?: folderPath.substringAfterLast('/').ifBlank { "Storage" }
+                                val normF = folderPath.normalizedPath()
+                                val lowerF = folderPath.replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT)
+                                val nameLower = folderDisplayName.lowercase(Locale.ROOT)
+                                if (folderPath in excludedFolders || normF in excludedFolders || folderPath in removedFolders || normF in removedFolders || lowerF in removedFolders || nameLower in removedFolders) {
+                                    continue
+                                }
                                 if (!isIgnoredAudioFolder(folderPath) && !isIgnoredAudioFolder(folderDisplayName)) {
-                                    if (folderPath !in excludedFolders && folderPath.normalizedPath() !in excludedFolders) {
-                                        mediaStoreFolderCounts[folderPath] = (mediaStoreFolderCounts[folderPath] ?: 0) + 1
-                                    }
+                                    mediaStoreFolderCounts[folderPath] = (mediaStoreFolderCounts[folderPath] ?: 0) + 1
                                 }
                             }
 
@@ -1226,8 +1234,18 @@ object LocalMediaRepository {
     fun computeActiveFolders(context: Context, songs: List<Song>): List<DeviceFolder> {
         val customFolders = AppSettings.localMusicCustomFolders.value
         val excludedFolders = AppSettings.localMusicExcludedFolders.value
+        val removedFolders = AppSettings.removedAudioFolders.value.map { it.trim().replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT) }.toSet()
         val scanAll = AppSettings.scanAllAudioFolders.value
         val hasPerm = hasStoragePermission(context)
+
+        fun isFolderExcludedOrRemoved(path: String?, name: String?): Boolean {
+            if (path.isNullOrBlank()) return false
+            val norm = path.normalizedPath()
+            val lower = path.replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT)
+            val nameLower = (name ?: path.substringAfterLast('/')).lowercase(Locale.ROOT)
+            return path in excludedFolders || norm in excludedFolders ||
+                path in removedFolders || norm in removedFolders || lower in removedFolders || nameLower in removedFolders
+        }
 
         val list = mutableListOf<DeviceFolder>()
         val seenNormPaths = mutableSetOf<String>()
@@ -1235,13 +1253,11 @@ object LocalMediaRepository {
 
         // 1. Process custom SAF folders
         for (uri in customFolders) {
-            if (uri in excludedFolders) continue
-            if (isIgnoredAudioFolder(uri)) continue
+            val name = getFolderDisplayName(context, uri)
+            if (isFolderExcludedOrRemoved(uri, name)) continue
+            if (isIgnoredAudioFolder(uri) || isIgnoredAudioFolder(name)) continue
             val norm = uri.normalizedPath()
             val fsPath = selectedFolder(uri)?.absolutePath?.normalizedPath()
-
-            val name = getFolderDisplayName(context, uri)
-            if (isIgnoredAudioFolder(name)) continue
 
             val matchingSongs = songs.filter {
                 it.folderUri == uri || isInSelectedFolder(it.localPath, uri) || isInSelectedFolder(it.localUri, uri)
@@ -1268,12 +1284,10 @@ object LocalMediaRepository {
                 ?: song.localUri?.let { runCatching { Uri.parse(it).path?.let { p -> File(p).parent } }.getOrNull() }
                 ?: continue
 
-            if (isIgnoredAudioFolder(fPath)) continue
-            val norm = fPath.normalizedPath()
-            if (norm in excludedFolders) continue
-
             val fName = fPath.substringAfterLast('/').ifBlank { "Storage" }
-            if (isIgnoredAudioFolder(fName)) continue
+            if (isFolderExcludedOrRemoved(fPath, fName)) continue
+            if (isIgnoredAudioFolder(fPath) || isIgnoredAudioFolder(fName)) continue
+            val norm = fPath.normalizedPath()
 
             // Deduplication: check if this matches an already added custom folder by name or path
             if (norm in seenNormPaths || fName.lowercase(Locale.ROOT) in seenNames) {
@@ -1295,7 +1309,7 @@ object LocalMediaRepository {
         if (scanAll && hasPerm) {
             val discovered = queryDeviceAudioFolders(context)
             for (df in discovered) {
-                if (df.path in excludedFolders) continue
+                if (isFolderExcludedOrRemoved(df.path, df.name)) continue
                 if (isIgnoredAudioFolder(df.path) || isIgnoredAudioFolder(df.name)) continue
                 val norm = df.path.normalizedPath()
                 val nameNorm = df.name.lowercase(Locale.ROOT)
@@ -1340,6 +1354,7 @@ object LocalMediaRepository {
         val foldersMap = mutableMapOf<String, Int>()
         val folderNamesMap = mutableMapOf<String, String>()
         val excludedFolders = AppSettings.localMusicExcludedFolders.value.map { it.normalizedPath() }.toSet()
+        val removedFolders = AppSettings.removedAudioFolders.value.map { it.trim().replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT) }.toSet()
         val filterNonMusic = AppSettings.filterNonMusicAudio.value
 
         val projection = mutableListOf(
@@ -1394,12 +1409,16 @@ object LocalMediaRepository {
                         ?: relPath?.let { "/storage/emulated/0/${it.trim('/')}" }
                         ?: bucketName
                     if (folderPath.isNullOrBlank() || isIgnoredAudioFolder(folderPath)) continue
-                    val norm = folderPath.normalizedPath()
-                    if (norm in excludedFolders) continue
-
                     val displayName = bucketName
                         ?: folderPath.substringAfterLast('/').ifBlank { "Storage" }
                     if (isIgnoredAudioFolder(displayName)) continue
+
+                    val norm = folderPath.normalizedPath()
+                    val lower = folderPath.replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT)
+                    val nameLower = displayName.lowercase(Locale.ROOT)
+                    if (folderPath in excludedFolders || norm in excludedFolders || folderPath in removedFolders || norm in removedFolders || lower in removedFolders || nameLower in removedFolders) {
+                        continue
+                    }
 
                     foldersMap[folderPath] = (foldersMap[folderPath] ?: 0) + 1
                     folderNamesMap[folderPath] = displayName

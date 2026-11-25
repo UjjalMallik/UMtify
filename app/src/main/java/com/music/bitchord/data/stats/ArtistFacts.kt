@@ -164,15 +164,15 @@ object ArtistFacts {
             ?.firstOrNull()
             ?.item
         val entry = known[key(name)] ?: StoredArtist(key = key(name))
+        val newImage = hit?.thumbnailUrl?.takeIf { hit.title.equals(name, ignoreCase = true) && it.isNotBlank() }
+        val newBrowseId = hit?.browseId?.takeIf { hit.title.equals(name, ignoreCase = true) && it.isNotBlank() }
         known[key(name)] = entry.copy(
             // Only when the hit is actually this artist. A search for a name
             // nobody has heard of still returns *something*, and filing a
             // stranger's photograph under someone else's name is worse than
             // keeping the sleeve.
-            image = hit?.thumbnailUrl?.takeIf { hit.title.equals(name, ignoreCase = true) }
-                ?: entry.image,
-            browseId = hit?.browseId?.takeIf { hit.title.equals(name, ignoreCase = true) }
-                ?: entry.browseId,
+            image = newImage ?: entry.image,
+            browseId = newBrowseId ?: entry.browseId,
             cardAt = System.currentTimeMillis(),
         )
         dirty = true

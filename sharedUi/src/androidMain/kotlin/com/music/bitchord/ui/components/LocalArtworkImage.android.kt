@@ -399,6 +399,7 @@ object LocalArtworkCache {
 
     val extractionJobs = ConcurrentHashMap<String, Deferred<Bitmap?>>()
     val extractionDispatcher = Dispatchers.IO.limitedParallelism(2)
+    val sessionNoArt = ConcurrentHashMap.newKeySet<String>()
 
     private fun cacheKey(path: String, maxSizePx: Int): String {
         return "${cleanLocalArtPath(path)}:$maxSizePx"
@@ -445,14 +446,20 @@ object LocalArtworkCache {
     }
 
     fun isNoArt(context: Context, key: String): Boolean {
+        val clean = cleanLocalArtPath(key)
+        val hash = localArtHash(clean)
+        if (sessionNoArt.contains(hash) || sessionNoArt.contains(clean) || sessionNoArt.contains(key)) return true
         initNoArt(context)
-        val hash = localArtHash(cleanLocalArtPath(key))
         return noArtHashes.contains(hash)
     }
 
     fun markNoArt(context: Context, key: String) {
+        val clean = cleanLocalArtPath(key)
+        val hash = localArtHash(clean)
+        sessionNoArt.add(hash)
+        sessionNoArt.add(clean)
+        sessionNoArt.add(key)
         initNoArt(context)
-        val hash = localArtHash(cleanLocalArtPath(key))
         if (noArtHashes.add(hash)) {
             runCatching {
                 val thumbDir = File(context.filesDir, "local_art_thumb").apply { if (!exists()) mkdirs() }
@@ -462,8 +469,12 @@ object LocalArtworkCache {
     }
 
     fun removeNoArt(context: Context, key: String) {
+        val clean = cleanLocalArtPath(key)
+        val hash = localArtHash(clean)
+        sessionNoArt.remove(hash)
+        sessionNoArt.remove(clean)
+        sessionNoArt.remove(key)
         initNoArt(context)
-        val hash = localArtHash(cleanLocalArtPath(key))
         if (noArtHashes.remove(hash)) {
             runCatching {
                 val file = File(File(context.filesDir, "local_art_thumb"), "no_art.txt")
@@ -1062,6 +1073,11 @@ actual fun LocalArtworkImage(
     val metaKey = if (!title.isNullOrBlank()) "meta_${normalizedArtKey(title, artist)}" else null
     val universalKey = if (!title.isNullOrBlank()) "universal_${universalArtTitleHash(title)}" else null
 
+    val isKnownNoArt = remember(primaryKey, fallbackKey, metaKey, universalKey) {
+        LocalArtworkCache.isNoArt(context, primaryKey) ||
+            LocalArtworkCache.isNoArt(context, fallbackKey)
+    }
+
     // Step A (Instant RAM):
     val initialCached = remember(primaryKey, fallbackKey, maxSizePx, metaKey, universalKey) {
         if (isFullHd) {
@@ -1082,7 +1098,9 @@ actual fun LocalArtworkImage(
     }
 
     val state by produceState<LocalArtState>(
-        initialValue = if (initialCached != null) LocalArtState.Loaded(initialCached) else LocalArtState.Loading,
+        initialValue = if (initialCached != null) LocalArtState.Loaded(initialCached)
+            else if (isKnownNoArt) LocalArtState.Missing
+            else LocalArtState.Loading,
         primaryKey,
         fallbackKey,
         maxSizePx,
@@ -1090,6 +1108,11 @@ actual fun LocalArtworkImage(
         metaKey,
         universalKey,
     ) {
+        if (isKnownNoArt && initialCached == null) {
+            value = LocalArtState.Missing
+            onLoadingStateChanged?.invoke(false, false)
+            return@produceState
+        }
         if (isFullHd) {
             val hd = LocalArtworkCache.getFullHd(primaryKey)
                 ?: LocalArtworkCache.getFullHd(fallbackKey)

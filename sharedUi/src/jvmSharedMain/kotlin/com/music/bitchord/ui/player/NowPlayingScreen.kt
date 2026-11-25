@@ -3243,6 +3243,7 @@ fun NowPlayingScreen(
                                             scaleY = scale
                                         },
                                         contentScale = ContentScale.Crop,
+                                        title = song?.title,
                                     )
                                 }
                             }
@@ -3266,6 +3267,7 @@ fun NowPlayingScreen(
                                                 DefaultCoverTile(
                                                     modifier = Modifier.fillMaxSize(),
                                                     contentScale = ContentScale.Crop,
+                                                    title = song?.title,
                                                 )
                                             }
                                         },

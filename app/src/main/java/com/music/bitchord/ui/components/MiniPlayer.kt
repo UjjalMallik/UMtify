@@ -429,6 +429,7 @@ fun MiniPlayer(
                             .clip(RoundedCornerShape(ART_CORNER))
                             .thumbnailBorder(RoundedCornerShape(ART_CORNER)),
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        title = song.title,
                     )
                 } else {
                     androidx.compose.foundation.layout.Box(
@@ -462,6 +463,7 @@ fun MiniPlayer(
                                 .clip(RoundedCornerShape(ART_CORNER))
                                 .thumbnailBorder(RoundedCornerShape(ART_CORNER)),
                             contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            title = song?.title,
                         )
                     },
                 )

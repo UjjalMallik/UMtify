@@ -36,5 +36,5 @@ expect fun LocalArtworkImage(
     title: String? = null,
     artist: String? = null,
     onLoadingStateChanged: ((isLoading: Boolean, isSuccess: Boolean) -> Unit)? = null,
-    fallback: @Composable () -> Unit = { DefaultCoverTile(modifier = modifier, contentScale = contentScale) },
+    fallback: @Composable () -> Unit = { DefaultCoverTile(modifier = modifier, contentScale = contentScale, title = title) },
 )

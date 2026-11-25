@@ -704,6 +704,9 @@ object AppSettings {
     /** Explicitly excluded local device folders. */
     val localMusicExcludedFolders = MutableStateFlow<Set<String>>(emptySet())
 
+    /** Explicitly removed local audio folders (by path or name). */
+    val removedAudioFolders = MutableStateFlow<Set<String>>(emptySet())
+
     const val CURRENT_STORAGE_MIGRATION_VERSION = 1
     val storageMigrationVersion = MutableStateFlow(0)
 
@@ -1071,6 +1074,7 @@ object AppSettings {
         localMusicSelectedSongs.value = prefs.getStringSet(KEY_LOCAL_MUSIC_SELECTED_SONGS, emptySet()).orEmpty()
         localMusicExcludedSongs.value = prefs.getStringSet(KEY_LOCAL_MUSIC_EXCLUDED_SONGS, emptySet()).orEmpty()
         localMusicExcludedFolders.value = prefs.getStringSet(KEY_LOCAL_MUSIC_EXCLUDED_FOLDERS, emptySet()).orEmpty()
+        removedAudioFolders.value = prefs.getStringSet(KEY_REMOVED_AUDIO_FOLDERS, emptySet()).orEmpty()
         storageMigrationVersion.value = prefs.getInt(KEY_STORAGE_MIGRATION_VERSION, 0)
         webdavUrl.value = prefs.getString(KEY_WEBDAV_URL, "").orEmpty()
         webdavUsername.value = prefs.getString(KEY_WEBDAV_USERNAME, "").orEmpty()
@@ -2030,6 +2034,8 @@ object AppSettings {
     }
 
     fun addLocalMusicCustomFolder(uri: String) {
+        restoreRemovedAudioFolder(uri)
+        removeLocalMusicExcludedFolder(uri)
         val current = localMusicCustomFolders.value
         if (uri !in current) {
             setLocalMusicCustomFolders(current + uri)
@@ -2109,6 +2115,31 @@ object AppSettings {
 
     fun removeLocalMusicExcludedFolder(folderPath: String) {
         setLocalMusicExcludedFolders(localMusicExcludedFolders.value - folderPath)
+    }
+
+    fun setRemovedAudioFolders(folders: Set<String>) {
+        removedAudioFolders.value = folders
+        prefs.edit().putStringSet(KEY_REMOVED_AUDIO_FOLDERS, folders).commit()
+    }
+
+    fun addRemovedAudioFolder(folderPath: String) {
+        val norm = folderPath.trim().replace('\\', '/').trimEnd('/').lowercase(java.util.Locale.ROOT)
+        val name = norm.substringAfterLast('/')
+        val set = removedAudioFolders.value.toMutableSet()
+        set.add(folderPath)
+        set.add(norm)
+        if (name.isNotBlank()) set.add(name)
+        setRemovedAudioFolders(set)
+    }
+
+    fun restoreRemovedAudioFolder(folderPath: String) {
+        val norm = folderPath.trim().replace('\\', '/').trimEnd('/').lowercase(java.util.Locale.ROOT)
+        val name = norm.substringAfterLast('/')
+        val set = removedAudioFolders.value.toMutableSet()
+        set.remove(folderPath)
+        set.remove(norm)
+        if (name.isNotBlank()) set.remove(name)
+        setRemovedAudioFolders(set)
     }
 
     fun runStorageMigrationIfNeeded(context: Context) {
@@ -2369,6 +2400,7 @@ object AppSettings {
         KEY_LOCAL_MUSIC_SELECTED_SONGS,
         KEY_LOCAL_MUSIC_EXCLUDED_SONGS,
         KEY_LOCAL_MUSIC_EXCLUDED_FOLDERS,
+        KEY_REMOVED_AUDIO_FOLDERS,
         KEY_LAST_VERSION_CODE,
         // The name is only ever the label of the file the listener imported
         // here; the file itself is not in the backup, so restoring the name
@@ -2510,6 +2542,7 @@ object AppSettings {
     private const val KEY_LOCAL_MUSIC_SELECTED_SONGS = "local_music_selected_songs"
     private const val KEY_LOCAL_MUSIC_EXCLUDED_SONGS = "local_music_excluded_songs"
     private const val KEY_LOCAL_MUSIC_EXCLUDED_FOLDERS = "local_music_excluded_folders"
+    private const val KEY_REMOVED_AUDIO_FOLDERS = "removed_audio_folders"
     private const val KEY_STORAGE_MIGRATION_VERSION = "storage_migration_version"
     private const val KEY_WEBDAV_URL = "webdav_url"
     private const val KEY_WEBDAV_USERNAME = "webdav_username"

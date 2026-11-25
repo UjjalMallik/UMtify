@@ -455,13 +455,14 @@ private fun CircularArtistItem(
                         .fillMaxSize()
                         .clip(CircleShape),
                     contentScale = ContentScale.Crop,
+                    title = item.title,
                 )
             } else {
                 val context = LocalPlatformContext.current
                 val imageRequest = remember(item.thumbnailUrl) {
                     ImageRequest.Builder(context)
                         .data(item.thumbnailUrl.artworkAt(HEADER_ART_PX))
-                        .crossfade(true)
+                        .crossfade(250)
                         .build()
                 }
                 AsyncImage(
