@@ -795,10 +795,10 @@ actual fun LocalArtworkImage(
 
     val state by produceState<LocalArtState>(
         initialValue = if (initialCached != null) LocalArtState.Loaded(initialCached) else LocalArtState.Loading,
-        key1 = primaryKey,
-        key2 = fallbackKey,
-        key3 = maxSizePx,
-        key4 = artworkVersion,
+        primaryKey,
+        fallbackKey,
+        maxSizePx,
+        artworkVersion,
     ) {
         if (isFullHd) {
             val hd = LocalArtworkCache.getFullHd(primaryKey) ?: LocalArtworkCache.getFullHd(fallbackKey)
