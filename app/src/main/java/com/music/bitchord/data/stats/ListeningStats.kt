@@ -289,18 +289,17 @@ object ListeningStats {
                 // "Cheema Y & Gur Sidhu" gets a picture of nobody and a genre of
                 // nothing.
                 ArtistFacts.noticed(name)
+                val officialPhoto = com.music.bitchord.data.ArtistAvatarCache.get(name) ?: ArtistFacts.imageFor(name)
                 val artist = bucket.artists.getOrPut(name.lowercase(Locale.ROOT)) {
-                    NameEntry(name = name, art = song.thumbnailUrl)
+                    NameEntry(name = name, art = officialPhoto ?: song.thumbnailUrl)
                 }
                 artist.ms += playedMs
                 if (countsAsPlay) artist.plays++
                 if (artist.id == null) artist.id = song.artistId
-                if (artist.art.isNullOrBlank() && !song.thumbnailUrl.isNullOrBlank()) {
+                if (!officialPhoto.isNullOrBlank()) {
+                    artist.art = officialPhoto
+                } else if (artist.art.isNullOrBlank() && !song.thumbnailUrl.isNullOrBlank()) {
                     artist.art = song.thumbnailUrl
-                }
-                val factsImage = ArtistFacts.imageFor(name)
-                if (!factsImage.isNullOrBlank() && (artist.art.isNullOrBlank() || isBetterArt(factsImage, artist.art))) {
-                    artist.art = factsImage
                 }
 
                 // Day-level sub-bucket for the artist.
@@ -768,8 +767,8 @@ object ListeningStats {
                         RankedEntry(
                             title = entry.name,
                             subtitle = entry.sub,
-                            artworkUrl = ArtistFacts.imageFor(entry.name) ?: entry.art,
-                            browseId = entry.id ?: ArtistFacts.browseIdFor(entry.name),
+                            artworkUrl = com.music.bitchord.data.ArtistAvatarCache.get(entry.name) ?: ArtistFacts.imageFor(entry.name) ?: entry.art,
+                            browseId = entry.id ?: com.music.bitchord.data.ArtistAvatarCache.getBrowseId(entry.name) ?: ArtistFacts.browseIdFor(entry.name),
                             ms = ms,
                             plays = plays,
                         )
@@ -781,8 +780,8 @@ object ListeningStats {
                         RankedEntry(
                             title = it.name,
                             subtitle = it.sub,
-                            artworkUrl = ArtistFacts.imageFor(it.name) ?: it.art,
-                            browseId = it.id ?: ArtistFacts.browseIdFor(it.name),
+                            artworkUrl = com.music.bitchord.data.ArtistAvatarCache.get(it.name) ?: ArtistFacts.imageFor(it.name) ?: it.art,
+                            browseId = it.id ?: com.music.bitchord.data.ArtistAvatarCache.getBrowseId(it.name) ?: ArtistFacts.browseIdFor(it.name),
                             ms = it.ms,
                             plays = it.plays,
                         )

@@ -339,12 +339,18 @@ fun ReplaySummary.songRows(limit: Int): List<ReplayRow> =
 
 fun ReplaySummary.artistRows(limit: Int): List<ReplayRow> =
     artists.take(limit).mapIndexed { index, entry ->
+        val officialArt = com.music.bitchord.data.ArtistAvatarCache.get(entry.title)
+            ?: com.music.bitchord.data.stats.ArtistFacts.imageFor(entry.title)
+            ?: entry.artworkUrl
+        if (officialArt == null) {
+            com.music.bitchord.data.ArtistAvatarCache.resolveInBackground(entry.title)
+        }
         ReplayRow(
             key = entry.title,
             rank = index + 1,
             title = entry.title,
             subtitle = null,
-            artworkUrl = entry.artworkUrl,
+            artworkUrl = officialArt,
             ms = entry.ms,
             plays = entry.plays,
         )

@@ -178,13 +178,23 @@ suspend fun renderReplayPoster(
     }
 
     for (artist in artists) {
-        val artUrl = artist.artworkUrl
-        if (artUrl == null || rawCovers[artUrl] == null) {
-            val img = com.music.bitchord.data.stats.ArtistFacts.imageFor(artist.title)
-            val bmp = img?.let { loadBitmap(context, it) }
+        val officialUrl = com.music.bitchord.data.ArtistAvatarCache.get(artist.title)
+            ?: com.music.bitchord.data.stats.ArtistFacts.imageFor(artist.title)
+        if (officialUrl != null) {
+            val bmp = loadBitmap(context, officialUrl)
             if (bmp != null) {
-                if (artUrl != null) rawCovers[artUrl] = bmp
+                artist.artworkUrl?.let { rawCovers[it] = bmp }
+                rawCovers[officialUrl] = bmp
                 rawCovers[artist.key] = bmp
+            }
+        } else {
+            val artUrl = artist.artworkUrl
+            if (artUrl == null || rawCovers[artUrl] == null) {
+                val bmp = (artUrl ?: com.music.bitchord.data.stats.ArtistFacts.imageFor(artist.title))?.let { loadBitmap(context, it) }
+                if (bmp != null) {
+                    if (artUrl != null) rawCovers[artUrl] = bmp
+                    rawCovers[artist.key] = bmp
+                }
             }
         }
     }

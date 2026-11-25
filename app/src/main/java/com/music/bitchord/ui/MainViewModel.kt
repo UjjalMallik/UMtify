@@ -3244,6 +3244,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             subscriberCountText = page.subscriberCountText
                             monthlyListenerCount = page.monthlyListenerCount
                             subscription = page.subscription
+                            if (!page.name.isNullOrBlank() && !page.thumbnailUrl.isNullOrBlank()) {
+                                com.music.bitchord.data.ArtistAvatarCache.put(page.name, page.thumbnailUrl, browseId)
+                            }
                             if (page.songs.isEmpty()) {
                                 UiState.Error(text(R.string.no_tracks_here))
                             } else {

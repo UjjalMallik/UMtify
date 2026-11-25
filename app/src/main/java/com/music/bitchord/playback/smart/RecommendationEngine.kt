@@ -589,13 +589,22 @@ object RecommendationEngine {
 
         val shelfItems = topKeys.map { key ->
             val displayName = key.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+            val officialAvatar = com.music.bitchord.data.ArtistAvatarCache.get(key)
+                ?: com.music.bitchord.data.stats.ArtistFacts.imageFor(key)
+            if (officialAvatar == null) {
+                com.music.bitchord.data.ArtistAvatarCache.resolveInBackground(key)
+            }
+            val bestAvatar = officialAvatar ?: artistArtwork[key]
+            val browseId = artistBrowseIds[key]
+                ?: com.music.bitchord.data.ArtistAvatarCache.getBrowseId(key)
+                ?: com.music.bitchord.data.stats.ArtistFacts.browseIdFor(key)
 
             ShelfItem(
                 title = displayName,
                 subtitle = "Artist",
-                thumbnailUrl = artistArtwork[key],
+                thumbnailUrl = bestAvatar,
                 videoId = null,
-                browseId = artistBrowseIds[key],
+                browseId = browseId,
             )
         }
 

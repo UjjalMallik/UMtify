@@ -434,6 +434,17 @@ private fun CircularArtistItem(
         if (isLight) Color.Black.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.22f)
     }
 
+    val avatarRevision by com.music.bitchord.data.ArtistAvatarCache.revision.collectAsStateWithLifecycle()
+    val officialAvatar = remember(item.title, avatarRevision) {
+        com.music.bitchord.data.ArtistAvatarCache.get(item.title)
+    }
+    LaunchedEffect(item.title) {
+        if (officialAvatar == null) {
+            com.music.bitchord.data.ArtistAvatarCache.resolveInBackground(item.title)
+        }
+    }
+    val effectiveThumbnail = officialAvatar ?: item.thumbnailUrl
+
     Column(
         modifier = Modifier
             .width(88.dp)
@@ -448,7 +459,7 @@ private fun CircularArtistItem(
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
             contentAlignment = Alignment.Center,
         ) {
-            val isBrokenOrBlank = item.thumbnailUrl.isNullOrBlank() || FailedArtworkCache.isFailed(item.thumbnailUrl)
+            val isBrokenOrBlank = effectiveThumbnail.isNullOrBlank() || FailedArtworkCache.isFailed(effectiveThumbnail)
             if (isBrokenOrBlank) {
                 DefaultCoverTile(
                     modifier = Modifier
@@ -459,9 +470,9 @@ private fun CircularArtistItem(
                 )
             } else {
                 val context = LocalPlatformContext.current
-                val imageRequest = remember(item.thumbnailUrl) {
+                val imageRequest = remember(effectiveThumbnail) {
                     ImageRequest.Builder(context)
-                        .data(item.thumbnailUrl.artworkAt(HEADER_ART_PX))
+                        .data(effectiveThumbnail.artworkAt(HEADER_ART_PX))
                         .crossfade(250)
                         .build()
                 }

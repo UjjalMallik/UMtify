@@ -99,7 +99,8 @@ object ArtistFacts {
     // known, and an artist that isn't yet simply keeps the track's sleeve.
 
     /** A picture of the artist, or null to fall back to whatever the row has. */
-    fun imageFor(artist: String): String? = known[key(artist)]?.image
+    fun imageFor(artist: String): String? =
+        com.music.bitchord.data.ArtistAvatarCache.get(artist) ?: known[key(artist)]?.image
 
     /** The artist's page, so a chart row opens it without searching first. */
     fun browseIdFor(artist: String): String? = known[key(artist)]?.browseId
@@ -115,6 +116,7 @@ object ArtistFacts {
         if (!ready) return
         val key = key(artist)
         if (key.isEmpty() || key.length > MAX_NAME_LENGTH) return
+        com.music.bitchord.data.ArtistAvatarCache.resolveInBackground(artist)
         val entry = known[key]
         if (entry != null && !entry.wants()) return
         if (!queued.add(key)) return
@@ -159,13 +161,28 @@ object ArtistFacts {
      * release, and the same one a person would make.
      */
     private suspend fun fetchCard(name: String) {
+        val q = name.trim().lowercase(Locale.ROOT)
         val hit = YtMusicRepository.search(name, SearchFilter.ARTISTS).getOrNull()
             ?.filterIsInstance<SearchResult.Browse>()
-            ?.firstOrNull()
+            ?.firstOrNull { browse ->
+                val h = browse.item.title.trim().lowercase(Locale.ROOT)
+                h == q || h.contains(q) || q.contains(h)
+            }
             ?.item
         val entry = known[key(name)] ?: StoredArtist(key = key(name))
-        val newImage = hit?.thumbnailUrl?.takeIf { hit.title.equals(name, ignoreCase = true) && it.isNotBlank() }
-        val newBrowseId = hit?.browseId?.takeIf { hit.title.equals(name, ignoreCase = true) && it.isNotBlank() }
+        val isMatch = hit != null && (
+            hit.title.equals(name, ignoreCase = true) ||
+            hit.title.contains(name, ignoreCase = true) ||
+            name.contains(hit.title, ignoreCase = true)
+        )
+        val newImage = hit?.thumbnailUrl?.takeIf { isMatch && it.isNotBlank() }
+        val newBrowseId = hit?.browseId?.takeIf { isMatch && it.isNotBlank() }
+
+        if (!newImage.isNullOrBlank()) {
+            com.music.bitchord.data.ArtistAvatarCache.put(name, newImage, newBrowseId)
+            hit?.title?.let { com.music.bitchord.data.ArtistAvatarCache.put(it, newImage, newBrowseId) }
+        }
+
         known[key(name)] = entry.copy(
             // Only when the hit is actually this artist. A search for a name
             // nobody has heard of still returns *something*, and filing a
