@@ -432,22 +432,23 @@ fun extractFlacPictureFromStream(inputStream: java.io.InputStream): ByteArray? {
             val hasFooter = (flags and 0x10) != 0
             val totalTagBytes = tagSize + (if (hasFooter) 10 else 0)
 
-            var foundApic: ByteArray? = null
-            if (tagSize in 10..25_000_000) {
+            val apic = if (tagSize in 10..25_000_000) {
                 runCatching {
                     val tagData = ByteArray(tagSize)
                     dis.readFully(tagData)
-                    foundApic = parseApicFromId3(tagData, majorVersion)
+                    val parsed = parseApicFromId3(tagData, majorVersion)
                     if (hasFooter) {
                         skipFully(dis, 10)
                     }
-                }
+                    parsed
+                }.getOrNull()
             } else {
                 skipFully(dis, totalTagBytes)
+                null
             }
 
-            if (foundApic != null && foundApic.isNotEmpty()) {
-                return@runCatching foundApic
+            if (apic != null && apic.isNotEmpty()) {
+                return@runCatching apic
             }
 
             // After ID3 tag, check if "fLaC" follows
