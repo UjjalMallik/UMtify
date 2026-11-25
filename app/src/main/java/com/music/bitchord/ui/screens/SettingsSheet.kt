@@ -384,9 +384,6 @@ fun SettingsScreen(
             )
         } catch (_: SecurityException) { /* fallback if already granted */ }
         AppSettings.addLocalMusicCustomFolder(folder.toString())
-        if (AppSettings.localMusicFolders.value.isNotEmpty()) {
-            AppSettings.setLocalMusicFolders(AppSettings.localMusicFolders.value + folder.toString())
-        }
         backupScope.launch(Dispatchers.IO) {
             LocalMediaRepository.refreshLocalMusic(context)
         }

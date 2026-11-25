@@ -546,8 +546,12 @@ fun LocalMusicManagerDialog(
                             checked = scanAllAudioFolders,
                             onCheckedChange = { checked ->
                                 AppSettings.setScanAllAudioFolders(checked)
-                                if (checked && !LocalMediaRepository.hasStoragePermission(context)) {
-                                    storagePermissionLauncher.launch(storagePermission)
+                                if (checked) {
+                                    AppSettings.setRemovedAudioFolders(emptySet())
+                                    AppSettings.setLocalMusicExcludedFolders(emptySet())
+                                    if (!LocalMediaRepository.hasStoragePermission(context)) {
+                                        storagePermissionLauncher.launch(storagePermission)
+                                    }
                                 }
                                 scope.launch(Dispatchers.IO) {
                                     LocalMediaRepository.refreshLocalMusic(context)
@@ -570,7 +574,7 @@ fun LocalMusicManagerDialog(
                         .clip(RoundedCornerShape(14.dp))
                         .background(Color.White.copy(alpha = 0.04f))
                         .border(0.6.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
-                        .clickable { onAddFolder?.invoke() ?: folderPicker.launch(null) }
+                        .clickable { folderPicker.launch(null) }
                         .padding(horizontal = 14.dp, vertical = 11.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -697,6 +701,7 @@ fun LocalMusicManagerDialog(
                                                 }
                                                 AppSettings.removeLocalMusicCustomFolder(folder.path)
                                             }
+                                            AppSettings.removeLocalMusicFolder(folder.path)
                                             AppSettings.addRemovedAudioFolder(folder.path)
                                             AppSettings.addRemovedAudioFolder(folder.name)
                                             AppSettings.addLocalMusicExcludedFolder(folder.path)

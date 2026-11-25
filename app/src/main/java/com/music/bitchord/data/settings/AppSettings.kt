@@ -2036,10 +2036,33 @@ object AppSettings {
     fun addLocalMusicCustomFolder(uri: String) {
         restoreRemovedAudioFolder(uri)
         removeLocalMusicExcludedFolder(uri)
-        val current = localMusicCustomFolders.value
-        if (uri !in current) {
-            setLocalMusicCustomFolders(current + uri)
+        val norm = uri.trim().replace('\\', '/').trimEnd('/').lowercase(java.util.Locale.ROOT)
+        val name = norm.substringAfterLast('/')
+        restoreRemovedAudioFolder(name)
+        restoreRemovedAudioFolder(norm)
+
+        val currentCustom = localMusicCustomFolders.value
+        val alreadyInCustom = currentCustom.any {
+            it == uri || it.trim().replace('\\', '/').trimEnd('/').lowercase(java.util.Locale.ROOT) == norm
         }
+        if (!alreadyInCustom) {
+            setLocalMusicCustomFolders(currentCustom + uri)
+        }
+
+        val currentFolders = localMusicFolders.value
+        val alreadyInFolders = currentFolders.any {
+            it == uri || it.trim().replace('\\', '/').trimEnd('/').lowercase(java.util.Locale.ROOT) == norm
+        }
+        if (!alreadyInFolders) {
+            setLocalMusicFolders(currentFolders + uri)
+        }
+    }
+
+    fun removeLocalMusicFolder(folderUriOrPath: String) {
+        val norm = folderUriOrPath.trim().replace('\\', '/').trimEnd('/').lowercase(java.util.Locale.ROOT)
+        setLocalMusicFolders(localMusicFolders.value.filterNot {
+            it == folderUriOrPath || it.trim().replace('\\', '/').trimEnd('/').lowercase(java.util.Locale.ROOT) == norm
+        }.toSet())
     }
 
     fun removeLocalMusicCustomFolder(uri: String) {

@@ -135,6 +135,13 @@ object LocalMediaRepository {
     suspend fun getDownloadedSongs(context: Context): List<Song> = withContext(Dispatchers.IO) {
         val appDownloads = Downloads.syncPublicDownloadsFolder(context)
         val knownUris = appDownloads.mapNotNull { it.localUri }.toSet()
+        val knownFileNames = appDownloads.mapNotNull {
+            it.localUri?.substringAfterLast('/')?.substringAfterLast('%')?.lowercase()
+        }.toSet()
+        val knownTrackKeys = appDownloads.mapNotNull {
+            val key = (it.title.orEmpty().trim().lowercase() + "|" + it.artist.orEmpty().trim().lowercase())
+            key.takeIf { k -> k != "|" }
+        }.toSet()
         val extraSongs = mutableListOf<Song>()
 
         /** uri to what the media scanner read off that file. */
@@ -181,7 +188,8 @@ object LocalMediaRepository {
                             dateModifiedSeconds = cursor.getLong(dateModifiedCol),
                         )
                         scanned[contentUri] = tags
-                        if (contentUri !in knownUris && isAudioFileName(name)) {
+                        val lowerName = name.lowercase()
+                        if (contentUri !in knownUris && lowerName !in knownFileNames && isAudioFileName(name)) {
                             extraSongs.add(buildSongFromUri(context, contentUri, name, tags))
                         }
                     }
@@ -195,7 +203,8 @@ object LocalMediaRepository {
                         folder.listFiles()?.forEach { file ->
                             if (file.isFile && isAudioFileName(file.name)) {
                                 val uriStr = Uri.fromFile(file).toString()
-                                if (uriStr !in knownUris) {
+                                val lowerName = file.name.lowercase()
+                                if (uriStr !in knownUris && lowerName !in knownFileNames) {
                                     val modified = file.lastModified().takeIf { it > 0 }?.div(1_000)
                                     extraSongs.add(
                                         buildSongFromUri(
@@ -223,7 +232,12 @@ object LocalMediaRepository {
             )
         }
 
-        (filled + extraSongs).distinctBy { it.localUri ?: it.videoId }
+        (filled + extraSongs).distinctBy { song ->
+            val tKey = (song.title.orEmpty().trim().lowercase() + "|" + song.artist.orEmpty().trim().lowercase()).takeIf { it != "|" }
+            val fName = song.localUri?.substringAfterLast('/')?.substringAfterLast('%')?.lowercase()
+            val realId = song.videoId.takeUnless { it.startsWith("content://") || it.startsWith("file://") }
+            realId ?: (tKey ?: (fName ?: (song.localUri ?: song.videoId)))
+        }
     }
 
     /**
@@ -720,7 +734,20 @@ object LocalMediaRepository {
         AppSettings.localMusicSelectedSongs.value.isNotEmpty()
 
     fun getCustomFolderUris(): Set<String> =
-        AppSettings.localMusicCustomFolders.value
+        (AppSettings.localMusicCustomFolders.value + AppSettings.localMusicFolders.value)
+            .filterNot { it.isBlank() }
+            .toSet()
+
+    fun isFolderExcludedOrRemoved(path: String?, name: String?): Boolean {
+        if (path.isNullOrBlank()) return false
+        val excludedFolders = AppSettings.localMusicExcludedFolders.value.map { it.normalizedPath() }.toSet()
+        val removedFolders = AppSettings.removedAudioFolders.value.map { it.trim().replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT) }.toSet()
+        val norm = path.normalizedPath()
+        val lower = path.replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT)
+        val nameLower = (name ?: path.substringAfterLast('/')).lowercase(Locale.ROOT)
+        return path in excludedFolders || norm in excludedFolders ||
+            path in removedFolders || norm in removedFolders || lower in removedFolders || nameLower in removedFolders
+    }
 
     fun getFolderDisplayName(context: Context, uriOrPath: String): String {
         if (uriOrPath.startsWith("content://")) {
@@ -960,6 +987,23 @@ object LocalMediaRepository {
             val selectedIndividualSongs = AppSettings.localMusicSelectedSongs.value
 
             if (!scanAll && customUris.isEmpty() && selectedIndividualSongs.isEmpty()) {
+                val existingActive = activeAudioFoldersFlow.value.ifEmpty { detectedAudioFolders.value }
+                if (existingActive.isNotEmpty()) {
+                    val survivingFolders = existingActive.filterNot { isFolderExcludedOrRemoved(it.path, it.name) }
+                    if (survivingFolders.isNotEmpty()) {
+                        activeAudioFoldersFlow.value = survivingFolders
+                        detectedAudioFolders.value = survivingFolders
+                        val filteredSongs = allLocalSongsFlow.value.filter { song ->
+                            survivingFolders.any { f ->
+                                song.folderUri == f.path || isInSelectedFolder(song.localPath, f.path) || isInSelectedFolder(song.localUri, f.path)
+                            }
+                        }
+                        if (filteredSongs.isNotEmpty()) {
+                            allLocalSongsFlow.value = filteredSongs
+                            return@withContext filteredSongs
+                        }
+                    }
+                }
                 detectedAudioFolders.value = emptyList()
                 allLocalSongsFlow.value = emptyList()
                 saveCachedIndex(context, emptyList())
@@ -1232,20 +1276,9 @@ object LocalMediaRepository {
     }
 
     fun computeActiveFolders(context: Context, songs: List<Song>): List<DeviceFolder> {
-        val customFolders = AppSettings.localMusicCustomFolders.value
-        val excludedFolders = AppSettings.localMusicExcludedFolders.value
-        val removedFolders = AppSettings.removedAudioFolders.value.map { it.trim().replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT) }.toSet()
+        val customFolders = getCustomFolderUris()
         val scanAll = AppSettings.scanAllAudioFolders.value
         val hasPerm = hasStoragePermission(context)
-
-        fun isFolderExcludedOrRemoved(path: String?, name: String?): Boolean {
-            if (path.isNullOrBlank()) return false
-            val norm = path.normalizedPath()
-            val lower = path.replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT)
-            val nameLower = (name ?: path.substringAfterLast('/')).lowercase(Locale.ROOT)
-            return path in excludedFolders || norm in excludedFolders ||
-                path in removedFolders || norm in removedFolders || lower in removedFolders || nameLower in removedFolders
-        }
 
         val list = mutableListOf<DeviceFolder>()
         val seenNormPaths = mutableSetOf<String>()
@@ -1257,15 +1290,20 @@ object LocalMediaRepository {
             if (isFolderExcludedOrRemoved(uri, name)) continue
             if (isIgnoredAudioFolder(uri) || isIgnoredAudioFolder(name)) continue
             val norm = uri.normalizedPath()
+            val lower = uri.replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT)
+            val nameLower = name.lowercase(Locale.ROOT)
             val fsPath = selectedFolder(uri)?.absolutePath?.normalizedPath()
+
+            if (norm in seenNormPaths || lower in seenNormPaths || nameLower in seenNames) continue
 
             val matchingSongs = songs.filter {
                 it.folderUri == uri || isInSelectedFolder(it.localPath, uri) || isInSelectedFolder(it.localUri, uri)
             }
             list.add(DeviceFolder(name = name, path = uri, songCount = matchingSongs.size, isCustom = true))
             seenNormPaths.add(norm)
+            seenNormPaths.add(lower)
             fsPath?.let { seenNormPaths.add(it) }
-            seenNames.add(name.lowercase(Locale.ROOT))
+            seenNames.add(nameLower)
         }
 
         // 2. If scanAll is ON, or if there are songs not belonging to custom folders:
@@ -1288,9 +1326,11 @@ object LocalMediaRepository {
             if (isFolderExcludedOrRemoved(fPath, fName)) continue
             if (isIgnoredAudioFolder(fPath) || isIgnoredAudioFolder(fName)) continue
             val norm = fPath.normalizedPath()
+            val lower = fPath.replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT)
+            val nameLower = fName.lowercase(Locale.ROOT)
 
             // Deduplication: check if this matches an already added custom folder by name or path
-            if (norm in seenNormPaths || fName.lowercase(Locale.ROOT) in seenNames) {
+            if (norm in seenNormPaths || lower in seenNormPaths || nameLower in seenNames) {
                 continue
             }
 
@@ -1302,6 +1342,7 @@ object LocalMediaRepository {
             val fName = folderNames[fPath] ?: fPath.substringAfterLast('/')
             list.add(DeviceFolder(name = fName, path = fPath, songCount = fSongs.size, isCustom = false))
             seenNormPaths.add(fPath.normalizedPath())
+            seenNormPaths.add(fPath.replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT))
             seenNames.add(fName.lowercase(Locale.ROOT))
         }
 
@@ -1312,12 +1353,21 @@ object LocalMediaRepository {
                 if (isFolderExcludedOrRemoved(df.path, df.name)) continue
                 if (isIgnoredAudioFolder(df.path) || isIgnoredAudioFolder(df.name)) continue
                 val norm = df.path.normalizedPath()
+                val lower = df.path.replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT)
                 val nameNorm = df.name.lowercase(Locale.ROOT)
-                if (norm in seenNormPaths || nameNorm in seenNames) continue
+                if (norm in seenNormPaths || lower in seenNormPaths || nameNorm in seenNames) continue
 
                 // Check actual matching songs count in allLocalSongs
                 val actualCount = songs.count {
                     it.folderUri == df.path || isInSelectedFolder(it.localPath, df.path) || isInSelectedFolder(it.localUri, df.path)
+                }
+                val count = if (actualCount > 0) actualCount else df.songCount
+                list.add(df.copy(songCount = count))
+                seenNormPaths.add(norm)
+                seenNormPaths.add(lower)
+                seenNames.add(nameNorm)
+            }
+        }
                 }
                 val count = if (actualCount > 0) actualCount else df.songCount
                 list.add(df.copy(songCount = count))

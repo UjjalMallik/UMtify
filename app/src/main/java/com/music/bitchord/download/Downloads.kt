@@ -151,15 +151,30 @@ object Downloads {
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences("umtify_settings", Context.MODE_PRIVATE)
-        _saved.value = runCatching {
+        val rawSaved = runCatching {
             json.decodeFromString(serializer, prefs.getString(KEY_SAVED, null) ?: "{}")
         }.getOrDefault(emptyMap())
-        _savedMetadata.value = runCatching {
+        val rawMeta = runCatching {
             json.decodeFromString(metadataSerializer, prefs.getString(KEY_SAVED_METADATA, null) ?: "{}")
         }.getOrDefault(emptyMap())
-        _collections.value = runCatching {
+        val rawCollections = runCatching {
             json.decodeFromString(collectionSerializer, prefs.getString(KEY_SAVED_COLLECTIONS, null) ?: "{}")
         }.getOrDefault(emptyMap())
+
+        val cleanedMeta = deduplicateMetadataMap(context, rawMeta)
+        val validUris = cleanedMeta.values.map { it.uri }.toSet()
+        val cleanedSaved = rawSaved.filter { (_, uri) -> uri in validUris }
+
+        _saved.value = cleanedSaved
+        _savedMetadata.value = cleanedMeta
+        _collections.value = rawCollections
+
+        if (cleanedMeta.size != rawMeta.size || cleanedSaved.size != rawSaved.size) {
+            prefs.edit()
+                .putString(KEY_SAVED, json.encodeToString(serializer, cleanedSaved))
+                .putString(KEY_SAVED_METADATA, json.encodeToString(metadataSerializer, cleanedMeta))
+                .apply()
+        }
     }
 
     // ---- Asking -------------------------------------------------------------
@@ -631,6 +646,67 @@ object Downloads {
 
     private val recordLock = Any()
 
+    private fun canonicalNameFromUri(uriStr: String): String {
+        if (uriStr.isBlank()) return ""
+        val uri = runCatching { Uri.parse(uriStr) }.getOrNull() ?: return ""
+        val p = uri.path ?: uriStr
+        return File(p).name.trim().lowercase(Locale.ROOT)
+    }
+
+    private fun normalizedTrackKey(title: String?, artist: String?): String {
+        val t = title?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        val a = artist?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        return if (t.isEmpty()) "" else "$t|$a"
+    }
+
+    private fun deduplicateMetadataMap(
+        context: Context,
+        rawMeta: Map<String, SavedSongMetadata>,
+    ): Map<String, SavedSongMetadata> {
+        if (rawMeta.isEmpty()) return emptyMap()
+
+        fun score(meta: SavedSongMetadata): Int {
+            var s = 0
+            val uri = runCatching { Uri.parse(meta.uri) }.getOrNull()
+            if (uri != null && DownloadStore.exists(context, uri)) s += 100
+            if (!meta.videoId.startsWith("content://") && !meta.videoId.startsWith("file://")) s += 20
+            if (!meta.thumbnailUrl.isNullOrBlank()) s += 10
+            if (!meta.durationText.isNullOrBlank()) s += 5
+            if (!meta.albumName.isNullOrBlank()) s += 2
+            return s
+        }
+
+        val result = mutableMapOf<String, SavedSongMetadata>()
+        val seenUris = mutableSetOf<String>()
+        val seenFileNames = mutableSetOf<String>()
+        val seenTrackKeys = mutableSetOf<String>()
+        val seenVideoIds = mutableSetOf<String>()
+
+        val sorted = rawMeta.entries.sortedByDescending { score(it.value) }
+
+        for ((key, meta) in sorted) {
+            val uriStr = meta.uri
+            val canonName = canonicalNameFromUri(uriStr)
+            val trackKey = normalizedTrackKey(meta.title, meta.artist)
+            val vId = meta.videoId
+
+            val isDup = (uriStr in seenUris) ||
+                (!vId.startsWith("content://") && !vId.startsWith("file://") && vId in seenVideoIds) ||
+                (canonName.isNotEmpty() && canonName.contains('.') && canonName in seenFileNames) ||
+                (trackKey.isNotEmpty() && trackKey in seenTrackKeys)
+
+            if (isDup) continue
+
+            result[key] = meta
+            seenUris.add(uriStr)
+            if (!vId.startsWith("content://") && !vId.startsWith("file://")) seenVideoIds.add(vId)
+            if (canonName.isNotEmpty() && canonName.contains('.')) seenFileNames.add(canonName)
+            if (trackKey.isNotEmpty()) seenTrackKeys.add(trackKey)
+        }
+
+        return result
+    }
+
     private fun isAudioFileName(name: String): Boolean {
         val lower = name.lowercase(Locale.ROOT)
         return lower.endsWith(".mp3") || lower.endsWith(".m4a") ||
@@ -649,7 +725,10 @@ object Downloads {
             init(context)
         }
         val currentMeta = _savedMetadata.value
-        val existingUris = currentMeta.values.map { it.uri }.toSet()
+        val existingUris = currentMeta.values.map { it.uri }.toMutableSet()
+        val existingFileNames = currentMeta.values.mapNotNull { canonicalNameFromUri(it.uri).takeIf { n -> n.contains('.') } }.toMutableSet()
+        val existingTrackKeys = currentMeta.values.mapNotNull { normalizedTrackKey(it.title, it.artist).takeIf { k -> k.isNotEmpty() } }.toMutableSet()
+        val existingVideoIds = currentMeta.values.map { it.videoId }.filterNot { it.startsWith("content://") || it.startsWith("file://") }.toMutableSet()
         val discoveredNew = mutableMapOf<String, SavedSongMetadata>()
 
         // 1. Scan MediaStore on Android 10+ (Q+)
@@ -687,7 +766,6 @@ object Downloads {
                         val id = cursor.getLong(idCol)
                         val name = cursor.getString(nameCol) ?: continue
                         val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id).toString()
-                        if (contentUri in existingUris || contentUri in discoveredNew) continue
 
                         val rawTitle = cursor.getString(titleCol)
                         val rawArtist = cursor.getString(artistCol)
@@ -695,6 +773,16 @@ object Downloads {
                         val durationMs = cursor.getLong(durationCol)
 
                         val (title, artist) = LocalMediaRepository.resolveTitleAndArtist(rawTitle, rawArtist, name)
+                        val canonName = canonicalNameFromUri(contentUri).ifEmpty { name.trim().lowercase(Locale.ROOT) }
+                        val trackKey = normalizedTrackKey(title, artist)
+
+                        if (contentUri in existingUris ||
+                            contentUri in discoveredNew ||
+                            (canonName.isNotEmpty() && canonName.contains('.') && canonName in existingFileNames) ||
+                            (trackKey.isNotEmpty() && trackKey in existingTrackKeys)
+                        ) {
+                            continue
+                        }
                         val album = rawAlbum?.takeUnless { it.isBlank() || it == "<unknown>" }
                         val durationText = durationMs.takeIf { it > 0 }?.let { ms ->
                             val totalSecs = ms / 1000
@@ -721,6 +809,9 @@ object Downloads {
                             downloadFormat = "OFFLINE",
                             dateAddedSeconds = dateAdded,
                         )
+                        existingUris.add(contentUri)
+                        if (canonName.isNotEmpty() && canonName.contains('.')) existingFileNames.add(canonName)
+                        if (trackKey.isNotEmpty()) existingTrackKeys.add(trackKey)
                     }
                 }
             }
@@ -734,30 +825,41 @@ object Downloads {
                     folder.listFiles()?.forEach { file ->
                         if (file.isFile && file.length() > 0 && isAudioFileName(file.name)) {
                             val fileUri = Uri.fromFile(file).toString()
-                            if (fileUri !in existingUris && fileUri !in discoveredNew) {
-                                val meta = LocalMediaRepository.extractMetadataAndArt(context, Uri.fromFile(file), fileUri)
-                                val (title, artist) = LocalMediaRepository.resolveTitleAndArtist(meta?.title, meta?.artist, file.name)
-                                val durationText = meta?.durationMs?.takeIf { it > 0 }?.let { ms ->
-                                    val totalSecs = ms / 1000
-                                    val mins = totalSecs / 60
-                                    val secs = totalSecs % 60
-                                    String.format(Locale.ROOT, "%d:%02d", mins, secs)
-                                }
-                                val dateAdded = file.lastModified().takeIf { it > 0 }?.div(1000L)
-                                    ?: (System.currentTimeMillis() / 1000L)
+                            val meta = LocalMediaRepository.extractMetadataAndArt(context, Uri.fromFile(file), fileUri)
+                            val (title, artist) = LocalMediaRepository.resolveTitleAndArtist(meta?.title, meta?.artist, file.name)
+                            val canonName = file.name.trim().lowercase(Locale.ROOT)
+                            val trackKey = normalizedTrackKey(title, artist)
 
-                                discoveredNew[fileUri] = SavedSongMetadata(
-                                    videoId = fileUri,
-                                    title = title,
-                                    artist = artist,
-                                    thumbnailUrl = meta?.artworkUri,
-                                    durationText = durationText,
-                                    albumName = meta?.album,
-                                    uri = fileUri,
-                                    downloadFormat = "OFFLINE",
-                                    dateAddedSeconds = dateAdded,
-                                )
+                            if (fileUri in existingUris ||
+                                fileUri in discoveredNew ||
+                                (canonName.isNotEmpty() && canonName.contains('.') && canonName in existingFileNames) ||
+                                (trackKey.isNotEmpty() && trackKey in existingTrackKeys)
+                            ) {
+                                return@forEach
                             }
+                            val durationText = meta?.durationMs?.takeIf { it > 0 }?.let { ms ->
+                                val totalSecs = ms / 1000
+                                val mins = totalSecs / 60
+                                val secs = totalSecs % 60
+                                String.format(Locale.ROOT, "%d:%02d", mins, secs)
+                            }
+                            val dateAdded = file.lastModified().takeIf { it > 0 }?.div(1000L)
+                                ?: (System.currentTimeMillis() / 1000L)
+
+                            discoveredNew[fileUri] = SavedSongMetadata(
+                                videoId = fileUri,
+                                title = title,
+                                artist = artist,
+                                thumbnailUrl = meta?.artworkUri,
+                                durationText = durationText,
+                                albumName = meta?.album,
+                                uri = fileUri,
+                                downloadFormat = "OFFLINE",
+                                dateAddedSeconds = dateAdded,
+                            )
+                            existingUris.add(fileUri)
+                            if (canonName.isNotEmpty() && canonName.contains('.')) existingFileNames.add(canonName)
+                            if (trackKey.isNotEmpty()) existingTrackKeys.add(trackKey)
                         }
                     }
                 }
@@ -793,6 +895,9 @@ object Downloads {
         val metaMap = _savedMetadata.value
         val result = mutableListOf<Song>()
         val seenUris = mutableSetOf<String>()
+        val seenFileNames = mutableSetOf<String>()
+        val seenTrackKeys = mutableSetOf<String>()
+        val seenVideoIds = mutableSetOf<String>()
         val migratedAddedByUri = mutableMapOf<String, Long>()
         val migratedFormatByUri = mutableMapOf<String, String>()
 
@@ -800,7 +905,16 @@ object Downloads {
             // A downloaded music video and the catalogue track it resolved to
             // are deliberately recorded as two ids for one file. Verify and
             // materialise that file once, not once per alias.
-            if (!seenUris.add(meta.uri)) continue
+            val uriStr = meta.uri
+            val canonName = canonicalNameFromUri(uriStr)
+            val trackKey = normalizedTrackKey(meta.title, meta.artist)
+            val vId = meta.videoId
+
+            if (!seenUris.add(uriStr)) continue
+            if (!vId.startsWith("content://") && !vId.startsWith("file://") && !seenVideoIds.add(vId)) continue
+            if (canonName.isNotEmpty() && canonName.contains('.') && !seenFileNames.add(canonName)) continue
+            if (trackKey.isNotEmpty() && !seenTrackKeys.add(trackKey)) continue
+
             val uri = meta.uri.toUri()
             if (DownloadStore.exists(context, uri)) {
                 if (meta.durationText.durationMillis() in 1..30_000L || (meta.durationText != null && meta.durationText.durationMillis() <= 30_000L)) {
@@ -858,7 +972,12 @@ object Downloads {
                 },
             )
         }
-        result
+        result.distinctBy { song ->
+            val tKey = normalizedTrackKey(song.title, song.artist)
+            val fName = canonicalNameFromUri(song.localUri.orEmpty())
+            val realId = song.videoId.takeUnless { it.startsWith("content://") || it.startsWith("file://") }
+            realId ?: (if (tKey.isNotEmpty()) tKey else fName)
+        }
     }
 
     /**
@@ -914,6 +1033,11 @@ object Downloads {
                     localDateAddedSeconds = dateAddedSeconds,
                     localDateModifiedSeconds = dateModifiedSeconds,
                 )
+            }.distinctBy { song ->
+                val tKey = normalizedTrackKey(song.title, song.artist)
+                val fName = canonicalNameFromUri(song.localUri.orEmpty())
+                val realId = song.videoId.takeUnless { it.startsWith("content://") || it.startsWith("file://") }
+                realId ?: (if (tKey.isNotEmpty()) tKey else fName)
             }
         }
 

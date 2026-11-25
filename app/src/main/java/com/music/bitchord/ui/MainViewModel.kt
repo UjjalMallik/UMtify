@@ -159,8 +159,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Every track this device can play without a network, read straight off disk. */
     private suspend fun readOfflineHome(): OfflineHome = withContext(Dispatchers.IO) {
         val context = getApplication<Application>()
-        val downloads = runCatching { Downloads.getDownloadedSongs(context) }.getOrDefault(emptyList())
+        val rawDownloads = runCatching { Downloads.getDownloadedSongs(context) }.getOrDefault(emptyList())
             .filter { it.videoId.isNotBlank() }
+        val downloads = rawDownloads.distinctBy { song ->
+            val tKey = (song.title.orEmpty().trim().lowercase() + "|" + song.artist.orEmpty().trim().lowercase()).takeIf { it != "|" }
+            val fName = song.localUri?.substringAfterLast('/')?.substringAfterLast('%')?.lowercase()
+            val realId = song.videoId.takeUnless { it.startsWith("content://") || it.startsWith("file://") }
+            realId ?: (tKey ?: (fName ?: song.videoId))
+        }
         val cached = runCatching { AudioCache.cachedSongs().map { it.song } }.getOrDefault(emptyList())
             .filter { it.videoId.isNotBlank() }
         // Unpermitted is not the same as empty, but offline the page has no
@@ -3456,8 +3462,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         return when {
             Downloads.recordIdOf(browseId) != null ->
                 nonEmpty(downloadedPlaylist(browseId)) { text(R.string.downloaded_playlist_empty) }
-            browseId == "local:downloads" ->
-                nonEmpty(Downloads.getDownloadedSongs(context)) { "No downloaded tracks" }
+            browseId == "local:downloads" -> {
+                val songs = runCatching { Downloads.getDownloadedSongs(context) }.getOrDefault(emptyList())
+                    .distinctBy { song ->
+                        val tKey = (song.title.orEmpty().trim().lowercase() + "|" + song.artist.orEmpty().trim().lowercase()).takeIf { it != "|" }
+                        val fName = song.localUri?.substringAfterLast('/')?.substringAfterLast('%')?.lowercase()
+                        val realId = song.videoId.takeUnless { it.startsWith("content://") || it.startsWith("file://") }
+                        realId ?: (tKey ?: (fName ?: song.videoId))
+                    }
+                nonEmpty(songs) { "No downloaded tracks" }
+            }
             browseId == CACHE_FOLDER_BROWSE_ID -> cachedSongsState()
             browseId == "local:all" -> {
                 val hasPerm = LocalMediaRepository.hasStoragePermission(context)
