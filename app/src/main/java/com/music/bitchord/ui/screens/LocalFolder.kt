@@ -633,8 +633,8 @@ private fun AlbumGridCard(
                 com.music.bitchord.ui.components.LocalArtworkImage(
                     url = art ?: localUri.orEmpty(),
                     localUri = localUri,
-                    title = song.title,
-                    artist = song.artist,
+                    title = firstSong?.title,
+                    artist = firstSong?.artist,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     maxSizePx = CARD_ART_PX,
@@ -696,8 +696,8 @@ private fun AlbumRow(
                 com.music.bitchord.ui.components.LocalArtworkImage(
                     url = art ?: localUri.orEmpty(),
                     localUri = localUri,
-                    title = song.title,
-                    artist = song.artist,
+                    title = firstSong?.title,
+                    artist = firstSong?.artist,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     maxSizePx = ROW_ART_PX,
