@@ -314,6 +314,7 @@ fun SettingsScreen(
     val scanAllAudioFolders by AppSettings.scanAllAudioFolders.collectAsStateWithLifecycle()
     val localMusicSelectedSongs by AppSettings.localMusicSelectedSongs.collectAsStateWithLifecycle()
     val localMusicExcludedSongs by AppSettings.localMusicExcludedSongs.collectAsStateWithLifecycle()
+    val localMusicExcludedFolders by AppSettings.localMusicExcludedFolders.collectAsStateWithLifecycle()
     var showLocalMusicManager by remember { mutableStateOf(false) }
     val highPerformanceMode by AppSettings.highPerformanceMode.collectAsStateWithLifecycle()
     val performanceRefreshRate by AppSettings.performanceRefreshRate.collectAsStateWithLifecycle()
