@@ -549,6 +549,11 @@ object LocalMediaRepository {
             }
         }
 
+        // 4. Lightweight FLAC Picture Block Extractor fallback (handles 24-bit Hi-Res FLAC)
+        if (picBytes == null || picBytes.isEmpty()) {
+            picBytes = com.music.bitchord.ui.components.extractFlacPicture(context, fileUri, directPath)
+        }
+
         // 4. Write bytes atomically to filesDir/local_art_full/<hash>.jpg and filesDir/local_art_thumb/<hash>.jpg
         var artUri: String? = null
         val artFile = getLocalArtFile(context, trackKey)
@@ -605,6 +610,9 @@ object LocalMediaRepository {
 
         if (artUri != null) {
             runCatching {
+                LocalArtworkCache.removeNoArt(context, trackKey)
+                LocalArtworkCache.removeNoArt(context, uriStr)
+                if (directPath != null) LocalArtworkCache.removeNoArt(context, directPath)
                 LocalArtworkCache.prewarm(artUri, 160, context)
             }
         }

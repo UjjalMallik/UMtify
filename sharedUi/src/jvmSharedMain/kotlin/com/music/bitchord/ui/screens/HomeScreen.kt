@@ -119,7 +119,37 @@ import com.music.bitchord.ui.player.MeshPalette
 private val HOME_TITLE_LIFT = 28.dp
 
 private const val RECENTS_TITLE = "Recents"
-private const val RECENT_TRACKS_PER_COLUMN = 4
+private const val RECENT_TRACKS_PER_COLUMN = 3
+
+/**
+ * Strict top-to-bottom section ordering:
+ * 1. Recents (3 songs per column)
+ * 2. Time-of-Day Smart Mix (Morning Energy / Afternoon Flow / Evening Chill / Your Late Night Mix)
+ * 3. Your Top Artists (Circular avatar row)
+ * 4. Because you play [Local Song] (Local → Online Smart Bridge)
+ * 5. Remaining sections (Listen again, Song mixes, New releases, etc.)
+ */
+fun orderHomeShelvesStrictly(shelves: List<HomeShelf>): List<HomeShelf> {
+    val recents = mutableListOf<HomeShelf>()
+    val timeOfDay = mutableListOf<HomeShelf>()
+    val topArtists = mutableListOf<HomeShelf>()
+    val localBridge = mutableListOf<HomeShelf>()
+    val others = mutableListOf<HomeShelf>()
+
+    shelves.forEach { shelf ->
+        val title = shelf.title.trim()
+        val titleLower = title.lowercase(Locale.ROOT)
+        when {
+            title.equals(RECENTS_TITLE, ignoreCase = true) || titleLower == "recents" -> recents.add(shelf)
+            isTimeOfDayShelf(title) -> timeOfDay.add(shelf)
+            title.equals("Your Top Artists", ignoreCase = true) || title.equals("Top Artists", ignoreCase = true) -> topArtists.add(shelf)
+            titleLower.contains("because you play") || titleLower.contains("local → online") || titleLower.contains("local -> online") -> localBridge.add(shelf)
+            else -> others.add(shelf)
+        }
+    }
+
+    return recents + timeOfDay + topArtists + localBridge + others
+}
 
 private fun List<ShelfItem>.playingItemMatcher(song: Song?): (ShelfItem) -> Boolean {
     song ?: return { false }
@@ -305,7 +335,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedShelves(
     recentsViewType: LibraryViewType,
     onRecentsViewTypeToggle: () -> Unit,
 ) {
-    shelves.forEachIndexed { index, shelf ->
+    val orderedShelves = orderHomeShelvesStrictly(shelves)
+    orderedShelves.forEachIndexed { index, shelf ->
         item(key = shelf.title + index, contentType = "shelf") {
             val openItem: (ShelfItem) -> Unit = { item -> onItemClick(item, shelf.title) }
             val isSparseSection = (shelf.items.size in 1..2 && !shelf.title.equals("Your Top Artists", ignoreCase = true) && !shelf.title.equals("Top Artists", ignoreCase = true)) ||

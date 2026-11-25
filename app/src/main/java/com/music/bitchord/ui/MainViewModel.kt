@@ -2198,21 +2198,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun injectSmartShelves(shelves: List<HomeShelf>): List<HomeShelf> {
         val smartShelves = com.music.bitchord.playback.smart.RecommendationEngine.getSmartShelves(getApplication())
-        if (smartShelves.isEmpty()) return shelves
-        val result = shelves.toMutableList()
-        var insertIdx = if (result.isNotEmpty() && result[0].title.equals("Recents", ignoreCase = true)) 1 else 0
+        val combined = shelves.toMutableList()
         for (shelf in smartShelves) {
             val titleLower = shelf.title.lowercase(Locale.ROOT)
-            if (result.none { it.title.lowercase(Locale.ROOT) == titleLower }) {
-                if (insertIdx <= result.size) {
-                    result.add(insertIdx, shelf)
-                    insertIdx++
-                } else {
-                    result.add(shelf)
-                }
+            if (combined.none { it.title.lowercase(Locale.ROOT) == titleLower }) {
+                combined.add(shelf)
             }
         }
-        return result
+        return com.music.bitchord.ui.screens.orderHomeShelvesStrictly(combined)
     }
 
     private fun publishHomeShelves(shelves: List<HomeShelf>, prepend: Boolean = false) {

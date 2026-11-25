@@ -6,8 +6,10 @@ import android.graphics.BitmapFactory
 import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
@@ -148,7 +150,7 @@ suspend fun renderReplayPoster(
             val rowH = 92f
             val columnsH = 68f + rows * rowH + 16f
             val hasAlbums = albums.isNotEmpty()
-            val albumsH = if (hasAlbums) 324f else 0f
+            val albumsH = if (hasAlbums) 380f else 0f
             val footerH = 96f
 
             val totalHeight = headerH + gap + heroH + gap + columnsH + (if (hasAlbums) gap + albumsH else 0f) + gap + footerH
@@ -156,11 +158,24 @@ suspend fun renderReplayPoster(
 
             val leadCover = covers[lit] ?: covers[songs.firstOrNull()?.key]
             val palette = paletteOf(leadCover)
-            val accentColor = palette.firstOrNull() ?: 0xFFFA2D48.toInt()
+
+            // Resolve active theme primary and accent colors for dynamic, theme-adaptive tinting
+            val themePrimary = if (effectivePaletteColors.size > 1) effectivePaletteColors[1] else effectivePaletteColors.firstOrNull() ?: 0xFF3B82F6.toInt()
+            val themeAccent = if (effectivePaletteColors.size > 2) effectivePaletteColors[2] else themePrimary
+            val accentColor = if (glassTheme == ReplayGlassTheme.AUTO && palette.isNotEmpty()) {
+                palette.first()
+            } else {
+                themePrimary
+            }
+            val secondaryAccent = if (glassTheme == ReplayGlassTheme.AUTO && palette.size > 1) {
+                palette[1]
+            } else {
+                themeAccent
+            }
 
             var y = drawEditorialHeader(canvas, context, type, summary, holder, memberSince, startY, headerH)
             y += gap
-            y = drawUnifiedHeroCard(canvas, context, type, summary, accentColor, y, heroH)
+            y = drawUnifiedHeroCard(canvas, context, type, summary, accentColor, secondaryAccent, y, heroH)
             y += gap
             y = drawColumns(canvas, context, type, songs, artists, covers, y, columnsH, rows, rowH)
             if (hasAlbums) {
@@ -615,8 +630,8 @@ private fun drawEditorialHeader(
     val creditPaint = type.label(20f, 0xAAFFFFFF.toInt(), tracking = 0.14f)
     canvas.drawText(credit.uppercase(locale), MARGIN, top + 84f, creditPaint)
 
-    // UMtify logo on the right
-    drawWordmark(canvas, context, POSTER_W - MARGIN, top + 44f)
+    // Larger UMtify logo on the right, aligned cleanly with REPLAY 2026 headline
+    drawWordmark(canvas, context, POSTER_W - MARGIN, top + 46f, height = 56f)
 
     return top + height
 }
@@ -626,6 +641,7 @@ private fun drawUnifiedHeroCard(
     context: Context,
     type: Fonts,
     summary: ReplaySummary,
+    primaryColor: Int,
     accentColor: Int,
     top: Float,
     heroH: Float = 286f,
@@ -636,7 +652,7 @@ private fun drawUnifiedHeroCard(
         bounds,
         cornerRadius = 56f, // RoundedCornerShape(28.dp)
         fillAlpha = 0x24,
-        accentGlow = accentColor,
+        accentGlow = primaryColor,
     )
 
     val locale = context.resources.configuration.locales[0]
@@ -702,7 +718,7 @@ private fun drawUnifiedHeroCard(
     val waveLeft = waveRight - waveW
     val waveCenterY = top + heroH / 2f
     val waveH = 190f
-    drawAudioWaveform(canvas, waveLeft, waveCenterY, waveW, waveH, accentColor)
+    drawAudioWaveform(canvas, waveLeft, waveCenterY, waveW, waveH, primaryColor, accentColor)
 
     return top + heroH
 }
@@ -713,6 +729,7 @@ private fun drawAudioWaveform(
     centerY: Float,
     width: Float,
     height: Float,
+    primaryColor: Int,
     accentColor: Int,
 ) {
     val barRatios = floatArrayOf(0.25f, 0.50f, 0.85f, 0.62f, 0.95f, 0.74f, 1.0f, 0.76f, 0.48f, 0.70f, 0.35f)
@@ -731,22 +748,23 @@ private fun drawAudioWaveform(
         val rect = RectF(bx, bTop, bx + barWidth, bBottom)
         val corner = barWidth / 2f
 
-        // Soft accent glow around peaks
-        if (ratio > 0.65f) {
-            val glowRect = RectF(bx - 3f, bTop - 3f, bx + barWidth + 3f, bBottom + 3f)
-            glowPaint.color = ColorUtils.setAlphaComponent(accentColor, (48 * ratio).toInt())
-            canvas.drawRoundRect(glowRect, corner + 2f, corner + 2f, glowPaint)
+        // Soft translucent glow around peaks using theme accent color
+        if (ratio > 0.55f) {
+            val glowRadius = 4f * ratio
+            val glowRect = RectF(bx - glowRadius, bTop - glowRadius, bx + barWidth + glowRadius, bBottom + glowRadius)
+            glowPaint.color = ColorUtils.setAlphaComponent(accentColor, (70 * ratio).toInt())
+            canvas.drawRoundRect(glowRect, corner + glowRadius, corner + glowRadius, glowPaint)
         }
 
-        // Translucent gradient bar tinted with dominant album accent color
-        barPaint.shader = android.graphics.LinearGradient(
+        // Dynamically tint the waveform bars using active card theme's primary/accent gradient colors
+        barPaint.shader = LinearGradient(
             bx, bTop, bx, bBottom,
             intArrayOf(
-                0xEEFFFFFF.toInt(),
-                ColorUtils.setAlphaComponent(accentColor, 225),
-                ColorUtils.setAlphaComponent(accentColor, 120),
+                ColorUtils.setAlphaComponent(primaryColor, 240),
+                ColorUtils.setAlphaComponent(accentColor, 215),
+                ColorUtils.setAlphaComponent(accentColor, 100),
             ),
-            floatArrayOf(0f, 0.45f, 1f),
+            floatArrayOf(0f, 0.50f, 1f),
             Shader.TileMode.CLAMP,
         )
         canvas.drawRoundRect(rect, corner, corner, barPaint)
@@ -864,7 +882,7 @@ private fun drawAlbums(
     albums: List<ReplayRow>,
     covers: Map<String, Bitmap?>,
     top: Float,
-    cardHeight: Float = 324f,
+    cardHeight: Float = 380f,
 ): Float {
     if (albums.isEmpty()) return top
     val cardBounds = RectF(MARGIN, top, POSTER_W - MARGIN, top + cardHeight)
@@ -874,44 +892,83 @@ private fun drawAlbums(
     canvas.drawText(
         context.getString(R.string.top_albums).uppercase(locale),
         MARGIN + 24f,
-        top + 44f,
+        top + 42f,
         type.label(21f, 0xEEFFFFFF.toInt(), tracking = 0.14f),
     )
 
     val items = albums.take(POSTER_ALBUMS)
-    val innerMargin = 24f
+    val innerMargin = 20f
     val availableW = CONTENT_W - innerMargin * 2
-    val artSize = 186f
-    val gap = if (items.size > 1) (availableW - artSize * items.size) / (items.size - 1) else 0f
+    val tileSpacing = 18f
+    val tileW = (availableW - tileSpacing * (items.size - 1)) / items.size.coerceAtLeast(1)
+    val tileH = tileW // aspectRatio(1f) filling its tile width
     val artY = top + 64f
 
     items.forEachIndexed { index, album ->
-        val x = MARGIN + innerMargin + index * (artSize + gap)
+        val x = MARGIN + innerMargin + index * (tileW + tileSpacing)
+        val tileBounds = RectF(x, artY, x + tileW, artY + tileH)
 
-        // Drop shadow behind cover
-        val shadowBounds = RectF(x + 2f, artY + 6f, x + artSize + 2f, artY + artSize + 6f)
-        val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0x66000000
-        }
-        canvas.drawRoundRect(shadowBounds, 20f, 20f, shadowPaint)
+        // Drop shadow behind showcase tile
+        val shadowBounds = RectF(x + 2f, artY + 6f, x + tileW + 2f, artY + tileH + 6f)
+        val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x66000000 }
+        canvas.drawRoundRect(shadowBounds, 22f, 22f, shadowPaint)
 
+        // Full-width cover art inside the showcase tile
         val art = album.artworkUrl?.let { covers[it] } ?: covers[album.key]
-        drawArtwork(canvas, art, album.title, x, artY, artSize, false)
+        drawArtwork(canvas, art, album.title, x, artY, tileW, false)
 
-        val artBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0x3AFFFFFF
+        // Sleek frosted dark bottom gradient inside the tile holding album title & artist
+        val gradientPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = LinearGradient(
+                x, artY + tileH * 0.40f, x, artY + tileH,
+                intArrayOf(0x00000000, 0x990A0D14.toInt(), 0xF20A0D14.toInt()),
+                floatArrayOf(0f, 0.45f, 1f),
+                Shader.TileMode.CLAMP,
+            )
+        }
+        canvas.save()
+        val path = Path().apply {
+            addRoundRect(tileBounds, 22f, 22f, Path.Direction.CW)
+        }
+        canvas.clipPath(path)
+        canvas.drawRect(RectF(x, artY + tileH * 0.40f, x + tileW, artY + tileH), gradientPaint)
+        canvas.restore()
+
+        // Subtle rank pill badge (#1, #2, #3) in the top-left corner
+        val rankText = "#${index + 1}"
+        val rankPaint = type.label(16f, Color.WHITE, tracking = 0.06f).apply {
+            textAlign = Paint.Align.CENTER
+        }
+        val rankPillW = rankPaint.measureText(rankText) + 20f
+        val rankPillH = 26f
+        val rankBounds = RectF(x + 12f, artY + 12f, x + 12f + rankPillW, artY + 12f + rankPillH)
+        val rankFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x88000000.toInt() }
+        val rankBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0x55FFFFFF
+            style = Paint.Style.STROKE
+            strokeWidth = 1f
+        }
+        canvas.drawRoundRect(rankBounds, 13f, 13f, rankFill)
+        canvas.drawRoundRect(rankBounds, 13f, 13f, rankBorder)
+        canvas.drawText(rankText, rankBounds.centerX(), rankBounds.centerY() + 5.5f, rankPaint)
+
+        // Sleek glass border around the showcase tile
+        val tileBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0x3EFFFFFF
             style = Paint.Style.STROKE
             strokeWidth = 1.5f
         }
-        canvas.drawRoundRect(RectF(x, artY, x + artSize, artY + artSize), 18f, 18f, artBorder)
+        canvas.drawRoundRect(tileBounds, 22f, 22f, tileBorder)
 
-        val name = type.body(21f, Color.WHITE, bold = true)
-        canvas.drawText(ellipsised(album.title, name, artSize), x, artY + artSize + 28f, name)
-        val sub = type.body(18f, 0x8CFFFFFF.toInt())
+        // Bold album title and artist name inside bottom frosted area
+        val name = type.body(20f, Color.WHITE, bold = true)
+        canvas.drawText(ellipsised(album.title, name, tileW - 24f), x + 12f, artY + tileH - 34f, name)
+        val sub = type.body(16f, 0xCCFFFFFF.toInt())
+        val subText = album.subtitle ?: formatListening(context, album.ms)
         canvas.drawText(
-            ellipsised(album.subtitle ?: formatListening(context, album.ms), sub, artSize),
-            x,
-            artY + artSize + 50f,
+            ellipsised(subText, sub, tileW - 24f),
+            x + 12f,
+            artY + tileH - 14f,
             sub,
         )
     }
@@ -1135,13 +1192,20 @@ private fun drawRuns(
  * will zoom into, so it carries the same wordmark the header on screen does,
  * at the size the 46 px heading beside it implies.
  */
-internal fun drawWordmark(canvas: Canvas, context: Context, right: Float, baseline: Float) {
+internal fun drawWordmark(
+    canvas: Canvas,
+    context: Context,
+    right: Float,
+    baseline: Float,
+    height: Float = WORDMARK_H,
+) {
     val mark = runCatching {
         ResourcesCompat.getDrawable(context.resources, R.drawable.ic_umtify_wordmark, null)
     }.getOrNull() ?: return
-    val left = right - WORDMARK_W
-    val top = baseline - WORDMARK_H
-    mark.setTint(0xE6FFFFFF.toInt())
+    val width = height * 800f / 275f
+    val left = right - width
+    val top = baseline - height
+    mark.setTint(0xF0FFFFFF.toInt())
     mark.setBounds(left.toInt(), top.toInt(), right.toInt(), baseline.toInt())
     mark.draw(canvas)
 }
@@ -1238,8 +1302,8 @@ private const val POSTER_H = 1920
 
 private const val MARGIN = 64f
 
-/** The wordmark's drawn size: 800×275 in the asset, set to the 46 px heading. */
-private const val WORDMARK_H = 48f
+/** The wordmark's drawn size: 800×275 in the asset, enlarged to match REPLAY headline height. */
+private const val WORDMARK_H = 56f
 private const val WORDMARK_W = WORDMARK_H * 800f / 275f
 
 /** The width type and artwork are laid out in. */

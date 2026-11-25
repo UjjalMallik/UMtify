@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.bitchord.data.settings.AppSettings
+import com.music.bitchord.playback.PlaybackService
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -101,6 +102,7 @@ fun ReplayShareSheet(
     val themeColors = rememberAppThemeGlassColors()
     val themeArgb = remember(themeColors) { themeColors.map { it.toArgb() } }
     val savedThemeId by AppSettings.replayGlassTheme.collectAsStateWithLifecycle()
+    val artworkVersion by PlaybackService.artworkVersionFlow.collectAsStateWithLifecycle()
     var selectedTheme by remember(savedThemeId) {
         mutableStateOf(ReplayGlassTheme.fromId(savedThemeId))
     }
@@ -113,7 +115,7 @@ fun ReplayShareSheet(
         saved = false
     }
 
-    LaunchedEffect(summary, page, selectedTheme, themeArgb) {
+    LaunchedEffect(summary, page, selectedTheme, themeArgb, artworkVersion) {
         poster = null
         poster = runCatching {
             renderReplayPoster(

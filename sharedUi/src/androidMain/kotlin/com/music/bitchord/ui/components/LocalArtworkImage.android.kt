@@ -12,6 +12,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -25,6 +26,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -247,6 +249,22 @@ object LocalArtworkCache {
         fullHdLruCache.put(hash, bitmap)
     }
 
+    val artworkVersionFlow = MutableStateFlow(0)
+
+    fun bumpArtworkVersion() {
+        artworkVersionFlow.value++
+    }
+
+    fun clearNoArt(context: Context) {
+        synchronized(noArtLock) {
+            noArtHashes.clear()
+            runCatching {
+                val file = File(File(context.filesDir, "local_art_thumb"), "no_art.txt")
+                if (file.exists()) file.delete()
+            }
+        }
+    }
+
     private val noArtHashes = ConcurrentHashMap.newKeySet<String>()
     @Volatile
     private var noArtFileLoaded = false
@@ -373,6 +391,83 @@ object LocalArtworkCache {
     }
 }
 
+/**
+ * Fast binary FLAC METADATA_BLOCK_PICTURE extractor.
+ * Solves MediaMetadataRetriever failing on 24-bit Hi-Res FLAC files.
+ */
+fun extractFlacPictureFromStream(inputStream: java.io.InputStream): ByteArray? {
+    return runCatching {
+        val dis = java.io.DataInputStream(java.io.BufferedInputStream(inputStream, 16384))
+        val header = ByteArray(4)
+        dis.readFully(header)
+        // Check "fLaC" magic: 0x66, 0x4C, 0x61, 0x43
+        if (header[0] != 0x66.toByte() || header[1] != 0x4C.toByte() ||
+            header[2] != 0x61.toByte() || header[3] != 0x43.toByte()
+        ) {
+            return@runCatching null
+        }
+
+        while (true) {
+            val b0 = dis.readUnsignedByte()
+            val isLast = (b0 and 0x80) != 0
+            val blockType = b0 and 0x7F
+            val blockLength = (dis.readUnsignedByte() shl 16) or
+                (dis.readUnsignedByte() shl 8) or
+                dis.readUnsignedByte()
+
+            if (blockType == 6) { // METADATA_BLOCK_PICTURE
+                val picType = dis.readInt()
+                val mimeLength = dis.readInt()
+                if (mimeLength > 0) skipFully(dis, mimeLength)
+                val descLength = dis.readInt()
+                if (descLength > 0) skipFully(dis, descLength)
+                val width = dis.readInt()
+                val height = dis.readInt()
+                val depth = dis.readInt()
+                val colors = dis.readInt()
+                val picDataLength = dis.readInt()
+                if (picDataLength in 1..35_000_000) {
+                    val picData = ByteArray(picDataLength)
+                    dis.readFully(picData)
+                    return@runCatching picData
+                }
+                return@runCatching null
+            }
+
+            if (isLast) break
+            skipFully(dis, blockLength)
+        }
+        null
+    }.getOrNull()
+}
+
+fun extractFlacPicture(context: Context, uri: Uri, directPath: String? = null): ByteArray? {
+    return runCatching {
+        val stream = if (directPath != null && File(directPath).exists()) {
+            File(directPath).inputStream()
+        } else {
+            context.contentResolver.openInputStream(uri)
+        } ?: return@runCatching null
+
+        stream.use { rawStream ->
+            extractFlacPictureFromStream(rawStream)
+        }
+    }.getOrNull()
+}
+
+private fun skipFully(dis: java.io.DataInputStream, bytesToSkip: Int) {
+    var remaining = bytesToSkip.toLong()
+    while (remaining > 0) {
+        val skipped = dis.skip(remaining)
+        if (skipped <= 0) {
+            if (dis.read() == -1) break
+            remaining--
+        } else {
+            remaining -= skipped
+        }
+    }
+}
+
 suspend fun extractThumbnailOnDemand(
     context: Context,
     key: String,
@@ -453,6 +548,15 @@ suspend fun extractThumbnailOnDemand(
                 if (picBytes == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && uri != null && !cleanAudioUri.startsWith("/")) {
                     runCatching {
                         loadedBmp = context.contentResolver.loadThumbnail(uri, Size(128, 128), null)
+                    }
+                }
+
+                // 4. Lightweight FLAC Picture Block Extractor fallback (handles 24-bit Hi-Res FLAC)
+                if (picBytes == null && loadedBmp == null) {
+                    val flacDirect = if (cleanAudioUri.startsWith("/")) cleanAudioUri else null
+                    val flacUri = runCatching { Uri.parse(cleanAudioUri) }.getOrNull()
+                    if (flacUri != null || flacDirect != null) {
+                        picBytes = extractFlacPicture(context, flacUri ?: Uri.EMPTY, flacDirect)
                     }
                 }
 
@@ -585,6 +689,15 @@ suspend fun extractFullArtworkOnDemand(
         }
     }
 
+    // Lightweight FLAC Picture Block Extractor fallback for full-HD artwork
+    if (picBytes == null) {
+        val flacDirect = if (cleanAudioUri.startsWith("/")) cleanAudioUri else null
+        val flacUri = runCatching { Uri.parse(cleanAudioUri) }.getOrNull()
+        if (flacUri != null || flacDirect != null) {
+            picBytes = extractFlacPicture(context, flacUri ?: Uri.EMPTY, flacDirect)
+        }
+    }
+
     if (picBytes != null && picBytes.isNotEmpty()) {
         // Save raw bytes to local_art_full/<hash>.jpg for permanent instant full-HD reloads
         val fullDir = File(context.filesDir, "local_art_full").apply { if (!exists()) mkdirs() }
@@ -660,6 +773,7 @@ actual fun LocalArtworkImage(
     }
 
     val context = LocalContext.current.applicationContext
+    val artworkVersion by LocalArtworkCache.artworkVersionFlow.collectAsState()
     val isFullHd = maxSizePx > 256
 
     // Step A (Instant RAM):
@@ -684,6 +798,7 @@ actual fun LocalArtworkImage(
         key1 = primaryKey,
         key2 = fallbackKey,
         key3 = maxSizePx,
+        key4 = artworkVersion,
     ) {
         if (isFullHd) {
             val hd = LocalArtworkCache.getFullHd(primaryKey) ?: LocalArtworkCache.getFullHd(fallbackKey)

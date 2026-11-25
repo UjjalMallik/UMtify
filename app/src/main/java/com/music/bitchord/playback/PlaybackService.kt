@@ -949,6 +949,25 @@ class PlaybackService : MediaLibraryService() {
                         }
                     }
                     val artUri = "file://${artFile.absolutePath}"
+                    val thumbUri = com.music.bitchord.data.LocalMediaRepository.getCachedLocalArtThumbUri(this@PlaybackService, key) ?: artUri
+
+                    // Force UI & Replay Sync: bump artwork version and update ListeningStats / local songs cache
+                    com.music.bitchord.ui.components.LocalArtworkCache.bumpArtworkVersion()
+                    com.music.bitchord.data.stats.ListeningStats.updateTrackArtwork(key, thumbUri)
+                    currentSong?.videoId?.let { com.music.bitchord.data.stats.ListeningStats.updateTrackArtwork(it, thumbUri) }
+                    currentSong?.title?.let { com.music.bitchord.data.stats.ListeningStats.updateTrackArtwork(it, thumbUri) }
+
+                    val allLocal = com.music.bitchord.data.LocalMediaRepository.allLocalSongsFlow.value
+                    val matchIdx = allLocal.indexOfFirst {
+                        it.videoId == currentSong?.videoId || it.localUri == key || it.localPath == key
+                    }
+                    if (matchIdx >= 0 && (allLocal[matchIdx].thumbnailUrl == null || !allLocal[matchIdx].thumbnailUrl!!.startsWith("file://"))) {
+                        val updated = allLocal.toMutableList()
+                        updated[matchIdx] = updated[matchIdx].copy(thumbnailUrl = thumbUri)
+                        com.music.bitchord.data.LocalMediaRepository.allLocalSongsFlow.value = updated
+                        com.music.bitchord.data.LocalMediaRepository.saveCachedIndex(this@PlaybackService, updated)
+                    }
+
                     if (exoPlayer.mediaMetadata.artworkUri == null || exoPlayer.mediaMetadata.artworkUri?.scheme == "local_art") {
                         val metaBuilder = exoPlayer.mediaMetadata.buildUpon()
                             .setArtworkUri(android.net.Uri.parse(artUri))
@@ -9398,6 +9417,7 @@ class PlaybackService : MediaLibraryService() {
 
         val playbackSpeedFlow = MutableStateFlow(1.0f)
         val playbackPitchFlow = MutableStateFlow(1.0f)
+        val artworkVersionFlow = com.music.bitchord.ui.components.LocalArtworkCache.artworkVersionFlow
 
         fun setPlaybackParameters(speed: Float = 1.0f, pitch: Float = 1.0f) {
             playbackSpeedFlow.value = 1.0f

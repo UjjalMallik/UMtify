@@ -454,15 +454,39 @@ object RecommendationEngine {
             .sortedByDescending { trackCountMap[it.trackId] ?: 0 }
 
         val mixSongs = mutableListOf<Song>()
-        sortedSlotEntries.take(15).forEach { entry ->
-            mixSongs.add(
-                Song(
-                    videoId = entry.trackId,
-                    title = entry.title,
-                    artist = entry.artist,
-                    thumbnailUrl = entry.artworkUrl,
+        val seenTrackIds = mutableSetOf<String>()
+        val seenSignatures = mutableSetOf<String>()
+
+        fun tryAddSong(song: Song): Boolean {
+            val trackId = song.videoId.trim()
+            if (trackId.isBlank()) return false
+            val normTitle = song.title.lowercase(Locale.ROOT).trim()
+            val normArtist = song.artist.lowercase(Locale.ROOT).trim()
+            val signature = "$normTitle|$normArtist"
+
+            if (seenTrackIds.contains(trackId) || (normTitle.isNotBlank() && seenSignatures.contains(signature))) {
+                return false
+            }
+
+            seenTrackIds.add(trackId)
+            if (normTitle.isNotBlank()) {
+                seenSignatures.add(signature)
+            }
+            mixSongs.add(song)
+            return true
+        }
+
+        sortedSlotEntries.forEach { entry ->
+            if (mixSongs.size < 15) {
+                tryAddSong(
+                    Song(
+                        videoId = entry.trackId,
+                        title = entry.title,
+                        artist = entry.artist,
+                        thumbnailUrl = entry.artworkUrl,
+                    ),
                 )
-            )
+            }
         }
 
         // Fallback gracefully if history in this window is still small (< 5 tracks)
@@ -471,17 +495,21 @@ object RecommendationEngine {
                 ListeningStats.summary(ReplayPeriod.THIS_MONTH)?.songs?.map { it.song }.orEmpty()
             }.getOrDefault(emptyList())
 
-            val extra = (recentSongs + AudioCache.cachedSongs().map { it.song })
-                .filter { candidate -> mixSongs.none { it.videoId == candidate.videoId } }
-
-            mixSongs.addAll(extra.take(15 - mixSongs.size))
+            val extraCandidates = recentSongs + AudioCache.cachedSongs().map { it.song }
+            for (candidate in extraCandidates) {
+                if (mixSongs.size >= 15) break
+                tryAddSong(candidate)
+            }
         }
 
         if (mixSongs.isEmpty()) {
             val localSongs = runCatching {
-                LocalMediaRepository.getLocalMusic(context).take(10)
+                LocalMediaRepository.getLocalMusic(context).take(15)
             }.getOrDefault(emptyList())
-            mixSongs.addAll(localSongs)
+            for (local in localSongs) {
+                if (mixSongs.size >= 10) break
+                tryAddSong(local)
+            }
         }
 
         if (mixSongs.isEmpty()) return@withContext null

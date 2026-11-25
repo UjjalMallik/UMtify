@@ -119,6 +119,7 @@ fun ReplayScreen(
     val summary = state.summary
     val leadArtwork = summary?.songs?.firstOrNull()?.song?.thumbnailUrl
     val savedThemeId by AppSettings.replayGlassTheme.collectAsStateWithLifecycle()
+    val artworkVersion by com.music.bitchord.playback.PlaybackService.artworkVersionFlow.collectAsStateWithLifecycle()
     val activeTheme = remember(savedThemeId) { ReplayGlassTheme.fromId(savedThemeId) }
     val themeMesh = rememberAppThemeMeshPalette()
     val palette = if (activeTheme == ReplayGlassTheme.AUTO) {

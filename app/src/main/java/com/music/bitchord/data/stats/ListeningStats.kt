@@ -195,6 +195,27 @@ object ListeningStats {
 
     private val ready: Boolean get() = this::directory.isInitialized
 
+    fun updateTrackArtwork(key: String, artUri: String) {
+        if (!ready || artUri.isBlank() || key.isBlank()) return
+        synchronized(lock) {
+            val bucket = open?.bucket ?: return
+            var changed = false
+            bucket.tracks.values.forEach { track ->
+                if (track.id == key || track.title.equals(key, ignoreCase = true)) {
+                    if (track.art != artUri) {
+                        track.art = artUri
+                        changed = true
+                    }
+                }
+            }
+            if (changed) {
+                dirty = true
+                version++
+                cached = null
+            }
+        }
+    }
+
     // ── Writing ─────────────────────────────────────────────────────────────
 
     /**
