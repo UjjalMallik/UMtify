@@ -444,6 +444,8 @@ fun MiniPlayer(
                 com.music.bitchord.ui.components.LocalArtworkImage(
                     url = remoteArt ?: localUri.orEmpty(),
                     localUri = localUri,
+                    title = song?.title,
+                    artist = song?.artist,
                     contentDescription = null,
                     modifier = Modifier
                         .size(40.dp)

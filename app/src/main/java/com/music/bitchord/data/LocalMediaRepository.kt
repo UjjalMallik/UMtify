@@ -558,7 +558,12 @@ object LocalMediaRepository {
             }
         }
 
-        // 4. Lightweight FLAC Picture Block Extractor fallback (handles 24-bit Hi-Res FLAC)
+        // 4. Media3 / ExoPlayer MetadataRetriever fallback (identical engine to playback!)
+        if (picBytes == null || picBytes.isEmpty()) {
+            picBytes = extractArtworkUsingMedia3(context, fileUri)
+        }
+
+        // 5. Lightweight FLAC Picture Block Extractor fallback (handles 24-bit Hi-Res FLAC & ID3v2 APIC)
         if (picBytes == null || picBytes.isEmpty()) {
             picBytes = com.music.bitchord.ui.components.extractFlacPicture(context, fileUri, directPath)
         }
@@ -617,6 +622,15 @@ object LocalMediaRepository {
             }
         }
 
+        val resolvedTitle = metaTitle?.cleanTag()
+        val resolvedArtist = metaArtist?.cleanTag()
+        if (artUri != null && !resolvedTitle.isNullOrBlank()) {
+            val rawBytes = picBytes ?: if (artFile.exists()) artFile.readBytes() else null
+            if (rawBytes != null && rawBytes.isNotEmpty()) {
+                com.music.bitchord.ui.components.saveThumbnailFileByTitleArtist(context, resolvedTitle, resolvedArtist, rawBytes)
+            }
+        }
+
         if (artUri != null) {
             runCatching {
                 LocalArtworkCache.removeNoArt(context, trackKey)
@@ -627,13 +641,40 @@ object LocalMediaRepository {
         }
 
         return ExtractedMeta(
-            title = metaTitle?.cleanTag(),
-            artist = metaArtist?.cleanTag(),
+            title = resolvedTitle,
+            artist = resolvedArtist,
             album = metaAlbum?.cleanTag(),
             durationMs = metaDur,
             trackNumber = trackNumberFromTag(metaTrack),
             artworkUri = artUri,
         )
+    }
+
+    private fun extractArtworkUsingMedia3(context: Context, uri: Uri): ByteArray? {
+        return runCatching {
+            val mediaItem = androidx.media3.common.MediaItem.fromUri(uri)
+            val future = androidx.media3.exoplayer.MetadataRetriever.retrieveMetadata(context, mediaItem)
+            val trackGroups = future.get(1500, java.util.concurrent.TimeUnit.MILLISECONDS)
+            for (i in 0 until trackGroups.length) {
+                val group = trackGroups.get(i)
+                for (j in 0 until group.length) {
+                    val format = group.getFormat(j)
+                    val metadata = format.metadata ?: continue
+                    for (k in 0 until metadata.length()) {
+                        val entry = metadata.get(k)
+                        val bytes = runCatching {
+                            val field = entry.javaClass.getDeclaredField("pictureData")
+                            field.isAccessible = true
+                            field.get(entry) as? ByteArray
+                        }.getOrNull()
+                        if (bytes != null && bytes.isNotEmpty()) {
+                            return@runCatching bytes
+                        }
+                    }
+                }
+            }
+            null
+        }.getOrNull()
     }
 
     private fun triggerEnrichmentPass(context: Context, songs: List<Song>) {
@@ -1003,7 +1044,7 @@ object LocalMediaRepository {
             // 3. Scan MediaStore if scanAllAudioFolders is true and permission is granted
             if (scanAll && hasPerm) {
                 val videoIdByUri = Downloads.saved.value.entries.associate { (id, uri) -> uri to id }
-                val projection = arrayOf(
+                val projection = mutableListOf(
                     MediaStore.Audio.Media._ID,
                     MediaStore.Audio.Media.DISPLAY_NAME,
                     MediaStore.Audio.Media.TITLE,
@@ -1015,7 +1056,12 @@ object LocalMediaRepository {
                     MediaStore.Audio.Media.DATE_ADDED,
                     MediaStore.Audio.Media.DATE_MODIFIED,
                     MediaStore.Audio.Media.TRACK,
-                )
+                    MediaStore.Audio.Media.BUCKET_DISPLAY_NAME,
+                ).apply {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        add(MediaStore.Audio.Media.RELATIVE_PATH)
+                    }
+                }.toTypedArray()
 
                 val selection = if (filterNonMusic) {
                     buildString {
@@ -1062,6 +1108,10 @@ object LocalMediaRepository {
                         val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
                         val dateModifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
                         val trackCol = cursor.getColumnIndex(MediaStore.Audio.Media.TRACK)
+                        val bucketNameCol = cursor.getColumnIndex(MediaStore.Audio.Media.BUCKET_DISPLAY_NAME)
+                        val relPathCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            cursor.getColumnIndex(MediaStore.Audio.Media.RELATIVE_PATH)
+                        } else -1
 
                         val albumArtBaseUri = Uri.parse("content://media/external/audio/albumart")
 
@@ -1074,14 +1124,22 @@ object LocalMediaRepository {
                             val albumId = cursor.getLong(albumIdCol)
                             val durationMs = cursor.getLong(durationCol)
                             val path = cursor.getString(dataCol)
-                            if (isUmtifyPath(path)) continue
+                            val bucketName = if (bucketNameCol >= 0 && !cursor.isNull(bucketNameCol)) cursor.getString(bucketNameCol) else null
+                            val relPath = if (relPathCol >= 0 && !cursor.isNull(relPathCol)) cursor.getString(relPathCol) else null
+
+                            if (isUmtifyPath(path) || isUmtifyPath(relPath) || bucketName.equals("UMtify", ignoreCase = true) || bucketName.equals("BitChord", ignoreCase = true)) continue
                             if (filterNonMusic && !isEligibleLocalMusic(durationMs, displayName, path)) continue
 
                             val folderPath = path?.let { File(it).parent }
+                                ?: relPath?.let { "/storage/emulated/0/${it.trim('/')}" }
+                                ?: bucketName
                             if (folderPath != null) {
-                                if (isUmtifyPath(folderPath) || File(folderPath).name.equals("UMtify", ignoreCase = true) || File(folderPath).name.equals("BitChord", ignoreCase = true)) continue
-                                if (folderPath in excludedFolders || folderPath.normalizedPath() in excludedFolders) continue
-                                mediaStoreFolderCounts[folderPath] = (mediaStoreFolderCounts[folderPath] ?: 0) + 1
+                                val folderDisplayName = bucketName ?: folderPath.substringAfterLast('/').ifBlank { "Storage" }
+                                if (!isIgnoredAudioFolder(folderPath) && !isIgnoredAudioFolder(folderDisplayName)) {
+                                    if (folderPath !in excludedFolders && folderPath.normalizedPath() !in excludedFolders) {
+                                        mediaStoreFolderCounts[folderPath] = (mediaStoreFolderCounts[folderPath] ?: 0) + 1
+                                    }
+                                }
                             }
 
                             val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id).toString()
@@ -1141,6 +1199,16 @@ object LocalMediaRepository {
                 }
             }
 
+            // Prune phantom excluded songs not matching any discovered song
+            val currentExcluded = AppSettings.localMusicExcludedSongs.value
+            if (currentExcluded.isNotEmpty() && collectedSongs.isNotEmpty()) {
+                val validIds = collectedSongs.flatMap { listOfNotNull(it.videoId, it.localUri, it.localPath) }.toSet()
+                val pruned = currentExcluded.filter { it in validIds }.toSet()
+                if (pruned.size != currentExcluded.size) {
+                    AppSettings.setLocalMusicExcludedSongs(pruned)
+                }
+            }
+
             val currentFolders = detectedAudioFolders.value
             val newFolders = foldersList.sortedWith(
                 compareByDescending<DeviceFolder> { it.isCustom }
@@ -1195,7 +1263,8 @@ object LocalMediaRepository {
         }
 
         if (scanAll) {
-            for (df in detected) {
+            val deviceFolders = if (detected.isNotEmpty()) detected else queryDeviceAudioFolders(context)
+            for (df in deviceFolders) {
                 if (df.path in excludedFolders) continue
                 if (isIgnoredAudioFolder(df.path) || isIgnoredAudioFolder(df.name)) continue
                 val norm = df.path.normalizedPath()
@@ -1204,6 +1273,93 @@ object LocalMediaRepository {
             }
         }
         return list
+    }
+
+    fun queryDeviceAudioFolders(context: Context): List<DeviceFolder> {
+        if (!hasStoragePermission(context)) return emptyList()
+        val foldersMap = mutableMapOf<String, Int>()
+        val folderNamesMap = mutableMapOf<String, String>()
+        val excludedFolders = AppSettings.localMusicExcludedFolders.value.map { it.normalizedPath() }.toSet()
+        val filterNonMusic = AppSettings.filterNonMusicAudio.value
+
+        val projection = mutableListOf(
+            MediaStore.Audio.Media._ID,
+            MediaStore.Audio.Media.DATA,
+            MediaStore.Audio.Media.DURATION,
+            MediaStore.Audio.Media.BUCKET_DISPLAY_NAME,
+        ).apply {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                add(MediaStore.Audio.Media.RELATIVE_PATH)
+            }
+        }.toTypedArray()
+
+        val selection = if (filterNonMusic) {
+            buildString {
+                append("${MediaStore.Audio.Media.IS_MUSIC} != 0")
+                append(" AND (${MediaStore.Audio.Media.DURATION} >= ? OR ${MediaStore.Audio.Media.DURATION} <= 0 OR ${MediaStore.Audio.Media.DURATION} IS NULL)")
+                append(" AND ${MediaStore.Audio.Media.IS_ALARM} = 0")
+                append(" AND ${MediaStore.Audio.Media.IS_NOTIFICATION} = 0")
+                append(" AND ${MediaStore.Audio.Media.IS_RINGTONE} = 0")
+            }
+        } else {
+            "${MediaStore.Audio.Media.IS_MUSIC} != 0"
+        }
+        val selectionArgs = if (filterNonMusic) arrayOf(MIN_LOCAL_MUSIC_DURATION_MS.toString()) else null
+
+        runCatching {
+            context.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs,
+                null,
+            )?.use { cursor ->
+                val dataCol = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
+                val durCol = cursor.getColumnIndex(MediaStore.Audio.Media.DURATION)
+                val bucketCol = cursor.getColumnIndex(MediaStore.Audio.Media.BUCKET_DISPLAY_NAME)
+                val relPathCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    cursor.getColumnIndex(MediaStore.Audio.Media.RELATIVE_PATH)
+                } else -1
+
+                while (cursor.moveToNext()) {
+                    val path = if (dataCol >= 0 && !cursor.isNull(dataCol)) cursor.getString(dataCol) else null
+                    val durationMs = if (durCol >= 0 && !cursor.isNull(durCol)) cursor.getLong(durCol) else 0L
+                    val bucketName = if (bucketCol >= 0 && !cursor.isNull(bucketCol)) cursor.getString(bucketCol) else null
+                    val relPath = if (relPathCol >= 0 && !cursor.isNull(relPathCol)) cursor.getString(relPathCol) else null
+
+                    if (isUmtifyPath(path) || isUmtifyPath(relPath) || bucketName.equals("UMtify", ignoreCase = true) || bucketName.equals("BitChord", ignoreCase = true)) continue
+                    if (filterNonMusic && !isEligibleLocalMusic(durationMs, path?.substringAfterLast('/') ?: bucketName.orEmpty(), path)) continue
+
+                    val folderPath = path?.let { File(it).parent }
+                        ?: relPath?.let { "/storage/emulated/0/${it.trim('/')}" }
+                        ?: bucketName
+                    if (folderPath.isNullOrBlank() || isIgnoredAudioFolder(folderPath)) continue
+                    val norm = folderPath.normalizedPath()
+                    if (norm in excludedFolders) continue
+
+                    val displayName = bucketName
+                        ?: folderPath.substringAfterLast('/').ifBlank { "Storage" }
+                    if (isIgnoredAudioFolder(displayName)) continue
+
+                    foldersMap[folderPath] = (foldersMap[folderPath] ?: 0) + 1
+                    folderNamesMap[folderPath] = displayName
+                }
+            }
+        }
+
+        val result = foldersMap.map { (path, count) ->
+            DeviceFolder(
+                name = folderNamesMap[path] ?: path.substringAfterLast('/').ifBlank { "Storage" },
+                path = path,
+                songCount = count,
+                isCustom = false,
+            )
+        }.sortedByDescending { it.songCount }
+
+        if (result.isNotEmpty() && detectedAudioFolders.value.isEmpty()) {
+            detectedAudioFolders.value = result
+        }
+        return result
     }
 
     suspend fun getAllDeviceAudioFolders(context: Context): List<DeviceFolder> = withContext(Dispatchers.IO) {

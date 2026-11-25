@@ -929,6 +929,8 @@ class PlaybackService : MediaLibraryService() {
                         this@PlaybackService,
                         key,
                         picBytes,
+                        title = currentSong?.title,
+                        artist = currentSong?.artist,
                     )
                     currentSong?.videoId?.let { vId ->
                         if (vId != key) {

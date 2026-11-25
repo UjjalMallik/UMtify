@@ -99,6 +99,15 @@ suspend fun renderReplayPoster(
     for (song in songs) {
         val artUrl = song.artworkUrl
         if (artUrl == null || rawCovers[artUrl] == null) {
+            val metaFile = com.music.bitchord.ui.components.localThumbFileByTitleArtist(context, song.title, song.subtitle)
+            if (metaFile != null && metaFile.length() > 0) {
+                val bmp = com.music.bitchord.ui.components.decodeSampledBitmapFromFile(metaFile.absolutePath, 256)
+                if (bmp != null) {
+                    if (artUrl != null) rawCovers[artUrl] = bmp
+                    rawCovers[song.key] = bmp
+                    continue
+                }
+            }
             val match = localSongs.firstOrNull { it.videoId == song.key }
                 ?: localSongs.firstOrNull { it.title.equals(song.title, ignoreCase = true) }
                 ?: downloads.firstOrNull { it.videoId == song.key }
@@ -109,6 +118,9 @@ suspend fun renderReplayPoster(
                 val resolvedUrl = match.thumbnailUrl ?: LocalMediaRepository.getCachedLocalArtThumbUri(context, key)
                 val bmp = (resolvedUrl?.let { loadBitmap(context, it) })
                     ?: com.music.bitchord.ui.components.decodeSampledBitmap(context, key, 256)
+                    ?: com.music.bitchord.ui.components.localThumbFileByTitleArtist(context, match.title, match.artist)?.let {
+                        com.music.bitchord.ui.components.decodeSampledBitmapFromFile(it.absolutePath, 256)
+                    }
                 if (bmp != null) {
                     if (artUrl != null) rawCovers[artUrl] = bmp
                     rawCovers[song.key] = bmp
@@ -120,6 +132,15 @@ suspend fun renderReplayPoster(
     for (album in albums) {
         val artUrl = album.artworkUrl
         if (artUrl == null || rawCovers[artUrl] == null) {
+            val metaFile = com.music.bitchord.ui.components.localThumbFileByTitleArtist(context, album.title, album.subtitle)
+            if (metaFile != null && metaFile.length() > 0) {
+                val bmp = com.music.bitchord.ui.components.decodeSampledBitmapFromFile(metaFile.absolutePath, 256)
+                if (bmp != null) {
+                    if (artUrl != null) rawCovers[artUrl] = bmp
+                    rawCovers[album.key] = bmp
+                    continue
+                }
+            }
             val match = localSongs.firstOrNull { it.albumName?.equals(album.title, ignoreCase = true) == true }
                 ?: downloads.firstOrNull { it.albumName?.equals(album.title, ignoreCase = true) == true }
             if (match != null) {
@@ -127,6 +148,9 @@ suspend fun renderReplayPoster(
                 val resolvedUrl = match.thumbnailUrl ?: LocalMediaRepository.getCachedLocalArtThumbUri(context, key)
                 val bmp = (resolvedUrl?.let { loadBitmap(context, it) })
                     ?: com.music.bitchord.ui.components.decodeSampledBitmap(context, key, 256)
+                    ?: com.music.bitchord.ui.components.localThumbFileByTitleArtist(context, match.title, match.artist)?.let {
+                        com.music.bitchord.ui.components.decodeSampledBitmapFromFile(it.absolutePath, 256)
+                    }
                 if (bmp != null) {
                     if (artUrl != null) rawCovers[artUrl] = bmp
                     rawCovers[album.key] = bmp

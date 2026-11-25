@@ -379,6 +379,7 @@ class MainActivity : AppCompatActivity() {
         JamInviteLink.consume(intent)
         // Likewise for a link tapped or shared from another app — see [MusicLink].
         MusicLink.consume(intent)
+        com.music.bitchord.data.settings.AppSettings.runStorageMigrationIfNeeded(this)
         setContent {
             // Recents shows the bitmap its task was given, not the launcher icon,
             // so the chosen variant has to be handed over here — and handed over

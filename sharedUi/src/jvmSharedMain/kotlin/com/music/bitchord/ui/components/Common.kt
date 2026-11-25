@@ -636,6 +636,8 @@ private fun SongRowContent(
                     LocalArtworkImage(
                         url = remoteArt ?: localUri.orEmpty(),
                         localUri = localUri,
+                        title = song.title,
+                        artist = song.artist,
                         contentDescription = null,
                         modifier = Modifier
                             .matchParentSize()

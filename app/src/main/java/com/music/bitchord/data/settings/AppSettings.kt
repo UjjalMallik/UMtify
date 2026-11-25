@@ -704,6 +704,9 @@ object AppSettings {
     /** Explicitly excluded local device folders. */
     val localMusicExcludedFolders = MutableStateFlow<Set<String>>(emptySet())
 
+    const val CURRENT_STORAGE_MIGRATION_VERSION = 1
+    val storageMigrationVersion = MutableStateFlow(0)
+
     // ── WebDAV ────────────────────────────────────────────────────────────
 
     /**
@@ -1068,6 +1071,7 @@ object AppSettings {
         localMusicSelectedSongs.value = prefs.getStringSet(KEY_LOCAL_MUSIC_SELECTED_SONGS, emptySet()).orEmpty()
         localMusicExcludedSongs.value = prefs.getStringSet(KEY_LOCAL_MUSIC_EXCLUDED_SONGS, emptySet()).orEmpty()
         localMusicExcludedFolders.value = prefs.getStringSet(KEY_LOCAL_MUSIC_EXCLUDED_FOLDERS, emptySet()).orEmpty()
+        storageMigrationVersion.value = prefs.getInt(KEY_STORAGE_MIGRATION_VERSION, 0)
         webdavUrl.value = prefs.getString(KEY_WEBDAV_URL, "").orEmpty()
         webdavUsername.value = prefs.getString(KEY_WEBDAV_USERNAME, "").orEmpty()
         webdavPassword.value = authStore.webdavPassword.orEmpty()
@@ -2107,6 +2111,36 @@ object AppSettings {
         setLocalMusicExcludedFolders(localMusicExcludedFolders.value - folderPath)
     }
 
+    fun runStorageMigrationIfNeeded(context: Context) {
+        val current = prefs.getInt(KEY_STORAGE_MIGRATION_VERSION, 0)
+        if (current < CURRENT_STORAGE_MIGRATION_VERSION) {
+            runCatching {
+                // 1. Delete stale no_art files and old local_tracks_index.json
+                val thumbDir = java.io.File(context.filesDir, "local_art_thumb")
+                java.io.File(thumbDir, "no_art.txt").delete()
+                java.io.File(thumbDir, "no_art_v2.marker").delete()
+                java.io.File(context.filesDir, "local_tracks_index.json").delete()
+                java.io.File(context.cacheDir, "local_tracks_index.json").delete()
+
+                // 2. Prune localMusicExcludedSongs so invalid IDs/URIs are removed
+                val currentExcluded = localMusicExcludedSongs.value
+                val allLocal = com.music.bitchord.data.LocalMediaRepository.allLocalSongsFlow.value
+                if (allLocal.isNotEmpty() && currentExcluded.isNotEmpty()) {
+                    val validIds = allLocal.flatMap { listOfNotNull(it.videoId, it.localUri, it.localPath) }.toSet()
+                    val pruned = currentExcluded.filter { it in validIds }.toSet()
+                    if (pruned.size != currentExcluded.size) {
+                        setLocalMusicExcludedSongs(pruned)
+                    }
+                } else if (allLocal.isEmpty() && currentExcluded.isNotEmpty()) {
+                    setLocalMusicExcludedSongs(emptySet())
+                }
+
+                storageMigrationVersion.value = CURRENT_STORAGE_MIGRATION_VERSION
+                prefs.edit().putInt(KEY_STORAGE_MIGRATION_VERSION, CURRENT_STORAGE_MIGRATION_VERSION).apply()
+            }
+        }
+    }
+
     fun setWebDavUrl(value: String) {
         val normalized = value.trim().trimEnd('/')
         webdavUrl.value = normalized
@@ -2476,6 +2510,7 @@ object AppSettings {
     private const val KEY_LOCAL_MUSIC_SELECTED_SONGS = "local_music_selected_songs"
     private const val KEY_LOCAL_MUSIC_EXCLUDED_SONGS = "local_music_excluded_songs"
     private const val KEY_LOCAL_MUSIC_EXCLUDED_FOLDERS = "local_music_excluded_folders"
+    private const val KEY_STORAGE_MIGRATION_VERSION = "storage_migration_version"
     private const val KEY_WEBDAV_URL = "webdav_url"
     private const val KEY_WEBDAV_USERNAME = "webdav_username"
     private const val KEY_SMB_HOST = "smb_host"

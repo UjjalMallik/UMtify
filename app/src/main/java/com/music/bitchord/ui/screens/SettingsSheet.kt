@@ -1518,13 +1518,20 @@ fun SettingsScreen(
             forceExpanded = searchQuery.isNotBlank(),
         ) {
             val localMusicFolderTitle = stringResource(R.string.local_music_folder)
-            val visibleFolders = remember(localMusicCustomFolders, scanAllAudioFolders, localMusicExcludedFolders) {
+            val allLocalSongs by LocalMediaRepository.allLocalSongsFlow.collectAsStateWithLifecycle()
+            val visibleFolders = remember(localMusicCustomFolders, scanAllAudioFolders, localMusicExcludedFolders, allLocalSongs) {
                 LocalMediaRepository.getVisibleFolders(context)
             }
             val customFolderCount = visibleFolders.size
             val fileCount = localMusicSelectedSongs.size
-            val excludedCount = localMusicExcludedSongs.size
-            val excludedSuffix = if (excludedCount > 0) " · $excludedCount excluded" else ""
+            val activeExcludedCount = remember(localMusicExcludedSongs, allLocalSongs) {
+                if (allLocalSongs.isEmpty() || localMusicExcludedSongs.isEmpty()) 0
+                else {
+                    val activeIds = allLocalSongs.flatMap { listOfNotNull(it.videoId, it.localUri, it.localPath) }.toSet()
+                    localMusicExcludedSongs.count { it in activeIds }
+                }
+            }
+            val excludedSuffix = if (activeExcludedCount > 0) " · $activeExcludedCount excluded" else ""
 
             val subtitleText = when {
                 scanAllAudioFolders -> "${stringResource(R.string.all_audio_folders)}$excludedSuffix"
