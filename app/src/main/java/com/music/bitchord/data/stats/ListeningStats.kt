@@ -198,7 +198,7 @@ object ListeningStats {
     fun updateTrackArtwork(key: String, artUri: String) {
         if (!ready || artUri.isBlank() || key.isBlank()) return
         synchronized(lock) {
-            val bucket = open?.bucket ?: return
+            val bucket = open ?: runCatching { bucketFor(YearMonth.now()) }.getOrNull() ?: return
             var changed = false
             bucket.tracks.values.forEach { track ->
                 if (track.id == key || track.title.equals(key, ignoreCase = true)) {
