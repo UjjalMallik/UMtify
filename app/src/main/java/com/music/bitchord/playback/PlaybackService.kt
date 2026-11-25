@@ -932,6 +932,9 @@ class PlaybackService : MediaLibraryService() {
                         title = currentSong?.title,
                         artist = currentSong?.artist,
                     )
+                    currentSong?.title?.let { sTitle ->
+                        com.music.bitchord.ui.components.saveUniversalArt(this@PlaybackService, sTitle, picBytes)
+                    }
                     currentSong?.videoId?.let { vId ->
                         if (vId != key) {
                             com.music.bitchord.ui.components.LocalArtworkCache.saveAndCacheThumbnail(

@@ -465,8 +465,9 @@ private fun ReplayRowThumbnail(
 ) {
     val context = LocalContext.current
     val localSongs by LocalMediaRepository.allLocalSongsFlow.collectAsStateWithLifecycle()
-    val artUrl = remember(row.key, row.artworkUrl, localSongs) {
-        row.artworkUrl?.takeIf { it.isNotBlank() } ?: run {
+    val universalFile = remember(row.title) { com.music.bitchord.ui.components.findUniversalArtFile(context, row.title) }
+    val artUrl = remember(row.key, row.artworkUrl, localSongs, universalFile) {
+        universalFile?.let { "file://${it.absolutePath}" } ?: row.artworkUrl?.takeIf { it.isNotBlank() } ?: run {
             val match = localSongs.firstOrNull { it.videoId == row.key }
                 ?: localSongs.firstOrNull { it.title.equals(row.title, ignoreCase = true) }
             val matchKey = match?.localUri ?: match?.localPath ?: match?.videoId

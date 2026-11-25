@@ -818,6 +818,8 @@ private fun InlineQueueRow(
             com.music.bitchord.ui.components.LocalArtworkImage(
                 url = remoteArt ?: localUri.orEmpty(),
                 localUri = localUri,
+                title = item.song.title,
+                artist = item.song.artist,
                 contentDescription = null,
                 modifier = Modifier
                     .size(44.dp)

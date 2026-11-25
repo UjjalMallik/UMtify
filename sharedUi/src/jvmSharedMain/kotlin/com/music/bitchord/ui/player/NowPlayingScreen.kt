@@ -3253,6 +3253,8 @@ fun NowPlayingScreen(
                                     com.music.bitchord.ui.components.LocalArtworkImage(
                                         url = art.url ?: localUri.orEmpty(),
                                         localUri = localUri,
+                                        title = song?.title,
+                                        artist = song?.artist,
                                         contentDescription = null,
                                         contentScale = ContentScale.Crop,
                                         maxSizePx = 1440,

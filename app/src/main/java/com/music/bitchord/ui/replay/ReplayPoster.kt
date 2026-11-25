@@ -99,6 +99,15 @@ suspend fun renderReplayPoster(
     for (song in songs) {
         val artUrl = song.artworkUrl
         if (artUrl == null || rawCovers[artUrl] == null) {
+            val universalFile = com.music.bitchord.ui.components.findUniversalArtFile(context, song.title)
+            if (universalFile != null && universalFile.length() > 0) {
+                val bmp = com.music.bitchord.ui.components.decodeSampledBitmapFromFile(universalFile.absolutePath, 256)
+                if (bmp != null) {
+                    if (artUrl != null) rawCovers[artUrl] = bmp
+                    rawCovers[song.key] = bmp
+                    continue
+                }
+            }
             val metaFile = com.music.bitchord.ui.components.localThumbFileByTitleArtist(context, song.title, song.subtitle)
             if (metaFile != null && metaFile.length() > 0) {
                 val bmp = com.music.bitchord.ui.components.decodeSampledBitmapFromFile(metaFile.absolutePath, 256)
@@ -132,6 +141,15 @@ suspend fun renderReplayPoster(
     for (album in albums) {
         val artUrl = album.artworkUrl
         if (artUrl == null || rawCovers[artUrl] == null) {
+            val universalFile = com.music.bitchord.ui.components.findUniversalArtFile(context, album.title)
+            if (universalFile != null && universalFile.length() > 0) {
+                val bmp = com.music.bitchord.ui.components.decodeSampledBitmapFromFile(universalFile.absolutePath, 256)
+                if (bmp != null) {
+                    if (artUrl != null) rawCovers[artUrl] = bmp
+                    rawCovers[album.key] = bmp
+                    continue
+                }
+            }
             val metaFile = com.music.bitchord.ui.components.localThumbFileByTitleArtist(context, album.title, album.subtitle)
             if (metaFile != null && metaFile.length() > 0) {
                 val bmp = com.music.bitchord.ui.components.decodeSampledBitmapFromFile(metaFile.absolutePath, 256)
@@ -154,6 +172,23 @@ suspend fun renderReplayPoster(
                 if (bmp != null) {
                     if (artUrl != null) rawCovers[artUrl] = bmp
                     rawCovers[album.key] = bmp
+                }
+            }
+        }
+    }
+
+    // Secondary fallback for songs: match against loaded album artwork
+    for (song in songs) {
+        if (rawCovers[song.key] == null && (song.artworkUrl == null || rawCovers[song.artworkUrl] == null)) {
+            val match = localSongs.firstOrNull { it.videoId == song.key || it.title.equals(song.title, ignoreCase = true) }
+                ?: downloads.firstOrNull { it.videoId == song.key || it.title.equals(song.title, ignoreCase = true) }
+            val albumName = match?.albumName ?: song.subtitle
+            if (!albumName.isNullOrBlank()) {
+                val albumMatch = albums.firstOrNull { it.title.equals(albumName, ignoreCase = true) }
+                val albumBmp = albumMatch?.let { rawCovers[it.artworkUrl] ?: rawCovers[it.key] }
+                if (albumBmp != null) {
+                    song.artworkUrl?.let { rawCovers[it] = albumBmp }
+                    rawCovers[song.key] = albumBmp
                 }
             }
         }

@@ -257,6 +257,8 @@ object LocalMediaRepository {
         val isCustom: Boolean = false,
     )
 
+    typealias LocalAudioFolder = DeviceFolder
+
     data class ExtractedMeta(
         val title: String? = null,
         val artist: String? = null,
@@ -267,6 +269,7 @@ object LocalMediaRepository {
     )
 
     val detectedAudioFolders = MutableStateFlow<List<DeviceFolder>>(emptyList())
+    val activeAudioFoldersFlow = MutableStateFlow<List<DeviceFolder>>(emptyList())
     val allLocalSongsFlow = MutableStateFlow<List<Song>>(emptyList())
 
     private const val LOCAL_TRACKS_INDEX_FILE = "local_tracks_index.json"
@@ -429,6 +432,7 @@ object LocalMediaRepository {
             val cached = loadCachedIndex(context)
             if (cached.isNotEmpty()) {
                 allLocalSongsFlow.value = cached
+                updateActiveFolders(context, cached)
             }
         }
     }
@@ -623,6 +627,7 @@ object LocalMediaRepository {
             val rawBytes = picBytes ?: if (artFile.exists()) artFile.readBytes() else null
             if (rawBytes != null && rawBytes.isNotEmpty()) {
                 com.music.bitchord.ui.components.saveThumbnailFileByTitleArtist(context, resolvedTitle, resolvedArtist, rawBytes)
+                com.music.bitchord.ui.components.saveUniversalArt(context, resolvedTitle, rawBytes)
             }
         }
 
@@ -916,12 +921,33 @@ object LocalMediaRepository {
         refreshLocalMusic(context)
 
     suspend fun getLocalMusic(context: Context): List<Song> = withContext(Dispatchers.IO) {
+        val scanAll = AppSettings.scanAllAudioFolders.value
+        val customUris = getCustomFolderUris()
         val current = allLocalSongsFlow.value
-        if (current.isNotEmpty()) return@withContext current
+        if (current.isNotEmpty()) {
+            if (!scanAll && customUris.isNotEmpty()) {
+                val filtered = current.filter { song ->
+                    customUris.any { uri -> song.folderUri == uri || isInSelectedFolder(song.localPath, uri) || isInSelectedFolder(song.localUri, uri) }
+                }
+                if (filtered.size != current.size) {
+                    allLocalSongsFlow.value = filtered
+                    saveCachedIndex(context, filtered)
+                    updateActiveFolders(context, filtered)
+                    return@withContext filtered
+                }
+            }
+            return@withContext current
+        }
         val cached = loadCachedIndex(context)
         if (cached.isNotEmpty()) {
-            allLocalSongsFlow.value = cached
-            return@withContext cached
+            val toUse = if (!scanAll && customUris.isNotEmpty()) {
+                cached.filter { song ->
+                    customUris.any { uri -> song.folderUri == uri || isInSelectedFolder(song.localPath, uri) || isInSelectedFolder(song.localUri, uri) }
+                }
+            } else cached
+            allLocalSongsFlow.value = toUse
+            updateActiveFolders(context, toUse)
+            return@withContext toUse
         }
         refreshLocalMusic(context)
     }
@@ -1177,15 +1203,6 @@ object LocalMediaRepository {
                 }
             }
 
-            val currentFolders = detectedAudioFolders.value
-            val newFolders = foldersList.sortedWith(
-                compareByDescending<DeviceFolder> { it.isCustom }
-                    .thenByDescending { it.songCount }
-            )
-            if (currentFolders != newFolders) {
-                detectedAudioFolders.value = newFolders
-            }
-
             val currentSongs = allLocalSongsFlow.value
             val hasSongsChanged = currentSongs.size != collectedSongs.size ||
                 currentSongs.zip(collectedSongs).any { (old, new) ->
@@ -1196,6 +1213,9 @@ object LocalMediaRepository {
                 saveCachedIndex(context, collectedSongs)
             }
 
+            // Unify folders source of truth: compute and update active audio folders
+            updateActiveFolders(context, collectedSongs)
+
             // Trigger background Pass 2 enrichment
             triggerEnrichmentPass(context, collectedSongs)
 
@@ -1203,44 +1223,116 @@ object LocalMediaRepository {
         }
     }
 
-    fun getVisibleFolders(context: Context): List<DeviceFolder> {
+    fun computeActiveFolders(context: Context, songs: List<Song>): List<DeviceFolder> {
         val customFolders = AppSettings.localMusicCustomFolders.value
         val excludedFolders = AppSettings.localMusicExcludedFolders.value
-        val detected = detectedAudioFolders.value
         val scanAll = AppSettings.scanAllAudioFolders.value
-        val allSongs = allLocalSongsFlow.value
+        val hasPerm = hasStoragePermission(context)
 
         val list = mutableListOf<DeviceFolder>()
-        val seenPaths = mutableSetOf<String>()
+        val seenNormPaths = mutableSetOf<String>()
+        val seenNames = mutableSetOf<String>()
 
+        // 1. Process custom SAF folders
         for (uri in customFolders) {
             if (uri in excludedFolders) continue
             if (isIgnoredAudioFolder(uri)) continue
             val norm = uri.normalizedPath()
-            if (!seenPaths.add(norm)) continue
+            val fsPath = selectedFolder(uri)?.absolutePath?.normalizedPath()
 
             val name = getFolderDisplayName(context, uri)
             if (isIgnoredAudioFolder(name)) continue
 
-            val detectedCount = detected.firstOrNull { it.path.normalizedPath() == norm }?.songCount ?: 0
-            val matchedSongsCount = allSongs.count {
+            val matchingSongs = songs.filter {
                 it.folderUri == uri || isInSelectedFolder(it.localPath, uri) || isInSelectedFolder(it.localUri, uri)
             }
-            val count = if (detectedCount > 0) detectedCount else matchedSongsCount
-            list.add(DeviceFolder(name = name, path = uri, songCount = count, isCustom = true))
+            list.add(DeviceFolder(name = name, path = uri, songCount = matchingSongs.size, isCustom = true))
+            seenNormPaths.add(norm)
+            fsPath?.let { seenNormPaths.add(it) }
+            seenNames.add(name.lowercase(Locale.ROOT))
         }
 
-        if (scanAll) {
-            val deviceFolders = if (detected.isNotEmpty()) detected else queryDeviceAudioFolders(context)
-            for (df in deviceFolders) {
+        // 2. If scanAll is ON, or if there are songs not belonging to custom folders:
+        val remainingSongs = songs.filter { song ->
+            customFolders.none { uri ->
+                song.folderUri == uri || isInSelectedFolder(song.localPath, uri) || isInSelectedFolder(song.localUri, uri)
+            }
+        }
+
+        val folderSongGroups = mutableMapOf<String, MutableList<Song>>()
+        val folderNames = mutableMapOf<String, String>()
+
+        for (song in remainingSongs) {
+            val fPath = song.folderUri?.takeIf { !it.startsWith("content://") }
+                ?: song.localPath?.let { File(it).parent }
+                ?: song.localUri?.let { runCatching { Uri.parse(it).path?.let { p -> File(p).parent } }.getOrNull() }
+                ?: continue
+
+            if (isIgnoredAudioFolder(fPath)) continue
+            val norm = fPath.normalizedPath()
+            if (norm in excludedFolders) continue
+
+            val fName = fPath.substringAfterLast('/').ifBlank { "Storage" }
+            if (isIgnoredAudioFolder(fName)) continue
+
+            // Deduplication: check if this matches an already added custom folder by name or path
+            if (norm in seenNormPaths || fName.lowercase(Locale.ROOT) in seenNames) {
+                continue
+            }
+
+            folderSongGroups.getOrPut(fPath) { mutableListOf() }.add(song)
+            folderNames[fPath] = fName
+        }
+
+        for ((fPath, fSongs) in folderSongGroups) {
+            val fName = folderNames[fPath] ?: fPath.substringAfterLast('/')
+            list.add(DeviceFolder(name = fName, path = fPath, songCount = fSongs.size, isCustom = false))
+            seenNormPaths.add(fPath.normalizedPath())
+            seenNames.add(fName.lowercase(Locale.ROOT))
+        }
+
+        // 3. If scanAll is ON, also discover and merge all device audio folders with MediaStore
+        if (scanAll && hasPerm) {
+            val discovered = queryDeviceAudioFolders(context)
+            for (df in discovered) {
                 if (df.path in excludedFolders) continue
                 if (isIgnoredAudioFolder(df.path) || isIgnoredAudioFolder(df.name)) continue
                 val norm = df.path.normalizedPath()
-                if (!seenPaths.add(norm)) continue
-                list.add(df)
+                val nameNorm = df.name.lowercase(Locale.ROOT)
+                if (norm in seenNormPaths || nameNorm in seenNames) continue
+
+                // Check actual matching songs count in allLocalSongs
+                val actualCount = songs.count {
+                    it.folderUri == df.path || isInSelectedFolder(it.localPath, df.path) || isInSelectedFolder(it.localUri, df.path)
+                }
+                val count = if (actualCount > 0) actualCount else df.songCount
+                list.add(df.copy(songCount = count))
+                seenNormPaths.add(norm)
+                seenNames.add(nameNorm)
             }
         }
-        return list
+
+        return list.sortedWith(
+            compareByDescending<DeviceFolder> { it.isCustom }
+                .thenByDescending { it.songCount }
+        )
+    }
+
+    fun updateActiveFolders(context: Context, songs: List<Song>) {
+        val computed = computeActiveFolders(context, songs)
+        activeAudioFoldersFlow.value = computed
+        detectedAudioFolders.value = computed
+    }
+
+    fun getVisibleFolders(context: Context): List<DeviceFolder> {
+        val active = activeAudioFoldersFlow.value
+        if (active.isNotEmpty()) return active
+        val computed = computeActiveFolders(context, allLocalSongsFlow.value)
+        if (computed.isNotEmpty()) {
+            activeAudioFoldersFlow.value = computed
+            return computed
+        }
+        return queryDeviceAudioFolders(context)
     }
 
     fun queryDeviceAudioFolders(context: Context): List<DeviceFolder> {

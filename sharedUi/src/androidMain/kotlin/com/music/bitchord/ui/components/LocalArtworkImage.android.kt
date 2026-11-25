@@ -84,6 +84,89 @@ fun saveThumbnailFileByTitleArtist(context: Context, title: String?, artist: Str
     }
 }
 
+fun universalArtTitleHash(title: String): String {
+    val clean = title.trim().lowercase(java.util.Locale.ROOT)
+    val bytes = java.security.MessageDigest.getInstance("SHA-256").digest(clean.toByteArray(Charsets.UTF_8))
+    return bytes.joinToString("") { "%02x".format(it) }
+}
+
+fun universalArtFile(context: Context, title: String): File {
+    val dir = File(context.filesDir, "universal_art").apply { if (!exists()) mkdirs() }
+    return File(dir, "${universalArtTitleHash(title)}.jpg")
+}
+
+fun findUniversalArtFile(context: Context, title: String?): File? {
+    if (title.isNullOrBlank()) return null
+    val f = universalArtFile(context, title)
+    return if (f.exists() && f.length() > 0) f else null
+}
+
+fun saveUniversalArt(context: Context, title: String?, picBytes: ByteArray) {
+    if (title.isNullOrBlank() || picBytes.isEmpty()) return
+    runCatching {
+        val targetFile = universalArtFile(context, title)
+        val dir = targetFile.parentFile ?: return@runCatching
+        if (!dir.exists()) dir.mkdirs()
+
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(picBytes, 0, picBytes.size, bounds)
+        val sampleSize = calculateInSampleSize(bounds.outWidth, bounds.outHeight, 160)
+        val opts = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inPreferredConfig = Bitmap.Config.RGB_565
+        }
+        val bmp = BitmapFactory.decodeByteArray(picBytes, 0, picBytes.size, opts)
+        if (bmp != null) {
+            val scaled = if (bmp.width > 160 || bmp.height > 160) {
+                Bitmap.createScaledBitmap(bmp, 160, 160, true)
+            } else bmp
+
+            val tmp = File(dir, "${targetFile.name}.tmp")
+            FileOutputStream(tmp).use { out ->
+                scaled.compress(Bitmap.CompressFormat.JPEG, 85, out)
+            }
+            if (!tmp.renameTo(targetFile)) {
+                tmp.copyTo(targetFile, overwrite = true)
+                tmp.delete()
+            }
+            val img = scaled.asImageBitmap()
+            val hashKey = "universal_${universalArtTitleHash(title)}"
+            LocalArtworkCache.put(hashKey, 160, img)
+            LocalArtworkCache.put(hashKey, 128, img)
+            LocalArtworkCache.bumpArtworkVersion()
+            if (scaled != bmp) bmp.recycle()
+        }
+    }
+}
+
+fun saveUniversalArtBitmap(context: Context, title: String?, bmp: Bitmap) {
+    if (title.isNullOrBlank()) return
+    runCatching {
+        val targetFile = universalArtFile(context, title)
+        val dir = targetFile.parentFile ?: return@runCatching
+        if (!dir.exists()) dir.mkdirs()
+
+        val scaled = if (bmp.width > 160 || bmp.height > 160) {
+            Bitmap.createScaledBitmap(bmp, 160, 160, true)
+        } else bmp
+
+        val tmp = File(dir, "${targetFile.name}.tmp")
+        FileOutputStream(tmp).use { out ->
+            scaled.compress(Bitmap.CompressFormat.JPEG, 85, out)
+        }
+        if (!tmp.renameTo(targetFile)) {
+            tmp.copyTo(targetFile, overwrite = true)
+            tmp.delete()
+        }
+        val img = scaled.asImageBitmap()
+        val hashKey = "universal_${universalArtTitleHash(title)}"
+        LocalArtworkCache.put(hashKey, 160, img)
+        LocalArtworkCache.put(hashKey, 128, img)
+        LocalArtworkCache.bumpArtworkVersion()
+        if (scaled != bmp) scaled.recycle()
+    }
+}
+
 fun extractArtHash(key: String): String {
     val clean = cleanLocalArtPath(key)
     val name = File(clean).name
@@ -444,6 +527,7 @@ object LocalArtworkCache {
 
                 if (!title.isNullOrBlank()) {
                     saveThumbnailFileByTitleArtist(context, title, artist, picBytes)
+                    saveUniversalArt(context, title, picBytes)
                 }
             }
         }
@@ -653,6 +737,8 @@ suspend fun extractThumbnailOnDemand(
     context: Context,
     key: String,
     audioUriStr: String,
+    title: String? = null,
+    artist: String? = null,
 ): Bitmap? = coroutineScope {
     val cleanAudioUri = cleanLocalArtPath(audioUriStr)
     val hash = localArtHash(cleanAudioUri)
@@ -781,6 +867,13 @@ suspend fun extractThumbnailOnDemand(
                         }
                     }
                     LocalArtworkCache.removeNoArt(context, cleanAudioUri)
+                    if (!title.isNullOrBlank()) {
+                        if (picBytes != null && picBytes.isNotEmpty()) {
+                            saveUniversalArt(context, title, picBytes)
+                        } else {
+                            saveUniversalArtBitmap(context, title, finalBmp)
+                        }
+                    }
                     finalBmp
                 } else {
                     LocalArtworkCache.markNoArt(context, cleanAudioUri)
@@ -800,6 +893,7 @@ suspend fun extractFullArtworkOnDemand(
     key: String,
     audioUriStr: String?,
     maxSizePx: Int = 1440,
+    title: String? = null,
 ): Bitmap? = withContext(LocalArtworkCache.extractionDispatcher) {
     // 1. Check if full-resolution file already exists on disk in filesDir/local_art_full/<hash>.jpg
     val fullFile = findLocalArtFullFile(context, key)
@@ -895,7 +989,10 @@ suspend fun extractFullArtworkOnDemand(
         }
 
         // Also ensure 128px thumb exists
-        LocalArtworkCache.saveAndCacheThumbnail(context, cleanAudioUri, picBytes)
+        LocalArtworkCache.saveAndCacheThumbnail(context, cleanAudioUri, picBytes, title = title)
+        if (!title.isNullOrBlank()) {
+            saveUniversalArt(context, title, picBytes)
+        }
 
         // Decode with ARGB_8888 up to maxSizePx (e.g. 1440)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -925,6 +1022,9 @@ suspend fun extractFullArtworkOnDemand(
                     tmpFull.copyTo(targetFull, overwrite = true)
                     tmpFull.delete()
                 }
+            }
+            if (!title.isNullOrBlank()) {
+                saveUniversalArtBitmap(context, title, qBmp)
             }
             return@withContext qBmp
         }
@@ -960,13 +1060,15 @@ actual fun LocalArtworkImage(
     val isFullHd = maxSizePx > 256
 
     val metaKey = if (!title.isNullOrBlank()) "meta_${normalizedArtKey(title, artist)}" else null
+    val universalKey = if (!title.isNullOrBlank()) "universal_${universalArtTitleHash(title)}" else null
 
     // Step A (Instant RAM):
-    val initialCached = remember(primaryKey, fallbackKey, maxSizePx, metaKey) {
+    val initialCached = remember(primaryKey, fallbackKey, maxSizePx, metaKey, universalKey) {
         if (isFullHd) {
             LocalArtworkCache.getFullHd(primaryKey)
                 ?: LocalArtworkCache.getFullHd(fallbackKey)
                 ?: metaKey?.let { LocalArtworkCache.getFullHd(it) ?: LocalArtworkCache.get(it, 160) ?: LocalArtworkCache.get(it, 128) }
+                ?: universalKey?.let { LocalArtworkCache.getFullHd(it) ?: LocalArtworkCache.get(it, 160) ?: LocalArtworkCache.get(it, 128) }
                 ?: LocalArtworkCache.get(primaryKey, 160)
                 ?: LocalArtworkCache.get(fallbackKey, 160)
                 ?: LocalArtworkCache.get(primaryKey, 128)
@@ -975,6 +1077,7 @@ actual fun LocalArtworkImage(
             LocalArtworkCache.get(primaryKey, maxSizePx)
                 ?: LocalArtworkCache.get(fallbackKey, maxSizePx)
                 ?: metaKey?.let { LocalArtworkCache.get(it, maxSizePx) }
+                ?: universalKey?.let { LocalArtworkCache.get(it, maxSizePx) }
         }
     }
 
@@ -985,11 +1088,13 @@ actual fun LocalArtworkImage(
         maxSizePx,
         artworkVersion,
         metaKey,
+        universalKey,
     ) {
         if (isFullHd) {
             val hd = LocalArtworkCache.getFullHd(primaryKey)
                 ?: LocalArtworkCache.getFullHd(fallbackKey)
                 ?: metaKey?.let { LocalArtworkCache.getFullHd(it) }
+                ?: universalKey?.let { LocalArtworkCache.getFullHd(it) }
             if (hd != null) {
                 value = LocalArtState.Loaded(hd)
                 onLoadingStateChanged?.invoke(false, true)
@@ -999,6 +1104,7 @@ actual fun LocalArtworkImage(
             val exactCached = LocalArtworkCache.get(primaryKey, maxSizePx)
                 ?: LocalArtworkCache.get(fallbackKey, maxSizePx)
                 ?: metaKey?.let { LocalArtworkCache.get(it, maxSizePx) }
+                ?: universalKey?.let { LocalArtworkCache.get(it, maxSizePx) }
             if (exactCached != null) {
                 value = LocalArtState.Loaded(exactCached)
                 onLoadingStateChanged?.invoke(false, true)
@@ -1016,17 +1122,24 @@ actual fun LocalArtworkImage(
 
         val loaded = withContext(localImageDispatcher) {
             if (isFullHd) {
-                val hdBitmap = extractFullArtworkOnDemand(context, fallbackKey, localUri ?: primaryKey, maxSizePx)
+                val hdBitmap = extractFullArtworkOnDemand(context, fallbackKey, localUri ?: primaryKey, maxSizePx, title)
                 if (hdBitmap != null) {
                     val img = hdBitmap.asImageBitmap()
                     LocalArtworkCache.putFullHd(primaryKey, img)
                     LocalArtworkCache.putFullHd(fallbackKey, img)
                     metaKey?.let { LocalArtworkCache.putFullHd(it, img) }
+                    universalKey?.let { LocalArtworkCache.putFullHd(it, img) }
                     img
                 } else {
                     var bmp = decodeSampledBitmap(context, fallbackKey, maxSizePx)
                     if (bmp == null && primaryKey != fallbackKey) {
                         bmp = decodeSampledBitmap(context, primaryKey, maxSizePx)
+                    }
+                    if (bmp == null && !title.isNullOrBlank()) {
+                        val uFile = findUniversalArtFile(context, title)
+                        if (uFile != null && uFile.length() > 0) {
+                            bmp = decodeSampledBitmapFromFile(uFile.absolutePath, maxSizePx)
+                        }
                     }
                     if (bmp == null && !title.isNullOrBlank()) {
                         val metaFile = localThumbFileByTitleArtist(context, title, artist)
@@ -1038,6 +1151,7 @@ actual fun LocalArtworkImage(
                         LocalArtworkCache.putFullHd(primaryKey, it)
                         LocalArtworkCache.putFullHd(fallbackKey, it)
                         metaKey?.let { k -> LocalArtworkCache.putFullHd(k, it) }
+                        universalKey?.let { k -> LocalArtworkCache.putFullHd(k, it) }
                     }
                 }
             } else {
@@ -1045,6 +1159,14 @@ actual fun LocalArtworkImage(
                 var bmp = decodeSampledBitmap(context, fallbackKey, maxSizePx)
                 if (bmp == null && primaryKey != fallbackKey) {
                     bmp = decodeSampledBitmap(context, primaryKey, maxSizePx)
+                }
+
+                // Check universal_art file by normalized title
+                if (bmp == null && !title.isNullOrBlank()) {
+                    val uFile = findUniversalArtFile(context, title)
+                    if (uFile != null && uFile.length() > 0) {
+                        bmp = decodeSampledBitmapFromFile(uFile.absolutePath, maxSizePx)
+                    }
                 }
 
                 // Check title|artist meta thumbnail
@@ -1066,7 +1188,7 @@ actual fun LocalArtworkImage(
                         else -> null
                     }
                     if (candidateAudioUri != null) {
-                        bmp = extractThumbnailOnDemand(context, primaryKey, candidateAudioUri)
+                        bmp = extractThumbnailOnDemand(context, primaryKey, candidateAudioUri, title, artist)
                     }
                 }
 
@@ -1074,6 +1196,7 @@ actual fun LocalArtworkImage(
                     LocalArtworkCache.put(primaryKey, maxSizePx, it)
                     LocalArtworkCache.put(fallbackKey, maxSizePx, it)
                     metaKey?.let { k -> LocalArtworkCache.put(k, maxSizePx, it) }
+                    universalKey?.let { k -> LocalArtworkCache.put(k, maxSizePx, it) }
                 }
             }
         }

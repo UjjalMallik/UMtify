@@ -102,6 +102,7 @@ fun LocalMusicManagerDialog(
     val selectedSongs by AppSettings.localMusicSelectedSongs.collectAsStateWithLifecycle()
 
     val detectedFolders by LocalMediaRepository.detectedAudioFolders.collectAsStateWithLifecycle()
+    val activeFolders by LocalMediaRepository.activeAudioFoldersFlow.collectAsStateWithLifecycle()
     val allLocalSongs by LocalMediaRepository.allLocalSongsFlow.collectAsStateWithLifecycle()
 
     var folderSongSearchQuery by remember { mutableStateOf("") }
@@ -151,8 +152,8 @@ fun LocalMusicManagerDialog(
     }
 
     // Display folders: clean, deduplicated, and unified with LocalMediaRepository
-    val displayFolders = remember(customFolders, detectedFolders, scanAllAudioFolders, allLocalSongs, excludedFolders) {
-        LocalMediaRepository.getVisibleFolders(context)
+    val displayFolders = remember(activeFolders, customFolders, detectedFolders, scanAllAudioFolders, allLocalSongs, excludedFolders) {
+        if (activeFolders.isNotEmpty()) activeFolders else LocalMediaRepository.getVisibleFolders(context)
     }
 
     ModalBottomSheet(
