@@ -30,7 +30,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.MusicNote
@@ -77,6 +76,9 @@ import com.music.bitchord.R
 import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.settings.AppSettings
+import com.music.bitchord.ui.components.DefaultCoverTile
+import com.music.bitchord.ui.components.LocalArtworkImage
+import com.music.bitchord.ui.components.isLocalArtUrl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -122,25 +124,6 @@ fun LocalMusicManagerDialog(
             scope.launch(Dispatchers.IO) {
                 LocalMediaRepository.refreshLocalMusic(context)
             }
-        }
-    }
-
-    val folderPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree(),
-    ) { treeUri ->
-        if (treeUri == null) return@rememberLauncherForActivityResult
-        try {
-            context.contentResolver.takePersistableUriPermission(
-                treeUri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION,
-            )
-        } catch (_: SecurityException) { /* fallback if already granted */ }
-
-        val uriStr = treeUri.toString()
-        AppSettings.addLocalMusicCustomFolder(uriStr)
-
-        scope.launch(Dispatchers.IO) {
-            LocalMediaRepository.refreshLocalMusic(context)
         }
     }
 
@@ -428,19 +411,37 @@ fun LocalMusicManagerDialog(
                                             .background(Color.White.copy(alpha = 0.08f)),
                                         contentAlignment = Alignment.Center,
                                     ) {
-                                        if (!song.thumbnailUrl.isNullOrBlank()) {
+                                        val songArt = song.thumbnailUrl
+                                        val localUri = song.localUri ?: song.localPath
+                                        val isLocal = isLocalArtUrl(songArt) || !localUri.isNullOrBlank()
+                                        if (isLocal) {
+                                            LocalArtworkImage(
+                                                url = songArt ?: localUri.orEmpty(),
+                                                localUri = localUri,
+                                                title = song.title,
+                                                artist = song.artist,
+                                                contentDescription = null,
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop,
+                                                maxSizePx = 96,
+                                                fallback = {
+                                                    DefaultCoverTile(
+                                                        modifier = Modifier.fillMaxSize(),
+                                                        title = song.title,
+                                                    )
+                                                },
+                                            )
+                                        } else if (!songArt.isNullOrBlank()) {
                                             AsyncImage(
-                                                model = song.thumbnailUrl,
+                                                model = songArt,
                                                 contentDescription = null,
                                                 contentScale = ContentScale.Crop,
                                                 modifier = Modifier.fillMaxSize(),
                                             )
                                         } else {
-                                            Icon(
-                                                imageVector = Icons.Rounded.MusicNote,
-                                                contentDescription = null,
-                                                tint = Color.White.copy(alpha = 0.6f),
-                                                modifier = Modifier.size(18.dp),
+                                            DefaultCoverTile(
+                                                modifier = Modifier.fillMaxSize(),
+                                                title = song.title,
                                             )
                                         }
                                     }
@@ -567,42 +568,6 @@ fun LocalMusicManagerDialog(
 
                 Spacer(Modifier.height(14.dp))
 
-                // Action: Add Custom Storage Folder
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color.White.copy(alpha = 0.04f))
-                        .border(0.6.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
-                        .clickable { folderPicker.launch(null) }
-                        .padding(horizontal = 14.dp, vertical = 11.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(30.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.CreateNewFolder,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                    Text(
-                        text = if (isBn) "+ পছন্দমতো সিস্টেম ফোল্ডার যোগ করুন..." else "+ Add custom storage folder...",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-
-                Spacer(Modifier.height(10.dp))
-
                 Text(
                     text = if (scanAllAudioFolders) {
                         if (isBn) "সকল অডিও ফোল্ডারসমূহ" else "Audio Folders"
@@ -624,8 +589,8 @@ fun LocalMusicManagerDialog(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            text = if (isBn) "কোনো ফোল্ডার যোগ করা হয়নি। উপরে '+ পছন্দমতো সিস্টেম ফোল্ডার যোগ করুন...' এ ট্যাপ করুন।"
-                            else "No folders added. Tap '+ Add custom storage folder...' above to add your music folders.",
+                            text = if (isBn) "কোনো অডিও ফোল্ডার সক্রিয় নেই। আপনার ডিভাইসের গান স্ক্যান করতে উপরে 'সকল অডিও ফোল্ডার' চালু করুন।"
+                            else "No audio folders active. Toggle 'All audio folders' above to scan your device music.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = Color.White.copy(alpha = 0.5f),
                             textAlign = TextAlign.Center,

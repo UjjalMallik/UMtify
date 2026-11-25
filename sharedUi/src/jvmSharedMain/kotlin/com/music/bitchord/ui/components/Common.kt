@@ -631,6 +631,7 @@ private fun SongRowContent(
                             .clip(SONG_ROW_ART_SHAPE)
                             .thumbnailBorder(SONG_ROW_ART_SHAPE),
                         contentScale = ContentScale.Crop,
+                        title = song.title,
                     )
                 } else if (isLocal) {
                     LocalArtworkImage(
@@ -652,6 +653,7 @@ private fun SongRowContent(
                                     .clip(SONG_ROW_ART_SHAPE)
                                     .thumbnailBorder(SONG_ROW_ART_SHAPE),
                                 contentScale = ContentScale.Crop,
+                                title = song.title,
                             )
                         },
                     )
