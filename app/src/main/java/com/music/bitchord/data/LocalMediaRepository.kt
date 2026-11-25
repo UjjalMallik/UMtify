@@ -1368,13 +1368,6 @@ object LocalMediaRepository {
                 seenNames.add(nameNorm)
             }
         }
-                }
-                val count = if (actualCount > 0) actualCount else df.songCount
-                list.add(df.copy(songCount = count))
-                seenNormPaths.add(norm)
-                seenNames.add(nameNorm)
-            }
-        }
 
         return list.sortedWith(
             compareByDescending<DeviceFolder> { it.isCustom }
