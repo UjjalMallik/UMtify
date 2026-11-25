@@ -558,12 +558,7 @@ object LocalMediaRepository {
             }
         }
 
-        // 4. Media3 / ExoPlayer MetadataRetriever fallback (identical engine to playback!)
-        if (picBytes == null || picBytes.isEmpty()) {
-            picBytes = extractArtworkUsingMedia3(context, fileUri)
-        }
-
-        // 5. Lightweight FLAC Picture Block Extractor fallback (handles 24-bit Hi-Res FLAC & ID3v2 APIC)
+        // 4. Lightweight FLAC Picture Block Extractor fallback (handles 24-bit Hi-Res FLAC & ID3v2 APIC)
         if (picBytes == null || picBytes.isEmpty()) {
             picBytes = com.music.bitchord.ui.components.extractFlacPicture(context, fileUri, directPath)
         }
@@ -648,33 +643,6 @@ object LocalMediaRepository {
             trackNumber = trackNumberFromTag(metaTrack),
             artworkUri = artUri,
         )
-    }
-
-    private fun extractArtworkUsingMedia3(context: Context, uri: Uri): ByteArray? {
-        return runCatching {
-            val mediaItem = androidx.media3.common.MediaItem.fromUri(uri)
-            val future = androidx.media3.exoplayer.MetadataRetriever.retrieveMetadata(context, mediaItem)
-            val trackGroups = future.get(1500, java.util.concurrent.TimeUnit.MILLISECONDS)
-            for (i in 0 until trackGroups.length) {
-                val group = trackGroups.get(i)
-                for (j in 0 until group.length) {
-                    val format = group.getFormat(j)
-                    val metadata = format.metadata ?: continue
-                    for (k in 0 until metadata.length()) {
-                        val entry = metadata.get(k)
-                        val bytes = runCatching {
-                            val field = entry.javaClass.getDeclaredField("pictureData")
-                            field.isAccessible = true
-                            field.get(entry) as? ByteArray
-                        }.getOrNull()
-                        if (bytes != null && bytes.isNotEmpty()) {
-                            return@runCatching bytes
-                        }
-                    }
-                }
-            }
-            null
-        }.getOrNull()
     }
 
     private fun triggerEnrichmentPass(context: Context, songs: List<Song>) {
