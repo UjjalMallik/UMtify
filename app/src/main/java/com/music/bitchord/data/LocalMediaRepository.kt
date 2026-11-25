@@ -60,9 +60,36 @@ object LocalMediaRepository {
         "/recordings/",
         "/voice recorder/",
         "/sound_recorder/",
+        "/soundrecorder/",
         "/call_rec/",
+        "/call recordings/",
+        "/call/",
+        "/voice notes/",
         "/whatsapp voice notes/",
+        "/whatsapp audio/",
+        "/telegram audio/",
+        "/android/media/",
+        "/android/data/",
+        "/.cache/",
+        "/.thumbnails/",
+        "/system/",
     )
+
+    fun isIgnoredAudioFolder(folderPath: String?): Boolean {
+        if (folderPath.isNullOrBlank()) return true
+        if (isUmtifyPath(folderPath)) return true
+        val lower = folderPath.replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT)
+        val folderName = lower.substringAfterLast('/')
+        val ignoredNames = setOf(
+            "umtify", "bitchord", "alarms", "notifications", "ringtones",
+            "podcasts", "audiobooks", "recordings", "voice recorder",
+            "sound_recorder", "soundrecorder", "call_rec", "call recordings",
+            "call", "voice notes", "whatsapp voice notes", "whatsapp audio",
+            "telegram audio", "media", "data", ".thumbnails", ".cache",
+        )
+        if (folderName in ignoredNames) return true
+        return nonMusicPathSegments.any { lower.contains(it) }
+    }
 
     fun isUmtifyPath(path: String?): Boolean {
         if (path.isNullOrBlank()) return false
@@ -414,29 +441,11 @@ object LocalMediaRepository {
     private const val LOCAL_ART_THUMB_DIR = "local_art_thumb"
 
     fun getLocalArtFile(context: Context, key: String): File {
-        val dir = File(context.filesDir, LOCAL_ART_DIR).apply { if (!exists()) mkdirs() }
-        val hash = key.hashCode().toUInt().toString()
-        val file = File(dir, "$hash.jpg")
-        if (!file.exists()) {
-            val legacy = File(File(context.cacheDir, "local_art"), "$hash.jpg")
-            if (legacy.exists() && legacy.length() > 0) {
-                runCatching { legacy.copyTo(file, overwrite = true) }
-            }
-        }
-        return file
+        return com.music.bitchord.ui.components.localFullArtFile(context, key)
     }
 
     fun getLocalArtThumbFile(context: Context, key: String): File {
-        val dir = File(context.filesDir, LOCAL_ART_THUMB_DIR).apply { if (!exists()) mkdirs() }
-        val hash = key.hashCode().toUInt().toString()
-        val file = File(dir, "$hash.jpg")
-        if (!file.exists()) {
-            val legacy = File(File(context.cacheDir, "local_art_thumb"), "$hash.jpg")
-            if (legacy.exists() && legacy.length() > 0) {
-                runCatching { legacy.copyTo(file, overwrite = true) }
-            }
-        }
-        return file
+        return com.music.bitchord.ui.components.localThumbFile(context, key)
     }
 
     fun getCachedLocalArtThumbUri(context: Context, key: String): String? {
@@ -928,6 +937,15 @@ object LocalMediaRepository {
                 return@withContext extra
             }
 
+            val currentCustom = AppSettings.localMusicCustomFolders.value
+            val cleanedCustom = currentCustom
+                .filterNot { isIgnoredAudioFolder(it) }
+                .distinctBy { it.normalizedPath() }
+                .toSet()
+            if (cleanedCustom.size != currentCustom.size) {
+                AppSettings.setLocalMusicCustomFolders(cleanedCustom)
+            }
+
             val collectedSongs = mutableListOf<Song>()
             val foldersList = mutableListOf<DeviceFolder>()
             val seenKeys = mutableSetOf<String>()
@@ -937,9 +955,9 @@ object LocalMediaRepository {
 
             // 1. Scan custom SAF folders
             for (uriStr in customUris) {
-                if (isUmtifyPath(uriStr) || uriStr in excludedFolders || uriStr.normalizedPath() in excludedFolders) continue
+                if (isIgnoredAudioFolder(uriStr) || uriStr in excludedFolders || uriStr.normalizedPath() in excludedFolders) continue
                 val displayName = getFolderDisplayName(context, uriStr)
-                if (displayName.equals("UMtify", ignoreCase = true) || displayName.equals("BitChord", ignoreCase = true)) continue
+                if (isIgnoredAudioFolder(displayName)) continue
                 val safSongs = scanSafFolderFast(context, uriStr).filterNot {
                     isUmtifyPath(it.localPath) || isUmtifyPath(it.localUri)
                 }
@@ -1112,11 +1130,13 @@ object LocalMediaRepository {
                 }.onFailure { Log.w(TAG, "Failed scanning device local music: ${it.message}") }
 
                 mediaStoreFolderCounts.forEach { (path, count) ->
-                    if (isUmtifyPath(path) || path.substringAfterLast('/').equals("UMtify", ignoreCase = true) || path.substringAfterLast('/').equals("BitChord", ignoreCase = true)) return@forEach
+                    if (isIgnoredAudioFolder(path)) return@forEach
                     val norm = path.normalizedPath()
                     if (path !in excludedFolders && norm !in excludedFolders && foldersList.none { it.path.normalizedPath() == norm }) {
                         val name = path.substringAfterLast('/').ifBlank { "Storage" }
-                        foldersList.add(DeviceFolder(name, path, count, isCustom = false))
+                        if (!isIgnoredAudioFolder(name)) {
+                            foldersList.add(DeviceFolder(name, path, count, isCustom = false))
+                        }
                     }
                 }
             }
@@ -1145,6 +1165,45 @@ object LocalMediaRepository {
 
             extraLocalMusic?.invoke(context, collectedSongs) ?: collectedSongs
         }
+    }
+
+    fun getVisibleFolders(context: Context): List<DeviceFolder> {
+        val customFolders = AppSettings.localMusicCustomFolders.value
+        val excludedFolders = AppSettings.localMusicExcludedFolders.value
+        val detected = detectedAudioFolders.value
+        val scanAll = AppSettings.scanAllAudioFolders.value
+        val allSongs = allLocalSongsFlow.value
+
+        val list = mutableListOf<DeviceFolder>()
+        val seenPaths = mutableSetOf<String>()
+
+        for (uri in customFolders) {
+            if (uri in excludedFolders) continue
+            if (isIgnoredAudioFolder(uri)) continue
+            val norm = uri.normalizedPath()
+            if (!seenPaths.add(norm)) continue
+
+            val name = getFolderDisplayName(context, uri)
+            if (isIgnoredAudioFolder(name)) continue
+
+            val detectedCount = detected.firstOrNull { it.path.normalizedPath() == norm }?.songCount ?: 0
+            val matchedSongsCount = allSongs.count {
+                it.folderUri == uri || isInSelectedFolder(it.localPath, uri) || isInSelectedFolder(it.localUri, uri)
+            }
+            val count = if (detectedCount > 0) detectedCount else matchedSongsCount
+            list.add(DeviceFolder(name = name, path = uri, songCount = count, isCustom = true))
+        }
+
+        if (scanAll) {
+            for (df in detected) {
+                if (df.path in excludedFolders) continue
+                if (isIgnoredAudioFolder(df.path) || isIgnoredAudioFolder(df.name)) continue
+                val norm = df.path.normalizedPath()
+                if (!seenPaths.add(norm)) continue
+                list.add(df)
+            }
+        }
+        return list
     }
 
     suspend fun getAllDeviceAudioFolders(context: Context): List<DeviceFolder> = withContext(Dispatchers.IO) {

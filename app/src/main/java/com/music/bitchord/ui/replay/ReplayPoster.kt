@@ -92,7 +92,7 @@ suspend fun renderReplayPoster(
         .mapValues { it.value.await() }
         .toMutableMap()
 
-    // Live fallback lookup for local/downloaded tracks with missing artwork
+    // Live fallback lookup for local/downloaded tracks and albums with missing artwork
     val localSongs = LocalMediaRepository.allLocalSongsFlow.value
     val downloads = runCatching { Downloads.getDownloadedSongs(context) }.getOrDefault(emptyList())
 
@@ -107,12 +107,29 @@ suspend fun renderReplayPoster(
             if (match != null) {
                 val key = match.localUri ?: match.localPath ?: match.videoId
                 val resolvedUrl = match.thumbnailUrl ?: LocalMediaRepository.getCachedLocalArtThumbUri(context, key)
-                if (resolvedUrl != null) {
-                    val bmp = loadBitmap(context, resolvedUrl)
-                    if (bmp != null) {
-                        if (artUrl != null) rawCovers[artUrl] = bmp
-                        rawCovers[song.key] = bmp
-                    }
+                val bmp = (resolvedUrl?.let { loadBitmap(context, it) })
+                    ?: com.music.bitchord.ui.components.decodeSampledBitmap(context, key, 256)
+                if (bmp != null) {
+                    if (artUrl != null) rawCovers[artUrl] = bmp
+                    rawCovers[song.key] = bmp
+                }
+            }
+        }
+    }
+
+    for (album in albums) {
+        val artUrl = album.artworkUrl
+        if (artUrl == null || rawCovers[artUrl] == null) {
+            val match = localSongs.firstOrNull { it.albumName?.equals(album.title, ignoreCase = true) == true }
+                ?: downloads.firstOrNull { it.albumName?.equals(album.title, ignoreCase = true) == true }
+            if (match != null) {
+                val key = match.localUri ?: match.localPath ?: match.videoId
+                val resolvedUrl = match.thumbnailUrl ?: LocalMediaRepository.getCachedLocalArtThumbUri(context, key)
+                val bmp = (resolvedUrl?.let { loadBitmap(context, it) })
+                    ?: com.music.bitchord.ui.components.decodeSampledBitmap(context, key, 256)
+                if (bmp != null) {
+                    if (artUrl != null) rawCovers[artUrl] = bmp
+                    rawCovers[album.key] = bmp
                 }
             }
         }
@@ -664,24 +681,24 @@ private fun drawUnifiedHeroCard(
     }
     val pillTextW = pillFont.measureText(pillText)
     val pillW = pillTextW + 36f
-    val pillH = 34f
-    val pillBounds = RectF(MARGIN + 28f, top + 24f, MARGIN + 28f + pillW, top + 24f + pillH)
+    val pillH = 32f
+    val pillBounds = RectF(MARGIN + 28f, top + 22f, MARGIN + 28f + pillW, top + 22f + pillH)
     val pillFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x22FFFFFF }
     val pillBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0x48FFFFFF
         style = Paint.Style.STROKE
         strokeWidth = 1.2f
     }
-    canvas.drawRoundRect(pillBounds, 17f, 17f, pillFill)
-    canvas.drawRoundRect(pillBounds, 17f, 17f, pillBorder)
+    canvas.drawRoundRect(pillBounds, 16f, 16f, pillFill)
+    canvas.drawRoundRect(pillBounds, 16f, 16f, pillBorder)
     canvas.drawText(pillText, pillBounds.centerX(), pillBounds.centerY() + 6f, pillFont)
 
-    // 2. Massive bold minutes listened with subtle soft glow
+    // 2. Massive bold minutes listened with subtle soft glow & balanced vertical breathing room
     val numberText = formatMinutes(summary.totalMs)
     val numberPaint = type.heading(104f, Color.WHITE)
     val glowPaint = type.heading(104f, ColorUtils.setAlphaComponent(accentColor, 110))
-    canvas.drawText(numberText, MARGIN + 28f + 1f, top + 152f, glowPaint)
-    canvas.drawText(numberText, MARGIN + 28f, top + 150f, numberPaint)
+    canvas.drawText(numberText, MARGIN + 28f + 1f, top + 164f, glowPaint)
+    canvas.drawText(numberText, MARGIN + 28f, top + 162f, numberPaint)
 
     // 3. Compact row of 3 frosted stat pills underneath (Plays, Songs, Artists)
     val chips = listOf(
@@ -904,6 +921,8 @@ private fun drawAlbums(
     val tileH = tileW // aspectRatio(1f) filling its tile width
     val artY = top + 64f
 
+    val tileRadius = 24f
+
     items.forEachIndexed { index, album ->
         val x = MARGIN + innerMargin + index * (tileW + tileSpacing)
         val tileBounds = RectF(x, artY, x + tileW, artY + tileH)
@@ -911,11 +930,39 @@ private fun drawAlbums(
         // Drop shadow behind showcase tile
         val shadowBounds = RectF(x + 2f, artY + 6f, x + tileW + 2f, artY + tileH + 6f)
         val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x66000000 }
-        canvas.drawRoundRect(shadowBounds, 22f, 22f, shadowPaint)
+        canvas.drawRoundRect(shadowBounds, tileRadius, tileRadius, shadowPaint)
 
-        // Full-width cover art inside the showcase tile
+        // Clip strictly to tileBounds with tileRadius for cover art & bottom gradient
+        val clipPath = Path().apply {
+            addRoundRect(tileBounds, tileRadius, tileRadius, Path.Direction.CW)
+        }
+        canvas.save()
+        canvas.clipPath(clipPath)
+
         val art = album.artworkUrl?.let { covers[it] } ?: covers[album.key]
-        drawArtwork(canvas, art, album.title, x, artY, tileW, false)
+        if (art != null) {
+            val scale = tileW / minOf(art.width, art.height).toFloat()
+            val matrix = Matrix().apply {
+                setScale(scale, scale)
+                postTranslate(
+                    x - (art.width * scale - tileW) / 2f,
+                    artY - (art.height * scale - tileH) / 2f,
+                )
+            }
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+                shader = BitmapShader(art, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
+                    setLocalMatrix(matrix)
+                }
+            }
+            canvas.drawRect(tileBounds, paint)
+        } else {
+            val tilePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.argb(40, 255, 255, 255)
+                style = Paint.Style.FILL
+            }
+            canvas.drawRect(tileBounds, tilePaint)
+            drawMusicNoteGlyph(canvas, tileBounds.centerX(), tileBounds.centerY(), tileW * 0.44f)
+        }
 
         // Sleek frosted dark bottom gradient inside the tile holding album title & artist
         val gradientPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -926,11 +973,6 @@ private fun drawAlbums(
                 Shader.TileMode.CLAMP,
             )
         }
-        canvas.save()
-        val path = Path().apply {
-            addRoundRect(tileBounds, 22f, 22f, Path.Direction.CW)
-        }
-        canvas.clipPath(path)
         canvas.drawRect(RectF(x, artY + tileH * 0.40f, x + tileW, artY + tileH), gradientPaint)
         canvas.restore()
 
@@ -952,13 +994,13 @@ private fun drawAlbums(
         canvas.drawRoundRect(rankBounds, 13f, 13f, rankBorder)
         canvas.drawText(rankText, rankBounds.centerX(), rankBounds.centerY() + 5.5f, rankPaint)
 
-        // Sleek glass border around the showcase tile
+        // Sleek glass border around the showcase tile with exact same radius
         val tileBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0x3EFFFFFF
             style = Paint.Style.STROKE
-            strokeWidth = 1.5f
+            strokeWidth = 2.4f
         }
-        canvas.drawRoundRect(tileBounds, 22f, 22f, tileBorder)
+        canvas.drawRoundRect(tileBounds, tileRadius, tileRadius, tileBorder)
 
         // Bold album title and artist name inside bottom frosted area
         val name = type.body(20f, Color.WHITE, bold = true)

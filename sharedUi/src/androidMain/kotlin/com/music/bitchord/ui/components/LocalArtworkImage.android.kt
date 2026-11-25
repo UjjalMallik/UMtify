@@ -32,7 +32,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.ConcurrentHashMap
 
-fun localArtHash(key: String): String = key.hashCode().toUInt().toString()
+fun localArtHash(key: String): String = cleanLocalArtPath(key).hashCode().toUInt().toString()
 
 fun extractArtHash(key: String): String {
     val clean = cleanLocalArtPath(key)
@@ -46,9 +46,9 @@ fun extractArtHash(key: String): String {
     return localArtHash(clean)
 }
 
-fun findLocalArtFullFile(context: Context, key: String): File? {
+fun localFullArtFile(context: Context, key: String): File {
     val hash = extractArtHash(key)
-    val fullDir = File(context.filesDir, "local_art_full")
+    val fullDir = File(context.filesDir, "local_art_full").apply { if (!exists()) mkdirs() }
     val f = File(fullDir, "$hash.jpg")
     if (f.exists() && f.length() > 0) return f
 
@@ -57,12 +57,16 @@ fun findLocalArtFullFile(context: Context, key: String): File? {
     val legacyFull = File(legacyFullDir, "$hash.jpg")
     if (legacyFull.exists() && legacyFull.length() > 0) {
         runCatching {
-            if (!fullDir.exists()) fullDir.mkdirs()
             legacyFull.copyTo(f, overwrite = true)
         }
         return f
     }
-    return null
+    return f
+}
+
+fun findLocalArtFullFile(context: Context, key: String): File? {
+    val f = localFullArtFile(context, key)
+    return if (f.exists() && f.length() > 0) f else null
 }
 
 fun calculateInSampleSize(width: Int, height: Int, maxSizePx: Int): Int {
@@ -117,15 +121,16 @@ fun decodeSampledBitmapFromUri(context: Context, uri: Uri, maxSizePx: Int): Bitm
     }.getOrNull()
 }
 
-fun findLocalArtThumbFile(context: Context, clean: String): File? {
-    val thumbDir = File(context.filesDir, "local_art_thumb")
-    val name = File(clean).name
+fun localThumbFile(context: Context, clean: String): File {
+    val cleaned = cleanLocalArtPath(clean)
+    val thumbDir = File(context.filesDir, "local_art_thumb").apply { if (!exists()) mkdirs() }
+    val name = File(cleaned).name
     if (name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) || name.endsWith(".png", ignoreCase = true)) {
         val directThumb = File(thumbDir, name)
         if (directThumb.exists() && directThumb.length() > 0) return directThumb
     }
 
-    val hash = localArtHash(clean)
+    val hash = extractArtHash(cleaned)
     val hashThumb = File(thumbDir, "$hash.jpg")
     if (hashThumb.exists() && hashThumb.length() > 0) return hashThumb
 
@@ -134,27 +139,24 @@ fun findLocalArtThumbFile(context: Context, clean: String): File? {
     val legacyThumb = File(legacyThumbDir, "$hash.jpg")
     if (legacyThumb.exists() && legacyThumb.length() > 0) {
         runCatching {
-            if (!thumbDir.exists()) thumbDir.mkdirs()
             legacyThumb.copyTo(hashThumb, overwrite = true)
         }
         return hashThumb
     }
 
-    return null
+    return hashThumb
+}
+
+fun findLocalArtThumbFile(context: Context, clean: String): File? {
+    val f = localThumbFile(context, clean)
+    return if (f.exists() && f.length() > 0) f else null
 }
 
 fun saveThumbnailFileIfMissing(context: Context, clean: String, bmp: Bitmap) {
     runCatching {
-        val thumbDir = File(context.filesDir, "local_art_thumb").apply { if (!exists()) mkdirs() }
-        val name = File(clean).name
-        val targetFile = if (name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) || name.endsWith(".png", ignoreCase = true)) {
-            File(thumbDir, name)
-        } else {
-            val hash = localArtHash(clean)
-            File(thumbDir, "$hash.jpg")
-        }
+        val targetFile = localThumbFile(context, clean)
         if (!targetFile.exists() || targetFile.length() == 0L) {
-            val tmp = File(thumbDir, "${targetFile.name}.tmp")
+            val tmp = File(targetFile.parentFile, "${targetFile.name}.tmp")
             val scaled = if (bmp.width > 128 || bmp.height > 128) {
                 Bitmap.createScaledBitmap(bmp, 128, 128, true)
             } else {
@@ -194,24 +196,16 @@ fun decodeSampledBitmap(context: Context, source: String, maxSizePx: Int): Bitma
         return bmp
     }
 
+    val fullFile = findLocalArtFullFile(context, clean)
+    if (fullFile != null) {
+        val bmp = decodeSampledBitmapFromFile(fullFile.absolutePath, maxSizePx)
+        if (bmp != null && maxSizePx <= 200) {
+            saveThumbnailFileIfMissing(context, clean, bmp)
+        }
+        return bmp
+    }
+
     if (clean.startsWith("content://")) {
-        val hash = localArtHash(clean)
-        val fullFile = File(File(context.filesDir, "local_art_full"), "$hash.jpg")
-        if (fullFile.exists() && fullFile.length() > 0) {
-            val bmp = decodeSampledBitmapFromFile(fullFile.absolutePath, maxSizePx)
-            if (bmp != null && maxSizePx <= 200) {
-                saveThumbnailFileIfMissing(context, clean, bmp)
-            }
-            return bmp
-        }
-        val legacyFullFile = File(File(context.cacheDir, "local_art"), "$hash.jpg")
-        if (legacyFullFile.exists() && legacyFullFile.length() > 0) {
-            val bmp = decodeSampledBitmapFromFile(legacyFullFile.absolutePath, maxSizePx)
-            if (bmp != null && maxSizePx <= 200) {
-                saveThumbnailFileIfMissing(context, clean, bmp)
-            }
-            return bmp
-        }
         val uri = Uri.parse(clean)
         val bmp = decodeSampledBitmapFromUri(context, uri, maxSizePx)
         if (bmp != null && maxSizePx <= 200) {
@@ -287,16 +281,29 @@ object LocalArtworkCache {
         lruCache.evictAll()
     }
 
+    private const val NO_ART_VERSION = 2
+
     fun initNoArt(context: Context) {
         if (noArtFileLoaded) return
         synchronized(noArtLock) {
             if (noArtFileLoaded) return
-            val file = File(File(context.filesDir, "local_art_thumb"), "no_art.txt")
-            if (file.exists()) {
+            val thumbDir = File(context.filesDir, "local_art_thumb").apply { if (!exists()) mkdirs() }
+            val marker = File(thumbDir, "no_art_v$NO_ART_VERSION.marker")
+            if (!marker.exists()) {
+                // Clear legacy no_art blacklist once so improved FLAC/ID3 extractor retries
                 runCatching {
-                    file.readLines().forEach { line ->
-                        val trimmed = line.trim()
-                        if (trimmed.isNotEmpty()) noArtHashes.add(trimmed)
+                    File(thumbDir, "no_art.txt").delete()
+                    marker.createNewFile()
+                }
+                noArtHashes.clear()
+            } else {
+                val file = File(thumbDir, "no_art.txt")
+                if (file.exists()) {
+                    runCatching {
+                        file.readLines().forEach { line ->
+                            val trimmed = line.trim()
+                            if (trimmed.isNotEmpty()) noArtHashes.add(trimmed)
+                        }
                     }
                 }
             }
@@ -337,10 +344,17 @@ object LocalArtworkCache {
 
     fun saveAndCacheThumbnail(context: Context, key: String, picBytes: ByteArray) {
         val clean = cleanLocalArtPath(key)
-        val hash = localArtHash(clean)
-        val thumbDir = File(context.filesDir, "local_art_thumb").apply { if (!exists()) mkdirs() }
-        val targetFile = File(thumbDir, "$hash.jpg")
+        val targetFile = localThumbFile(context, clean)
+        val fullFile = localFullArtFile(context, clean)
         runCatching {
+            if (!fullFile.exists() || fullFile.length() == 0L) {
+                val tmpFull = File(fullFile.parentFile, "${fullFile.name}.tmp")
+                tmpFull.writeBytes(picBytes)
+                if (!tmpFull.renameTo(fullFile)) {
+                    tmpFull.copyTo(fullFile, overwrite = true)
+                    tmpFull.delete()
+                }
+            }
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(picBytes, 0, picBytes.size, bounds)
             val sampleSize = calculateInSampleSize(bounds.outWidth, bounds.outHeight, 128)
@@ -354,7 +368,7 @@ object LocalArtworkCache {
                     Bitmap.createScaledBitmap(bmp, 128, 128, true)
                 } else bmp
 
-                val tmp = File(thumbDir, "$hash.tmp")
+                val tmp = File(targetFile.parentFile, "${targetFile.name}.tmp")
                 FileOutputStream(tmp).use { out ->
                     scaled.compress(Bitmap.CompressFormat.JPEG, 80, out)
                 }
@@ -370,6 +384,7 @@ object LocalArtworkCache {
                 put(key, 160, imageBitmap)
                 if (scaled != bmp) bmp.recycle()
                 removeNoArt(context, key)
+                removeNoArt(context, clean)
             }
         }
     }
@@ -392,18 +407,66 @@ object LocalArtworkCache {
 }
 
 /**
- * Fast binary FLAC METADATA_BLOCK_PICTURE extractor.
- * Solves MediaMetadataRetriever failing on 24-bit Hi-Res FLAC files.
+ * Fast binary FLAC METADATA_BLOCK_PICTURE and ID3v2 APIC extractor.
+ * Solves MediaMetadataRetriever failing on 24-bit Hi-Res FLAC files,
+ * files with ID3v2 tags prepended before "fLaC", or ID3v2 tags containing APIC frames.
  */
 fun extractFlacPictureFromStream(inputStream: java.io.InputStream): ByteArray? {
     return runCatching {
-        val dis = java.io.DataInputStream(java.io.BufferedInputStream(inputStream, 16384))
-        val header = ByteArray(4)
-        dis.readFully(header)
-        // Check "fLaC" magic: 0x66, 0x4C, 0x61, 0x43
-        if (header[0] != 0x66.toByte() || header[1] != 0x4C.toByte() ||
-            header[2] != 0x61.toByte() || header[3] != 0x43.toByte()
+        val bis = java.io.BufferedInputStream(inputStream, 32768)
+        val dis = java.io.DataInputStream(bis)
+        val initial = ByteArray(4)
+        dis.readFully(initial)
+
+        var hasFlacHeader = false
+
+        // Check if stream starts with ID3 header: "ID3" (0x49, 0x44, 0x33)
+        if (initial[0] == 0x49.toByte() && initial[1] == 0x44.toByte() && initial[2] == 0x33.toByte()) {
+            val majorVersion = initial[3].toInt() and 0xFF
+            val revision = dis.readUnsignedByte()
+            val flags = dis.readUnsignedByte()
+            val tagSize = (dis.readUnsignedByte() shl 21) or
+                (dis.readUnsignedByte() shl 14) or
+                (dis.readUnsignedByte() shl 7) or
+                dis.readUnsignedByte()
+            val hasFooter = (flags and 0x10) != 0
+            val totalTagBytes = tagSize + (if (hasFooter) 10 else 0)
+
+            var foundApic: ByteArray? = null
+            if (tagSize in 10..25_000_000) {
+                runCatching {
+                    val tagData = ByteArray(tagSize)
+                    dis.readFully(tagData)
+                    foundApic = parseApicFromId3(tagData, majorVersion)
+                    if (hasFooter) {
+                        skipFully(dis, 10)
+                    }
+                }
+            } else {
+                skipFully(dis, totalTagBytes)
+            }
+
+            if (foundApic != null && foundApic.isNotEmpty()) {
+                return@runCatching foundApic
+            }
+
+            // After ID3 tag, check if "fLaC" follows
+            val nextHeader = ByteArray(4)
+            dis.readFully(nextHeader)
+            if (nextHeader[0] == 0x66.toByte() && nextHeader[1] == 0x4C.toByte() &&
+                nextHeader[2] == 0x61.toByte() && nextHeader[3] == 0x43.toByte()
+            ) {
+                hasFlacHeader = true
+            } else {
+                return@runCatching null
+            }
+        } else if (initial[0] == 0x66.toByte() && initial[1] == 0x4C.toByte() &&
+            initial[2] == 0x61.toByte() && initial[3] == 0x43.toByte()
         ) {
+            hasFlacHeader = true
+        }
+
+        if (!hasFlacHeader) {
             return@runCatching null
         }
 
@@ -439,6 +502,63 @@ fun extractFlacPictureFromStream(inputStream: java.io.InputStream): ByteArray? {
         }
         null
     }.getOrNull()
+}
+
+private fun parseApicFromId3(tagData: ByteArray, majorVersion: Int): ByteArray? {
+    var pos = 0
+    val len = tagData.size
+    while (pos + 10 <= len) {
+        if (tagData[pos] == 0.toByte()) break
+        val id = String(tagData, pos, 4, Charsets.ISO_8859_1)
+        val frameSize = if (majorVersion == 4) {
+            ((tagData[pos + 4].toInt() and 0x7F) shl 21) or
+                ((tagData[pos + 5].toInt() and 0x7F) shl 14) or
+                ((tagData[pos + 6].toInt() and 0x7F) shl 7) or
+                (tagData[pos + 7].toInt() and 0x7F)
+        } else {
+            ((tagData[pos + 4].toInt() and 0xFF) shl 24) or
+                ((tagData[pos + 5].toInt() and 0xFF) shl 16) or
+                ((tagData[pos + 6].toInt() and 0xFF) shl 8) or
+                (tagData[pos + 7].toInt() and 0xFF)
+        }
+        if (frameSize <= 0 || pos + 10 + frameSize > len) break
+
+        if (id == "APIC") {
+            val dataStart = pos + 10
+            val textEncoding = tagData[dataStart].toInt() and 0xFF
+            var mimeEnd = dataStart + 1
+            while (mimeEnd < dataStart + frameSize && tagData[mimeEnd] != 0.toByte()) {
+                mimeEnd++
+            }
+            val picTypePos = mimeEnd + 1
+            val descStart = picTypePos + 1
+            var picDataStart: Int
+            if (textEncoding == 1 || textEncoding == 2) {
+                var descEnd = descStart
+                while (descEnd + 1 < dataStart + frameSize &&
+                    !(tagData[descEnd] == 0.toByte() && tagData[descEnd + 1] == 0.toByte())
+                ) {
+                    descEnd += 2
+                }
+                picDataStart = descEnd + 2
+            } else {
+                var descEnd = descStart
+                while (descEnd < dataStart + frameSize && tagData[descEnd] != 0.toByte()) {
+                    descEnd++
+                }
+                picDataStart = descEnd + 1
+            }
+            if (picDataStart < dataStart + frameSize) {
+                val picLength = (dataStart + frameSize) - picDataStart
+                if (picLength in 1..35_000_000) {
+                    return tagData.copyOfRange(picDataStart, picDataStart + picLength)
+                }
+            }
+            return null
+        }
+        pos += 10 + frameSize
+    }
+    return null
 }
 
 fun extractFlacPicture(context: Context, uri: Uri, directPath: String? = null): ByteArray? {

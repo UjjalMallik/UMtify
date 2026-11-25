@@ -1517,7 +1517,10 @@ fun SettingsScreen(
             forceExpanded = searchQuery.isNotBlank(),
         ) {
             val localMusicFolderTitle = stringResource(R.string.local_music_folder)
-            val customFolderCount = localMusicCustomFolders.size
+            val visibleFolders = remember(localMusicCustomFolders, scanAllAudioFolders, localMusicExcludedFolders) {
+                LocalMediaRepository.getVisibleFolders(context)
+            }
+            val customFolderCount = visibleFolders.size
             val fileCount = localMusicSelectedSongs.size
             val excludedCount = localMusicExcludedSongs.size
             val excludedSuffix = if (excludedCount > 0) " · $excludedCount excluded" else ""

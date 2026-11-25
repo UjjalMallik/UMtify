@@ -150,35 +150,9 @@ fun LocalMusicManagerDialog(
         LocalMediaRepository.refreshLocalMusic(context)
     }
 
-    // Display folders: custom folders are computed immediately from AppSettings.localMusicCustomFolders
+    // Display folders: clean, deduplicated, and unified with LocalMediaRepository
     val displayFolders = remember(customFolders, detectedFolders, scanAllAudioFolders, allLocalSongs, excludedFolders) {
-        val list = mutableListOf<LocalMediaRepository.DeviceFolder>()
-        // 1. All custom folders rendered immediately
-        for (uri in customFolders) {
-            if (uri in excludedFolders) continue
-            if (LocalMediaRepository.isUmtifyPath(uri)) continue
-            val name = LocalMediaRepository.getFolderDisplayName(context, uri)
-            if (name.equals("UMtify", ignoreCase = true) || name.equals("BitChord", ignoreCase = true)) continue
-            val detectedCount = detectedFolders.firstOrNull { it.path == uri }?.songCount ?: 0
-            val matchedSongsCount = allLocalSongs.count {
-                it.folderUri == uri ||
-                LocalMediaRepository.isInSelectedFolder(it.localPath, uri) ||
-                LocalMediaRepository.isInSelectedFolder(it.localUri, uri)
-            }
-            val count = if (detectedCount > 0) detectedCount else matchedSongsCount
-            list.add(LocalMediaRepository.DeviceFolder(name = name, path = uri, songCount = count, isCustom = true))
-        }
-        // 2. If scanAllAudioFolders is enabled, also list detected MediaStore folders
-        if (scanAllAudioFolders) {
-            for (df in detectedFolders) {
-                if (df.path in excludedFolders) continue
-                if (df.name.equals("UMtify", ignoreCase = true) || df.name.equals("BitChord", ignoreCase = true) || LocalMediaRepository.isUmtifyPath(df.path)) continue
-                if (!df.isCustom && list.none { it.path == df.path }) {
-                    list.add(df)
-                }
-            }
-        }
-        list
+        LocalMediaRepository.getVisibleFolders(context)
     }
 
     ModalBottomSheet(
