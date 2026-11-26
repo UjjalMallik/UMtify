@@ -110,7 +110,7 @@ Every release builds **two optimized arm64-v8a APK editions** sharing the exact 
 git clone https://github.com/UjjalMallik/UMtify.git
 cd UMtify
 
-# Build Standard Release APK (com.music.bitchord)
+# Build Standard Release APK (com.music.umtify)
 ./gradlew assembleProdRelease
 
 # Build Vivo / iQOO OriginOS Edition APK (com.tencent.qqmusic)

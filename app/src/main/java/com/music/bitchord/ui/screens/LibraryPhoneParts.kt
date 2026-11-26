@@ -27,6 +27,7 @@ import com.music.bitchord.sharedui.resources.spotify_logo
 import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.model.ShelfItem
 import com.music.bitchord.data.settings.AppSettings
+import com.music.bitchord.data.stats.ListeningStats
 import com.music.bitchord.download.Downloads
 import com.music.bitchord.download.SavedCollection
 import com.music.bitchord.playback.AudioCache
@@ -35,6 +36,7 @@ import com.music.bitchord.ui.components.ReplayCardRowSkeleton
 import com.music.bitchord.ui.replay.ReplayCardRow
 import com.music.bitchord.ui.replay.ReplayHeroCard
 import com.music.bitchord.ui.replay.ReplayStoryPage
+import com.music.bitchord.ui.replay.cards
 
 // The phone's halves of the shared Library page: its list of folders, what
 // sits on its "On device" shelf, and the way in to Replay at its head.
@@ -219,11 +221,22 @@ fun LibraryReplayEntry(
     memberSince: String?,
     onOpenReplay: (ReplayStoryPage) -> Unit,
 ) {
-    if (loading) {
+    val context = LocalContext.current
+    val prewarmedSummary by ListeningStats.summaryFlow.collectAsStateWithLifecycle()
+    val effectiveCards = remember(cards, prewarmedSummary) {
+        if (cards.isNotEmpty()) {
+            cards
+        } else {
+            prewarmedSummary?.takeUnless { it.isEmpty }?.cards(context).orEmpty()
+        }
+    }
+    val effectiveLoading = loading && effectiveCards.isEmpty()
+
+    if (effectiveLoading) {
         ReplayCardRowSkeleton()
-    } else if (cards.isNotEmpty()) {
+    } else if (effectiveCards.isNotEmpty()) {
         ReplayCardRow(
-            cards = cards,
+            cards = effectiveCards,
             holder = holder,
             memberSince = memberSince,
             onCardClick = onOpenReplay,

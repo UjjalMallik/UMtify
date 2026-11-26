@@ -8,6 +8,9 @@ import com.music.bitchord.download.Downloads
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -108,6 +111,9 @@ object ListeningStats {
         val summary: ReplaySummary,
     )
 
+    private val _summaryFlow = MutableStateFlow<ReplaySummary?>(null)
+    val summaryFlow: StateFlow<ReplaySummary?> = _summaryFlow.asStateFlow()
+
     private lateinit var appContext: Context
 
     fun init(context: Context) {
@@ -117,7 +123,13 @@ object ListeningStats {
         // ask for one is the playback sampler — on the main thread, a few
         // seconds into the first track. Done here instead, it has happened long
         // before anything is playing.
-        writer.launch { synchronized(lock) { bucketFor(YearMonth.now()) } }
+        writer.launch {
+            synchronized(lock) { bucketFor(YearMonth.now()) }
+            runCatching {
+                val prewarmed = summary(ReplayPeriod.THIS_YEAR)
+                _summaryFlow.value = prewarmed
+            }
+        }
     }
 
     private fun sanitizePermanentArt(song: Song): String? {
@@ -436,7 +448,12 @@ object ListeningStats {
         // answer that has not changed.
         cached?.takeIf {
             it.period == period && it.version == version && it.facts == facts && it.day == today
-        }?.let { return@withContext it.summary }
+        }?.let {
+            if (period == ReplayPeriod.THIS_YEAR && _summaryFlow.value == null) {
+                _summaryFlow.value = it.summary
+            }
+            return@withContext it.summary
+        }
 
         val merged = MergedBucket()
         when {
@@ -456,6 +473,9 @@ object ListeningStats {
         }
         merged.toSummary(period, today).also {
             cached = Cached(period, version, facts, today, it)
+            if (period == ReplayPeriod.THIS_YEAR) {
+                _summaryFlow.value = it
+            }
         }
     }
 

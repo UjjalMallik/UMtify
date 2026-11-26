@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.bitchord.data.stats.ArtistFacts
 import com.music.bitchord.data.stats.ListeningStats
 import com.music.bitchord.data.stats.ReplayPeriod
@@ -62,9 +63,17 @@ class ReplayState(
 @Composable
 fun rememberReplayState(active: Boolean): Pair<ReplayState, (ReplayPeriod) -> Unit> {
     var period by rememberSaveable { mutableStateOf(ReplayPeriod.THIS_YEAR) }
-    var summary by remember { mutableStateOf<ReplaySummary?>(null) }
-    var loading by remember { mutableStateOf(true) }
+    val prewarmed by ListeningStats.summaryFlow.collectAsStateWithLifecycle()
+    var summary by remember { mutableStateOf<ReplaySummary?>(prewarmed ?: ListeningStats.summaryFlow.value) }
+    var loading by remember { mutableStateOf(summary == null && prewarmed == null) }
     var memberSince by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(prewarmed) {
+        if (prewarmed != null && summary == null) {
+            summary = prewarmed
+            loading = false
+        }
+    }
 
     LaunchedEffect(active) {
         if (!active) return@LaunchedEffect
@@ -80,8 +89,9 @@ fun rememberReplayState(active: Boolean): Pair<ReplayState, (ReplayPeriod) -> Un
         // Only the first read shows a spinner. Switching period must not blank
         // the charts for the beat it takes to merge the files — that reads as
         // the page breaking rather than as it answering a different question.
-        loading = summary == null
-        summary = ListeningStats.summary(period)
+        loading = summary == null && prewarmed == null
+        val fresh = ListeningStats.summary(period)
+        summary = fresh
         loading = false
 
         // Artist pictures and pages arrive after the page has been built — see

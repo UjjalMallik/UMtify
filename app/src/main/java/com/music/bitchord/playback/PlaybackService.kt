@@ -6709,10 +6709,11 @@ class PlaybackService : MediaLibraryService() {
     private fun farBufferingLoadControl() = DefaultLoadControl.Builder()
         .setBufferDurationsMs(
             /* minBufferMs = */ 15_000,
-            /* maxBufferMs = */ 30_000,
-            /* bufferForPlaybackMs = */ 200,
-            /* bufferForPlaybackAfterRebufferMs = */ 500,
+            /* maxBufferMs = */ 50_000,
+            /* bufferForPlaybackMs = */ 600,
+            /* bufferForPlaybackAfterRebufferMs = */ 1_200,
         )
+        .setPrioritizeTimeOverSizeThresholds(true)
         .setTargetBufferBytes(FAR_BUFFER_BYTES)
         .setBackBuffer(/* backBufferDurationMs = */ BACK_BUFFER_MS, /* retainBackBufferFromKeyframe = */ true)
         .build()

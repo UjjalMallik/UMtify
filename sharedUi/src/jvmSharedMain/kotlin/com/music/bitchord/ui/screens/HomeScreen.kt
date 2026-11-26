@@ -1,1895 +1,1914 @@
-package com.music.bitchord.ui.screens
-
-import androidx.compose.material3.surfaceColorAtElevation
-
-import com.music.bitchord.ui.components.contextClick
-import com.music.bitchord.ui.AppUi
-import com.music.bitchord.sharedui.resources.*
-import org.jetbrains.compose.resources.painterResource
-import org.jetbrains.compose.resources.DrawableResource
-import androidx.compose.foundation.Image
-import org.jetbrains.compose.resources.stringResource
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import com.music.bitchord.ui.components.longPressMenuClickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
-import com.music.bitchord.ui.components.ShelfRow
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.material3.pulltorefresh.PullToRefreshState
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Cached
-import androidx.compose.material.icons.rounded.Favorite
-import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.LibraryMusic
-import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Storage
-import com.music.bitchord.ui.icons.BitChordIcons
-import coil3.compose.AsyncImage
-import coil3.compose.AsyncImagePainter
-import coil3.compose.LocalPlatformContext
-import coil3.request.ImageRequest
-import coil3.request.crossfade
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.sp
-import com.music.bitchord.ui.components.DefaultCoverTile
-import com.music.bitchord.ui.components.FailedArtworkCache
-import com.music.bitchord.data.model.CARD_ART_PX
-import com.music.bitchord.data.model.HEADER_ART_PX
-import com.music.bitchord.data.model.HomeShelf
-import com.music.bitchord.data.model.ROW_ART_PX
-import com.music.bitchord.data.model.ShelfItem
-import com.music.bitchord.data.model.Song
-import com.music.bitchord.data.model.UiState
-import java.util.Locale
-import com.music.bitchord.data.model.artworkAt
-import com.music.bitchord.data.settings.LibraryViewType
-import com.music.bitchord.ui.components.HERO_CARD_RATIO
-import com.music.bitchord.ui.components.MessageState
-import com.music.bitchord.ui.components.PAGE_GUTTER
-import com.music.bitchord.ui.components.RowMoreButton
-import com.music.bitchord.ui.components.PlayingAccent
-import com.music.bitchord.ui.components.PullToRefresh
-import com.music.bitchord.ui.components.SHELF_CARD_WIDTH
-import com.music.bitchord.ui.components.SearchPlayingBars
-import com.music.bitchord.ui.components.SignInBanner
-import com.music.bitchord.ui.components.feedMoreSkeleton
-import com.music.bitchord.ui.components.feedSkeleton
-import com.music.bitchord.ui.components.recentlyPlayedSkeleton
-import com.music.bitchord.ui.components.heroCardWidth
-import com.music.bitchord.ui.components.thumbnailBorder
-import com.music.bitchord.ui.components.trackColumnWidth
-import com.music.bitchord.ui.components.liquidGlassCard
-import com.music.bitchord.ui.player.MeshGradientBackground
-import com.music.bitchord.ui.player.MeshPalette
-
-/** How far the Listen now heading and feed sit above the shared top inset. */
-private val HOME_TITLE_LIFT = 28.dp
-
-private const val RECENTS_TITLE = "Recents"
-private const val RECENT_TRACKS_PER_COLUMN = 3
-
-/**
- * Strict top-to-bottom section ordering:
- * 1. Recents (3 songs per column)
- * 2. Time-of-Day Smart Mix (Morning Energy / Afternoon Flow / Evening Chill / Your Late Night Mix)
- * 3. Your Top Artists (Circular avatar row)
- * 4. Because you play [Local Song] (Local → Online Smart Bridge)
- * 5. Remaining sections (Listen again, Song mixes, New releases, etc.)
- */
-fun orderHomeShelvesStrictly(shelves: List<HomeShelf>): List<HomeShelf> {
-    val recents = mutableListOf<HomeShelf>()
-    val timeOfDay = mutableListOf<HomeShelf>()
-    val topArtists = mutableListOf<HomeShelf>()
-    val localBridge = mutableListOf<HomeShelf>()
-    val others = mutableListOf<HomeShelf>()
-
-    shelves.forEach { shelf ->
-        val title = shelf.title.trim()
-        val titleLower = title.lowercase(Locale.ROOT)
-        when {
-            title.equals(RECENTS_TITLE, ignoreCase = true) || titleLower == "recents" -> recents.add(shelf)
-            isTimeOfDayShelf(title) -> timeOfDay.add(shelf)
-            title.equals("Your Top Artists", ignoreCase = true) || title.equals("Top Artists", ignoreCase = true) -> topArtists.add(shelf)
-            titleLower.contains("because you play") || titleLower.contains("local → online") || titleLower.contains("local -> online") -> localBridge.add(shelf)
-            else -> others.add(shelf)
-        }
-    }
-
-    return recents + timeOfDay + topArtists + localBridge + others
-}
-
-private fun List<ShelfItem>.playingItemMatcher(song: Song?): (ShelfItem) -> Boolean {
-    song ?: return { false }
-    // The card that was played, when the shelf holds it, and only that one —
-    // see [com.music.bitchord.data.model.playingRowMatcher], which rows use.
-    if (any { it.videoId == song.videoId }) return { it.videoId == song.videoId }
-    val byName = firstOrNull {
-        it.videoId != null &&
-            it.title.equals(song.title, ignoreCase = true) &&
-            (it.subtitle.contains(song.artist, ignoreCase = true) ||
-                song.artist.contains(it.subtitle, ignoreCase = true))
-    } ?: return { false }
-    return { it == byName }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun HomeScreen(
-    state: UiState<List<HomeShelf>>,
-    listState: LazyListState,
-    /** The tapped item and the recommendation shelf it came from. */
-    onItemClick: (ShelfItem, String) -> Unit,
-    onRetry: () -> Unit,
-    refreshing: Boolean,
-    onRefresh: () -> Unit,
-    pullState: PullToRefreshState,
-    modifier: Modifier = Modifier,
-    contentPadding: PaddingValues,
-    /** The page's heading, or null for none — the desktop's pages carry no heading. */
-    title: String?,
-    /**
-     * The mark that sits above the heading. The caller draws it because the
-     * wordmark asset belongs to the app, not to this module.
-     */
-    wordmark: @Composable () -> Unit,
-    signedIn: Boolean = true,
-    onSignIn: (() -> Unit)? = null,
-    /**
-     * Holding a card rather than tapping it. Every card on the feed answers,
-     * whichever kind it is: the caller reads the item the same way it does for
-     * a tap, so a track card opens the track menu and a card that points at a
-     * collection opens the album / playlist one.
-     */
-    onItemLongPress: ((ShelfItem) -> Unit)? = null,
-    // Explore doesn't page — only Home has a continuation worth following.
-    onLoadMore: (() -> Unit)? = null,
-    loadingMore: Boolean = false,
-    recentlyPlayedLoading: Boolean = false,
-    /**
-     * Whether the feed's first shelf gets the big full-bleed cards. The phone
-     * leads with them; on a window as wide as a desktop's they are posters, so
-     * there every shelf is the ordinary row.
-     */
-    leadHero: Boolean = true,
-    currentSong: Song? = null,
-    isPlaying: Boolean = false,
-    onSearchClick: (() -> Unit)? = null,
-) {
-    val recentsViewType by AppUi.host.homeRecentsViewType.collectAsStateWithLifecycle()
-    var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        visible = true
-    }
-    val entranceAlpha by animateFloatAsState(
-        targetValue = if (visible) 1f else 0f,
-        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
-        label = "homeEntranceFade",
-    )
-
-    val homeBg = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
-    PullToRefresh(
-        refreshing = refreshing,
-        onRefresh = onRefresh,
-        state = pullState,
-        modifier = modifier
-            .fillMaxSize()
-            .background(homeBg)
-            .graphicsLayer { alpha = entranceAlpha },
-    ) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .background(homeBg),
-            contentPadding = contentPadding,
-        ) {
-            if (title != null) {
-                item(key = "home-title", contentType = "header") { HomeTitle(title, wordmark, onSearchClick) }
-            }
-            if (!signedIn && onSignIn != null) {
-                item(key = "sign-in-banner", contentType = "banner") {
-                    SignInBanner(onSignIn = onSignIn, modifier = Modifier.padding(bottom = 8.dp))
-                }
-            }
-            when (state) {
-                is UiState.Loading -> {
-                    if (recentlyPlayedLoading) {
-                        recentlyPlayedSkeleton(listLayout = recentsViewType == LibraryViewType.LIST)
-                        // Recents owns the leading layout while its request is
-                        // pending, so the feed behind it starts with ordinary
-                        // shelf placeholders rather than another hero card.
-                        feedSkeleton(firstIsHero = false)
-                    } else {
-                        feedSkeleton(firstIsHero = false)
-                    }
-                }
-                is UiState.Error -> item(key = "home-error") {
-                    MessageState(state.message, actionLabel = stringResource(Res.string.retry), onAction = onRetry)
-                }
-                is UiState.Success -> {
-                    if (recentlyPlayedLoading) {
-                        recentlyPlayedSkeleton(listLayout = recentsViewType == LibraryViewType.LIST)
-                    }
-                    // The loading skeleton already owns the hero slot. Until
-                    // Recently Played lands, every real shelf must retain its
-                    // compact-card layout instead of briefly becoming a hero.
-                    itemsIndexedShelves(
-                        shelves = state.data,
-                        onItemClick = onItemClick,
-                        onItemLongPress = onItemLongPress,
-                        currentSong = currentSong,
-                        isPlaying = isPlaying,
-                        firstIsHero = false,
-                        recentsViewType = recentsViewType,
-                        onRecentsViewTypeToggle = {
-                            AppUi.host.setHomeRecentsViewType(
-                                if (recentsViewType == LibraryViewType.LIST) {
-                                    LibraryViewType.GRID
-                                } else {
-                                    LibraryViewType.LIST
-                                },
-                            )
-                        },
-                    )
-                    if (loadingMore) feedMoreSkeleton()
-                }
-            }
-        }
-    }
-
-    if (onLoadMore != null && state is UiState.Success) {
-        val loadMore by rememberUpdatedState(onLoadMore)
-        // Re-checked on every layout change, rather than on the rising edge of
-        // "the tail is in view". A page that appends only a shelf or two leaves
-        // the list still near its end, so an edge-triggered effect would never
-        // fire a second time: the feed dead-ended at the bottom with no
-        // skeleton and no request in flight to explain it. Restarting on
-        // [loadingMore] re-checks the moment a page settles, so the next one is
-        // asked for while the tail is still on screen to show it loading.
-        LaunchedEffect(listState, loadingMore) {
-            snapshotFlow {
-                val layout = listState.layoutInfo
-                (layout.visibleItemsInfo.lastOrNull()?.index ?: -1) to layout.totalItemsCount
-            }.collect { (lastVisible, total) ->
-                if (!loadingMore && total > 0 && lastVisible >= total - 3) loadMore()
-            }
-        }
-    }
-}
-
-/**
- * A key for one card inside a shelf's own row.
- *
- * The id is what survives a refresh — a track that is still the same track keeps
- * its scroll position and its already-decoded thumbnail — and the position is
- * what keeps a repeated single out of a duplicate-key crash, because a home feed
- * can and does show one video twice in the same carousel.
- */
-private fun shelfCardKey(position: Int, item: ShelfItem): String =
-    "$position-${item.videoId ?: item.browseId ?: item.title}"
-
-/**
- * Recents mirrors the artist page's top-tracks pager. Any other lead shelf keeps
- * Apple's full-bleed treatment, while the remaining shelves use square cards.
- */
-private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedShelves(
-    shelves: List<HomeShelf>,
-    onItemClick: (ShelfItem, String) -> Unit,
-    onItemLongPress: ((ShelfItem) -> Unit)?,
-    currentSong: Song?,
-    isPlaying: Boolean,
-    firstIsHero: Boolean = true,
-    recentsViewType: LibraryViewType,
-    onRecentsViewTypeToggle: () -> Unit,
-) {
-    val orderedShelves = orderHomeShelvesStrictly(shelves)
-    orderedShelves.forEachIndexed { index, shelf ->
-        item(key = shelf.title + index, contentType = "shelf") {
-            val openItem: (ShelfItem) -> Unit = { item -> onItemClick(item, shelf.title) }
-            val isSparseSection = (shelf.items.size in 1..2 && !shelf.title.equals("Your Top Artists", ignoreCase = true) && !shelf.title.equals("Top Artists", ignoreCase = true)) ||
-                shelf.title.equals("Forgotten favorites", ignoreCase = true) ||
-                shelf.title.equals("Archive Mix", ignoreCase = true) ||
-                isTimeOfDayShelf(shelf.title)
-
-            when {
-                shelf.title.equals(RECENTS_TITLE, ignoreCase = true) -> {
-                    RecentShelf(
-                        shelf = shelf,
-                        onItemClick = openItem,
-                        onItemLongPress = onItemLongPress,
-                        currentSong = currentSong,
-                        isPlaying = isPlaying,
-                        viewType = recentsViewType,
-                        onViewTypeToggle = onRecentsViewTypeToggle,
-                    )
-                }
-                shelf.title.equals("Your Top Artists", ignoreCase = true) ||
-                shelf.title.equals("Top Artists", ignoreCase = true) -> {
-                    CircularTopArtistsShelf(
-                        shelf = shelf,
-                        onItemClick = openItem,
-                    )
-                }
-                isSparseSection && shelf.items.isNotEmpty() -> {
-                    WideFeatureShelf(
-                        shelf = shelf,
-                        onItemClick = openItem,
-                        onItemLongPress = onItemLongPress,
-                        currentSong = currentSong,
-                        isPlaying = isPlaying,
-                    )
-                }
-                else -> {
-                    Shelf(
-                        shelf = shelf,
-                        onItemClick = openItem,
-                        onItemLongPress = onItemLongPress,
-                        currentSong = currentSong,
-                        isPlaying = isPlaying,
-                    )
-                }
-            }
-        }
-    }
-}
-
-/** Check if shelf is a Time-of-Day smart mix */
-internal fun isTimeOfDayShelf(title: String): Boolean {
-    val t = title.trim().lowercase(Locale.ROOT)
-    return t.contains("morning energy") ||
-        t.contains("afternoon flow") ||
-        t.contains("evening chill") ||
-        t.contains("late night mix")
-}
-
-/**
- * Sleek circular avatar carousel for "Your Top Artists".
- * Built from the user's most-played artists across local and online listening history.
- */
-@Composable
-private fun CircularTopArtistsShelf(
-    shelf: HomeShelf,
-    onItemClick: (ShelfItem) -> Unit,
-) {
-    Column(Modifier.padding(bottom = 26.dp)) {
-        SectionHeader(shelf.title, shelf.subtitle)
-        ShelfRow(
-            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            itemsIndexed(
-                shelf.items,
-                key = { position, item -> "top-artist-$position-${item.browseId ?: item.title}" },
-                contentType = { _, _ -> "circular_artist" },
-            ) { _, item ->
-                CircularArtistItem(
-                    item = item,
-                    onClick = { onItemClick(item) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun CircularArtistItem(
-    item: ShelfItem,
-    onClick: () -> Unit,
-) {
-    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
-    val ringBorder = remember(isLight) {
-        if (isLight) Color.Black.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.22f)
-    }
-
-    val avatarRevision by com.music.bitchord.data.ArtistAvatarCache.revision.collectAsStateWithLifecycle()
-    val officialAvatar = remember(item.title, avatarRevision) {
-        com.music.bitchord.data.ArtistAvatarCache.get(item.title)
-    }
-    LaunchedEffect(item.title) {
-        if (officialAvatar == null) {
-            com.music.bitchord.data.ArtistAvatarCache.resolveInBackground(item.title)
-        }
-    }
-    val effectiveThumbnail = officialAvatar ?: item.thumbnailUrl
-
-    Column(
-        modifier = Modifier
-            .width(88.dp)
-            .clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(84.dp)
-                .clip(CircleShape)
-                .border(1.5.dp, ringBorder, CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            val isBrokenOrBlank = effectiveThumbnail.isNullOrBlank() || FailedArtworkCache.isFailed(effectiveThumbnail)
-            if (isBrokenOrBlank) {
-                DefaultCoverTile(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(CircleShape),
-                    contentScale = ContentScale.Crop,
-                    title = item.title,
-                )
-            } else {
-                val context = LocalPlatformContext.current
-                val imageRequest = remember(effectiveThumbnail) {
-                    ImageRequest.Builder(context)
-                        .data(effectiveThumbnail.artworkAt(HEADER_ART_PX))
-                        .crossfade(250)
-                        .build()
-                }
-                AsyncImage(
-                    model = imageRequest,
-                    contentDescription = item.title,
-                    contentScale = ContentScale.Crop,
-                    onState = { state ->
-                        if (state is AsyncImagePainter.State.Error) {
-                            FailedArtworkCache.markFailed(item.thumbnailUrl)
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(CircleShape),
-                )
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = item.title,
-            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 2.dp),
-        )
-        if (item.subtitle.isNotBlank() && !item.subtitle.equals("Artist", ignoreCase = true)) {
-            Text(
-                text = item.subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 2.dp),
-            )
-        }
-    }
-}
-
-/**
- * Full-Width Glassy Wide Feature Card for sparse sections (1-2 items)
- * such as Forgotten Favorites, Time-of-Day Smart Mixes, and Local-to-Online highlights.
- */
-@Composable
-private fun WideFeatureShelf(
-    shelf: HomeShelf,
-    onItemClick: (ShelfItem) -> Unit,
-    onItemLongPress: ((ShelfItem) -> Unit)? = null,
-    currentSong: Song? = null,
-    isPlaying: Boolean = false,
-) {
-    Column(Modifier.padding(bottom = 26.dp)) {
-        SectionHeader(shelf.title, shelf.subtitle)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = PAGE_GUTTER),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            val isCurrentItem = shelf.items.playingItemMatcher(currentSong)
-            shelf.items.forEachIndexed { _, item ->
-                WideFeatureCard(
-                    item = item,
-                    sectionTitle = shelf.title,
-                    onClick = { onItemClick(item) },
-                    onLongPress = onItemLongPress?.let { { it(item) } },
-                    isCurrent = isCurrentItem(item),
-                    isPlaying = isCurrentItem(item) && isPlaying,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun WideFeatureCard(
-    item: ShelfItem,
-    sectionTitle: String,
-    onClick: () -> Unit,
-    onLongPress: (() -> Unit)? = null,
-    isCurrent: Boolean = false,
-    isPlaying: Boolean = false,
-) {
-    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
-    val cardShape = RoundedCornerShape(20.dp)
-    val glassBorder = if (isLight) Color.Black.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.22f)
-
-    val badgeText = when {
-        sectionTitle.contains("Forgotten", ignoreCase = true) || sectionTitle.contains("Archive", ignoreCase = true) -> "Rediscover"
-        sectionTitle.contains("Because you play", ignoreCase = true) || sectionTitle.contains("Local", ignoreCase = true) -> "Local → Online"
-        isTimeOfDayShelf(sectionTitle) || item.title.contains("Mix", ignoreCase = true) -> "Smart Mix"
-        else -> "Featured"
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(128.dp)
-            .clip(cardShape)
-            .border(1.dp, glassBorder, cardShape)
-            .background(if (isLight) Color(0xFFF2F4F8).copy(alpha = 0.95f) else Color(0xFF10141D).copy(alpha = 0.90f))
-            .clickable(onClick = onClick),
-    ) {
-        // Subtle ambient blurred background from cover thumbnail
-        if (!item.thumbnailUrl.isNullOrBlank() && !FailedArtworkCache.isFailed(item.thumbnailUrl)) {
-            val context = LocalPlatformContext.current
-            val bgRequest = remember(item.thumbnailUrl) {
-                ImageRequest.Builder(context)
-                    .data(item.thumbnailUrl.artworkAt(HEADER_ART_PX))
-                    .crossfade(false)
-                    .build()
-            }
-            AsyncImage(
-                model = bgRequest,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { alpha = if (isLight) 0.18f else 0.28f },
-            )
-        }
-
-        // Dark frosted glass overlay gradient
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.horizontalGradient(
-                        if (isLight) {
-                            listOf(
-                                Color.White.copy(alpha = 0.88f),
-                                Color(0xFFF0F4FA).copy(alpha = 0.80f),
-                                Color.White.copy(alpha = 0.92f),
-                            )
-                        } else {
-                            listOf(
-                                Color(0xFF0C0F17).copy(alpha = 0.94f),
-                                Color(0xFF121724).copy(alpha = 0.82f),
-                                Color(0xFF0C0F17).copy(alpha = 0.96f),
-                            )
-                        },
-                    ),
-                ),
-        )
-
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 14.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // Left: Crisp 96.dp rounded cover thumbnail
-            Box(
-                modifier = Modifier
-                    .size(96.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .border(0.8.dp, if (isLight) Color.Black.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.20f), RoundedCornerShape(14.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center,
-            ) {
-                val isBrokenOrBlank = item.thumbnailUrl.isNullOrBlank() || FailedArtworkCache.isFailed(item.thumbnailUrl)
-                if (isBrokenOrBlank) {
-                    DefaultCoverTile(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(14.dp)),
-                        contentScale = ContentScale.Crop,
-                    )
-                } else {
-                    val context = LocalPlatformContext.current
-                    val thumbRequest = remember(item.thumbnailUrl) {
-                        ImageRequest.Builder(context)
-                            .data(item.thumbnailUrl.artworkAt(CARD_ART_PX))
-                            .crossfade(false)
-                            .build()
-                    }
-                    AsyncImage(
-                        model = thumbRequest,
-                        contentDescription = item.title,
-                        contentScale = ContentScale.Crop,
-                        onState = { state ->
-                            if (state is AsyncImagePainter.State.Error) {
-                                FailedArtworkCache.markFailed(item.thumbnailUrl)
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(14.dp)),
-                    )
-                }
-
-                if (isCurrent) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color.Black.copy(alpha = 0.35f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (isPlaying) {
-                            SearchPlayingBars()
-                        } else {
-                            Icon(
-                                imageVector = Icons.Rounded.Pause,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp),
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.width(14.dp))
-
-            // Middle: Badge, Mix Title, Subtitle
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(end = 8.dp),
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(
-                            if (isLight) Color(0xFF1E88E5).copy(alpha = 0.14f) else Color(0xFF64B5F6).copy(alpha = 0.22f),
-                        )
-                        .border(
-                            0.6.dp,
-                            if (isLight) Color(0xFF1E88E5).copy(alpha = 0.35f) else Color(0xFF90CAF9).copy(alpha = 0.40f),
-                            RoundedCornerShape(50),
-                        )
-                        .padding(horizontal = 8.dp, vertical = 2.dp),
-                ) {
-                    Text(
-                        text = badgeText,
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.4.sp,
-                        ),
-                        color = if (isLight) Color(0xFF1565C0) else Color(0xFF90CAF9),
-                    )
-                }
-
-                Spacer(Modifier.height(6.dp))
-
-                Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = if (isCurrent) PlayingAccent else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-
-                Spacer(Modifier.height(3.dp))
-
-                Text(
-                    text = if (item.subtitle.isNotBlank()) item.subtitle else "Rediscover this curated mix",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-
-            // Right: Circular glassy Play button for instant one-tap playback
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (isLight) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.18f),
-                    )
-                    .border(
-                        1.dp,
-                        if (isLight) Color.Black.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.35f),
-                        CircleShape,
-                    )
-                    .clickable(onClick = onClick),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = if (isCurrent && isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                    contentDescription = "Play",
-                    tint = if (isLight) Color(0xFF1E1E1E) else Color.White,
-                    modifier = Modifier.size(26.dp),
-                )
-            }
-        }
-    }
-}
-
-/** The same four-rows-per-page treatment used by an artist's Top songs. */
-@Composable
-private fun RecentShelf(
-    shelf: HomeShelf,
-    onItemClick: (ShelfItem) -> Unit,
-    onItemLongPress: ((ShelfItem) -> Unit)?,
-    currentSong: Song?,
-    isPlaying: Boolean,
-    viewType: LibraryViewType,
-    onViewTypeToggle: () -> Unit,
-) {
-    Column(Modifier.padding(bottom = 26.dp)) {
-        RecentSectionHeader(
-            title = shelf.title,
-            subtitle = shelf.subtitle,
-            viewType = viewType,
-            onViewTypeToggle = onViewTypeToggle,
-        )
-        val isCurrentItem = shelf.items.playingItemMatcher(currentSong)
-        if (viewType == LibraryViewType.LIST) {
-            BoxWithConstraints {
-                val columnWidth = trackColumnWidth(maxWidth)
-                ShelfRow(
-                    contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    itemsIndexed(
-                        shelf.items.chunked(RECENT_TRACKS_PER_COLUMN),
-                        key = { position, _ -> "recent-column-$position" },
-                        contentType = { _, _ -> "recent_column" },
-                    ) { _, column ->
-                        Column(
-                            modifier = Modifier.width(columnWidth),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            column.forEach { item ->
-                                RecentTrackRow(
-                                    item = item,
-                                    onClick = { onItemClick(item) },
-                                    onLongPress = onItemLongPress?.let { { it(item) } },
-                                    isCurrent = isCurrentItem(item),
-                                    isPlaying = isCurrentItem(item) && isPlaying,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            BoxWithConstraints {
-                val cardWidth = heroCardWidth(maxWidth)
-                ShelfRow(
-                    contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    itemsIndexed(
-                        shelf.items,
-                        key = { position, item -> shelfCardKey(position, item) },
-                        contentType = { _, _ -> "hero_card" },
-                    ) { _, item ->
-                        HeroCard(
-                            item = item,
-                            onClick = { onItemClick(item) },
-                            onLongPress = onItemLongPress?.let { { it(item) } },
-                            modifier = Modifier.width(cardWidth),
-                            isCurrent = isCurrentItem(item),
-                            isPlaying = isCurrentItem(item) && isPlaying,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RecentSectionHeader(
-    title: String,
-    subtitle: String,
-    viewType: LibraryViewType,
-    onViewTypeToggle: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .padding(horizontal = PAGE_GUTTER, vertical = 10.dp)
-            .fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onBackground,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (subtitle.isNotBlank()) {
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        Spacer(Modifier.width(8.dp))
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
-                .clickable(onClick = onViewTypeToggle),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = if (viewType == LibraryViewType.LIST) {
-                    BitChordIcons.GridView
-                } else {
-                    BitChordIcons.ListView
-                },
-                contentDescription = stringResource(
-                    if (viewType == LibraryViewType.LIST) {
-                        Res.string.switch_to_grid_view
-                    } else {
-                        Res.string.switch_to_list_view
-                    },
-                ),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(19.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun RecentTrackRow(
-    item: ShelfItem,
-    onClick: () -> Unit,
-    onLongPress: (() -> Unit)?,
-    isCurrent: Boolean,
-    isPlaying: Boolean,
-) {
-    CompactTrackRow(
-        title = item.title,
-        subtitle = item.subtitle,
-        thumbnailUrl = item.thumbnailUrl,
-        onClick = onClick,
-        onLongPress = onLongPress,
-        isCurrent = isCurrent,
-        isPlaying = isPlaying,
-    )
-}
-
-/**
- * One row of Recents' four-to-a-column pager. Public so the desktop artist page
- * can list its top songs the same way.
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun CompactTrackRow(
-    title: String,
-    subtitle: String,
-    thumbnailUrl: String?,
-    onClick: () -> Unit,
-    onLongPress: (() -> Unit)?,
-    isCurrent: Boolean = false,
-    isPlaying: Boolean = false,
-) {
-    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
-    val cardShape = RoundedCornerShape(14.dp)
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .liquidGlassCard(shape = cardShape, isLight = isLight)
-            .longPressMenuClickable(onClick = onClick, onLongClick = onLongPress)
-            .contextClick(onLongPress)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(44.dp)) {
-            val isBrokenOrBlank = thumbnailUrl.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(thumbnailUrl)
-            val coverBorder = if (isLight) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.14f)
-            if (isBrokenOrBlank) {
-                com.music.bitchord.ui.components.DefaultCoverTile(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .border(0.8.dp, coverBorder, RoundedCornerShape(10.dp)),
-                    contentScale = ContentScale.Crop,
-                )
-            } else {
-                val context = coil3.compose.LocalPlatformContext.current
-                val imageRequest = remember(thumbnailUrl) {
-                    coil3.request.ImageRequest.Builder(context)
-                        .data(thumbnailUrl.artworkAt(ROW_ART_PX))
-                        .crossfade(false)
-                        .build()
-                }
-                AsyncImage(
-                    model = imageRequest,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    onState = { state ->
-                        if (state is coil3.compose.AsyncImagePainter.State.Error) {
-                            com.music.bitchord.ui.components.FailedArtworkCache.markFailed(thumbnailUrl)
-                        }
-                    },
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .border(0.8.dp, coverBorder, RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                )
-            }
-            if (isCurrent) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color.Black.copy(alpha = 0.35f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (isPlaying) {
-                        SearchPlayingBars()
-                    } else {
-                        Icon(
-                            imageVector = Icons.Rounded.Pause,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                }
-            }
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = if (isCurrent) PlayingAccent else MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (onLongPress != null) {
-            RowMoreButton(onClick = onLongPress)
-        }
-    }
-}
-
-/**
- * Listen now's large heading, with the wordmark stacked above it.
- *
- * Only the home tab carries it — the top bar no longer shows the logo, so this
- * is where the app's mark lives. Its height is taken from the heading's own
- * font size rather than a fixed dp, so the two keep their proportion under the
- * system font scale.
- */
-@Composable
-private fun HomeTitle(
-    title: String,
-    wordmark: @Composable () -> Unit,
-    onSearchClick: (() -> Unit)? = null,
-    modifier: Modifier = Modifier,
-) {
-    val style = MaterialTheme.typography.displayLarge
-    val pillShape = RoundedCornerShape(percent = 50)
-    Column(modifier = modifier.padding(horizontal = PAGE_GUTTER).padding(top = 2.dp, bottom = 8.dp)) {
-        Row(
-            modifier = Modifier
-                .padding(bottom = 14.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .height(36.dp)
-                    .aspectRatio(WORDMARK_ASPECT),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                wordmark()
-            }
-            if (onSearchClick != null) {
-                Spacer(Modifier.width(12.dp))
-                val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
-                val searchBorder = remember(isLight) {
-                    if (isLight) {
-                        Brush.verticalGradient(
-                            listOf(
-                                Color.Black.copy(alpha = 0.18f),
-                                Color.Black.copy(alpha = 0.10f),
-                            ),
-                        )
-                    } else {
-                        Brush.verticalGradient(
-                            listOf(
-                                Color.White.copy(alpha = 0.45f),
-                                Color.White.copy(alpha = 0.12f),
-                            ),
-                        )
-                    }
-                }
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(36.dp)
-                        .liquidGlassCard(shape = pillShape, isLight = isLight)
-                        .clickable(onClick = onSearchClick)
-                        .padding(horizontal = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Search,
-                        contentDescription = null,
-                        tint = if (isLight) Color(0xFF1E1E1E) else Color.White,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = "Search songs, artists...",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                        color = if (isLight) Color(0xFF1E1E1E) else Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-        }
-        Text(
-            text = title,
-            style = style,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
-    }
-}
-
-/** The wordmark's height against the heading's font size. */
-private const val LOGO_TO_FONT = 1.1f
-
-/** ic_umtify_wordmark's viewport, 800 x 275. */
-private const val WORDMARK_ASPECT = 800f / 275f
-
-/**
- * Shared by the home feed, Explore and Library so headings line up across tabs.
- *
- * [onShowAll] is only ever set on Library, whose rows stop at five cards
- * rather than running the shelf's whole length — see [LibraryGridShelf].
- * Home and Explore never pass it, so their heading is unchanged.
- */
-@Composable
-internal fun SectionHeader(title: String, subtitle: String = "", onShowAll: (() -> Unit)? = null) {
-    val displayTitle = localizeShelfTitle(title)
-    val displaySubtitle = localizeShelfSubtitle(subtitle)
-    Row(
-        modifier = Modifier
-            .padding(horizontal = PAGE_GUTTER, vertical = 10.dp)
-            .fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = displayTitle,
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onBackground,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (displaySubtitle.isNotBlank()) {
-                Text(
-                    text = displaySubtitle,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        if (onShowAll != null) {
-            Text(
-                text = stringResource(Res.string.show_all),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .clickable(onClick = onShowAll)
-                    .padding(start = 12.dp, top = 4.dp, bottom = 4.dp),
-            )
-        }
-    }
-}
-@Composable
-internal fun localizeShelfTitle(title: String): String {
-    val trimmed = title.trim()
-    return when {
-        trimmed.equals("Recents", ignoreCase = true) ||
-            trimmed.equals("Recently played", ignoreCase = true) ||
-            trimmed.equals("Gần đây", ignoreCase = true) ||
-            trimmed.equals("最近", ignoreCase = true) ->
-            stringResource(Res.string.shelf_recents)
-        trimmed.equals("Playlists", ignoreCase = true) ||
-            trimmed.equals("Danh sách phát", ignoreCase = true) ||
-            trimmed.equals("再生リスト", ignoreCase = true) ->
-            stringResource(Res.string.playlists)
-        trimmed.equals("Albums", ignoreCase = true) ||
-            trimmed.equals("Album", ignoreCase = true) ||
-            trimmed.equals("アルバム", ignoreCase = true) ->
-            stringResource(Res.string.albums)
-        trimmed.equals("Artists", ignoreCase = true) ||
-            trimmed.equals("Nghệ sĩ", ignoreCase = true) ||
-            trimmed.equals("アーティスト", ignoreCase = true) ->
-            stringResource(Res.string.artists)
-        trimmed.equals("Subscriptions", ignoreCase = true) ||
-            trimmed.equals("Đã đăng ký", ignoreCase = true) ||
-            trimmed.equals("登録チャンネル", ignoreCase = true) ->
-            stringResource(Res.string.subscriptions)
-        trimmed.equals("Trending community playlists", ignoreCase = true) ||
-            trimmed.equals("Danh sách phát cộng đồng thịnh hành", ignoreCase = true) ||
-            trimmed.equals("Danh sách phát thịnh hành trong cộng đồng người dùng", ignoreCase = true) ||
-            trimmed.equals("急上昇のコミュニティ再生リスト", ignoreCase = true) ->
-            stringResource(Res.string.shelf_trending_community_playlists)
-        trimmed.equals("Featured playlists for you", ignoreCase = true) ||
-            trimmed.equals("Danh sách phát đề xuất cho bạn", ignoreCase = true) ||
-            trimmed.equals("Danh sách phát nổi bật dành cho bạn", ignoreCase = true) ||
-            trimmed.equals("おすすめの再生リスト", ignoreCase = true) ->
-            stringResource(Res.string.shelf_featured_playlists_for_you)
-        trimmed.equals("Quick picks", ignoreCase = true) ||
-            trimmed.equals("Lựa chọn nhanh", ignoreCase = true) ||
-            trimmed.equals("Chọn nhanh đài phát", ignoreCase = true) ||
-            trimmed.equals("クイック ミックス", ignoreCase = true) ||
-            trimmed.equals("দ্রুত পছন্দ", ignoreCase = true) ||
-            trimmed.equals("দ্রুত বাছাই", ignoreCase = true) ||
-            trimmed.equals("সেরা বাছাই", ignoreCase = true) ||
-            trimmed.equals("Schnellauswahl", ignoreCase = true) ||
-            trimmed.equals("Selección rápida", ignoreCase = true) ||
-            trimmed.equals("Sélection rapide", ignoreCase = true) ||
-            trimmed.equals("快速选择", ignoreCase = true) ||
-            trimmed.equals("快速選擇", ignoreCase = true) ->
-            stringResource(Res.string.shelf_quick_picks)
-        trimmed.equals("Listen again", ignoreCase = true) ||
-            trimmed.equals("Nghe lại", ignoreCase = true) ||
-            trimmed.equals("もう一度聴く", ignoreCase = true) ->
-            stringResource(Res.string.shelf_listen_again)
-        trimmed.equals("Mixed for you", ignoreCase = true) ||
-            trimmed.equals("Dành riêng cho bạn", ignoreCase = true) ||
-            trimmed.equals("ミックス", ignoreCase = true) ->
-            stringResource(Res.string.shelf_mixed_for_you)
-        trimmed.startsWith("Similar to", ignoreCase = true) -> {
-            val rest = trimmed.substring(10).trim()
-            stringResource(Res.string.shelf_similar_to, rest)
-        }
-        trimmed.startsWith("Tương tự như", ignoreCase = true) -> {
-            val rest = trimmed.substring(12).trim()
-            stringResource(Res.string.shelf_similar_to, rest)
-        }
-        trimmed.equals("Forgotten favorites", ignoreCase = true) ||
-            trimmed.equals("Giai điệu quen thuộc", ignoreCase = true) ||
-            trimmed.equals("よく聴いたお気に入りの曲", ignoreCase = true) ->
-            stringResource(Res.string.shelf_forgotten_favorites)
-        trimmed.equals("Recommended music videos", ignoreCase = true) ||
-            trimmed.equals("Video âm nhạc đề xuất", ignoreCase = true) ||
-            trimmed.equals("おすすめのミュージック ビデオ", ignoreCase = true) ->
-            stringResource(Res.string.shelf_recommended_music_videos)
-        trimmed.equals("From your library", ignoreCase = true) ||
-            trimmed.equals("Từ thư viện của bạn", ignoreCase = true) ||
-            trimmed.equals("ライブラリから", ignoreCase = true) ->
-            stringResource(Res.string.shelf_from_your_library)
-        trimmed.equals("Charts", ignoreCase = true) ||
-            trimmed.equals("Bảng xếp hạng", ignoreCase = true) ||
-            trimmed.equals("チャート", ignoreCase = true) ->
-            stringResource(Res.string.shelf_charts)
-        trimmed.equals("New releases", ignoreCase = true) ||
-            trimmed.equals("Bản phát hành mới", ignoreCase = true) ||
-            trimmed.equals("最新リリース", ignoreCase = true) ->
-            stringResource(Res.string.shelf_new_releases)
-        trimmed.equals("Top music videos", ignoreCase = true) ||
-            trimmed.equals("Video âm nhạc hàng đầu", ignoreCase = true) ||
-            trimmed.equals("人気のミュージック ビデオ", ignoreCase = true) ->
-            stringResource(Res.string.shelf_top_music_videos)
-        trimmed.equals("For you", ignoreCase = true) ||
-            trimmed.equals("Dành cho bạn", ignoreCase = true) ||
-            trimmed.equals("あなたへのおすすめ", ignoreCase = true) ->
-            stringResource(Res.string.shelf_for_you)
-        trimmed.equals("Hits today", ignoreCase = true) ||
-            trimmed.equals("Today's Hits", ignoreCase = true) ||
-            trimmed.equals("Bản hit hôm nay", ignoreCase = true) ||
-            trimmed.equals("今日のヒット曲", ignoreCase = true) ->
-            stringResource(Res.string.shelf_hits_today)
-        trimmed.equals("Artists on the rise", ignoreCase = true) ||
-            trimmed.equals("Nghệ sĩ đang lên", ignoreCase = true) ->
-            stringResource(Res.string.shelf_artists_on_the_rise)
-        trimmed.equals("Concerts", ignoreCase = true) ||
-            trimmed.equals("Buổi hòa nhạc", ignoreCase = true) ||
-            trimmed.equals("コンサート", ignoreCase = true) ->
-            stringResource(Res.string.shelf_concerts)
-        trimmed.startsWith("Shorts", ignoreCase = true) ||
-            trimmed.equals("Shorts nổi bật", ignoreCase = true) ||
-            trimmed.equals("ショート", ignoreCase = true) ->
-            stringResource(Res.string.shelf_shorts)
-        trimmed.equals("Trending", ignoreCase = true) ||
-            trimmed.equals("Thịnh hành", ignoreCase = true) ||
-            trimmed.equals("急上昇", ignoreCase = true) ->
-            stringResource(Res.string.shelf_trending)
-        else -> title
-    }
-}
-@Composable
-internal fun localizeShelfSubtitle(subtitle: String): String {
-    val trimmed = subtitle.trim()
-    return when {
-        trimmed.equals("TOP TUNES RIGHT NOW", ignoreCase = true) ||
-            trimmed.equals("Top tunes right now", ignoreCase = true) ||
-            trimmed.equals("Giai điệu hàng đầu hiện nay", ignoreCase = true) ||
-            trimmed.equals("注目の曲", ignoreCase = true) ->
-            stringResource(Res.string.shelf_top_tunes_right_now)
-        trimmed.equals("From the community", ignoreCase = true) ||
-            trimmed.equals("Từ cộng đồng", ignoreCase = true) ||
-            trimmed.equals("コミュニティより", ignoreCase = true) ->
-            stringResource(Res.string.shelf_from_the_community)
-        trimmed.equals("YouTube Charts", ignoreCase = true) ||
-            trimmed.equals("Bảng xếp hạng YouTube", ignoreCase = true) ||
-            trimmed.equals("YouTube チャート", ignoreCase = true) ->
-            stringResource(Res.string.shelf_youtube_charts)
-        else -> subtitle
-    }
-}
-
-@Composable
-internal fun localizeCardSubtitle(subtitle: String): String {
-    if (subtitle.isBlank()) return subtitle
-    val delimiter = " • "
-    val parts = subtitle.split(delimiter)
-    val songLabel = stringResource(Res.string.shelf_song_item)
-    val singleLabel = stringResource(Res.string.shelf_single)
-    val chartLabel = stringResource(Res.string.shelf_chart)
-    val playlistLabel = stringResource(Res.string.playlist)
-    val localizedParts = parts.map { part ->
-        val trimmed = part.trim()
-        val lower = trimmed.lowercase(Locale.ROOT)
-        when {
-            trimmed.equals("Song", ignoreCase = true) || trimmed.equals("Titre", ignoreCase = true) ||
-                trimmed.equals("Bài hát", ignoreCase = true) || trimmed.equals("曲", ignoreCase = true) -> songLabel
-            trimmed.equals("Single", ignoreCase = true) || trimmed.equals("Đĩa đơn", ignoreCase = true) ||
-                trimmed.equals("シングル", ignoreCase = true) -> singleLabel
-            trimmed.equals("Chart", ignoreCase = true) || trimmed.equals("Bảng xếp hạng", ignoreCase = true) ||
-                trimmed.equals("チャート", ignoreCase = true) -> chartLabel
-            trimmed.equals("Playlist", ignoreCase = true) || trimmed.equals("Danh sách phát", ignoreCase = true) ||
-                trimmed.equals("再生リスト", ignoreCase = true) -> playlistLabel
-            lower.endsWith(" views") || lower.endsWith(" view") || lower.endsWith(" lượt xem") ||
-                lower.endsWith(" 回視聴") || lower.endsWith("回視聴") -> {
-                val count = trimmed.substringBeforeLast(' ', "").trim()
-                if (count.any { it.isDigit() }) stringResource(Res.string.card_views_format, count) else part
-            }
-            lower.endsWith(" plays") || lower.endsWith(" play") || lower.endsWith(" lượt phát") ||
-                lower.endsWith(" 回再生") || lower.endsWith("回再生") -> {
-                val count = trimmed.substringBeforeLast(' ', "").trim()
-                if (count.any { it.isDigit() }) stringResource(Res.string.card_plays_format, count) else part
-            }
-            lower.endsWith(" songs") || lower.endsWith(" song") || lower.endsWith(" bài hát") ||
-                lower.endsWith(" 曲") || lower.endsWith("曲") -> {
-                val count = trimmed.substringBeforeLast(' ', "").trim()
-                if (count.any { it.isDigit() }) stringResource(Res.string.card_songs_format, count) else part
-            }
-            else -> part
-        }
-    }
-    return localizedParts.joinToString(delimiter)
-}
-
-@Composable
-private fun HeroShelf(
-    shelf: HomeShelf,
-    onItemClick: (ShelfItem) -> Unit,
-    onItemLongPress: ((ShelfItem) -> Unit)? = null,
-    currentSong: Song? = null,
-    isPlaying: Boolean = false,
-) {
-    Column(Modifier.padding(bottom = 26.dp)) {
-        SectionHeader(shelf.title, shelf.subtitle)
-        val isCurrentItem = shelf.items.playingItemMatcher(currentSong)
-        // Measured rather than taken as a share of the parent, because the card
-        // has a ceiling as well as a fraction — see [heroCardWidth]. A fixed
-        // width is also the only one of the two the aspect ratio below can turn
-        // into a height, so the card keeps its shape however it was arrived at.
-        BoxWithConstraints {
-            val cardWidth = heroCardWidth(maxWidth)
-            ShelfRow(
-                state = rememberLazyListState(),
-                contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                itemsIndexed(
-                    shelf.items,
-                    key = { position, item -> shelfCardKey(position, item) },
-                    contentType = { _, _ -> "hero_card" },
-                ) { _, item ->
-                    HeroCard(
-                        item = item,
-                        onClick = { onItemClick(item) },
-                        onLongPress = onItemLongPress?.let { { it(item) } },
-                        modifier = Modifier.width(cardWidth),
-                        isCurrent = isCurrentItem(item),
-                        isPlaying = isCurrentItem(item) && isPlaying,
-                    )
-                }
-            }
-        }
-    }
-}
-
-/** Big card: artwork with the caption laid over a scrim, as on Listen Now. */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun HeroCard(
-    item: ShelfItem,
-    onClick: () -> Unit,
-    onLongPress: (() -> Unit)? = null,
-    modifier: Modifier = Modifier,
-    isCurrent: Boolean = false,
-    isPlaying: Boolean = false,
-) {
-    Box(
-        modifier = modifier
-            .aspectRatio(HERO_CARD_RATIO)
-            .clip(RoundedCornerShape(18.dp))
-            .thumbnailBorder(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .longPressMenuClickable(onClick = onClick, onLongClick = onLongPress)
-            .contextClick(onLongPress),
-    ) {
-        val isBrokenOrBlank = item.thumbnailUrl.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(item.thumbnailUrl)
-        if (isBrokenOrBlank) {
-            com.music.bitchord.ui.components.DefaultCoverTile(
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-            )
-        } else {
-            val context = coil3.compose.LocalPlatformContext.current
-            val imageRequest = remember(item.thumbnailUrl) {
-                coil3.request.ImageRequest.Builder(context)
-                    .data(item.thumbnailUrl.artworkAt(HEADER_ART_PX))
-                    .crossfade(false)
-                    .build()
-            }
-            AsyncImage(
-                model = imageRequest,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                onState = { state ->
-                    if (state is coil3.compose.AsyncImagePainter.State.Error) {
-                        com.music.bitchord.ui.components.FailedArtworkCache.markFailed(item.thumbnailUrl)
-                    }
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        if (isCurrent) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.35f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (isPlaying) {
-                    SearchPlayingBars()
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.60f))
-                            .border(0.8.dp, Color.White.copy(alpha = 0.30f), CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Pause,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
-            }
-        }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomStart)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.78f)),
-                    ),
-                )
-                .padding(start = 16.dp, end = 16.dp, top = 34.dp, bottom = 14.dp),
-        ) {
-            Text(
-                text = item.title,
-                style = MaterialTheme.typography.titleLarge,
-                color = if (isCurrent) PlayingAccent else Color.White,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (item.subtitle.isNotBlank()) {
-                val displaySubtitle = localizeCardSubtitle(item.subtitle)
-                Text(
-                    text = displaySubtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.72f),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
-}
-
-/**
- * [leadingCard] rides at the head of the row, ahead of the content — the
- * Library tab's "New playlist" tile, which belongs among the playlists rather
- * than in a bar somewhere above them. [onItemLongPress] opens the album /
- * playlist menu, and is null only where a card points at something with no
- * track list behind it to act on.
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-internal fun Shelf(
-    shelf: HomeShelf,
-    onItemClick: (ShelfItem) -> Unit,
-    onItemLongPress: ((ShelfItem) -> Unit)? = null,
-    leadingCard: (@Composable () -> Unit)? = null,
-    currentSong: Song? = null,
-    isPlaying: Boolean = false,
-) {
-    Column(Modifier.padding(bottom = 26.dp)) {
-        SectionHeader(shelf.title, shelf.subtitle)
-        val isCurrentItem = shelf.items.playingItemMatcher(currentSong)
-        ShelfRow(
-            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            leadingCard?.let { card -> item(key = "leading") { card() } }
-            itemsIndexed(
-                shelf.items,
-                key = { position, item -> shelfCardKey(position, item) },
-                contentType = { _, _ -> "shelf_card" },
-            ) { _, item ->
-                ShelfCard(
-                    item = item,
-                    onClick = { onItemClick(item) },
-                    onLongPress = onItemLongPress?.let { { it(item) } },
-                    isCurrent = isCurrentItem(item),
-                    isPlaying = isCurrentItem(item) && isPlaying,
-                )
-            }
-        }
-    }
-}
-
-/**
- * A card that isn't a thing yet — the dashed "New playlist" tile at the head
- * of the Library's playlist row, sized to sit in line with the covers beside
- * it rather than as a button bolted above them.
- */
-@Composable
-internal fun NewShelfCard(
-    icon: ImageVector,
-    label: String,
-    subtitle: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier.width(SHELF_CARD_WIDTH),
-    /** A full-colour mark drawn in place of [icon], for a card that stands for a brand. */
-    logo: DrawableResource? = null,
-) {
-    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
-    val cardShape = RoundedCornerShape(18.dp)
-
-    Column(
-        modifier = modifier
-            .liquidGlassCard(shape = cardShape, isLight = isLight)
-            .clickable(onClick = onClick)
-            .padding(8.dp),
-    ) {
-        val coverBorder = if (isLight) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.14f)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(14.dp))
-                .border(0.8.dp, coverBorder, RoundedCornerShape(14.dp))
-                .background(if (isLight) Color.Black.copy(alpha = 0.04f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (logo != null) {
-                // The mark is a disc with the bars cut out, so tinting it
-                // leaves the bars clear: white on dark, black on light.
-                Icon(
-                    painter = painterResource(logo),
-                    contentDescription = null,
-                    tint = if (isLight) Color(0xFF1DB954) else Color(0xFF1ED760),
-                    modifier = Modifier.size(40.dp),
-                )
-            } else {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(34.dp),
-                )
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = subtitle,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-/**
- * A device-folder card: mesh gradient in the folder's colours with its glyph
- * on top. One composable for local music, WebDAV and SMB rather than three
- * copies of the same box.
- */
-@Composable
-private fun ServiceCard(colors: List<Color>, trackKey: String, icon: ImageVector) {
-    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
-    val palette = remember { MeshPalette(colors) }
-    val coverBorder = if (isLight) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.14f)
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(1f)
-            .clip(RoundedCornerShape(14.dp))
-            .border(0.8.dp, coverBorder, RoundedCornerShape(14.dp)),
-        contentAlignment = Alignment.Center,
-    ) {
-        MeshGradientBackground(
-            palette = palette,
-            trackKey = trackKey,
-            continuous = true,
-            blurRadius = 24.dp,
-        )
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = Color.White,
-            modifier = Modifier.size(40.dp),
-        )
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-internal fun ShelfCard(
-    item: ShelfItem,
-    onClick: () -> Unit,
-    onLongPress: (() -> Unit)? = null,
-    modifier: Modifier = Modifier.width(SHELF_CARD_WIDTH),
-    /** Set on a Library playlist card that's in [AppSettings.pinnedPlaylists][com.music.bitchord.data.settings.AppSettings.pinnedPlaylists]. */
-    isPinned: Boolean = false,
-    isCurrent: Boolean = false,
-    isPlaying: Boolean = false,
-) {
-    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
-    val cardShape = RoundedCornerShape(18.dp)
-    val coverBorder = if (isLight) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.14f)
-
-    Column(
-        modifier = modifier
-            .liquidGlassCard(shape = cardShape, isLight = isLight)
-            .longPressMenuClickable(onClick = onClick, onLongClick = onLongPress)
-            .contextClick(onLongPress)
-            .padding(8.dp),
-    ) {
-        when {
-            item.browseId in listOf("VLLM", "LM") || item.title.equals("Liked Music", ignoreCase = true) -> {
-                val primary = MaterialTheme.colorScheme.primary
-                val secondary = MaterialTheme.colorScheme.secondary
-                val tertiary = MaterialTheme.colorScheme.tertiary
-                val surface = MaterialTheme.colorScheme.surfaceContainerHigh
-                val palette = remember(primary, secondary, tertiary, surface) {
-                    MeshPalette(listOf(primary, secondary, tertiary, surface))
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .border(0.8.dp, coverBorder, RoundedCornerShape(14.dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    MeshGradientBackground(
-                        palette = palette,
-                        trackKey = "liked_music_${primary.hashCode()}",
-                        continuous = true,
-                        blurRadius = 24.dp,
-                    )
-                    Icon(
-                        imageVector = Icons.Rounded.Favorite,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(40.dp),
-                    )
-                    if (isCurrent) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color.Black.copy(alpha = 0.35f)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (isPlaying) {
-                                SearchPlayingBars()
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.Black.copy(alpha = 0.60f))
-                                        .border(0.8.dp, Color.White.copy(alpha = 0.30f), CircleShape),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Pause,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            item.browseId == "local:downloads" -> {
-                val palette = remember { MeshPalette(listOf(Color(0xFF1E3C72), Color(0xFF2A5298))) }
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .border(0.8.dp, coverBorder, RoundedCornerShape(14.dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    MeshGradientBackground(
-                        palette = palette,
-                        trackKey = "local:downloads",
-                        continuous = true,
-                        blurRadius = 24.dp,
-                    )
-                    Icon(
-                        imageVector = BitChordIcons.Download,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(40.dp),
-                    )
-                }
-            }
-            item.browseId == "local:all" -> ServiceCard(
-                colors = listOf(Color(0xFF134E5E), Color(0xFF71B280)),
-                trackKey = "local:all",
-                icon = Icons.Rounded.LibraryMusic,
-            )
-            item.browseId == "local:cache" -> ServiceCard(
-                colors = listOf(Color(0xFF42275A), Color(0xFF734B6D)),
-                trackKey = "local:cache",
-                icon = Icons.Rounded.Cached,
-            )
-            item.browseId == "local:webdav" -> ServiceCard(
-                colors = listOf(Color(0xFF3A1C71), Color(0xFFD76D77)),
-                trackKey = "local:webdav",
-                icon = Icons.Rounded.Folder,
-            )
-            item.browseId == "local:smb" -> ServiceCard(
-                colors = listOf(Color(0xFF0F2027), Color(0xFF2C5364)),
-                trackKey = "local:smb",
-                icon = Icons.Rounded.Storage,
-            )
-            else -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .border(0.8.dp, coverBorder, RoundedCornerShape(14.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                ) {
-                    val isBrokenOrBlank = item.thumbnailUrl.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(item.thumbnailUrl)
-                    if (isBrokenOrBlank) {
-                        com.music.bitchord.ui.components.DefaultCoverTile(
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                        )
-                    } else {
-                        val context = coil3.compose.LocalPlatformContext.current
-                        val imageRequest = remember(item.thumbnailUrl) {
-                            coil3.request.ImageRequest.Builder(context)
-                                .data(item.thumbnailUrl.artworkAt(CARD_ART_PX))
-                                .crossfade(false)
-                                .build()
-                        }
-                        AsyncImage(
-                            model = imageRequest,
-                            contentDescription = null,
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                            onState = { state ->
-                                if (state is coil3.compose.AsyncImagePainter.State.Error) {
-                                    com.music.bitchord.ui.components.FailedArtworkCache.markFailed(item.thumbnailUrl)
-                                }
-                            },
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                    if (isCurrent) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color.Black.copy(alpha = 0.35f)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (isPlaying) {
-                                SearchPlayingBars()
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.Black.copy(alpha = 0.60f))
-                                        .border(0.8.dp, Color.White.copy(alpha = 0.30f), CircleShape),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Pause,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                }
-                            }
-                        }
-                    } else if (item.videoId != null) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(6.dp)
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.48f))
-                                .border(
-                                    width = 0.8.dp,
-                                    brush = Brush.verticalGradient(
-                                        listOf(
-                                            Color.White.copy(alpha = 0.65f),
-                                            Color.White.copy(alpha = 0.18f),
-                                        ),
-                                    ),
-                                    shape = CircleShape,
-                                ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.PlayArrow,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp),
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (isPinned) {
-                Icon(
-                    imageVector = BitChordIcons.Pin,
-                    contentDescription = stringResource(Res.string.pinned),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(14.dp),
-                )
-                Spacer(Modifier.width(4.dp))
-            }
-            Text(
-                text = item.title,
-                style = MaterialTheme.typography.titleMedium,
-                color = if (isCurrent) PlayingAccent else MaterialTheme.colorScheme.onBackground,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-        }
-        val displaySubtitle = localizeCardSubtitle(item.subtitle)
-        Text(
-            text = displaySubtitle.ifBlank { " " },
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
+package com.music.bitchord.ui.screens
+
+import androidx.compose.material3.surfaceColorAtElevation
+
+import com.music.bitchord.ui.components.contextClick
+import com.music.bitchord.ui.AppUi
+import com.music.bitchord.sharedui.resources.*
+import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.DrawableResource
+import androidx.compose.foundation.Image
+import org.jetbrains.compose.resources.stringResource
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import com.music.bitchord.ui.components.longPressMenuClickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import com.music.bitchord.ui.components.ShelfRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.material3.pulltorefresh.PullToRefreshState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Cached
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Storage
+import com.music.bitchord.ui.icons.BitChordIcons
+import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
+import coil3.compose.LocalPlatformContext
+import coil3.request.ImageRequest
+import coil3.request.crossfade
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
+import com.music.bitchord.ui.components.DefaultCoverTile
+import com.music.bitchord.ui.components.FailedArtworkCache
+import com.music.bitchord.data.model.CARD_ART_PX
+import com.music.bitchord.data.model.HEADER_ART_PX
+import com.music.bitchord.data.model.HomeShelf
+import com.music.bitchord.data.model.ROW_ART_PX
+import com.music.bitchord.data.model.ShelfItem
+import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.model.UiState
+import java.util.Locale
+import com.music.bitchord.data.model.artworkAt
+import com.music.bitchord.data.settings.LibraryViewType
+import com.music.bitchord.ui.components.HERO_CARD_RATIO
+import com.music.bitchord.ui.components.MessageState
+import com.music.bitchord.ui.components.PAGE_GUTTER
+import com.music.bitchord.ui.components.RowMoreButton
+import com.music.bitchord.ui.components.PlayingAccent
+import com.music.bitchord.ui.components.PullToRefresh
+import com.music.bitchord.ui.components.SHELF_CARD_WIDTH
+import com.music.bitchord.ui.components.SearchPlayingBars
+import com.music.bitchord.ui.components.SignInBanner
+import com.music.bitchord.ui.components.feedMoreSkeleton
+import com.music.bitchord.ui.components.feedSkeleton
+import com.music.bitchord.ui.components.recentlyPlayedSkeleton
+import com.music.bitchord.ui.components.heroCardWidth
+import com.music.bitchord.ui.components.thumbnailBorder
+import com.music.bitchord.ui.components.trackColumnWidth
+import com.music.bitchord.ui.components.liquidGlassCard
+import com.music.bitchord.ui.player.MeshGradientBackground
+import com.music.bitchord.ui.player.MeshPalette
+
+/** How far the Listen now heading and feed sit above the shared top inset. */
+private val HOME_TITLE_LIFT = 28.dp
+
+private const val RECENTS_TITLE = "Recents"
+private const val RECENT_TRACKS_PER_COLUMN = 3
+
+/**
+ * Strict top-to-bottom section ordering:
+ * 1. Recents (3 songs per column)
+ * 2. Time-of-Day Smart Mix (Morning Energy / Afternoon Flow / Evening Chill / Your Late Night Mix)
+ * 3. Your Top Artists (Circular avatar row)
+ * 4. Because you play [Local Song] (Local → Online Smart Bridge)
+ * 5. Remaining sections (Listen again, Song mixes, New releases, etc.)
+ */
+fun orderHomeShelvesStrictly(shelves: List<HomeShelf>): List<HomeShelf> {
+    val recents = mutableListOf<HomeShelf>()
+    val timeOfDay = mutableListOf<HomeShelf>()
+    val topArtists = mutableListOf<HomeShelf>()
+    val localBridge = mutableListOf<HomeShelf>()
+    val others = mutableListOf<HomeShelf>()
+
+    shelves.forEach { shelf ->
+        val title = shelf.title.trim()
+        val titleLower = title.lowercase(Locale.ROOT)
+        when {
+            title.equals(RECENTS_TITLE, ignoreCase = true) || titleLower == "recents" -> recents.add(shelf)
+            isTimeOfDayShelf(title) -> timeOfDay.add(shelf)
+            title.equals("Your Top Artists", ignoreCase = true) || title.equals("Top Artists", ignoreCase = true) -> topArtists.add(shelf)
+            titleLower.contains("because you play") || titleLower.contains("local → online") || titleLower.contains("local -> online") -> localBridge.add(shelf)
+            else -> others.add(shelf)
+        }
+    }
+
+    return recents + timeOfDay + topArtists + localBridge + others
+}
+
+private fun List<ShelfItem>.playingItemMatcher(song: Song?): (ShelfItem) -> Boolean {
+    song ?: return { false }
+    // The card that was played, when the shelf holds it, and only that one —
+    // see [com.music.bitchord.data.model.playingRowMatcher], which rows use.
+    if (any { it.videoId == song.videoId }) return { it.videoId == song.videoId }
+    val byName = firstOrNull {
+        it.videoId != null &&
+            it.title.equals(song.title, ignoreCase = true) &&
+            (it.subtitle.contains(song.artist, ignoreCase = true) ||
+                song.artist.contains(it.subtitle, ignoreCase = true))
+    } ?: return { false }
+    return { it == byName }
+}
+
+private var cachedHomeShelves: List<HomeShelf>? = null
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HomeScreen(
+    state: UiState<List<HomeShelf>>,
+    listState: LazyListState,
+    /** The tapped item and the recommendation shelf it came from. */
+    onItemClick: (ShelfItem, String) -> Unit,
+    onRetry: () -> Unit,
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
+    pullState: PullToRefreshState,
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues,
+    /** The page's heading, or null for none — the desktop's pages carry no heading. */
+    title: String?,
+    /**
+     * The mark that sits above the heading. The caller draws it because the
+     * wordmark asset belongs to the app, not to this module.
+     */
+    wordmark: @Composable () -> Unit,
+    signedIn: Boolean = true,
+    onSignIn: (() -> Unit)? = null,
+    /**
+     * Holding a card rather than tapping it. Every card on the feed answers,
+     * whichever kind it is: the caller reads the item the same way it does for
+     * a tap, so a track card opens the track menu and a card that points at a
+     * collection opens the album / playlist one.
+     */
+    onItemLongPress: ((ShelfItem) -> Unit)? = null,
+    // Explore doesn't page — only Home has a continuation worth following.
+    onLoadMore: (() -> Unit)? = null,
+    loadingMore: Boolean = false,
+    recentlyPlayedLoading: Boolean = false,
+    /**
+     * Whether the feed's first shelf gets the big full-bleed cards. The phone
+     * leads with them; on a window as wide as a desktop's they are posters, so
+     * there every shelf is the ordinary row.
+     */
+    leadHero: Boolean = true,
+    currentSong: Song? = null,
+    isPlaying: Boolean = false,
+    onSearchClick: (() -> Unit)? = null,
+) {
+    val recentsViewType by AppUi.host.homeRecentsViewType.collectAsStateWithLifecycle()
+    if (state is UiState.Success && state.data.isNotEmpty()) {
+        cachedHomeShelves = state.data
+    }
+    val displayShelves = (state as? UiState.Success)?.data ?: cachedHomeShelves
+
+    var visible by remember { mutableStateOf(cachedHomeShelves != null) }
+    LaunchedEffect(Unit) {
+        visible = true
+    }
+    val entranceAlpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(durationMillis = if (cachedHomeShelves != null) 0 else 220, easing = FastOutSlowInEasing),
+        label = "homeEntranceFade",
+    )
+
+    val homeBg = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
+    PullToRefresh(
+        refreshing = refreshing,
+        onRefresh = onRefresh,
+        state = pullState,
+        modifier = modifier
+            .fillMaxSize()
+            .background(homeBg)
+            .graphicsLayer { alpha = entranceAlpha },
+    ) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .background(homeBg),
+            contentPadding = contentPadding,
+        ) {
+            if (title != null) {
+                item(key = "home-title", contentType = "header") { HomeTitle(title, wordmark, onSearchClick) }
+            }
+            if (!signedIn && onSignIn != null) {
+                item(key = "sign-in-banner", contentType = "banner") {
+                    SignInBanner(onSignIn = onSignIn, modifier = Modifier.padding(bottom = 8.dp))
+                }
+            }
+            when {
+                displayShelves != null && displayShelves.isNotEmpty() -> {
+                    if (recentlyPlayedLoading && state is UiState.Loading) {
+                        recentlyPlayedSkeleton(listLayout = recentsViewType == LibraryViewType.LIST)
+                    }
+                    itemsIndexedShelves(
+                        shelves = displayShelves,
+                        onItemClick = onItemClick,
+                        onItemLongPress = onItemLongPress,
+                        currentSong = currentSong,
+                        isPlaying = isPlaying,
+                        firstIsHero = false,
+                        recentsViewType = recentsViewType,
+                        onRecentsViewTypeToggle = {
+                            AppUi.host.setHomeRecentsViewType(
+                                if (recentsViewType == LibraryViewType.LIST) {
+                                    LibraryViewType.GRID
+                                } else {
+                                    LibraryViewType.LIST
+                                },
+                            )
+                        },
+                    )
+                    if (loadingMore) feedMoreSkeleton()
+                }
+                state is UiState.Loading -> {
+                    if (recentlyPlayedLoading) {
+                        recentlyPlayedSkeleton(listLayout = recentsViewType == LibraryViewType.LIST)
+                    }
+                    feedSkeleton(firstIsHero = false)
+                }
+                state is UiState.Error -> item(key = "home-error", contentType = "error") {
+                    MessageState(state.message, actionLabel = stringResource(Res.string.retry), onAction = onRetry)
+                }
+                state is UiState.Success -> {
+                    if (recentlyPlayedLoading) {
+                        recentlyPlayedSkeleton(listLayout = recentsViewType == LibraryViewType.LIST)
+                    }
+                    itemsIndexedShelves(
+                        shelves = state.data,
+                        onItemClick = onItemClick,
+                        onItemLongPress = onItemLongPress,
+                        currentSong = currentSong,
+                        isPlaying = isPlaying,
+                        firstIsHero = false,
+                        recentsViewType = recentsViewType,
+                        onRecentsViewTypeToggle = {
+                            AppUi.host.setHomeRecentsViewType(
+                                if (recentsViewType == LibraryViewType.LIST) {
+                                    LibraryViewType.GRID
+                                } else {
+                                    LibraryViewType.LIST
+                                },
+                            )
+                        },
+                    )
+                    if (loadingMore) feedMoreSkeleton()
+                }
+            }
+        }
+    }
+
+    if (onLoadMore != null && (state is UiState.Success || displayShelves != null)) {
+        val loadMore by rememberUpdatedState(onLoadMore)
+        // Re-checked on every layout change, rather than on the rising edge of
+        // "the tail is in view". Trigger next-page loading 2-3 items before hitting bottom
+        // so scrolling feels seamless instead of hitting empty shimmer rows.
+        LaunchedEffect(listState, loadingMore) {
+            snapshotFlow {
+                val layout = listState.layoutInfo
+                (layout.visibleItemsInfo.lastOrNull()?.index ?: -1) to layout.totalItemsCount
+            }.collect { (lastVisible, total) ->
+                if (!loadingMore && total > 0 && lastVisible >= total - 3) loadMore()
+            }
+        }
+    }
+}
+
+/**
+ * A key for one card inside a shelf's own row.
+ *
+ * The id is what survives a refresh — a track that is still the same track keeps
+ * its scroll position and its already-decoded thumbnail — and the position is
+ * what keeps a repeated single out of a duplicate-key crash, because a home feed
+ * can and does show one video twice in the same carousel.
+ */
+private fun shelfCardKey(position: Int, item: ShelfItem): String =
+    "$position-${item.videoId ?: item.browseId ?: item.title}"
+
+/**
+ * Recents mirrors the artist page's top-tracks pager. Any other lead shelf keeps
+ * Apple's full-bleed treatment, while the remaining shelves use square cards.
+ */
+private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedShelves(
+    shelves: List<HomeShelf>,
+    onItemClick: (ShelfItem, String) -> Unit,
+    onItemLongPress: ((ShelfItem) -> Unit)?,
+    currentSong: Song?,
+    isPlaying: Boolean,
+    firstIsHero: Boolean = true,
+    recentsViewType: LibraryViewType,
+    onRecentsViewTypeToggle: () -> Unit,
+) {
+    val orderedShelves = orderHomeShelvesStrictly(shelves)
+    orderedShelves.forEachIndexed { index, shelf ->
+        item(key = "shelf-${shelf.title}-$index", contentType = "shelf") {
+            val openItem: (ShelfItem) -> Unit = { item -> onItemClick(item, shelf.title) }
+            val isSparseSection = (shelf.items.size in 1..2 && !shelf.title.equals("Your Top Artists", ignoreCase = true) && !shelf.title.equals("Top Artists", ignoreCase = true)) ||
+                shelf.title.equals("Forgotten favorites", ignoreCase = true) ||
+                shelf.title.equals("Archive Mix", ignoreCase = true) ||
+                isTimeOfDayShelf(shelf.title)
+
+            when {
+                shelf.title.equals(RECENTS_TITLE, ignoreCase = true) -> {
+                    RecentShelf(
+                        shelf = shelf,
+                        onItemClick = openItem,
+                        onItemLongPress = onItemLongPress,
+                        currentSong = currentSong,
+                        isPlaying = isPlaying,
+                        viewType = recentsViewType,
+                        onViewTypeToggle = onRecentsViewTypeToggle,
+                    )
+                }
+                shelf.title.equals("Your Top Artists", ignoreCase = true) ||
+                shelf.title.equals("Top Artists", ignoreCase = true) -> {
+                    CircularTopArtistsShelf(
+                        shelf = shelf,
+                        onItemClick = openItem,
+                    )
+                }
+                isSparseSection && shelf.items.isNotEmpty() -> {
+                    WideFeatureShelf(
+                        shelf = shelf,
+                        onItemClick = openItem,
+                        onItemLongPress = onItemLongPress,
+                        currentSong = currentSong,
+                        isPlaying = isPlaying,
+                    )
+                }
+                else -> {
+                    Shelf(
+                        shelf = shelf,
+                        onItemClick = openItem,
+                        onItemLongPress = onItemLongPress,
+                        currentSong = currentSong,
+                        isPlaying = isPlaying,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Check if shelf is a Time-of-Day smart mix */
+internal fun isTimeOfDayShelf(title: String): Boolean {
+    val t = title.trim().lowercase(Locale.ROOT)
+    return t.contains("morning energy") ||
+        t.contains("afternoon flow") ||
+        t.contains("evening chill") ||
+        t.contains("late night mix")
+}
+
+/**
+ * Sleek circular avatar carousel for "Your Top Artists".
+ * Built from the user's most-played artists across local and online listening history.
+ */
+@Composable
+private fun CircularTopArtistsShelf(
+    shelf: HomeShelf,
+    onItemClick: (ShelfItem) -> Unit,
+) {
+    Column(Modifier.padding(bottom = 26.dp)) {
+        SectionHeader(shelf.title, shelf.subtitle)
+        ShelfRow(
+            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            itemsIndexed(
+                shelf.items,
+                key = { position, item -> "top-artist-$position-${item.browseId ?: item.title}" },
+                contentType = { _, _ -> "circular_artist" },
+            ) { _, item ->
+                CircularArtistItem(
+                    item = item,
+                    onClick = { onItemClick(item) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CircularArtistItem(
+    item: ShelfItem,
+    onClick: () -> Unit,
+) {
+    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val ringBorder = remember(isLight) {
+        if (isLight) Color.Black.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.22f)
+    }
+
+    val avatarRevision by com.music.bitchord.data.ArtistAvatarCache.revision.collectAsStateWithLifecycle()
+    val officialAvatar = remember(item.title, avatarRevision) {
+        com.music.bitchord.data.ArtistAvatarCache.get(item.title)
+    }
+    LaunchedEffect(item.title) {
+        if (officialAvatar == null) {
+            com.music.bitchord.data.ArtistAvatarCache.resolveInBackground(item.title)
+        }
+    }
+    val effectiveThumbnail = officialAvatar ?: item.thumbnailUrl
+
+    Column(
+        modifier = Modifier
+            .width(88.dp)
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(84.dp)
+                .clip(CircleShape)
+                .border(1.5.dp, ringBorder, CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            val isBrokenOrBlank = effectiveThumbnail.isNullOrBlank() || FailedArtworkCache.isFailed(effectiveThumbnail)
+            if (isBrokenOrBlank) {
+                DefaultCoverTile(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop,
+                    title = item.title,
+                )
+            } else {
+                val context = LocalPlatformContext.current
+                val imageRequest = remember(effectiveThumbnail) {
+                    ImageRequest.Builder(context)
+                        .data(effectiveThumbnail.artworkAt(HEADER_ART_PX))
+                        .crossfade(250)
+                        .build()
+                }
+                AsyncImage(
+                    model = imageRequest,
+                    contentDescription = item.title,
+                    contentScale = ContentScale.Crop,
+                    onState = { state ->
+                        if (state is AsyncImagePainter.State.Error) {
+                            FailedArtworkCache.markFailed(item.thumbnailUrl)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape),
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = item.title,
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 2.dp),
+        )
+        if (item.subtitle.isNotBlank() && !item.subtitle.equals("Artist", ignoreCase = true)) {
+            Text(
+                text = item.subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 2.dp),
+            )
+        }
+    }
+}
+
+/**
+ * Full-Width Glassy Wide Feature Card for sparse sections (1-2 items)
+ * such as Forgotten Favorites, Time-of-Day Smart Mixes, and Local-to-Online highlights.
+ */
+@Composable
+private fun WideFeatureShelf(
+    shelf: HomeShelf,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: ((ShelfItem) -> Unit)? = null,
+    currentSong: Song? = null,
+    isPlaying: Boolean = false,
+) {
+    Column(Modifier.padding(bottom = 26.dp)) {
+        SectionHeader(shelf.title, shelf.subtitle)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = PAGE_GUTTER),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            val isCurrentItem = shelf.items.playingItemMatcher(currentSong)
+            shelf.items.forEachIndexed { _, item ->
+                WideFeatureCard(
+                    item = item,
+                    sectionTitle = shelf.title,
+                    onClick = { onItemClick(item) },
+                    onLongPress = onItemLongPress?.let { { it(item) } },
+                    isCurrent = isCurrentItem(item),
+                    isPlaying = isCurrentItem(item) && isPlaying,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WideFeatureCard(
+    item: ShelfItem,
+    sectionTitle: String,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+    isCurrent: Boolean = false,
+    isPlaying: Boolean = false,
+) {
+    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val cardShape = RoundedCornerShape(20.dp)
+    val glassBorder = if (isLight) Color.Black.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.22f)
+
+    val badgeText = when {
+        sectionTitle.contains("Forgotten", ignoreCase = true) || sectionTitle.contains("Archive", ignoreCase = true) -> "Rediscover"
+        sectionTitle.contains("Because you play", ignoreCase = true) || sectionTitle.contains("Local", ignoreCase = true) -> "Local → Online"
+        isTimeOfDayShelf(sectionTitle) || item.title.contains("Mix", ignoreCase = true) -> "Smart Mix"
+        else -> "Featured"
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(128.dp)
+            .clip(cardShape)
+            .border(1.dp, glassBorder, cardShape)
+            .background(if (isLight) Color(0xFFF2F4F8).copy(alpha = 0.95f) else Color(0xFF10141D).copy(alpha = 0.90f))
+            .clickable(onClick = onClick),
+    ) {
+        // Subtle ambient blurred background from cover thumbnail
+        if (!item.thumbnailUrl.isNullOrBlank() && !FailedArtworkCache.isFailed(item.thumbnailUrl)) {
+            val context = LocalPlatformContext.current
+            val bgRequest = remember(item.thumbnailUrl) {
+                ImageRequest.Builder(context)
+                    .data(item.thumbnailUrl.artworkAt(HEADER_ART_PX))
+                    .crossfade(false)
+                    .build()
+            }
+            AsyncImage(
+                model = bgRequest,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = if (isLight) 0.18f else 0.28f },
+            )
+        }
+
+        // Dark frosted glass overlay gradient
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        if (isLight) {
+                            listOf(
+                                Color.White.copy(alpha = 0.88f),
+                                Color(0xFFF0F4FA).copy(alpha = 0.80f),
+                                Color.White.copy(alpha = 0.92f),
+                            )
+                        } else {
+                            listOf(
+                                Color(0xFF0C0F17).copy(alpha = 0.94f),
+                                Color(0xFF121724).copy(alpha = 0.82f),
+                                Color(0xFF0C0F17).copy(alpha = 0.96f),
+                            )
+                        },
+                    ),
+                ),
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 14.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Left: Crisp 96.dp rounded cover thumbnail
+            Box(
+                modifier = Modifier
+                    .size(96.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .border(0.8.dp, if (isLight) Color.Black.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.20f), RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) {
+                val isBrokenOrBlank = item.thumbnailUrl.isNullOrBlank() || FailedArtworkCache.isFailed(item.thumbnailUrl)
+                if (isBrokenOrBlank) {
+                    DefaultCoverTile(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(14.dp)),
+                        contentScale = ContentScale.Crop,
+                    )
+                } else {
+                    val context = LocalPlatformContext.current
+                    val thumbRequest = remember(item.thumbnailUrl) {
+                        ImageRequest.Builder(context)
+                            .data(item.thumbnailUrl.artworkAt(CARD_ART_PX))
+                            .crossfade(false)
+                            .build()
+                    }
+                    AsyncImage(
+                        model = thumbRequest,
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Crop,
+                        onState = { state ->
+                            if (state is AsyncImagePainter.State.Error) {
+                                FailedArtworkCache.markFailed(item.thumbnailUrl)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(14.dp)),
+                    )
+                }
+
+                if (isCurrent) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.Black.copy(alpha = 0.35f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (isPlaying) {
+                            SearchPlayingBars()
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.Pause,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.width(14.dp))
+
+            // Middle: Badge, Mix Title, Subtitle
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 8.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(
+                            if (isLight) Color(0xFF1E88E5).copy(alpha = 0.14f) else Color(0xFF64B5F6).copy(alpha = 0.22f),
+                        )
+                        .border(
+                            0.6.dp,
+                            if (isLight) Color(0xFF1E88E5).copy(alpha = 0.35f) else Color(0xFF90CAF9).copy(alpha = 0.40f),
+                            RoundedCornerShape(50),
+                        )
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        text = badgeText,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.4.sp,
+                        ),
+                        color = if (isLight) Color(0xFF1565C0) else Color(0xFF90CAF9),
+                    )
+                }
+
+                Spacer(Modifier.height(6.dp))
+
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = if (isCurrent) PlayingAccent else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Spacer(Modifier.height(3.dp))
+
+                Text(
+                    text = if (item.subtitle.isNotBlank()) item.subtitle else "Rediscover this curated mix",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            // Right: Circular glassy Play button for instant one-tap playback
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isLight) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.18f),
+                    )
+                    .border(
+                        1.dp,
+                        if (isLight) Color.Black.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.35f),
+                        CircleShape,
+                    )
+                    .clickable(onClick = onClick),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (isCurrent && isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    contentDescription = "Play",
+                    tint = if (isLight) Color(0xFF1E1E1E) else Color.White,
+                    modifier = Modifier.size(26.dp),
+                )
+            }
+        }
+    }
+}
+
+/** The same four-rows-per-page treatment used by an artist's Top songs. */
+@Composable
+private fun RecentShelf(
+    shelf: HomeShelf,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: ((ShelfItem) -> Unit)?,
+    currentSong: Song?,
+    isPlaying: Boolean,
+    viewType: LibraryViewType,
+    onViewTypeToggle: () -> Unit,
+) {
+    Column(Modifier.padding(bottom = 26.dp)) {
+        RecentSectionHeader(
+            title = shelf.title,
+            subtitle = shelf.subtitle,
+            viewType = viewType,
+            onViewTypeToggle = onViewTypeToggle,
+        )
+        val isCurrentItem = shelf.items.playingItemMatcher(currentSong)
+        if (viewType == LibraryViewType.LIST) {
+            BoxWithConstraints {
+                val columnWidth = trackColumnWidth(maxWidth)
+                ShelfRow(
+                    contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    itemsIndexed(
+                        shelf.items.chunked(RECENT_TRACKS_PER_COLUMN),
+                        key = { position, column -> "recent-col-$position-${column.firstOrNull()?.videoId ?: column.firstOrNull()?.title ?: position}" },
+                        contentType = { _, _ -> "recent_column" },
+                    ) { _, column ->
+                        Column(
+                            modifier = Modifier.width(columnWidth),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            column.forEach { item ->
+                                RecentTrackRow(
+                                    item = item,
+                                    onClick = { onItemClick(item) },
+                                    onLongPress = onItemLongPress?.let { { it(item) } },
+                                    isCurrent = isCurrentItem(item),
+                                    isPlaying = isCurrentItem(item) && isPlaying,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            BoxWithConstraints {
+                val cardWidth = heroCardWidth(maxWidth)
+                ShelfRow(
+                    contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    itemsIndexed(
+                        shelf.items,
+                        key = { position, item -> shelfCardKey(position, item) },
+                        contentType = { _, _ -> "hero_card" },
+                    ) { _, item ->
+                        HeroCard(
+                            item = item,
+                            onClick = { onItemClick(item) },
+                            onLongPress = onItemLongPress?.let { { it(item) } },
+                            modifier = Modifier.width(cardWidth),
+                            isCurrent = isCurrentItem(item),
+                            isPlaying = isCurrentItem(item) && isPlaying,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentSectionHeader(
+    title: String,
+    subtitle: String,
+    viewType: LibraryViewType,
+    onViewTypeToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .padding(horizontal = PAGE_GUTTER, vertical = 10.dp)
+            .fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onViewTypeToggle),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (viewType == LibraryViewType.LIST) {
+                    BitChordIcons.GridView
+                } else {
+                    BitChordIcons.ListView
+                },
+                contentDescription = stringResource(
+                    if (viewType == LibraryViewType.LIST) {
+                        Res.string.switch_to_grid_view
+                    } else {
+                        Res.string.switch_to_list_view
+                    },
+                ),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(19.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecentTrackRow(
+    item: ShelfItem,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)?,
+    isCurrent: Boolean,
+    isPlaying: Boolean,
+) {
+    CompactTrackRow(
+        title = item.title,
+        subtitle = item.subtitle,
+        thumbnailUrl = item.thumbnailUrl,
+        onClick = onClick,
+        onLongPress = onLongPress,
+        isCurrent = isCurrent,
+        isPlaying = isPlaying,
+    )
+}
+
+/**
+ * One row of Recents' four-to-a-column pager. Public so the desktop artist page
+ * can list its top songs the same way.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun CompactTrackRow(
+    title: String,
+    subtitle: String,
+    thumbnailUrl: String?,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)?,
+    isCurrent: Boolean = false,
+    isPlaying: Boolean = false,
+) {
+    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val cardShape = RoundedCornerShape(14.dp)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .liquidGlassCard(shape = cardShape, isLight = isLight)
+            .longPressMenuClickable(onClick = onClick, onLongClick = onLongPress)
+            .contextClick(onLongPress)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(44.dp)) {
+            val isBrokenOrBlank = thumbnailUrl.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(thumbnailUrl)
+            val coverBorder = if (isLight) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.14f)
+            if (isBrokenOrBlank) {
+                com.music.bitchord.ui.components.DefaultCoverTile(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .border(0.8.dp, coverBorder, RoundedCornerShape(10.dp)),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                val context = coil3.compose.LocalPlatformContext.current
+                val imageRequest = remember(thumbnailUrl) {
+                    coil3.request.ImageRequest.Builder(context)
+                        .data(thumbnailUrl.artworkAt(ROW_ART_PX))
+                        .crossfade(false)
+                        .build()
+                }
+                AsyncImage(
+                    model = imageRequest,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    onState = { state ->
+                        if (state is coil3.compose.AsyncImagePainter.State.Error) {
+                            com.music.bitchord.ui.components.FailedArtworkCache.markFailed(thumbnailUrl)
+                        }
+                    },
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .border(0.8.dp, coverBorder, RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                )
+            }
+            if (isCurrent) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.Black.copy(alpha = 0.35f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (isPlaying) {
+                        SearchPlayingBars()
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.Pause,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = if (isCurrent) PlayingAccent else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (onLongPress != null) {
+            RowMoreButton(onClick = onLongPress)
+        }
+    }
+}
+
+/**
+ * Listen now's large heading, with the wordmark stacked above it.
+ *
+ * Only the home tab carries it — the top bar no longer shows the logo, so this
+ * is where the app's mark lives. Its height is taken from the heading's own
+ * font size rather than a fixed dp, so the two keep their proportion under the
+ * system font scale.
+ */
+@Composable
+private fun HomeTitle(
+    title: String,
+    wordmark: @Composable () -> Unit,
+    onSearchClick: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    val style = MaterialTheme.typography.displayLarge
+    val pillShape = RoundedCornerShape(percent = 50)
+    Column(modifier = modifier.padding(horizontal = PAGE_GUTTER).padding(top = 2.dp, bottom = 8.dp)) {
+        Row(
+            modifier = Modifier
+                .padding(bottom = 14.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .height(36.dp)
+                    .aspectRatio(WORDMARK_ASPECT),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                wordmark()
+            }
+            if (onSearchClick != null) {
+                Spacer(Modifier.width(12.dp))
+                val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+                val searchBorder = remember(isLight) {
+                    if (isLight) {
+                        Brush.verticalGradient(
+                            listOf(
+                                Color.Black.copy(alpha = 0.18f),
+                                Color.Black.copy(alpha = 0.10f),
+                            ),
+                        )
+                    } else {
+                        Brush.verticalGradient(
+                            listOf(
+                                Color.White.copy(alpha = 0.45f),
+                                Color.White.copy(alpha = 0.12f),
+                            ),
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp)
+                        .liquidGlassCard(shape = pillShape, isLight = isLight)
+                        .clickable(onClick = onSearchClick)
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Search,
+                        contentDescription = null,
+                        tint = if (isLight) Color(0xFF1E1E1E) else Color.White,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "Search songs, artists...",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                        color = if (isLight) Color(0xFF1E1E1E) else Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        Text(
+            text = title,
+            style = style,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
+    }
+}
+
+/** The wordmark's height against the heading's font size. */
+private const val LOGO_TO_FONT = 1.1f
+
+/** ic_umtify_wordmark's viewport, 800 x 275. */
+private const val WORDMARK_ASPECT = 800f / 275f
+
+/**
+ * Shared by the home feed, Explore and Library so headings line up across tabs.
+ *
+ * [onShowAll] is only ever set on Library, whose rows stop at five cards
+ * rather than running the shelf's whole length — see [LibraryGridShelf].
+ * Home and Explore never pass it, so their heading is unchanged.
+ */
+@Composable
+internal fun SectionHeader(title: String, subtitle: String = "", onShowAll: (() -> Unit)? = null) {
+    val displayTitle = localizeShelfTitle(title)
+    val displaySubtitle = localizeShelfSubtitle(subtitle)
+    Row(
+        modifier = Modifier
+            .padding(horizontal = PAGE_GUTTER, vertical = 10.dp)
+            .fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = displayTitle,
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (displaySubtitle.isNotBlank()) {
+                Text(
+                    text = displaySubtitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (onShowAll != null) {
+            Text(
+                text = stringResource(Res.string.show_all),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clickable(onClick = onShowAll)
+                    .padding(start = 12.dp, top = 4.dp, bottom = 4.dp),
+            )
+        }
+    }
+}
+@Composable
+internal fun localizeShelfTitle(title: String): String {
+    val trimmed = title.trim()
+    return when {
+        trimmed.equals("Recents", ignoreCase = true) ||
+            trimmed.equals("Recently played", ignoreCase = true) ||
+            trimmed.equals("Gần đây", ignoreCase = true) ||
+            trimmed.equals("最近", ignoreCase = true) ->
+            stringResource(Res.string.shelf_recents)
+        trimmed.equals("Playlists", ignoreCase = true) ||
+            trimmed.equals("Danh sách phát", ignoreCase = true) ||
+            trimmed.equals("再生リスト", ignoreCase = true) ->
+            stringResource(Res.string.playlists)
+        trimmed.equals("Albums", ignoreCase = true) ||
+            trimmed.equals("Album", ignoreCase = true) ||
+            trimmed.equals("アルバム", ignoreCase = true) ->
+            stringResource(Res.string.albums)
+        trimmed.equals("Artists", ignoreCase = true) ||
+            trimmed.equals("Nghệ sĩ", ignoreCase = true) ||
+            trimmed.equals("アーティスト", ignoreCase = true) ->
+            stringResource(Res.string.artists)
+        trimmed.equals("Subscriptions", ignoreCase = true) ||
+            trimmed.equals("Đã đăng ký", ignoreCase = true) ||
+            trimmed.equals("登録チャンネル", ignoreCase = true) ->
+            stringResource(Res.string.subscriptions)
+        trimmed.equals("Trending community playlists", ignoreCase = true) ||
+            trimmed.equals("Danh sách phát cộng đồng thịnh hành", ignoreCase = true) ||
+            trimmed.equals("Danh sách phát thịnh hành trong cộng đồng người dùng", ignoreCase = true) ||
+            trimmed.equals("急上昇のコミュニティ再生リスト", ignoreCase = true) ->
+            stringResource(Res.string.shelf_trending_community_playlists)
+        trimmed.equals("Featured playlists for you", ignoreCase = true) ||
+            trimmed.equals("Danh sách phát đề xuất cho bạn", ignoreCase = true) ||
+            trimmed.equals("Danh sách phát nổi bật dành cho bạn", ignoreCase = true) ||
+            trimmed.equals("おすすめの再生リスト", ignoreCase = true) ->
+            stringResource(Res.string.shelf_featured_playlists_for_you)
+        trimmed.equals("Quick picks", ignoreCase = true) ||
+            trimmed.equals("Lựa chọn nhanh", ignoreCase = true) ||
+            trimmed.equals("Chọn nhanh đài phát", ignoreCase = true) ||
+            trimmed.equals("クイック ミックス", ignoreCase = true) ||
+            trimmed.equals("দ্রুত পছন্দ", ignoreCase = true) ||
+            trimmed.equals("দ্রুত বাছাই", ignoreCase = true) ||
+            trimmed.equals("সেরা বাছাই", ignoreCase = true) ||
+            trimmed.equals("Schnellauswahl", ignoreCase = true) ||
+            trimmed.equals("Selección rápida", ignoreCase = true) ||
+            trimmed.equals("Sélection rapide", ignoreCase = true) ||
+            trimmed.equals("快速选择", ignoreCase = true) ||
+            trimmed.equals("快速選擇", ignoreCase = true) ->
+            stringResource(Res.string.shelf_quick_picks)
+        trimmed.equals("Listen again", ignoreCase = true) ||
+            trimmed.equals("Nghe lại", ignoreCase = true) ||
+            trimmed.equals("もう一度聴く", ignoreCase = true) ->
+            stringResource(Res.string.shelf_listen_again)
+        trimmed.equals("Mixed for you", ignoreCase = true) ||
+            trimmed.equals("Dành riêng cho bạn", ignoreCase = true) ||
+            trimmed.equals("ミックス", ignoreCase = true) ->
+            stringResource(Res.string.shelf_mixed_for_you)
+        trimmed.startsWith("Similar to", ignoreCase = true) -> {
+            val rest = trimmed.substring(10).trim()
+            stringResource(Res.string.shelf_similar_to, rest)
+        }
+        trimmed.startsWith("Tương tự như", ignoreCase = true) -> {
+            val rest = trimmed.substring(12).trim()
+            stringResource(Res.string.shelf_similar_to, rest)
+        }
+        trimmed.equals("Forgotten favorites", ignoreCase = true) ||
+            trimmed.equals("Giai điệu quen thuộc", ignoreCase = true) ||
+            trimmed.equals("よく聴いたお気に入りの曲", ignoreCase = true) ->
+            stringResource(Res.string.shelf_forgotten_favorites)
+        trimmed.equals("Recommended music videos", ignoreCase = true) ||
+            trimmed.equals("Video âm nhạc đề xuất", ignoreCase = true) ||
+            trimmed.equals("おすすめのミュージック ビデオ", ignoreCase = true) ->
+            stringResource(Res.string.shelf_recommended_music_videos)
+        trimmed.equals("From your library", ignoreCase = true) ||
+            trimmed.equals("Từ thư viện của bạn", ignoreCase = true) ||
+            trimmed.equals("ライブラリから", ignoreCase = true) ->
+            stringResource(Res.string.shelf_from_your_library)
+        trimmed.equals("Charts", ignoreCase = true) ||
+            trimmed.equals("Bảng xếp hạng", ignoreCase = true) ||
+            trimmed.equals("チャート", ignoreCase = true) ->
+            stringResource(Res.string.shelf_charts)
+        trimmed.equals("New releases", ignoreCase = true) ||
+            trimmed.equals("Bản phát hành mới", ignoreCase = true) ||
+            trimmed.equals("最新リリース", ignoreCase = true) ->
+            stringResource(Res.string.shelf_new_releases)
+        trimmed.equals("Top music videos", ignoreCase = true) ||
+            trimmed.equals("Video âm nhạc hàng đầu", ignoreCase = true) ||
+            trimmed.equals("人気のミュージック ビデオ", ignoreCase = true) ->
+            stringResource(Res.string.shelf_top_music_videos)
+        trimmed.equals("For you", ignoreCase = true) ||
+            trimmed.equals("Dành cho bạn", ignoreCase = true) ||
+            trimmed.equals("あなたへのおすすめ", ignoreCase = true) ->
+            stringResource(Res.string.shelf_for_you)
+        trimmed.equals("Hits today", ignoreCase = true) ||
+            trimmed.equals("Today's Hits", ignoreCase = true) ||
+            trimmed.equals("Bản hit hôm nay", ignoreCase = true) ||
+            trimmed.equals("今日のヒット曲", ignoreCase = true) ->
+            stringResource(Res.string.shelf_hits_today)
+        trimmed.equals("Artists on the rise", ignoreCase = true) ||
+            trimmed.equals("Nghệ sĩ đang lên", ignoreCase = true) ->
+            stringResource(Res.string.shelf_artists_on_the_rise)
+        trimmed.equals("Concerts", ignoreCase = true) ||
+            trimmed.equals("Buổi hòa nhạc", ignoreCase = true) ||
+            trimmed.equals("コンサート", ignoreCase = true) ->
+            stringResource(Res.string.shelf_concerts)
+        trimmed.startsWith("Shorts", ignoreCase = true) ||
+            trimmed.equals("Shorts nổi bật", ignoreCase = true) ||
+            trimmed.equals("ショート", ignoreCase = true) ->
+            stringResource(Res.string.shelf_shorts)
+        trimmed.equals("Trending", ignoreCase = true) ||
+            trimmed.equals("Thịnh hành", ignoreCase = true) ||
+            trimmed.equals("急上昇", ignoreCase = true) ->
+            stringResource(Res.string.shelf_trending)
+        else -> title
+    }
+}
+@Composable
+internal fun localizeShelfSubtitle(subtitle: String): String {
+    val trimmed = subtitle.trim()
+    return when {
+        trimmed.equals("TOP TUNES RIGHT NOW", ignoreCase = true) ||
+            trimmed.equals("Top tunes right now", ignoreCase = true) ||
+            trimmed.equals("Giai điệu hàng đầu hiện nay", ignoreCase = true) ||
+            trimmed.equals("注目の曲", ignoreCase = true) ->
+            stringResource(Res.string.shelf_top_tunes_right_now)
+        trimmed.equals("From the community", ignoreCase = true) ||
+            trimmed.equals("Từ cộng đồng", ignoreCase = true) ||
+            trimmed.equals("コミュニティより", ignoreCase = true) ->
+            stringResource(Res.string.shelf_from_the_community)
+        trimmed.equals("YouTube Charts", ignoreCase = true) ||
+            trimmed.equals("Bảng xếp hạng YouTube", ignoreCase = true) ||
+            trimmed.equals("YouTube チャート", ignoreCase = true) ->
+            stringResource(Res.string.shelf_youtube_charts)
+        else -> subtitle
+    }
+}
+
+@Composable
+internal fun localizeCardSubtitle(subtitle: String): String {
+    if (subtitle.isBlank()) return subtitle
+    val delimiter = " • "
+    val parts = subtitle.split(delimiter)
+    val songLabel = stringResource(Res.string.shelf_song_item)
+    val singleLabel = stringResource(Res.string.shelf_single)
+    val chartLabel = stringResource(Res.string.shelf_chart)
+    val playlistLabel = stringResource(Res.string.playlist)
+    val localizedParts = parts.map { part ->
+        val trimmed = part.trim()
+        val lower = trimmed.lowercase(Locale.ROOT)
+        when {
+            trimmed.equals("Song", ignoreCase = true) || trimmed.equals("Titre", ignoreCase = true) ||
+                trimmed.equals("Bài hát", ignoreCase = true) || trimmed.equals("曲", ignoreCase = true) -> songLabel
+            trimmed.equals("Single", ignoreCase = true) || trimmed.equals("Đĩa đơn", ignoreCase = true) ||
+                trimmed.equals("シングル", ignoreCase = true) -> singleLabel
+            trimmed.equals("Chart", ignoreCase = true) || trimmed.equals("Bảng xếp hạng", ignoreCase = true) ||
+                trimmed.equals("チャート", ignoreCase = true) -> chartLabel
+            trimmed.equals("Playlist", ignoreCase = true) || trimmed.equals("Danh sách phát", ignoreCase = true) ||
+                trimmed.equals("再生リスト", ignoreCase = true) -> playlistLabel
+            lower.endsWith(" views") || lower.endsWith(" view") || lower.endsWith(" lượt xem") ||
+                lower.endsWith(" 回視聴") || lower.endsWith("回視聴") -> {
+                val count = trimmed.substringBeforeLast(' ', "").trim()
+                if (count.any { it.isDigit() }) stringResource(Res.string.card_views_format, count) else part
+            }
+            lower.endsWith(" plays") || lower.endsWith(" play") || lower.endsWith(" lượt phát") ||
+                lower.endsWith(" 回再生") || lower.endsWith("回再生") -> {
+                val count = trimmed.substringBeforeLast(' ', "").trim()
+                if (count.any { it.isDigit() }) stringResource(Res.string.card_plays_format, count) else part
+            }
+            lower.endsWith(" songs") || lower.endsWith(" song") || lower.endsWith(" bài hát") ||
+                lower.endsWith(" 曲") || lower.endsWith("曲") -> {
+                val count = trimmed.substringBeforeLast(' ', "").trim()
+                if (count.any { it.isDigit() }) stringResource(Res.string.card_songs_format, count) else part
+            }
+            else -> part
+        }
+    }
+    return localizedParts.joinToString(delimiter)
+}
+
+@Composable
+private fun HeroShelf(
+    shelf: HomeShelf,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: ((ShelfItem) -> Unit)? = null,
+    currentSong: Song? = null,
+    isPlaying: Boolean = false,
+) {
+    Column(Modifier.padding(bottom = 26.dp)) {
+        SectionHeader(shelf.title, shelf.subtitle)
+        val isCurrentItem = shelf.items.playingItemMatcher(currentSong)
+        // Measured rather than taken as a share of the parent, because the card
+        // has a ceiling as well as a fraction — see [heroCardWidth]. A fixed
+        // width is also the only one of the two the aspect ratio below can turn
+        // into a height, so the card keeps its shape however it was arrived at.
+        BoxWithConstraints {
+            val cardWidth = heroCardWidth(maxWidth)
+            ShelfRow(
+                state = rememberLazyListState(),
+                contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                itemsIndexed(
+                    shelf.items,
+                    key = { position, item -> shelfCardKey(position, item) },
+                    contentType = { _, _ -> "hero_card" },
+                ) { _, item ->
+                    HeroCard(
+                        item = item,
+                        onClick = { onItemClick(item) },
+                        onLongPress = onItemLongPress?.let { { it(item) } },
+                        modifier = Modifier.width(cardWidth),
+                        isCurrent = isCurrentItem(item),
+                        isPlaying = isCurrentItem(item) && isPlaying,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Big card: artwork with the caption laid over a scrim, as on Listen Now. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun HeroCard(
+    item: ShelfItem,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    isCurrent: Boolean = false,
+    isPlaying: Boolean = false,
+) {
+    Box(
+        modifier = modifier
+            .aspectRatio(HERO_CARD_RATIO)
+            .clip(RoundedCornerShape(18.dp))
+            .thumbnailBorder(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .longPressMenuClickable(onClick = onClick, onLongClick = onLongPress)
+            .contextClick(onLongPress),
+    ) {
+        val isBrokenOrBlank = item.thumbnailUrl.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(item.thumbnailUrl)
+        if (isBrokenOrBlank) {
+            com.music.bitchord.ui.components.DefaultCoverTile(
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            val context = coil3.compose.LocalPlatformContext.current
+            val imageRequest = remember(item.thumbnailUrl) {
+                coil3.request.ImageRequest.Builder(context)
+                    .data(item.thumbnailUrl.artworkAt(HEADER_ART_PX))
+                    .crossfade(false)
+                    .build()
+            }
+            AsyncImage(
+                model = imageRequest,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                onState = { state ->
+                    if (state is coil3.compose.AsyncImagePainter.State.Error) {
+                        com.music.bitchord.ui.components.FailedArtworkCache.markFailed(item.thumbnailUrl)
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        if (isCurrent) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.35f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (isPlaying) {
+                    SearchPlayingBars()
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.60f))
+                            .border(0.8.dp, Color.White.copy(alpha = 0.30f), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Pause,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+            }
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomStart)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.78f)),
+                    ),
+                )
+                .padding(start = 16.dp, end = 16.dp, top = 34.dp, bottom = 14.dp),
+        ) {
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.titleLarge,
+                color = if (isCurrent) PlayingAccent else Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (item.subtitle.isNotBlank()) {
+                val displaySubtitle = localizeCardSubtitle(item.subtitle)
+                Text(
+                    text = displaySubtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.72f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * [leadingCard] rides at the head of the row, ahead of the content — the
+ * Library tab's "New playlist" tile, which belongs among the playlists rather
+ * than in a bar somewhere above them. [onItemLongPress] opens the album /
+ * playlist menu, and is null only where a card points at something with no
+ * track list behind it to act on.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun Shelf(
+    shelf: HomeShelf,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: ((ShelfItem) -> Unit)? = null,
+    leadingCard: (@Composable () -> Unit)? = null,
+    currentSong: Song? = null,
+    isPlaying: Boolean = false,
+) {
+    Column(Modifier.padding(bottom = 26.dp)) {
+        SectionHeader(shelf.title, shelf.subtitle)
+        val isCurrentItem = shelf.items.playingItemMatcher(currentSong)
+        ShelfRow(
+            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            leadingCard?.let { card -> item(key = "leading", contentType = "leading_card") { card() } }
+            itemsIndexed(
+                shelf.items,
+                key = { position, item -> shelfCardKey(position, item) },
+                contentType = { _, _ -> "shelf_card" },
+            ) { _, item ->
+                ShelfCard(
+                    item = item,
+                    onClick = { onItemClick(item) },
+                    onLongPress = onItemLongPress?.let { { it(item) } },
+                    isCurrent = isCurrentItem(item),
+                    isPlaying = isCurrentItem(item) && isPlaying,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A card that isn't a thing yet — the dashed "New playlist" tile at the head
+ * of the Library's playlist row, sized to sit in line with the covers beside
+ * it rather than as a button bolted above them.
+ */
+@Composable
+internal fun NewShelfCard(
+    icon: ImageVector,
+    label: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier.width(SHELF_CARD_WIDTH),
+    /** A full-colour mark drawn in place of [icon], for a card that stands for a brand. */
+    logo: DrawableResource? = null,
+) {
+    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val cardShape = RoundedCornerShape(18.dp)
+
+    Column(
+        modifier = modifier
+            .liquidGlassCard(shape = cardShape, isLight = isLight)
+            .clickable(onClick = onClick)
+            .padding(8.dp),
+    ) {
+        val coverBorder = if (isLight) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.14f)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(14.dp))
+                .border(0.8.dp, coverBorder, RoundedCornerShape(14.dp))
+                .background(if (isLight) Color.Black.copy(alpha = 0.04f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (logo != null) {
+                // The mark is a disc with the bars cut out, so tinting it
+                // leaves the bars clear: white on dark, black on light.
+                Icon(
+                    painter = painterResource(logo),
+                    contentDescription = null,
+                    tint = if (isLight) Color(0xFF1DB954) else Color(0xFF1ED760),
+                    modifier = Modifier.size(40.dp),
+                )
+            } else {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(34.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * A device-folder card: mesh gradient in the folder's colours with its glyph
+ * on top. One composable for local music, WebDAV and SMB rather than three
+ * copies of the same box.
+ */
+@Composable
+private fun ServiceCard(colors: List<Color>, trackKey: String, icon: ImageVector) {
+    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val palette = remember { MeshPalette(colors) }
+    val coverBorder = if (isLight) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.14f)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(14.dp))
+            .border(0.8.dp, coverBorder, RoundedCornerShape(14.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        MeshGradientBackground(
+            palette = palette,
+            trackKey = trackKey,
+            continuous = true,
+            blurRadius = 24.dp,
+        )
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier.size(40.dp),
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun ShelfCard(
+    item: ShelfItem,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+    modifier: Modifier = Modifier.width(SHELF_CARD_WIDTH),
+    /** Set on a Library playlist card that's in [AppSettings.pinnedPlaylists][com.music.bitchord.data.settings.AppSettings.pinnedPlaylists]. */
+    isPinned: Boolean = false,
+    isCurrent: Boolean = false,
+    isPlaying: Boolean = false,
+) {
+    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val cardShape = RoundedCornerShape(18.dp)
+    val coverBorder = if (isLight) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.14f)
+
+    Column(
+        modifier = modifier
+            .liquidGlassCard(shape = cardShape, isLight = isLight)
+            .longPressMenuClickable(onClick = onClick, onLongClick = onLongPress)
+            .contextClick(onLongPress)
+            .padding(8.dp),
+    ) {
+        when {
+            item.browseId in listOf("VLLM", "LM") || item.title.equals("Liked Music", ignoreCase = true) -> {
+                val primary = MaterialTheme.colorScheme.primary
+                val secondary = MaterialTheme.colorScheme.secondary
+                val tertiary = MaterialTheme.colorScheme.tertiary
+                val surface = MaterialTheme.colorScheme.surfaceContainerHigh
+                val palette = remember(primary, secondary, tertiary, surface) {
+                    MeshPalette(listOf(primary, secondary, tertiary, surface))
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(0.8.dp, coverBorder, RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    MeshGradientBackground(
+                        palette = palette,
+                        trackKey = "liked_music_${primary.hashCode()}",
+                        continuous = true,
+                        blurRadius = 24.dp,
+                    )
+                    Icon(
+                        imageVector = Icons.Rounded.Favorite,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(40.dp),
+                    )
+                    if (isCurrent) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.35f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (isPlaying) {
+                                SearchPlayingBars()
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.60f))
+                                        .border(0.8.dp, Color.White.copy(alpha = 0.30f), CircleShape),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Pause,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            item.browseId == "local:downloads" -> {
+                val palette = remember { MeshPalette(listOf(Color(0xFF1E3C72), Color(0xFF2A5298))) }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(0.8.dp, coverBorder, RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    MeshGradientBackground(
+                        palette = palette,
+                        trackKey = "local:downloads",
+                        continuous = true,
+                        blurRadius = 24.dp,
+                    )
+                    Icon(
+                        imageVector = BitChordIcons.Download,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(40.dp),
+                    )
+                }
+            }
+            item.browseId == "local:all" -> ServiceCard(
+                colors = listOf(Color(0xFF134E5E), Color(0xFF71B280)),
+                trackKey = "local:all",
+                icon = Icons.Rounded.LibraryMusic,
+            )
+            item.browseId == "local:cache" -> ServiceCard(
+                colors = listOf(Color(0xFF42275A), Color(0xFF734B6D)),
+                trackKey = "local:cache",
+                icon = Icons.Rounded.Cached,
+            )
+            item.browseId == "local:webdav" -> ServiceCard(
+                colors = listOf(Color(0xFF3A1C71), Color(0xFFD76D77)),
+                trackKey = "local:webdav",
+                icon = Icons.Rounded.Folder,
+            )
+            item.browseId == "local:smb" -> ServiceCard(
+                colors = listOf(Color(0xFF0F2027), Color(0xFF2C5364)),
+                trackKey = "local:smb",
+                icon = Icons.Rounded.Storage,
+            )
+            else -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(0.8.dp, coverBorder, RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                ) {
+                    val isBrokenOrBlank = item.thumbnailUrl.isNullOrBlank() || com.music.bitchord.ui.components.FailedArtworkCache.isFailed(item.thumbnailUrl)
+                    if (isBrokenOrBlank) {
+                        com.music.bitchord.ui.components.DefaultCoverTile(
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        )
+                    } else {
+                        val context = coil3.compose.LocalPlatformContext.current
+                        val imageRequest = remember(item.thumbnailUrl) {
+                            coil3.request.ImageRequest.Builder(context)
+                                .data(item.thumbnailUrl.artworkAt(CARD_ART_PX))
+                                .crossfade(false)
+                                .build()
+                        }
+                        AsyncImage(
+                            model = imageRequest,
+                            contentDescription = null,
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            onState = { state ->
+                                if (state is coil3.compose.AsyncImagePainter.State.Error) {
+                                    com.music.bitchord.ui.components.FailedArtworkCache.markFailed(item.thumbnailUrl)
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    if (isCurrent) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.35f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (isPlaying) {
+                                SearchPlayingBars()
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.60f))
+                                        .border(0.8.dp, Color.White.copy(alpha = 0.30f), CircleShape),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Pause,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                            }
+                        }
+                    } else if (item.videoId != null) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(6.dp)
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.48f))
+                                .border(
+                                    width = 0.8.dp,
+                                    brush = Brush.verticalGradient(
+                                        listOf(
+                                            Color.White.copy(alpha = 0.65f),
+                                            Color.White.copy(alpha = 0.18f),
+                                        ),
+                                    ),
+                                    shape = CircleShape,
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.PlayArrow,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (isPinned) {
+                Icon(
+                    imageVector = BitChordIcons.Pin,
+                    contentDescription = stringResource(Res.string.pinned),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+            }
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = if (isCurrent) PlayingAccent else MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+        }
+        val displaySubtitle = localizeCardSubtitle(item.subtitle)
+        Text(
+            text = displaySubtitle.ifBlank { " " },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
