@@ -1,9 +1,14 @@
-<p align="center">
-  <img src="assets/screenshot_home.jpg" width="24%" alt="Home Screen" />
-  <img src="assets/screenshot_player.jpg" width="24%" alt="Now Playing Screen" />
-  <img src="assets/screenshot_settings.jpg" width="24%" alt="Settings Screen" />
-  <img src="assets/screenshot_widgets.jpg" width="24%" alt="Lockscreen & Home Widgets" />
-</p>
+<div align="center">
+
+| **Player** | **Home** | **Explore** |
+| :---: | :---: | :---: |
+| <img src="assets/Screenshot_Player.jpg" width="260" /> | <img src="assets/Screenshot_Home.jpg" width="260" /> | <img src="assets/Screenshot_Explore.jpg" width="260" /> |
+
+| **Library** | **Widgets** | **Settings** |
+| :---: | :---: | :---: |
+| <img src="assets/Screenshot_Library.jpg" width="260" /> | <img src="assets/Screenshot_Widgets.jpg" width="260" /> | <img src="assets/Screenshot_Settings.jpg" width="260" /> |
+
+</div>
 
 <div align="center">
 
@@ -73,7 +78,7 @@ A high-performance, fluid Android music streaming & local audio player built aro
 | Feature | Description |
 | :--- | :--- |
 | **Vivo & iQOO OriginOS Atomic Island** | Dedicated OriginOS edition (`com.tencent.qqmusic`) unlocking the native **Atomic Island** media capsule on the punch-hole status bar and lockscreen. |
-| **Standard Android Edition** | Clean package (`com.music.bitchord`) optimized for OnePlus (OxygenOS), Samsung (OneUI), Xiaomi (HyperOS), Pixel, Motorola, and all Android 8.0+ devices. |
+| **Standard Android Edition** | Clean package (`com.music.umtify`) optimized for OnePlus (OxygenOS), Samsung (OneUI), Xiaomi (HyperOS), Pixel, Motorola, and all Android 8.0+ devices. |
 | **Full Android Auto Support** | Complete `MediaLibraryService` architecture for browsing and playing Downloads, Local Music, and Playlists directly on your car head unit. |
 | **Smart Offline Hub** | Automatic offline failover with local library search across Downloads, Local Files, and Audio Cache without touching network sockets. |
 
