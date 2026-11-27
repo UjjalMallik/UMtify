@@ -1,5 +1,11 @@
 package com.music.bitchord.ui.screens
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -30,6 +36,7 @@ import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -41,23 +48,28 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.music.bitchord.R
 import com.music.bitchord.data.LocalGroup
 import com.music.bitchord.data.LocalGroups
+import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.model.BrowseType
 import com.music.bitchord.data.model.CARD_ART_PX
 import com.music.bitchord.data.model.ROW_ART_PX
@@ -80,6 +92,8 @@ import com.music.bitchord.ui.components.rememberRemoteArtworkUrl
 import com.music.bitchord.ui.components.thumbnailBorder
 import com.music.bitchord.ui.icons.BitChordIcons
 import com.music.bitchord.ui.theme.ArtworkPalette
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * What a device folder — Downloads, Local Music, the song cache, a file
@@ -836,4 +850,47 @@ internal fun LocalMusicSort.localizedLabel(): String = when (this) {
     LocalMusicSort.TITLE_DESC -> stringResource(R.string.sort_title_descending)
     LocalMusicSort.DATE_ADDED -> stringResource(R.string.sort_date_added)
     LocalMusicSort.DATE_MODIFIED -> stringResource(R.string.sort_date_modified)
+}
+
+/**
+ * A sleek refresh button for local music screens that triggers
+ * [LocalMediaRepository.forceRescanLocalMusic] and rotates smoothly while scanning.
+ */
+@Composable
+fun LocalMusicRefreshButton(
+    modifier: Modifier = Modifier,
+    tint: Color = MaterialTheme.colorScheme.onSurface,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val isScanning by LocalMediaRepository.isScanningFlow.collectAsStateWithLifecycle()
+    val infiniteTransition = rememberInfiniteTransition(label = "rescan_rotation")
+    val rotationAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "rescan_angle",
+    )
+
+    IconButton(
+        onClick = {
+            scope.launch(Dispatchers.IO) {
+                LocalMediaRepository.forceRescanLocalMusic(context)
+            }
+        },
+        enabled = !isScanning,
+        modifier = modifier,
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.Refresh,
+            contentDescription = "Rescan local music",
+            tint = if (isScanning) MaterialTheme.colorScheme.primary else tint,
+            modifier = Modifier
+                .size(20.dp)
+                .graphicsLayer { rotationZ = if (isScanning) rotationAngle else 0f },
+        )
+    }
 }

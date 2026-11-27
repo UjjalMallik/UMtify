@@ -7,8 +7,10 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.util.Size
@@ -27,16 +29,21 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
+import kotlin.coroutines.resume
 
 object LocalMediaRepository {
 
@@ -285,6 +292,7 @@ object LocalMediaRepository {
     val detectedAudioFolders = MutableStateFlow<List<DeviceFolder>>(emptyList())
     val activeAudioFoldersFlow = MutableStateFlow<List<DeviceFolder>>(emptyList())
     val allLocalSongsFlow = MutableStateFlow<List<Song>>(emptyList())
+    val isScanningFlow = MutableStateFlow<Boolean>(false)
 
     private const val LOCAL_TRACKS_INDEX_FILE = "local_tracks_index.json"
     private const val LOCAL_TRACKS_INDEX_VERSION = 3
@@ -449,11 +457,56 @@ object LocalMediaRepository {
                 updateActiveFolders(context, cached)
             }
         }
+        registerContentObserver(context.applicationContext)
     }
 
     private val scanMutex = Mutex()
     private val repositoryScope = CoroutineScope(Dispatchers.IO)
     private var enrichmentJob: Job? = null
+    private var debounceJob: Job? = null
+    @Volatile
+    private var isObserverRegistered = false
+    private val activeScansCount = java.util.concurrent.atomic.AtomicInteger(0)
+
+    private suspend fun <T> withScanning(block: suspend () -> T): T {
+        activeScansCount.incrementAndGet()
+        isScanningFlow.value = true
+        try {
+            return block()
+        } finally {
+            if (activeScansCount.decrementAndGet() <= 0) {
+                isScanningFlow.value = false
+            }
+        }
+    }
+
+    fun registerContentObserver(context: Context) {
+        if (isObserverRegistered) return
+        val appContext = context.applicationContext
+        if (!hasStoragePermission(appContext)) return
+
+        synchronized(this) {
+            if (isObserverRegistered) return
+            runCatching {
+                val observer = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
+                    override fun onChange(selfChange: Boolean, uri: Uri?) {
+                        super.onChange(selfChange, uri)
+                        debounceJob?.cancel()
+                        debounceJob = repositoryScope.launch {
+                            delay(1500L)
+                            refreshLocalMusic(appContext)
+                        }
+                    }
+                }
+                appContext.contentResolver.registerContentObserver(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    true,
+                    observer,
+                )
+                isObserverRegistered = true
+            }.onFailure { Log.w(TAG, "Failed registering MediaStore ContentObserver: ${it.message}") }
+        }
+    }
 
     private const val LOCAL_ART_DIR = "local_art_full"
     private const val LOCAL_ART_THUMB_DIR = "local_art_thumb"
@@ -947,6 +1000,105 @@ object LocalMediaRepository {
     suspend fun refreshFoldersAndSongs(context: Context): List<Song> =
         refreshLocalMusic(context)
 
+    suspend fun forceRescanLocalMusic(context: Context): List<Song> = withScanning {
+        withContext(Dispatchers.IO) {
+            val appContext = context.applicationContext
+            registerContentObserver(appContext)
+
+            val targetDirs = mutableSetOf<File>()
+
+            // 1. Standard public music dirs
+            runCatching {
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)?.takeIf { it.exists() }?.let {
+                    targetDirs.add(it)
+                }
+            }
+            runCatching {
+                val root = Environment.getExternalStorageDirectory()
+                if (root != null && root.exists()) {
+                    listOf("Music", "My Music", "Download", "Audio").forEach { sub ->
+                        val dir = File(root, sub)
+                        if (dir.exists() && dir.isDirectory) targetDirs.add(dir)
+                    }
+                }
+            }
+
+            // 2. Active, detected, and custom folders
+            activeAudioFoldersFlow.value.forEach { folder ->
+                if (folder.path.startsWith("/")) {
+                    val f = File(folder.path)
+                    if (f.exists() && f.isDirectory) targetDirs.add(f)
+                }
+            }
+            detectedAudioFolders.value.forEach { folder ->
+                if (folder.path.startsWith("/")) {
+                    val f = File(folder.path)
+                    if (f.exists() && f.isDirectory) targetDirs.add(f)
+                }
+            }
+
+            // 3. Known song parent folders
+            allLocalSongsFlow.value.forEach { song ->
+                val p = song.localPath
+                if (p != null && p.startsWith("/")) {
+                    val parent = File(p).parentFile
+                    if (parent != null && parent.exists() && parent.isDirectory) {
+                        targetDirs.add(parent)
+                    }
+                }
+            }
+
+            // Collect all audio files in targetDirs (skip ignored & umtify folders)
+            val filesToScan = mutableListOf<String>()
+            val dirPathsToScan = mutableListOf<String>()
+
+            for (dir in targetDirs) {
+                if (isIgnoredAudioFolder(dir.absolutePath) || isUmtifyPath(dir.absolutePath)) continue
+                dirPathsToScan.add(dir.absolutePath)
+                runCatching {
+                    dir.walkTopDown()
+                        .maxDepth(5)
+                        .filter { file ->
+                            file.isFile && isAudioFileName(file.name) &&
+                                !isUmtifyPath(file.absolutePath) &&
+                                !isIgnoredAudioFolder(file.parent)
+                        }
+                        .forEach { file ->
+                            filesToScan.add(file.absolutePath)
+                        }
+                }
+            }
+
+            val allPaths = (dirPathsToScan + filesToScan).distinct()
+            if (allPaths.isNotEmpty()) {
+                runCatching {
+                    withTimeoutOrNull(6000L) {
+                        suspendCancellableCoroutine<Unit> { cont ->
+                            var remaining = allPaths.size
+                            val lock = Any()
+                            MediaScannerConnection.scanFile(
+                                appContext,
+                                allPaths.toTypedArray(),
+                                null,
+                            ) { _, _ ->
+                                synchronized(lock) {
+                                    remaining--
+                                    if (remaining <= 0) {
+                                        if (cont.isActive) {
+                                            cont.resume(Unit)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            refreshLocalMusic(appContext)
+        }
+    }
+
     suspend fun getLocalMusic(context: Context): List<Song> = withContext(Dispatchers.IO) {
         val scanAll = AppSettings.scanAllAudioFolders.value
         val customUris = getCustomFolderUris()
@@ -980,8 +1132,10 @@ object LocalMediaRepository {
     }
 
     suspend fun refreshLocalMusic(context: Context): List<Song> = scanMutex.withLock {
-        withContext(Dispatchers.IO) {
-            val hasPerm = hasStoragePermission(context)
+        withScanning {
+            withContext(Dispatchers.IO) {
+                registerContentObserver(context.applicationContext)
+                val hasPerm = hasStoragePermission(context)
             val customUris = getCustomFolderUris()
             val scanAll = AppSettings.scanAllAudioFolders.value
             val selectedIndividualSongs = AppSettings.localMusicSelectedSongs.value
@@ -1255,15 +1409,8 @@ object LocalMediaRepository {
                 }
             }
 
-            val currentSongs = allLocalSongsFlow.value
-            val hasSongsChanged = currentSongs.size != collectedSongs.size ||
-                currentSongs.zip(collectedSongs).any { (old, new) ->
-                    old.videoId != new.videoId || old.title != new.title || old.thumbnailUrl != new.thumbnailUrl
-                }
-            if (hasSongsChanged || currentSongs.isEmpty()) {
-                allLocalSongsFlow.value = collectedSongs
-                saveCachedIndex(context, collectedSongs)
-            }
+            allLocalSongsFlow.value = collectedSongs
+            saveCachedIndex(context, collectedSongs)
 
             // Unify folders source of truth: compute and update active audio folders
             updateActiveFolders(context, collectedSongs)
@@ -1274,6 +1421,7 @@ object LocalMediaRepository {
             extraLocalMusic?.invoke(context, collectedSongs) ?: collectedSongs
         }
     }
+}
 
     fun computeActiveFolders(context: Context, songs: List<Song>): List<DeviceFolder> {
         val customFolders = getCustomFolderUris()

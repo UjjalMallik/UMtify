@@ -310,6 +310,7 @@ import com.music.bitchord.ui.screens.sortedForDetail
 import com.music.bitchord.ui.screens.ExploreScreen
 import com.music.bitchord.ui.screens.LocalFolder
 import com.music.bitchord.ui.screens.LocalFolderState
+import com.music.bitchord.ui.screens.LocalMusicRefreshButton
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -4082,6 +4083,9 @@ private fun BitChordApp(
                                             tint = MaterialTheme.colorScheme.onSurface,
                                         )
                                     }
+                                }
+                                if (isLocalDetail) {
+                                    LocalMusicRefreshButton()
                                 }
                                 // The menu itself is [FrostedSortMenu], composed
                                 // with the app's other frosted overlays further

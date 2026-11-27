@@ -7,6 +7,12 @@ import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,6 +39,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material3.Button
@@ -62,6 +69,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -106,6 +114,18 @@ fun LocalMusicManagerDialog(
     val detectedFolders by LocalMediaRepository.detectedAudioFolders.collectAsStateWithLifecycle()
     val activeFolders by LocalMediaRepository.activeAudioFoldersFlow.collectAsStateWithLifecycle()
     val allLocalSongs by LocalMediaRepository.allLocalSongsFlow.collectAsStateWithLifecycle()
+    val isScanning by LocalMediaRepository.isScanningFlow.collectAsStateWithLifecycle()
+
+    val infiniteTransition = rememberInfiniteTransition(label = "scanning_rotation")
+    val rotationAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "scanning_angle",
+    )
 
     var folderSongSearchQuery by remember { mutableStateOf("") }
     var drilledFolder by remember { mutableStateOf<LocalMediaRepository.DeviceFolder?>(null) }
@@ -169,7 +189,7 @@ fun LocalMusicManagerDialog(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                     Text(
                         text = if (isBn) "লোকাল মিউজিক ম্যানেজার" else "Local Music Manager",
                         style = MaterialTheme.typography.titleLarge,
@@ -182,19 +202,45 @@ fun LocalMusicManagerDialog(
                         color = Color.White.copy(alpha = 0.65f),
                     )
                 }
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.08f)),
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = "Close",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp),
-                    )
+                    IconButton(
+                        onClick = {
+                            scope.launch(Dispatchers.IO) {
+                                LocalMediaRepository.forceRescanLocalMusic(context)
+                            }
+                        },
+                        enabled = !isScanning,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.08f)),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = "Rescan Local Music",
+                            tint = if (isScanning) MaterialTheme.colorScheme.primary else Color.White,
+                            modifier = Modifier
+                                .size(20.dp)
+                                .graphicsLayer { rotationZ = if (isScanning) rotationAngle else 0f },
+                        )
+                    }
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.08f)),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Close",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
             }
 
@@ -280,6 +326,41 @@ fun LocalMusicManagerDialog(
                             color = Color.White.copy(alpha = 0.55f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            scope.launch(Dispatchers.IO) {
+                                LocalMediaRepository.forceRescanLocalMusic(context)
+                            }
+                        },
+                        enabled = !isScanning,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.08f)),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = "Rescan Local Music",
+                            tint = if (isScanning) MaterialTheme.colorScheme.primary else Color.White,
+                            modifier = Modifier
+                                .size(20.dp)
+                                .graphicsLayer { rotationZ = if (isScanning) rotationAngle else 0f },
+                        )
+                    }
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.08f)),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Close",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 }
