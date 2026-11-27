@@ -115,7 +115,7 @@ object NerdStats {
          * said" is not.
          */
         val isLossless: Boolean
-            get() = isLosslessMime(mimeType)
+            get() = !isDolbyAtmos && isLosslessMime(mimeType) && (bitrateKbps == null || bitrateKbps >= 450)
 
         /** Dolby Atmos decoded as E-AC-3 JOC; deliberately distinct from lossless. */
         val isDolbyAtmos: Boolean

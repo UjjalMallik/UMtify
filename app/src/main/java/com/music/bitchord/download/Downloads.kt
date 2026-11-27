@@ -1494,7 +1494,41 @@ object Downloads {
      *   a mid-download refusal and has to ask for the same rung it started on.
      */
     private suspend fun routeFor(context: Context, track: Song, quality: DownloadQuality): Route {
-        if (AppSettings.enableLosslessDownloads.value) {
+        val sourceAnswer = fromSources(track, quality)
+        if (sourceAnswer != null && (sourceAnswer.first.format.isDolbyAtmos || sourceAnswer.first.format.isLossless == true)) {
+            val (stream, storable) = sourceAnswer
+            val dash = OfflineDash.handles(stream.url)
+            val hls = stream.url.substringBefore('?').endsWith(".m3u8", ignoreCase = true)
+            val packaged = hls || dash
+            if (packaged && storable.extension in ManifestFile.EXTENSIONS) {
+                return Route(
+                    extension = storable.extension,
+                    mimeType = storable.mimeType,
+                    describe = "${stream.format.summary} (assembled from ${if (dash) "DASH" else "HLS"})",
+                    downloadFormat = stream.format.downloadBadge(),
+                    write = { sink, onProgress ->
+                        ManifestFile.write(
+                            context.cacheDir, stream.url, stream.headers, dash,
+                            storable.extension, sink, onProgress,
+                        )
+                    },
+                )
+            }
+            if (!(packaged && AppSettings.exportDownloads.value)) {
+                return Route(
+                    extension = if (packaged) "m3u8" else storable.extension,
+                    mimeType = if (packaged) "application/vnd.apple.mpegurl" else storable.mimeType,
+                    describe = stream.format.summary,
+                    downloadFormat = stream.format.downloadBadge(),
+                    taggable = true,
+                    offlineHls = Manifest(stream.url, stream.headers, dash = dash).takeIf { packaged },
+                    write = { sink, onProgress ->
+                        Downloader.fetchDirect(stream.url, stream.headers, sink, onProgress)
+                    },
+                )
+            }
+        }
+        if (quality.keepsLossless) {
             val lossless = runCatching {
                 withTimeoutOrNull(6000L) {
                     LosslessAudioProvider.resolveLosslessTrack(
@@ -1540,7 +1574,7 @@ object Downloads {
                 }
             }
         }
-        fromSources(track, quality)?.let { (stream, storable) ->
+        sourceAnswer?.let { (stream, storable) ->
             // A manifest is an index, not audio. Whichever kind it is, fetching
             // it as a file writes the index into something named `.flac` —
             // which is exactly what a `.mpd` did until [OfflineDash] existed:
@@ -1702,6 +1736,7 @@ object Downloads {
             else -> "audio/webm"
         }
         val badge = when {
+            option.isDolbyAtmos || option.id == "dolby_atmos" -> "Dolby Atmos"
             option.isLossless && (option.bitDepth ?: 16) > 16 -> "FLAC ${option.bitDepth}-bit"
             option.isLossless -> "FLAC"
             ext == "m4a" -> "AAC ${option.bitrateKbps ?: 128}k"
@@ -1715,7 +1750,7 @@ object Downloads {
                 downloadFormat = badge,
                 write = { sink, onProgress ->
                     ManifestFile.write(
-                        context.cacheDir, streamUrl, emptyMap(), dash,
+                        context.cacheDir, streamUrl, option.headers, dash,
                         ext, sink, onProgress,
                     )
                 },
@@ -1728,10 +1763,10 @@ object Downloads {
                 downloadFormat = badge,
                 taggable = true,
                 write = { sink, onProgress ->
-                    val headers = if (streamUrl.contains("googlevideo.com")) {
-                        StreamResolver.mediaHeadersFor(streamUrl)
-                    } else {
-                        mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    val headers = when {
+                        option.headers.isNotEmpty() -> option.headers
+                        streamUrl.contains("googlevideo.com") -> StreamResolver.mediaHeadersFor(streamUrl)
+                        else -> mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                     }
                     Downloader.fetchDirect(streamUrl, headers, sink, onProgress)
                 },

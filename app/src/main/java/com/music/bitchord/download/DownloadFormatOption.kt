@@ -15,4 +15,6 @@ data class DownloadFormatOption(
     val streamUrl: String,
     val fileExtension: String,
     val isLossless: Boolean = false,
+    val isDolbyAtmos: Boolean = false,
+    val headers: Map<String, String> = emptyMap(),
 )

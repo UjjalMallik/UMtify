@@ -15,6 +15,7 @@ import com.music.bitchord.playback.EqLayout
 import com.music.bitchord.playback.EqualizerPreset
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 
 
 /**
@@ -586,7 +587,7 @@ object AppSettings {
     val jamendoClientId = MutableStateFlow("")
 
     fun hasAnyBuiltInLossless(): Boolean =
-        enableLosslessStreaming.value ||
+        effectiveAudioQuality == AudioQuality.LOSSLESS ||
         enableInternetArchiveLossless.value ||
         enableJamendoLossless.value ||
         com.music.bitchord.data.sources.builtin.SoundCloudProvider.isEnabled ||
@@ -1215,6 +1216,7 @@ object AppSettings {
      */
     private fun watchConnection(context: Context) {
         val manager = context.getSystemService(ConnectivityManager::class.java) ?: return
+        var lastBenchmarkedConnection: Pair<Boolean, Boolean?>? = null
         val refresh: (NetworkCapabilities?) -> Unit = { capabilities ->
             val caps = capabilities
                 ?: runCatching { manager.getNetworkCapabilities(manager.activeNetwork) }.getOrNull()
@@ -1227,11 +1229,20 @@ object AppSettings {
                 setOfflineModeEnabled(true)
             }
 
-
-
-            meteredConnection.value = runCatching {
+            val isMetered = runCatching {
                 if (manager.activeNetwork == null) null else manager.isActiveNetworkMetered
             }.getOrNull()
+            meteredConnection.value = isMetered
+
+            val currentKey = available to isMetered
+            if (available && currentKey != lastBenchmarkedConnection) {
+                lastBenchmarkedConnection = currentKey
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    com.music.bitchord.data.LosslessAudioProvider.benchmarkTopServers("network-change")
+                }
+            } else if (!available) {
+                lastBenchmarkedConnection = currentKey
+            }
         }
         refresh(null)
         runCatching {

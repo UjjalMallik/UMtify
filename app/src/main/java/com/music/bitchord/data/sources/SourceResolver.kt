@@ -1054,7 +1054,82 @@ object SourceResolver {
      * addon path sends its `?atmos=` hint on, asked in the one place that
      * chooses between rows.
      */
-    private fun atmosWanted(): Boolean = DeviceCodecs.offersDolbyAtmos
+    private fun atmosWanted(): Boolean = AppSettings.dolbyAtmos.value
+
+    /**
+     * Resolves both (Dolby Atmos stream, Stereo Lossless FLAC stream) from enabled addons
+     * (prioritizing the user's custom UMtify addon first).
+     */
+    suspend fun resolveAddonStreamsFor(
+        target: TrackMatcher.Target,
+        wantsDolbyAtmos: Boolean,
+        wantsLossless: Boolean,
+    ): Pair<SourceStream?, SourceStream?> = coroutineScope {
+        if (target.title.isBlank() || target.isVideo) return@coroutineScope Pair(null, null)
+        val addons = SourceRegistry.activeAddonSources()
+        if (addons.isEmpty()) return@coroutineScope Pair(null, null)
+
+        var atmosWinner: SourceStream? = null
+        var losslessWinner: SourceStream? = null
+
+        val request = if (wantsLossless) StreamRequest.Lossless else StreamRequest.Best
+        for (addon in addons) {
+            for (query in TrackMatcher.queries(target)) {
+                val candidates = attempt(addon) {
+                    addon.search(query, limit = MATCH_CANDIDATES, waitForAll = false, request = request)
+                } ?: break
+                val ranked = TrackMatcher.ranked(candidates, target)
+                val sameLength = ranked.filter { TrackMatcher.withinSeconds(it, target, SAME_RECORDING_SEC) }
+                val eligible = sameLength.ifEmpty { ranked }
+                if (eligible.isEmpty()) continue
+
+                val atmosDeferred = if (wantsDolbyAtmos && atmosWinner == null) {
+                    async {
+                        val atmosRow = eligible.firstOrNull { it.sourceQuality == ModuleSource.DOLBY } ?: eligible.first()
+                        val trackId = SourceRegistry.parseTrackKey(atmosRow.videoId)?.second ?: atmosRow.videoId
+                        val opened = attempt(addon) { addon.stream(trackId, request, stereoOnly = false) }
+                        if (opened != null && opened.format.isDolbyAtmos) {
+                            opened.copy(
+                                sourceConfigId = addon.configId,
+                                sourceName = addon.displayName,
+                                durationSec = TrackMatcher.secondsOf(atmosRow.durationText),
+                            )
+                        } else null
+                    }
+                } else null
+
+                val flacDeferred = if (wantsLossless && losslessWinner == null) {
+                    async {
+                        val flacRow = eligible.firstOrNull {
+                            it.sourceQuality != ModuleSource.DOLBY &&
+                                (it.sourceHiRes || it.sourceQuality == ModuleSource.LOSSLESS)
+                        } ?: eligible.firstOrNull { it.sourceQuality != ModuleSource.DOLBY } ?: eligible.first()
+                        val trackId = SourceRegistry.parseTrackKey(flacRow.videoId)?.second ?: flacRow.videoId
+                        val opened = attempt(addon) { addon.stream(trackId, StreamRequest.Lossless, stereoOnly = true) }
+                        if (opened != null && opened.format.isLossless == true) {
+                            opened.copy(
+                                sourceConfigId = addon.configId,
+                                sourceName = addon.displayName,
+                                durationSec = TrackMatcher.secondsOf(flacRow.durationText),
+                            )
+                        } else null
+                    }
+                } else null
+
+                atmosDeferred?.await()?.let { if (atmosWinner == null) atmosWinner = it }
+                flacDeferred?.await()?.let { candidate ->
+                    if (losslessWinner == null || isBetter(candidate.format, losslessWinner?.format)) {
+                        losslessWinner = candidate
+                    }
+                }
+                if ((!wantsDolbyAtmos || atmosWinner != null) && (!wantsLossless || losslessWinner != null)) {
+                    return@coroutineScope Pair(atmosWinner, losslessWinner)
+                }
+                break
+            }
+        }
+        Pair(atmosWinner, losslessWinner)
+    }
 
     private suspend fun streamBest(
         source: MusicSource,

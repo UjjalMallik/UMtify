@@ -1324,10 +1324,10 @@ class PlaybackService : MediaLibraryService() {
                 "$audioFormatFor <- ${format.sampleMimeType} $khz $kbps $depth $channels",
                 about = audioFormatFor,
             )
+            currentAudioInputFormat = format
             activeTrackIsDolbyAtmos = NerdStats.isDolbyAtmosMime(format.sampleMimeType)
             applySpatialAudioEnabled()
-            publishNerdStats()
-            currentAudioInputFormat = format
+            publishNerdStats(format)
             applyOutputRoute()
         }
 
@@ -1697,14 +1697,19 @@ class PlaybackService : MediaLibraryService() {
             // the end of the cached bytes. Deciding afresh each time is how
             // the middle of an MP4 ended up appended to a WebM. See
             // [StreamChoice].
-            val wantsLossless = (AppSettings.enableLosslessStreaming.value || AppSettings.effectiveAudioQuality == AudioQuality.LOSSLESS) && !StreamChoice.substitutesRefused(videoId)
+            val wantsDolbyAtmos = AppSettings.dolbyAtmos.value && !StreamChoice.substitutesRefused(videoId)
+            val wantsLossless = (AppSettings.effectiveAudioQuality == AudioQuality.LOSSLESS) && !StreamChoice.substitutesRefused(videoId)
             val existingServing = StreamChoice.of(videoId)
 
-            // If we already have a chosen stream that is lossless FLAC, serve it immediately
-            if (existingServing != null && existingServing.format.isLossless == true) {
+            // If we already have a chosen stream matching priority (Dolby Atmos or Lossless FLAC), serve it immediately
+            if (existingServing != null &&
+                ((wantsDolbyAtmos && existingServing.format.isDolbyAtmos) ||
+                    (wantsLossless && existingServing.format.isLossless == true))
+            ) {
+                val defaultLabel = if (existingServing.format.isDolbyAtmos) "Dolby Atmos" else "Hi-Res FLAC"
                 val sourceName = existingServing.sourceName
                     ?: existingServing.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
-                    ?: "Hi-Res FLAC"
+                    ?: defaultLabel
                 NerdStats.onSourceStream(videoId, existingServing.format, sourceName)
                 NerdStats.recordSource(videoId, sourceName)
                 return@Resolver dataSpec.buildUpon()
@@ -1713,22 +1718,39 @@ class PlaybackService : MediaLibraryService() {
                     .build()
             }
 
-            // Hi-Res Lossless streaming provider check (when enabled and not refused)
-            if (wantsLossless) {
+            // Priority 1: Dolby Atmos (when ON) -> Priority 2: Lossless FLAC (when active network is Lossless)
+            // -> Priority 3: Smooth High-Bitrate Fallback (JioSaavn 320 kbps / YouTube Music)
+            if (wantsDolbyAtmos || wantsLossless) {
                 val target = SourceResolver.targetIn(dataSpec.uri)
                 if (target.title.isNotBlank()) {
-                    val (losslessResult: LosslessStreamResult?, fallbackResult: SourceStream?) = runBlocking(about) {
+                    val (winnerStream: SourceStream?, fallbackResult: SourceStream?) = runBlocking(about) {
                         coroutineScope {
-                            val losslessDeferred = async {
+                            val addonDeferred = async {
                                 runCatching {
                                     withTimeoutOrNull(1800L) {
-                                        LosslessAudioProvider.resolveLosslessTrack(
-                                            title = target.title,
-                                            artist = target.artist,
-                                            durationSec = target.durationSec,
+                                        SourceResolver.resolveAddonStreamsFor(
+                                            target = target,
+                                            wantsDolbyAtmos = wantsDolbyAtmos,
+                                            wantsLossless = wantsLossless,
                                         )
                                     }
                                 }.getOrNull()
+                            }
+
+                            val losslessMirrorDeferred = if (wantsLossless) {
+                                async {
+                                    runCatching {
+                                        withTimeoutOrNull(1800L) {
+                                            LosslessAudioProvider.resolveLosslessTrack(
+                                                title = target.title,
+                                                artist = target.artist,
+                                                durationSec = target.durationSec,
+                                            )
+                                        }
+                                    }.getOrNull()
+                                }
+                            } else {
+                                CompletableDeferred<LosslessStreamResult?>(null)
                             }
 
                             val fallbackDeferred: Deferred<SourceStream?> = if (existingServing != null) {
@@ -1743,50 +1765,79 @@ class PlaybackService : MediaLibraryService() {
                                 }
                             }
 
-                            val lossless = losslessDeferred.await()
-                            if (lossless != null && lossless.streamUrl.isNotBlank()) {
-                                Pair<LosslessStreamResult?, SourceStream?>(lossless, null)
+                            val addonResult = addonDeferred.await()
+                            val addonAtmos = addonResult?.first
+                            val addonLossless = addonResult?.second
+                            val mirrorFlac = losslessMirrorDeferred.await()
+
+                            // Priority 1: Dolby Atmos
+                            val atmosWinner = if (wantsDolbyAtmos && addonAtmos != null && addonAtmos.url.isNotBlank()) {
+                                addonAtmos
+                            } else null
+
+                            // Priority 2: Lossless FLAC (Custom UMtify addon FLAC or fastest benchmarked mirror)
+                            val flacHeaders = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                            val mirrorStream = if (wantsLossless && mirrorFlac != null && mirrorFlac.streamUrl.isNotBlank()) {
+                                SourceStream(
+                                    url = mirrorFlac.streamUrl,
+                                    format = StreamFormat(
+                                        codec = "flac",
+                                        bitDepth = mirrorFlac.bitDepth,
+                                        sampleRateHz = mirrorFlac.sampleRate,
+                                    ),
+                                    headers = flacHeaders,
+                                    sourceName = mirrorFlac.sourceName,
+                                )
+                            } else null
+
+                            val losslessWinner = if (wantsLossless) {
+                                when {
+                                    addonLossless != null && addonLossless.url.isNotBlank() &&
+                                        (mirrorStream == null || (addonLossless.format.bitDepth ?: 16) >= (mirrorStream.format.bitDepth ?: 16)) ->
+                                        addonLossless
+                                    mirrorStream != null -> mirrorStream
+                                    else -> null
+                                }
+                            } else null
+
+                            val priorityWinner = atmosWinner ?: losslessWinner
+                            if (priorityWinner != null) {
+                                Pair<SourceStream?, SourceStream?>(priorityWinner, null)
                             } else {
-                                Pair<LosslessStreamResult?, SourceStream?>(null, fallbackDeferred.await())
+                                // Only wait on fallback if network quality isn't purely bypassing it
+                                Pair<SourceStream?, SourceStream?>(null, fallbackDeferred.await())
                             }
                         }
                     }
 
-                    if (losslessResult != null && losslessResult.streamUrl.isNotBlank()) {
-                        val format = StreamFormat(
-                            codec = "flac",
-                            bitDepth = losslessResult.bitDepth,
-                            sampleRateHz = losslessResult.sampleRate,
-                        )
-                        NerdStats.onSourceStream(videoId, format, losslessResult.sourceName)
-                        NerdStats.recordSource(videoId, losslessResult.sourceName)
-                        val flacHeaders = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                        val sourceStream = SourceStream(
-                            url = losslessResult.streamUrl,
-                            format = format,
-                            headers = flacHeaders,
-                            sourceName = losslessResult.sourceName,
-                        )
-                        StreamChoice.remember(videoId, sourceStream, substituted = true)
-                        TrackLog.d("BitChord", "serving Hi-Res Lossless FLAC for $videoId (${losslessResult.sourceName})", about = videoId)
+                    if (winnerStream != null && winnerStream.url.isNotBlank()) {
+                        val sourceName = winnerStream.sourceName
+                            ?: winnerStream.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
+                            ?: if (winnerStream.format.isDolbyAtmos) "Dolby Atmos" else "Hi-Res FLAC"
+                        NerdStats.onSourceStream(videoId, winnerStream.format, sourceName)
+                        NerdStats.recordSource(videoId, sourceName)
+                        StreamChoice.remember(videoId, winnerStream, substituted = true)
+                        TrackLog.d("BitChord", "serving ${winnerStream.format.summary} for $videoId ($sourceName)", about = videoId)
                         return@Resolver dataSpec.buildUpon()
-                            .setUri(Uri.parse(losslessResult.streamUrl))
-                            .setHttpRequestHeaders(flacHeaders)
+                            .setUri(Uri.parse(winnerStream.url))
+                            .setHttpRequestHeaders(winnerStream.headers)
                             .build()
                     } else if (fallbackResult != null && fallbackResult.url.isNotBlank()) {
-                        // Play fast fallback stream (JioSaavn 320 kbps or module) with zero stall!
+                        // Priority 3: High-bitrate fallback (JioSaavn 320 kbps / module) with zero stall!
                         val sourceName = fallbackResult.sourceName ?: "High Quality"
                         NerdStats.onSourceStream(videoId, fallbackResult.format, sourceName)
                         NerdStats.recordSource(videoId, sourceName)
                         StreamChoice.remember(videoId, fallbackResult, substituted = true)
-                        // Trigger background FLAC resolve into cache for future playback/replay
-                        scope.launch(Dispatchers.IO) {
-                            runCatching {
-                                LosslessAudioProvider.resolveLosslessTrack(
-                                    title = target.title,
-                                    artist = target.artist,
-                                    durationSec = target.durationSec,
-                                )
+                        // Trigger background Atmos/FLAC resolve into cache for future playback/replay
+                        if (wantsLossless) {
+                            scope.launch(Dispatchers.IO) {
+                                runCatching {
+                                    LosslessAudioProvider.resolveLosslessTrack(
+                                        title = target.title,
+                                        artist = target.artist,
+                                        durationSec = target.durationSec,
+                                    )
+                                }
                             }
                         }
                         return@Resolver dataSpec.buildUpon()
@@ -6118,10 +6169,11 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
-    private fun publishNerdStats() {
+    private fun publishNerdStats(overrideFormat: Format? = null) {
         val player = player ?: return
-        val format = player.audioFormat
         val mediaId = player.currentMediaItem?.mediaId
+        val formatBelongsToCurrent = overrideFormat != null || audioFormatFor == null || audioFormatFor == mediaId
+        val format = if (formatBelongsToCurrent) (overrideFormat ?: player.audioFormat) else null
         val measured = format?.measure()
         // DSD reaches the renderer already decimated to PCM (DsdExtractor), so
         // its sample mime is `audio/raw`; the extractor leaves `dsd64` and the
@@ -6130,7 +6182,15 @@ class PlaybackService : MediaLibraryService() {
         // 176.4 kHz PCM it became.
         val dsd = format?.codecs?.takeIf { it.startsWith("dsd") }
         val dsdRateHz = dsd?.removePrefix("dsd")?.toIntOrNull()?.times(44_100)
-        val isLossless = dsd != null || NerdStats.isLosslessMime(format?.sampleMimeType)
+        val rawFormatBitrate = when {
+            format?.averageBitrate != null && format.averageBitrate > 0 -> (format.averageBitrate + 500) / 1000
+            format?.bitrate != null && format.bitrate > 0 -> (format.bitrate + 500) / 1000
+            else -> null
+        }
+        val isDolbyAtmos = NerdStats.isDolbyAtmosMime(format?.sampleMimeType)
+        val isLossless = !isDolbyAtmos &&
+            (dsd != null || NerdStats.isLosslessMime(format?.sampleMimeType)) &&
+            (rawFormatBitrate == null || rawFormatBitrate >= 450)
         val isRawPcm = NerdStats.isRawPcm(format?.sampleMimeType)
         val pcmDataRate = measured?.pcmBitrateKbps
 
@@ -6141,18 +6201,20 @@ class PlaybackService : MediaLibraryService() {
         } else {
             declared
         }
+        val validClaimedKbps = validClaimed?.kbps
+        val pickedKbps = NerdStats.pickedBitrateKbps(mediaId)
 
         val (bitrate, provenance) = when {
-            format?.averageBitrate != null && format.averageBitrate > 0 ->
-                Pair((format.averageBitrate + 500) / 1000, TelemetryProvenance.AUTHORITATIVE)
-            format?.bitrate != null && format.bitrate > 0 ->
-                Pair((format.bitrate + 500) / 1000, TelemetryProvenance.AUTHORITATIVE)
+            rawFormatBitrate != null ->
+                Pair(rawFormatBitrate, TelemetryProvenance.AUTHORITATIVE)
             mediaId != null && localBitrateCache.containsKey(mediaId) ->
                 Pair(localBitrateCache[mediaId], TelemetryProvenance.AUTHORITATIVE)
-            validClaimed?.kbps != null ->
-                Pair(validClaimed.kbps, TelemetryProvenance.AUTHORITATIVE)
-            NerdStats.pickedBitrateKbps(mediaId) != null ->
-                Pair(NerdStats.pickedBitrateKbps(mediaId), TelemetryProvenance.AUTHORITATIVE)
+            validClaimedKbps != null && (!isLossless || validClaimedKbps >= 450) ->
+                Pair(validClaimedKbps, TelemetryProvenance.AUTHORITATIVE)
+            !isLossless && pickedKbps != null ->
+                Pair(pickedKbps, TelemetryProvenance.AUTHORITATIVE)
+            isLossless && dsd == null && pcmDataRate != null ->
+                Pair(pcmDataRate, TelemetryProvenance.DERIVED)
             dsd == null && isRawPcm && pcmDataRate != null ->
                 Pair(pcmDataRate, TelemetryProvenance.DERIVED)
             else ->
@@ -6842,26 +6904,47 @@ class PlaybackService : MediaLibraryService() {
             val nextItem = runCatching { exoPlayer.getMediaItemAt(nextIdx).toSong() }.getOrNull() ?: return
             scope.launch(Dispatchers.IO) {
                 val target = TrackMatcher.targetOf(nextItem)
-                if (AppSettings.enableLosslessStreaming.value || AppSettings.effectiveAudioQuality == AudioQuality.LOSSLESS) {
-                    runCatching {
-                        val durationSec = (nextItem.durationMillis() / 1000).toInt().takeIf { it > 0 } ?: 210
-                        LosslessAudioProvider.resolveLosslessTrack(
-                            title = nextItem.title,
-                            artist = nextItem.artist,
-                            durationSec = durationSec,
-                        )
-                    }.getOrNull()?.let { lossless ->
-                        val flacHeaders = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                        val sourceStream = SourceStream(
-                            url = lossless.streamUrl,
-                            format = StreamFormat(codec = "flac", bitDepth = lossless.bitDepth, sampleRateHz = lossless.sampleRate),
-                            headers = flacHeaders,
-                            sourceName = lossless.sourceName,
-                        )
-                        StreamChoice.remember(nextItem.videoId, sourceStream, substituted = true)
+                val wantsAtmos = AppSettings.dolbyAtmos.value
+                val wantsLossless = AppSettings.effectiveAudioQuality == AudioQuality.LOSSLESS
+                var prefetched = false
+
+                if (wantsAtmos || wantsLossless) {
+                    val addonPair = runCatching {
+                        SourceResolver.resolveAddonStreamsFor(target, wantsAtmos, wantsLossless)
+                    }.getOrNull()
+                    val atmosStream = addonPair?.first
+                    val addonFlac = addonPair?.second
+
+                    val chosenAddon = when {
+                        wantsAtmos && atmosStream != null -> atmosStream
+                        wantsLossless && addonFlac != null -> addonFlac
+                        else -> null
+                    }
+                    if (chosenAddon != null) {
+                        StreamChoice.remember(nextItem.videoId, chosenAddon, substituted = true)
+                        prefetched = true
+                    } else if (wantsLossless) {
+                        runCatching {
+                            val durationSec = (nextItem.durationMillis() / 1000).toInt().takeIf { it > 0 } ?: 210
+                            LosslessAudioProvider.resolveLosslessTrack(
+                                title = nextItem.title,
+                                artist = nextItem.artist,
+                                durationSec = durationSec,
+                            )
+                        }.getOrNull()?.let { lossless ->
+                            val flacHeaders = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                            val sourceStream = SourceStream(
+                                url = lossless.streamUrl,
+                                format = StreamFormat(codec = "flac", bitDepth = lossless.bitDepth, sampleRateHz = lossless.sampleRate),
+                                headers = flacHeaders,
+                                sourceName = lossless.sourceName,
+                            )
+                            StreamChoice.remember(nextItem.videoId, sourceStream, substituted = true)
+                            prefetched = true
+                        }
                     }
                 }
-                if (SourceResolver.canSubstituteForYouTube()) {
+                if (!prefetched && SourceResolver.canSubstituteForYouTube()) {
                     runCatching { SourceResolver.prefetchSubstitute(target) }
                         .getOrNull()
                         ?.also { StreamChoice.remember(nextItem.videoId, it, substituted = true) }

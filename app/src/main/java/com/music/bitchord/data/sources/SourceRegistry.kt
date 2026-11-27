@@ -137,9 +137,6 @@ object SourceRegistry {
                 .putBoolean(KEY_DEFAULT_SOURCES_V4, true)
                 .apply()
         }
-        if (AppSettings.enableLosslessStreaming.value) {
-            syncLosslessSource(true)
-        }
     }
 
     /**
@@ -268,6 +265,16 @@ object SourceRegistry {
         enabledConfigs(configs.value)
             .filterNot { it.awaitsLosslessOutput }
             .mapNotNull { instances[it.id] }
+
+    /** Enabled custom addons & UMtify addons, with any UMtify addon prioritized first. */
+    fun activeAddonSources(): List<AddonSource> =
+        active().filterIsInstance<AddonSource>()
+            .sortedByDescending {
+                val cfg = config(it.configId)
+                it.configId == UMTIFY_HQ_ADDON_ID ||
+                    cfg?.label?.contains("umtify", ignoreCase = true) == true ||
+                    cfg?.baseUrl?.contains("umtify", ignoreCase = true) == true
+            }
 
     /**
      * [active], minus the addons whose manifest said `allowDownloads: 0`. A

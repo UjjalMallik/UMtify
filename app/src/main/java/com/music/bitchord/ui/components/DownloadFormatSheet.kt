@@ -300,6 +300,7 @@ private fun FormatOptionRow(
     modifier: Modifier = Modifier,
 ) {
     val badgeColor = when {
+        option.isDolbyAtmos || option.id == "dolby_atmos" -> Color(0xFF9C27B0) // Deep Spatial Purple
         option.id == "flac_hires" -> Color(0xFFFFB300) // Amber / Gold
         option.isLossless -> Color(0xFF26C6DA) // Cyan / Teal
         option.codec == "opus" -> Color(0xFFAB47BC) // Violet
@@ -307,6 +308,7 @@ private fun FormatOptionRow(
     }
 
     val badgeText = when {
+        option.isDolbyAtmos || option.id == "dolby_atmos" -> "ATMOS"
         option.id == "flac_hires" -> "HI-RES"
         option.isLossless -> "LOSSLESS"
         option.codec == "opus" -> "OPUS"
@@ -372,6 +374,7 @@ private fun FormatOptionRow(
                 Spacer(Modifier.height(2.dp))
                 val subtext = buildString {
                     when {
+                        option.isDolbyAtmos || option.id == "dolby_atmos" -> append("Dolby Atmos • E-AC-3 JOC Spatial Audio")
                         option.id == "flac_hires" -> append("FLAC • 24-bit Hi-Res Audio")
                         option.isLossless -> append("FLAC • 16-bit Lossless Audio")
                         option.id == "jiosaavn_320" || option.label.contains("JioSaavn", ignoreCase = true) -> append("AAC • JioSaavn")

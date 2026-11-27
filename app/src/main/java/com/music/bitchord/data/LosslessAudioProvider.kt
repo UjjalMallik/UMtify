@@ -4,8 +4,11 @@ import android.util.Base64
 import android.util.LruCache
 import com.music.bitchord.data.DebugLog as Log
 import com.music.bitchord.data.settings.AppSettings
+import com.music.bitchord.data.sources.SourceRegistry
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -54,6 +57,11 @@ object LosslessAudioProvider {
 
     private val mirrorLatencies = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val mirrorFailures = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    @Volatile
+    private var benchmarkedTopMirrors: List<String> = emptyList()
+    @Volatile
+    private var lastBenchmarkAtMs: Long = 0L
+    private val isBenchmarking = AtomicBoolean(false)
 
     fun recordMirrorSuccess(endpoint: String, latencyMs: Long) {
         mirrorLatencies[endpoint] = latencyMs
@@ -65,6 +73,96 @@ object LosslessAudioProvider {
         mirrorFailures[endpoint] = fails
         if (fails >= 2) {
             mirrorLatencies[endpoint] = 99999L
+        }
+    }
+
+    /** Returns the top [limit] fastest servers chosen by smart connection benchmarking (ignoring list position). */
+    fun getTopBenchmarkedServers(limit: Int = 3): List<String> {
+        val benchmarked = benchmarkedTopMirrors
+        if (benchmarked.isNotEmpty()) return benchmarked.take(limit)
+        return getCandidateEndpoints().take(limit)
+    }
+
+    /**
+     * Benchmarks all enabled lossless mirrors & custom addons in parallel (2s cap) on Dispatchers.IO,
+     * ranking the top 2–3 fastest healthy servers for the current Wi-Fi / Mobile Data connection.
+     */
+    suspend fun benchmarkTopServers(reason: String = "manual"): List<String> = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        if (reason != "network-change" && now - lastBenchmarkAtMs < 3_000L && benchmarkedTopMirrors.isNotEmpty()) {
+            return@withContext benchmarkedTopMirrors
+        }
+        if (!isBenchmarking.compareAndSet(false, true)) {
+            return@withContext benchmarkedTopMirrors
+        }
+        try {
+            val candidates = getCandidateEndpoints()
+            val probeClient = httpClient.newBuilder()
+                .connectTimeout(1500, TimeUnit.MILLISECONDS)
+                .readTimeout(1500, TimeUnit.MILLISECONDS)
+                .callTimeout(1800, TimeUnit.MILLISECONDS)
+                .build()
+
+            val results = withTimeoutOrNull(2000L) {
+                coroutineScope {
+                    // Warm custom UMtify & enabled AddonSource health in parallel
+                    SourceRegistry.activeAddonSources().forEach { addon ->
+                        launch { runCatching { addon.health() } }
+                    }
+
+                    candidates.map { endpoint ->
+                        async {
+                            val base = endpoint.trimEnd('/')
+                            val urls = listOf(
+                                "$base/v1/health",
+                                "$base/health",
+                                "$base/v1/search?q=test",
+                                "$base/search/?s=test",
+                            )
+                            val start = System.currentTimeMillis()
+                            var latency: Long? = null
+                            for (u in urls) {
+                                val req = Request.Builder()
+                                    .url(u)
+                                    .header("User-Agent", "UMtify/1.0 (Android; SmartBenchmark)")
+                                    .header("Accept", "application/json")
+                                    .build()
+                                val ok = runCatching {
+                                    probeClient.newCall(req).execute().use { resp ->
+                                        if (!resp.isSuccessful) false
+                                        else {
+                                            val text = resp.body?.string()?.trim().orEmpty()
+                                            text.startsWith("{") || text.startsWith("[") || text == "ok"
+                                        }
+                                    }
+                                }.getOrDefault(false)
+                                if (ok) {
+                                    latency = (System.currentTimeMillis() - start).coerceAtLeast(1L)
+                                    break
+                                }
+                            }
+                            if (latency != null) {
+                                recordMirrorSuccess(endpoint, latency)
+                                endpoint to latency
+                            } else {
+                                recordMirrorFailure(endpoint)
+                                null
+                            }
+                        }
+                    }.awaitAll().filterNotNull()
+                }
+            }.orEmpty()
+
+            val rankedTop = results.sortedBy { it.second }.take(3).map { it.first }
+            if (rankedTop.isNotEmpty()) {
+                benchmarkedTopMirrors = rankedTop
+                lastHealthyEndpoint = rankedTop.first()
+                lastBenchmarkAtMs = System.currentTimeMillis()
+                Log.i(TAG, "Smart benchmark ($reason) selected top servers: $rankedTop")
+            }
+            benchmarkedTopMirrors
+        } finally {
+            isBenchmarking.set(false)
         }
     }
 
@@ -146,26 +244,12 @@ object LosslessAudioProvider {
         val normArtist = normalize(cleanedArtist)
 
         val endpoints = getCandidateEndpoints()
+        val topBenchmarked = getTopBenchmarkedServers(3)
 
-        // 1. Instant Start: If we have a cached winning mirror, try it with a 1.5s timeout for instant start
-        val winning = lastHealthyEndpoint
-        if (winning != null && winning in endpoints) {
-            val quickResult = runCatching {
-                withTimeoutOrNull(1500L) {
-                    probeSingleMirror(winning, encodedQuery, normTitle, normArtist, durationSec, qualityTier)
-                }
-            }.getOrNull()
-            if (quickResult != null) {
-                synchronized(memoryCache) {
-                    memoryCache.put(cacheKey, CacheEntry(quickResult, System.currentTimeMillis()))
-                }
-                Log.d(TAG, "Instant FLAC stream resolved from cached winner $winning: ${quickResult.streamUrl}")
-                return@withContext quickResult
-            }
-        }
-
-        // 2. Fast Parallel Racing: Race top mirrors in parallel
-        val probeEndpoints = (listOfNotNull(winning) + endpoints.filter { it != winning }).distinct().take(6)
+        // 1. Fast Parallel Racing over the Top 3 benchmarked fastest servers (plus cached winner)
+        val probeEndpoints = (listOfNotNull(lastHealthyEndpoint) + topBenchmarked + endpoints)
+            .distinct()
+            .take(4)
         val resultDeferred = CompletableDeferred<LosslessStreamResult?>()
         val atomicFinished = AtomicBoolean(false)
 
@@ -504,7 +588,31 @@ object LosslessAudioProvider {
                 }
             }
 
+            val statedQuality = dataObj.optString("audioQuality")
+                .ifBlank { dataObj.optString("quality") }
+                .uppercase(Locale.ROOT)
+            val statedCodec = dataObj.optString("codec")
+                .ifBlank { dataObj.optString("mimeType") }
+                .lowercase(Locale.ROOT)
+
             if (streamUrl != null && streamUrl.startsWith("http")) {
+                val pathLower = streamUrl.substringBefore('?').lowercase(Locale.ROOT)
+                val explicitlyLossyExt = pathLower.endsWith(".mp3") ||
+                    pathLower.endsWith(".aac") ||
+                    pathLower.endsWith(".opus") ||
+                    pathLower.endsWith(".ogg") ||
+                    pathLower.endsWith(".webm")
+                val explicitlyLossyCodec = statedCodec.contains("mp3") ||
+                    statedCodec.contains("mpeg") ||
+                    statedCodec.contains("aac") ||
+                    statedCodec.contains("opus") ||
+                    statedCodec.contains("vorbis")
+                val explicitlyLossyQuality = statedQuality in setOf("LOW", "MEDIUM", "NORMAL", "HIGH", "320", "128", "96") &&
+                    !pathLower.endsWith(".flac")
+                if (explicitlyLossyExt || explicitlyLossyCodec || explicitlyLossyQuality) {
+                    return@runCatching null
+                }
+
                 val sourceName = if (bitDepth > 16 || sampleRate > 48000) "Hi-Res FLAC" else "FLAC Lossless"
                 LosslessStreamResult(
                     streamUrl = streamUrl,
@@ -531,7 +639,18 @@ object LosslessAudioProvider {
             .build()
         return runCatching {
             probeClient.newCall(req).execute().use { resp ->
-                resp.isSuccessful || resp.code in 200..206 || resp.code in 301..308 || resp.code == 416
+                val ok = resp.isSuccessful || resp.code in 200..206 || resp.code in 301..308 || resp.code == 416
+                if (!ok) return@use false
+                val ct = resp.header("Content-Type")?.lowercase(Locale.ROOT).orEmpty()
+                val rejectedLossyType = ct.startsWith("audio/mpeg") ||
+                    ct.startsWith("audio/mp3") ||
+                    ct.startsWith("audio/aac") ||
+                    ct.startsWith("audio/opus") ||
+                    ct.startsWith("audio/ogg") ||
+                    ct.startsWith("audio/webm") ||
+                    ct.startsWith("text/html") ||
+                    ct.startsWith("application/json")
+                !rejectedLossyType
             }
         }.getOrDefault(false)
     }

@@ -149,9 +149,12 @@ fun SourcesScreen(
     val smbShare by AppSettings.smbShare.collectAsStateWithLifecycle()
     val smbUsername by AppSettings.smbUsername.collectAsStateWithLifecycle()
     val smbPassword by AppSettings.smbPassword.collectAsStateWithLifecycle()
-    val enableLosslessStreaming by AppSettings.enableLosslessStreaming.collectAsStateWithLifecycle()
-    val enableLosslessDownloads by AppSettings.enableLosslessDownloads.collectAsStateWithLifecycle()
-    val losslessQualityTier by AppSettings.losslessQualityTier.collectAsStateWithLifecycle()
+
+    val allRepoExtensions by ExtensionRepoManager.extensions.collectAsStateWithLifecycle()
+    val installedExtensionIds by ExtensionRepoManager.installedIds.collectAsStateWithLifecycle()
+    val enabledExtensionIds by ExtensionRepoManager.enabledIds.collectAsStateWithLifecycle()
+    val installedVersions by ExtensionRepoManager.installedVersions.collectAsStateWithLifecycle()
+    val isRepoLoading by ExtensionRepoManager.isLoading.collectAsStateWithLifecycle()
 
     val coroutineScope = rememberCoroutineScope()
 
@@ -206,7 +209,8 @@ fun SourcesScreen(
     // Asked of the kinds themselves rather than of the module specifically, so
     // a source added later answers this on its own terms instead of being
     // invisible to it.
-    val anyLosslessSource = enableLosslessStreaming || configs.any { it.enabled && it.isComplete && it.kind.canServeLossless }
+    val anyLosslessSource = configs.any { it.enabled && it.isComplete && it.kind.canServeLossless } ||
+        enabledExtensionIds.isNotEmpty()
 
     Column(
         modifier = modifier
@@ -221,89 +225,77 @@ fun SourcesScreen(
             modifier = Modifier.padding(start = 72.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
         )
 
-        // Compact Lossless Streaming & Download Toggles
+        // Original SOURCES / Addons card (custom UMtify addon, SoundCloud, JioSaavn, YouTube Music, etc.)
         SettingsGroup(
-            header = "Hi-Res Lossless Audio",
-            footer = "Stream and download CD-quality (16-bit) and Studio Master (24-bit) FLAC audio automatically.",
+            header = stringResource(R.string.sources_order_header),
+            footer = buildString {
+                append(stringResource(R.string.sources_order_footer))
+                if (cappedByQuality) {
+                    append("\n\n")
+                    append(stringResource(R.string.sources_quality_capped))
+                } else if (!anyLosslessSource) {
+                    append("\n\n")
+                    append(stringResource(R.string.sources_no_lossless))
+                }
+            },
         ) {
-            // Lossless Streaming (FLAC)
-            SettingsRow(
-                icon = Icons.Rounded.GraphicEq,
-                title = "Lossless Streaming (FLAC)",
-                subtitle = "Stream 16-bit/24-bit FLAC when available, auto-fallback to standard",
-                trailing = {
-                    Switch(
-                        checked = enableLosslessStreaming,
-                        onCheckedChange = AppSettings::setEnableLosslessStreaming,
-                        colors = SwitchDefaults.colors(
-                            checkedTrackColor = MaterialTheme.colorScheme.primary,
-                            checkedBorderColor = MaterialTheme.colorScheme.primary,
-                        ),
+            val row: @Composable (Int, SourceConfig, (@Composable () -> Unit)?) -> Unit =
+                { position, config, handle ->
+                    SourceRow(
+                        position = position,
+                        config = config,
+                        health = health[config.id],
+                        skippedByQuality = config.enabled && !ceiling.permits(config.kind),
+                        awaitingOutput = if (config.enabled && config.awaitsLosslessOutput) losslessOutput else null,
+                        onMetered = metered == true,
+                        ceiling = ceiling,
+                        onClick = if (config.kind.needsServer) ({ onEditSource(config) }) else null,
+                        onToggle = if (config.kind == SourceKind.YOUTUBE) null else { enabled ->
+                            if (config.kind == SourceKind.JIOSAAVN && enabled && !config.enabled) {
+                                onConfirmJioSaavn()
+                            } else {
+                                SourceRegistry.setEnabled(config.id, enabled)
+                            }
+                        },
+                        handle = handle,
                     )
-                },
-                onClick = { AppSettings.setEnableLosslessStreaming(!enableLosslessStreaming) },
+                }
+
+            ReorderableSources(
+                sources = configs,
+                onReorder = { SourceRegistry.reorder(it.map(SourceConfig::id)) },
+                row = row,
             )
 
-            RowDivider()
-
-            // Lossless Downloads (FLAC)
-            SettingsRow(
-                icon = Icons.Rounded.Download,
-                title = "Lossless Downloads (FLAC)",
-                subtitle = "Save offline downloads as lossless FLAC files",
-                trailing = {
-                    Switch(
-                        checked = enableLosslessDownloads,
-                        onCheckedChange = AppSettings::setEnableLosslessDownloads,
-                        colors = SwitchDefaults.colors(
-                            checkedTrackColor = MaterialTheme.colorScheme.primary,
-                            checkedBorderColor = MaterialTheme.colorScheme.primary,
-                        ),
-                    )
-                },
-                onClick = { AppSettings.setEnableLosslessDownloads(!enableLosslessDownloads) },
-            )
+            val waiting = configs.any { it.enabled && it.awaitsLosslessOutput }
+            if (waiting && losslessOutput.bluetoothCodecUnknown) {
+                RowDivider()
+                BluetoothCodecPermissionRow()
+            }
 
             RowDivider()
-
-            // Quality Tier selector
-            SettingsRow(
-                icon = Icons.Rounded.Tune,
-                title = "Quality Tier",
-                subtitle = if (losslessQualityTier == "HI_RES_LOSSLESS") "Up to 24-bit / 192kHz Studio Master" else "16-bit / 44.1kHz CD Quality",
-                value = if (losslessQualityTier == "HI_RES_LOSSLESS") "24-bit Hi-Res" else "16-bit Lossless",
-                onClick = {
-                    val next = if (losslessQualityTier == "HI_RES_LOSSLESS") "LOSSLESS" else "HI_RES_LOSSLESS"
-                    AppSettings.setLosslessQualityTier(next)
-                },
-            )
-
-            RowDivider()
-
-            // Fastest-Source Priority indicator
-            SettingsRow(
-                icon = Icons.Rounded.PlayCircle,
-                title = "Fastest-Source Priority",
-                subtitle = "Race active Hi-Res FLAC mirrors with instant 320 kbps fallback (Zero lag)",
-                value = "Active",
+            AddSourceRow(
+                onClick = { onEditSource(SourceConfig(kind = SourceKind.ADDON)) },
             )
         }
 
         // Extension Repo (Live from GitHub) Section
-        val allRepoExtensions by ExtensionRepoManager.extensions.collectAsStateWithLifecycle()
-        val installedExtensionIds by ExtensionRepoManager.installedIds.collectAsStateWithLifecycle()
-        val enabledExtensionIds by ExtensionRepoManager.enabledIds.collectAsStateWithLifecycle()
-        val installedVersions by ExtensionRepoManager.installedVersions.collectAsStateWithLifecycle()
-        val isRepoLoading by ExtensionRepoManager.isLoading.collectAsStateWithLifecycle()
-
         var selectedCategory by remember { mutableStateOf("All") }
         val categories = listOf("All", "Integration", "Download", "Metadata", "Utility")
 
-        val filteredExtensions = remember(allRepoExtensions, selectedCategory) {
+        val nonDuplicateExtensions = remember(allRepoExtensions) {
+            allRepoExtensions.filterNot {
+                it.id.contains("jiosaavn", ignoreCase = true) ||
+                    it.name.contains("jiosaavn", ignoreCase = true) ||
+                    it.displayName.contains("jiosaavn", ignoreCase = true)
+            }
+        }
+
+        val filteredExtensions = remember(nonDuplicateExtensions, selectedCategory) {
             if (selectedCategory == "All") {
-                allRepoExtensions
+                nonDuplicateExtensions
             } else {
-                allRepoExtensions.filter {
+                nonDuplicateExtensions.filter {
                     it.category.equals(selectedCategory, ignoreCase = true) ||
                         it.tags.any { tag -> tag.equals(selectedCategory, ignoreCase = true) }
                 }

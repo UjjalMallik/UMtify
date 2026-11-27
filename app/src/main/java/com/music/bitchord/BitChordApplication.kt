@@ -164,6 +164,11 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
         // one to hand — see SpotifyToken's doc for why.
         SpotifyToken.init(this)
         com.music.bitchord.data.ExtensionRepoManager.init(this)
+        backgroundInit.join()
+        // Smart connection-aware benchmark across enabled lossless mirrors and custom addons
+        CoroutineScope(Dispatchers.IO).launch {
+            com.music.bitchord.data.LosslessAudioProvider.benchmarkTopServers("startup")
+        }
         // A sideloaded update is just a new APK over the old one, so app data —
         // including whatever the old build left in these caches — survives it
         // untouched. Wipe both on the first launch of a higher versionCode so a
@@ -178,7 +183,6 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
         }
         // The public "apps open right now" count; see Presence.
         com.music.bitchord.data.presence.AndroidPresence.install(this)
-        backgroundInit.join()
     }
 
     override fun onTrimMemory(level: Int) {

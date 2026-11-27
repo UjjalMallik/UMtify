@@ -5,10 +5,12 @@ import com.music.bitchord.data.LosslessAudioProvider
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.durationMillis
+import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.sources.JioSaavnSource
 import com.music.bitchord.data.sources.SourceConfig
 import com.music.bitchord.data.sources.SourceKind
 import com.music.bitchord.data.sources.SourceRegistry
+import com.music.bitchord.data.sources.SourceResolver
 import com.music.bitchord.data.sources.StreamRequest
 import com.music.bitchord.data.sources.TrackMatcher
 import kotlinx.coroutines.Dispatchers
@@ -24,8 +26,22 @@ object DownloadFormatResolver {
 
     suspend fun resolveFormats(song: Song): List<DownloadFormatOption> = withContext(Dispatchers.IO) {
         val durationSec = (song.durationMillis() / 1000).toInt().takeIf { it > 0 } ?: 210
+        val target = TrackMatcher.targetOf(song)
+        val allowAtmos = AppSettings.dolbyAtmos.value
 
         coroutineScope {
+            val addonDeferred = async {
+                runCatching {
+                    withTimeoutOrNull(4500L) {
+                        SourceResolver.resolveAddonStreamsFor(
+                            target = target,
+                            wantsDolbyAtmos = allowAtmos,
+                            wantsLossless = true,
+                        )
+                    }
+                }.getOrNull()
+            }
+
             val flacHiResDeferred = async {
                 runCatching {
                     withTimeoutOrNull(4000L) {
@@ -58,7 +74,6 @@ object DownloadFormatResolver {
                         val jioSaavnConfig = SourceRegistry.configs.value.firstOrNull { it.kind == SourceKind.JIOSAAVN }
                             ?: SourceConfig(kind = SourceKind.JIOSAAVN, enabled = true)
                         val source = JioSaavnSource(jioSaavnConfig)
-                        val target = TrackMatcher.targetOf(song)
                         val queries = TrackMatcher.queries(target)
                         var bestMatch: Song? = null
                         for (q in queries) {
@@ -123,6 +138,9 @@ object DownloadFormatResolver {
                 }.getOrNull()
             }
 
+            val addonResult = addonDeferred.await()
+            val addonAtmos = addonResult?.first
+            val addonFlac = addonResult?.second
             val flacHiRes = flacHiResDeferred.await()
             val flacLossless = flacLosslessDeferred.await()
             val jioSaavnOption = jioSaavnDeferred.await()
@@ -133,8 +151,61 @@ object DownloadFormatResolver {
             val options = mutableListOf<DownloadFormatOption>()
             val seenUrls = mutableSetOf<String>()
 
-            // 1. Hi-Res FLAC (24-bit / up to 192kHz)
-            if (flacHiRes != null && flacHiRes.streamUrl.isNotBlank() && flacHiRes.bitDepth > 16) {
+            // 1. Dolby Atmos (from custom UMtify addon / Atmos-capable addons)
+            if (addonAtmos != null && addonAtmos.url.isNotBlank()) {
+                val kbps = addonAtmos.format.kbps ?: 768
+                val probedBytes = probeContentLength(addonAtmos.url)
+                val isEst = probedBytes == null
+                val bytes = probedBytes ?: calculateEstimatedBytes(bitrateKbps = kbps, durationSec = durationSec)
+                val sourceTag = addonAtmos.sourceName?.let { " ($it)" }.orEmpty()
+                options.add(
+                    DownloadFormatOption(
+                        id = "dolby_atmos",
+                        label = "Dolby Atmos • E-AC-3 JOC$sourceTag",
+                        codec = addonAtmos.format.codec ?: "eac3-joc",
+                        bitrateKbps = kbps,
+                        sampleRateHz = addonAtmos.format.sampleRateHz ?: 48000,
+                        bitDepth = 16,
+                        sizeBytes = bytes,
+                        formattedSize = formatSize(bytes, isEst),
+                        streamUrl = addonAtmos.url,
+                        fileExtension = "m4a",
+                        isLossless = false,
+                        isDolbyAtmos = true,
+                        headers = addonAtmos.headers,
+                    )
+                )
+                seenUrls.add(addonAtmos.url)
+            }
+
+            // 2. Hi-Res FLAC (24-bit / up to 192kHz — from custom UMtify addon or top benchmarked mirrors)
+            val hiResAddon = addonFlac?.takeIf { (it.format.bitDepth ?: 16) > 16 && it.url !in seenUrls }
+            if (hiResAddon != null) {
+                val sr = hiResAddon.format.sampleRateHz ?: 96000
+                val bd = hiResAddon.format.bitDepth ?: 24
+                val probedBytes = probeContentLength(hiResAddon.url)
+                val isEst = probedBytes == null
+                val bytes = probedBytes ?: calculateEstimatedBytes(bitrateKbps = 2200, durationSec = durationSec)
+                val sampleRateKhz = sr / 1000.0
+                val sourceTag = hiResAddon.sourceName?.let { " ($it)" }.orEmpty()
+                options.add(
+                    DownloadFormatOption(
+                        id = "flac_hires",
+                        label = "FLAC • $bd-bit / ${String.format(Locale.US, "%.1f", sampleRateKhz)} kHz$sourceTag",
+                        codec = hiResAddon.format.codec ?: "flac",
+                        bitrateKbps = 2200,
+                        sampleRateHz = sr,
+                        bitDepth = bd,
+                        sizeBytes = bytes,
+                        formattedSize = formatSize(bytes, isEst),
+                        streamUrl = hiResAddon.url,
+                        fileExtension = "flac",
+                        isLossless = true,
+                        headers = hiResAddon.headers,
+                    )
+                )
+                seenUrls.add(hiResAddon.url)
+            } else if (flacHiRes != null && flacHiRes.streamUrl.isNotBlank() && flacHiRes.bitDepth > 16 && flacHiRes.streamUrl !in seenUrls) {
                 val probedBytes = probeContentLength(flacHiRes.streamUrl)
                 val isEst = probedBytes == null
                 val bytes = probedBytes ?: calculateEstimatedBytes(bitrateKbps = 2200, durationSec = durationSec)
@@ -157,41 +228,68 @@ object DownloadFormatResolver {
                 seenUrls.add(flacHiRes.streamUrl)
             }
 
-            // 2. 16-bit Lossless FLAC (16-bit / 44.1kHz)
-            val losslessCandidate = when {
-                flacLossless != null && flacLossless.streamUrl !in seenUrls -> flacLossless
-                flacHiRes != null && flacHiRes.bitDepth <= 16 && flacHiRes.streamUrl !in seenUrls -> flacHiRes
-                else -> null
-            }
-            if (losslessCandidate != null && losslessCandidate.streamUrl.isNotBlank()) {
-                val probedBytes = probeContentLength(losslessCandidate.streamUrl)
+            // 3. 16-bit Lossless FLAC (16-bit / 44.1kHz — from custom UMtify addon or benchmarked mirror)
+            val addonFlac16 = addonFlac?.takeIf { it.url !in seenUrls }
+            if (addonFlac16 != null && addonFlac16.url.isNotBlank()) {
+                val sr = addonFlac16.format.sampleRateHz ?: 44100
+                val bd = addonFlac16.format.bitDepth ?: 16
+                val probedBytes = probeContentLength(addonFlac16.url)
                 val isEst = probedBytes == null
                 val bytes = probedBytes ?: calculateEstimatedBytes(bitrateKbps = 950, durationSec = durationSec)
+                val sourceTag = addonFlac16.sourceName?.let { " ($it)" }.orEmpty()
                 options.add(
                     DownloadFormatOption(
                         id = "flac_16",
-                        label = "FLAC • 16-bit Lossless (44.1 kHz)",
-                        codec = "flac",
+                        label = "FLAC • $bd-bit Lossless (${String.format(Locale.US, "%.1f", sr / 1000.0)} kHz)$sourceTag",
+                        codec = addonFlac16.format.codec ?: "flac",
                         bitrateKbps = 950,
-                        sampleRateHz = losslessCandidate.sampleRate,
-                        bitDepth = 16,
+                        sampleRateHz = sr,
+                        bitDepth = bd,
                         sizeBytes = bytes,
                         formattedSize = formatSize(bytes, isEst),
-                        streamUrl = losslessCandidate.streamUrl,
+                        streamUrl = addonFlac16.url,
                         fileExtension = "flac",
                         isLossless = true,
+                        headers = addonFlac16.headers,
                     )
                 )
-                seenUrls.add(losslessCandidate.streamUrl)
+                seenUrls.add(addonFlac16.url)
+            } else {
+                val losslessCandidate = when {
+                    flacLossless != null && flacLossless.streamUrl !in seenUrls -> flacLossless
+                    flacHiRes != null && flacHiRes.bitDepth <= 16 && flacHiRes.streamUrl !in seenUrls -> flacHiRes
+                    else -> null
+                }
+                if (losslessCandidate != null && losslessCandidate.streamUrl.isNotBlank()) {
+                    val probedBytes = probeContentLength(losslessCandidate.streamUrl)
+                    val isEst = probedBytes == null
+                    val bytes = probedBytes ?: calculateEstimatedBytes(bitrateKbps = 950, durationSec = durationSec)
+                    options.add(
+                        DownloadFormatOption(
+                            id = "flac_16",
+                            label = "FLAC • 16-bit Lossless (44.1 kHz)",
+                            codec = "flac",
+                            bitrateKbps = 950,
+                            sampleRateHz = losslessCandidate.sampleRate,
+                            bitDepth = 16,
+                            sizeBytes = bytes,
+                            formattedSize = formatSize(bytes, isEst),
+                            streamUrl = losslessCandidate.streamUrl,
+                            fileExtension = "flac",
+                            isLossless = true,
+                        )
+                    )
+                    seenUrls.add(losslessCandidate.streamUrl)
+                }
             }
 
-            // 3. JioSaavn 320 kbps (High Quality M4A / AAC)
+            // 4. JioSaavn 320 kbps (High Quality M4A / AAC)
             if (jioSaavnOption != null && jioSaavnOption.streamUrl !in seenUrls) {
                 options.add(jioSaavnOption)
                 seenUrls.add(jioSaavnOption.streamUrl)
             }
 
-            // 4. Opus High
+            // 5. YouTube Music — Opus High
             if (opusHigh != null && opusHigh.url.isNotBlank() && opusHigh.url !in seenUrls) {
                 val probedBytes = probeContentLength(opusHigh.url)
                 val isEst = probedBytes == null
@@ -214,7 +312,7 @@ object DownloadFormatResolver {
                 seenUrls.add(opusHigh.url)
             }
 
-            // 5. M4A / AAC Standard
+            // 6. YouTube Music — M4A / AAC Standard
             if (m4a != null && m4a.url.isNotBlank() && m4a.url !in seenUrls) {
                 val probedBytes = probeContentLength(m4a.url)
                 val isEst = probedBytes == null
@@ -237,7 +335,7 @@ object DownloadFormatResolver {
                 seenUrls.add(m4a.url)
             }
 
-            // 6. Opus Medium (if distinct from Opus High)
+            // 7. YouTube Music — Opus Medium (if distinct from Opus High)
             if (opusMed != null && opusMed.url.isNotBlank() && opusMed.url !in seenUrls && (opusHigh == null || opusMed.kbps < opusHigh.kbps)) {
                 val probedBytes = probeContentLength(opusMed.url)
                 val isEst = probedBytes == null

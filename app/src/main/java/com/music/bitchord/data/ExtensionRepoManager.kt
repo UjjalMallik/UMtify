@@ -134,9 +134,10 @@ object ExtensionRepoManager {
             }
         }
 
-        // Trigger live refresh and auto-update on background Dispatchers.IO
+        // Trigger live refresh, auto-update, and smart server benchmark on background Dispatchers.IO
         scope.launch {
             refreshRegistry(context, autoUpdate = true)
+            LosslessAudioProvider.benchmarkTopServers("repo-init")
         }
     }
 
@@ -191,6 +192,13 @@ object ExtensionRepoManager {
 
                 val name = item.optString("name", id)
                 val displayName = item.optString("display_name").ifBlank { name }
+                // Hide duplicate JioSaavn extension since JioSaavn is built-in to the main Sources list
+                if (id.contains("jiosaavn", ignoreCase = true) ||
+                    name.contains("jiosaavn", ignoreCase = true) ||
+                    displayName.contains("jiosaavn", ignoreCase = true)
+                ) {
+                    continue
+                }
                 val version = item.optString("version", "1.0.0")
                 val description = item.optString("description")
                 val downloadUrl = item.optString("download_url")
@@ -361,6 +369,7 @@ object ExtensionRepoManager {
 
     fun getExtractedEndpoints(): List<String> {
         val ctx = appContext ?: return emptyList()
+        val enabled = _enabledIds.value
         val endpoints = mutableListOf<String>()
         val extDir = File(ctx.filesDir, "extensions")
         if (!extDir.exists() || !extDir.isDirectory) return emptyList()
@@ -369,6 +378,8 @@ object ExtensionRepoManager {
         val urlRegex = Regex("""https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?::[0-9]+)?(?:/[a-zA-Z0-9._~-]+)*""")
 
         for (file in files) {
+            val extId = file.nameWithoutExtension
+            if (enabled.isNotEmpty() && extId !in enabled) continue
             runCatching {
                 java.util.zip.ZipFile(file).use { zip ->
                     val entries = listOfNotNull(zip.getEntry("index.js"), zip.getEntry("manifest.json"))
