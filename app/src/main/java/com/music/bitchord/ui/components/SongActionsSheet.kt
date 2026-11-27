@@ -620,7 +620,11 @@ private fun DownloadRow(song: Song, palette: ArtworkPalette, isOffline: Boolean,
 
         is DownloadState.Failed -> ActionRow(
             icon = Icons.Rounded.ErrorOutline,
-            label = state.reason,
+            label = if (state.failedFormatIds.isNotEmpty()) {
+                "Download failed • Tap to try another format"
+            } else {
+                state.reason
+            },
             value = stringResource(R.string.retry),
             // Not the artwork's colour: a failure has to stay legible as a
             // failure whatever the sleeve happens to be tinted.

@@ -17,7 +17,7 @@ sealed interface DownloadProgress {
 
     data object Done : DownloadProgress
 
-    data class Failed(val reason: String) : DownloadProgress
+    data class Failed(val reason: String, val failedFormatIds: Set<String> = emptySet()) : DownloadProgress
 
     /** Neither waiting nor coming back — nothing left for the user to watch. */
     val settled: Boolean get() = this is Done || this is Failed
@@ -68,7 +68,9 @@ object DownloadSession {
         val from: String? = null,
         /** Ask order, so the list reads the way the queue drains. */
         val sequence: Long,
-    )
+    ) {
+        val failedFormatIds: Set<String> get() = (progress as? DownloadProgress.Failed)?.failedFormatIds ?: emptySet()
+    }
 
     data class State(
         val items: List<Item> = emptyList(),
@@ -167,7 +169,8 @@ object DownloadSession {
 
     fun done(videoId: String) = set(videoId, DownloadProgress.Done)
 
-    fun failed(videoId: String, reason: String) = set(videoId, DownloadProgress.Failed(reason))
+    fun failed(videoId: String, reason: String, failedFormatIds: Set<String> = emptySet()) =
+        set(videoId, DownloadProgress.Failed(reason, failedFormatIds))
 
     /**
      * Swap in the track that is actually being fetched.

@@ -52,7 +52,10 @@ sealed interface DownloadState {
     /** [fraction] is 0f until the length is known, which is the first thing asked for. */
     data class Running(val fraction: Float) : DownloadState
 
-    data class Failed(val reason: String) : DownloadState
+    data class Failed(
+        val reason: String,
+        val failedFormatIds: Set<String> = emptySet(),
+    ) : DownloadState
 }
 
 /**
@@ -88,6 +91,11 @@ object Downloads {
 
     private val _active = MutableStateFlow<Map<String, DownloadState>>(emptyMap())
     val active: StateFlow<Map<String, DownloadState>> = _active.asStateFlow()
+
+    private val chosenFormatForTrack = java.util.concurrent.ConcurrentHashMap<String, DownloadFormatOption>()
+    private val failedFormatsForTrack = java.util.concurrent.ConcurrentHashMap<String, Set<String>>()
+
+    fun failedFormatIdsFor(videoId: String): Set<String> = failedFormatsForTrack[videoId] ?: emptySet()
 
     /**
      * Ids asked for as part of a release's own download tap, by the browseId
@@ -198,8 +206,16 @@ object Downloads {
      *   one of many. Carried no further than [DownloadSession], which is the
      *   only thing that has to say *why* forty tracks are in the queue.
      */
-    fun enqueue(context: Context, song: Song, from: String? = null) {
+    fun enqueue(
+        context: Context,
+        song: Song,
+        from: String? = null,
+        formatOption: DownloadFormatOption? = null,
+    ) {
         val id = song.videoId
+        if (formatOption != null) {
+            chosenFormatForTrack[id] = formatOption
+        }
         val isCached = AudioCache.isSongFullyCached(id)
         if (!AppSettings.downloadsAllowedNow && !isCached) {
             // Distinct from the duplicate-tap no-op below: nothing is in flight
@@ -564,6 +580,10 @@ object Downloads {
         artworkUri: String? = null,
     ) {
         val ids = setOf(asked.videoId, fetched.videoId)
+        failedFormatsForTrack.remove(asked.videoId)
+        failedFormatsForTrack.remove(fetched.videoId)
+        chosenFormatForTrack.remove(asked.videoId)
+        chosenFormatForTrack.remove(fetched.videoId)
         // MediaStore supplies this for exported downloads, but app-private and
         // legacy file:// downloads never pass through that index. Keep the
         // creation time in our own record so "Date added" remains stable if a
@@ -1263,7 +1283,12 @@ object Downloads {
             return@withContext Prepared(song.videoId, effectiveTrack, route = route, alreadyAt = null, isFromCache = true)
         }
 
-        val route = routeFor(context, track, quality)
+        val explicitOption = chosenFormatForTrack[song.videoId]
+        val route = if (explicitOption != null) {
+            routeForOption(context, track, explicitOption)
+        } else {
+            routeFor(context, track, quality)
+        }
         Log.d(TAG, "downloading ${song.videoId} as .${route.extension} (${route.describe}, ${quality.label})")
         Prepared(song.videoId, track, route = route, alreadyAt = null)
     }
@@ -1651,12 +1676,65 @@ object Downloads {
 
     /** Back to "not downloaded" — used for success, where [saved] takes over, and for cancellation. */
     private fun clear(videoId: String) {
+        chosenFormatForTrack.remove(videoId)
         _active.update { it - videoId }
     }
 
     private fun fail(videoId: String, reason: String) {
-        _active.update { it + (videoId to DownloadState.Failed(reason)) }
-        DownloadSession.failed(videoId, reason)
+        val failedOption = chosenFormatForTrack[videoId]
+        val prev = failedFormatsForTrack[videoId] ?: emptySet()
+        val updated = if (failedOption != null) prev + failedOption.id else prev
+        failedFormatsForTrack[videoId] = updated
+        _active.update { it + (videoId to DownloadState.Failed(reason, updated)) }
+        DownloadSession.failed(videoId, reason, updated)
+    }
+
+    private fun routeForOption(context: Context, track: Song, option: DownloadFormatOption): Route {
+        val streamUrl = option.streamUrl
+        val dash = OfflineDash.handles(streamUrl)
+        val hls = streamUrl.substringBefore('?').endsWith(".m3u8", ignoreCase = true)
+        val packaged = hls || dash
+        val ext = option.fileExtension
+        val mime = when (ext) {
+            "flac" -> "audio/flac"
+            "m4a" -> "audio/mp4"
+            "opus" -> "audio/opus"
+            else -> "audio/webm"
+        }
+        val badge = when {
+            option.isLossless && (option.bitDepth ?: 16) > 16 -> "FLAC ${option.bitDepth}-bit"
+            option.isLossless -> "FLAC"
+            ext == "m4a" -> "AAC ${option.bitrateKbps ?: 128}k"
+            else -> "OPUS ${option.bitrateKbps ?: 160}k"
+        }
+        if (packaged) {
+            return Route(
+                extension = ext,
+                mimeType = mime,
+                describe = "${option.label} (assembled from ${if (dash) "DASH" else "HLS"})",
+                downloadFormat = badge,
+                write = { sink, onProgress ->
+                    ManifestFile.write(
+                        context.cacheDir, streamUrl, emptyMap(), dash,
+                        ext, sink, onProgress,
+                    )
+                },
+            )
+        } else {
+            return Route(
+                extension = ext,
+                mimeType = mime,
+                describe = option.label,
+                downloadFormat = badge,
+                taggable = true,
+                write = { sink, onProgress ->
+                    val headers = if (streamUrl.contains("googlevideo.com")) {
+                        StreamResolver.mediaHeadersFor(streamUrl)
+                    } else emptyMap()
+                    Downloader.fetchDirect(streamUrl, headers, sink, onProgress)
+                },
+            )
+        }
     }
 
     /**

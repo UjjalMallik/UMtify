@@ -192,7 +192,11 @@ fun TopBarDownloadButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
  *   takes the indicator down.
  */
 @Composable
-fun DownloadManagerSheet(onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+fun DownloadManagerSheet(
+    onDismiss: () -> Unit,
+    onPickAlternativeFormat: ((com.music.bitchord.data.model.Song, Set<String>) -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     val session by DownloadSession.state.collectAsStateWithLifecycle()
     // Newest ask last, the order the queue will actually reach them in.
@@ -274,7 +278,13 @@ fun DownloadManagerSheet(onDismiss: () -> Unit, modifier: Modifier = Modifier) {
                 DownloadManagerRow(
                     item = item,
                     onCancel = { Downloads.cancel(item.videoId) },
-                    onRetry = { Downloads.enqueue(context, item.song, item.from) },
+                    onRetry = {
+                        if (onPickAlternativeFormat != null) {
+                            onPickAlternativeFormat(item.song, item.failedFormatIds)
+                        } else {
+                            Downloads.enqueue(context, item.song, item.from)
+                        }
+                    },
                 )
             }
         }
@@ -299,6 +309,11 @@ private fun DownloadManagerRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(
+                if (failed != null) {
+                    Modifier.clickable(onClick = onRetry)
+                } else Modifier
+            )
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -413,7 +428,14 @@ private fun DownloadManagerRow(
                 }
                 is DownloadProgress.Done -> RowStatus(stringResource(R.string.saved_to_bitchord_folder))
                 is DownloadProgress.Failed ->
-                    RowStatus(progress.reason, MaterialTheme.colorScheme.error)
+                    RowStatus(
+                        text = if (progress.failedFormatIds.isNotEmpty()) {
+                            "Download failed • Tap to try another format"
+                        } else {
+                            progress.reason
+                        },
+                        color = MaterialTheme.colorScheme.error,
+                    )
             }
         }
         Spacer(Modifier.width(8.dp))

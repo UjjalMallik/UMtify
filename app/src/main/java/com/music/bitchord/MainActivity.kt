@@ -225,6 +225,7 @@ import com.music.bitchord.download.Downloads
 import com.music.bitchord.ui.components.BrowseActionsSheet
 import com.music.bitchord.ui.components.BrowseTarget
 import com.music.bitchord.ui.components.ConfirmationAlert
+import com.music.bitchord.ui.components.DownloadFormatSheet
 import com.music.bitchord.ui.components.DownloadManagerSheet
 import com.music.bitchord.ui.components.PlaylistPickerSheet
 import com.music.bitchord.ui.components.ReorderPlaylistSheet
@@ -1291,6 +1292,7 @@ private fun BitChordApp(
     // A device folder's tab and selection, kept the same way and for the same
     // reason: an album opened from the folder replaces its page until Back.
     val localFolderStates = remember { mutableMapOf<String, LocalFolderState>() }
+    var formatPickerSong by remember { mutableStateOf<Pair<Song, Set<String>>?>(null) }
     LaunchedEffect(detailStack.map { it.browseId }) {
         val open = detailStack.mapTo(HashSet()) { it.browseId }
         detailListStates.keys.retainAll(open)
@@ -2265,7 +2267,8 @@ private fun BitChordApp(
         } else {
             song
         }
-        startDownload(listOf(withDuration), null)
+        val failedIds = Downloads.failedFormatIdsFor(song.videoId)
+        formatPickerSong = withDuration to failedIds
     }
 
     // Content padding leaves room for the frosted bar above and the tab bar
@@ -4747,8 +4750,47 @@ private fun BitChordApp(
                 onDismissRequest = closeDownloadManager,
                 containerColor = MaterialTheme.colorScheme.background,
             ) {
-                DownloadManagerSheet(onDismiss = closeDownloadManager)
+                DownloadManagerSheet(
+                    onDismiss = closeDownloadManager,
+                    onPickAlternativeFormat = { song, failedIds ->
+                        closeDownloadManager()
+                        formatPickerSong = song to failedIds
+                    },
+                )
             }
+        }
+
+        formatPickerSong?.let { (song, failedIds) ->
+            DownloadFormatSheet(
+                song = song,
+                failedFormatIds = failedIds,
+                onDismiss = { formatPickerSong = null },
+                onSelectFormat = { option ->
+                    formatPickerSong = null
+                    val needsStorage = AppSettings.exportDownloads.value && DownloadStore.needsLegacyPermission() &&
+                        ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                        ) != PackageManager.PERMISSION_GRANTED
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.POST_NOTIFICATIONS,
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        notifyPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+
+                    if (needsStorage) {
+                        downloadPending = listOf(song)
+                        downloadPendingFrom = null
+                        storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    } else {
+                        Downloads.enqueue(context, song, from = null, formatOption = option)
+                    }
+                },
+            )
         }
 
         // ---- Add to playlist / new playlist ----

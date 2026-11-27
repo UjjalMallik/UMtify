@@ -92,9 +92,11 @@ object LosslessAudioProvider {
         title: String,
         artist: String,
         durationSec: Int? = null,
+        preferredQuality: String? = null,
     ): LosslessStreamResult? = withContext(Dispatchers.IO) {
         if (title.isBlank()) return@withContext null
-        val cacheKey = "${title.trim().lowercase(Locale.ROOT)}|${artist.trim().lowercase(Locale.ROOT)}"
+        val qualityTier = preferredQuality ?: if (AppSettings.losslessQualityTier.value == "LOSSLESS") "LOSSLESS" else "HI_RES_LOSSLESS"
+        val cacheKey = "${title.trim().lowercase(Locale.ROOT)}|${artist.trim().lowercase(Locale.ROOT)}|$qualityTier"
         synchronized(memoryCache) {
             val cached = memoryCache.get(cacheKey)
             if (cached != null && System.currentTimeMillis() - cached.timestamp < CACHE_TTL_MS) {
