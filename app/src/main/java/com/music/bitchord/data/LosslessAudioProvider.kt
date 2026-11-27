@@ -113,7 +113,6 @@ object LosslessAudioProvider {
         val normArtist = normalize(cleanedArtist)
 
         val endpoints = getCandidateEndpoints()
-        val qualityTier = if (AppSettings.losslessQualityTier.value == "LOSSLESS") "LOSSLESS" else "HI_RES_LOSSLESS"
 
         for (endpoint in endpoints) {
             try {

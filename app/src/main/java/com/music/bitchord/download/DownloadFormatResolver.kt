@@ -4,6 +4,7 @@ import com.music.bitchord.data.Http
 import com.music.bitchord.data.LosslessAudioProvider
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.model.durationMillis
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
