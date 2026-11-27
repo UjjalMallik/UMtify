@@ -203,7 +203,7 @@ fun LocalMusicManagerDialog(
                     )
                 }
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(
@@ -326,41 +326,6 @@ fun LocalMusicManagerDialog(
                             color = Color.White.copy(alpha = 0.55f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    IconButton(
-                        onClick = {
-                            scope.launch(Dispatchers.IO) {
-                                LocalMediaRepository.forceRescanLocalMusic(context)
-                            }
-                        },
-                        enabled = !isScanning,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.08f)),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Refresh,
-                            contentDescription = "Rescan Local Music",
-                            tint = if (isScanning) MaterialTheme.colorScheme.primary else Color.White,
-                            modifier = Modifier
-                                .size(20.dp)
-                                .graphicsLayer { rotationZ = if (isScanning) rotationAngle else 0f },
-                        )
-                    }
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.08f)),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Close,
-                            contentDescription = "Close",
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp),
                         )
                     }
                 }

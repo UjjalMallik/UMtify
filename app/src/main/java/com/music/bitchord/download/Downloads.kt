@@ -1500,7 +1500,7 @@ object Downloads {
                     LosslessAudioProvider.resolveLosslessTrack(
                         title = track.title,
                         artist = track.artist,
-                        durationSec = track.durationSec,
+                        durationSec = (track.durationMillis() / 1000).toInt().takeIf { it > 0 },
                     )
                 }
             }.getOrNull()

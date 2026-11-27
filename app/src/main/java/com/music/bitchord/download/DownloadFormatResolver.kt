@@ -16,9 +16,7 @@ import java.util.concurrent.TimeUnit
 object DownloadFormatResolver {
 
     suspend fun resolveFormats(song: Song): List<DownloadFormatOption> = withContext(Dispatchers.IO) {
-        val durationSec = song.durationSec?.takeIf { it > 0 }
-            ?: (song.durationMillis() / 1000).toInt().takeIf { it > 0 }
-            ?: 210
+        val durationSec = (song.durationMillis() / 1000).toInt().takeIf { it > 0 } ?: 210
 
         coroutineScope {
             val flacHiResDeferred = async {
