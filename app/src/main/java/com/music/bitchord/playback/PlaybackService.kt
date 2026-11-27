@@ -127,6 +127,7 @@ import com.music.bitchord.data.Http
 import com.music.bitchord.auth.SignedIn
 import com.music.bitchord.data.LikeState
 import com.music.bitchord.data.LosslessAudioProvider
+import com.music.bitchord.data.LosslessStreamResult
 import com.music.bitchord.data.NerdStats
 import com.music.bitchord.data.TrackLog
 import com.music.bitchord.data.discord.DiscordRPC
@@ -162,6 +163,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -1715,7 +1717,7 @@ class PlaybackService : MediaLibraryService() {
             if (wantsLossless) {
                 val target = SourceResolver.targetIn(dataSpec.uri)
                 if (target.title.isNotBlank()) {
-                    val (losslessResult, fallbackResult) = runBlocking(about) {
+                    val (losslessResult: LosslessStreamResult?, fallbackResult: SourceStream?) = runBlocking(about) {
                         coroutineScope {
                             val losslessDeferred = async {
                                 runCatching {
@@ -1729,7 +1731,7 @@ class PlaybackService : MediaLibraryService() {
                                 }.getOrNull()
                             }
 
-                            val fallbackDeferred = if (existingServing != null) {
+                            val fallbackDeferred: Deferred<SourceStream?> = if (existingServing != null) {
                                 CompletableDeferred(existingServing)
                             } else {
                                 async {
@@ -1743,9 +1745,9 @@ class PlaybackService : MediaLibraryService() {
 
                             val lossless = losslessDeferred.await()
                             if (lossless != null && lossless.streamUrl.isNotBlank()) {
-                                Pair(lossless, null)
+                                Pair<LosslessStreamResult?, SourceStream?>(lossless, null)
                             } else {
-                                Pair(null, fallbackDeferred.await())
+                                Pair<LosslessStreamResult?, SourceStream?>(null, fallbackDeferred.await())
                             }
                         }
                     }
