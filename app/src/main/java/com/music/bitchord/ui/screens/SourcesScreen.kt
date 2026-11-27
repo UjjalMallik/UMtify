@@ -206,7 +206,7 @@ fun SourcesScreen(
     // Asked of the kinds themselves rather than of the module specifically, so
     // a source added later answers this on its own terms instead of being
     // invisible to it.
-    val anyLosslessSource = configs.any { it.enabled && it.isComplete && it.kind.canServeLossless }
+    val anyLosslessSource = enableLosslessStreaming || configs.any { it.enabled && it.isComplete && it.kind.canServeLossless }
 
     Column(
         modifier = modifier

@@ -137,6 +137,9 @@ object SourceRegistry {
                 .putBoolean(KEY_DEFAULT_SOURCES_V4, true)
                 .apply()
         }
+        if (AppSettings.enableLosslessStreaming.value) {
+            syncLosslessSource(true)
+        }
     }
 
     /**
@@ -309,11 +312,19 @@ object SourceRegistry {
         configs.filter { it.enabled && it.isComplete }
 
     fun ensureUmtifyHqEnabled() {
+        syncLosslessSource(true)
+    }
+
+    fun syncLosslessSource(enabled: Boolean) {
         val list = configs.value
-        val hq = list.firstOrNull { it.id == UMTIFY_HQ_ADDON_ID || it.baseUrl.contains("umtifyhq") } ?: return
-        val enabledHq = hq.copy(enabled = true)
-        val others = list.filterNot { it.id == hq.id }
-        publish(listOf(enabledHq) + others)
+        val hq = list.firstOrNull { it.id == UMTIFY_HQ_ADDON_ID || it.baseUrl.contains("umtifyhq") } ?: createUmtifyHqConfig()
+        val updatedHq = hq.copy(label = "UMtify", enabled = enabled)
+        val others = list.filterNot { it.id == hq.id || it.baseUrl.contains("umtifyhq") }
+        if (enabled) {
+            publish(listOf(updatedHq) + others)
+        } else {
+            publish(others + listOf(updatedHq))
+        }
     }
 
     /**

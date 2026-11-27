@@ -4,9 +4,13 @@ import android.util.Base64
 import android.util.LruCache
 import com.music.bitchord.data.DebugLog as Log
 import com.music.bitchord.data.settings.AppSettings
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -14,6 +18,7 @@ import org.json.JSONObject
 import java.net.URLEncoder
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 
 data class LosslessStreamResult(
@@ -30,16 +35,18 @@ object LosslessAudioProvider {
 
     val BUILTIN_ENDPOINTS = listOf(
         "https://api.zarz.moe",
+        "https://dab.yeet.su",
+        "https://squid.wtf",
         "https://wolf.qqdl.site",
         "https://maus.qqdl.site",
         "https://katze.qqdl.site",
         "https://hund.qqdl.site",
         "https://vogel.qqdl.site",
+        "https://hifi-api.vercel.app",
+        "https://tidal.kinoko.eu.org",
         "https://api.monochrome.tf",
         "https://hifi.monochrome.tf",
         "https://trident.monochrome.tf",
-        "https://tidal.kinoko.eu.org",
-        "https://hifi-api.vercel.app",
     )
 
     @Volatile
@@ -51,9 +58,9 @@ object LosslessAudioProvider {
 
     private val httpClient: OkHttpClient by lazy {
         Http.client.newBuilder()
-            .connectTimeout(3500, TimeUnit.MILLISECONDS)
-            .readTimeout(4000, TimeUnit.MILLISECONDS)
-            .callTimeout(5000, TimeUnit.MILLISECONDS)
+            .connectTimeout(2500, TimeUnit.MILLISECONDS)
+            .readTimeout(3000, TimeUnit.MILLISECONDS)
+            .callTimeout(4500, TimeUnit.MILLISECONDS)
             .followRedirects(true)
             .build()
     }
@@ -67,6 +74,9 @@ object LosslessAudioProvider {
         val healthy = lastHealthyEndpoint
         if (healthy != null && healthy !in endpoints) {
             endpoints.add(healthy)
+        }
+        ExtensionRepoManager.getExtractedEndpoints().forEach {
+            if (it !in endpoints) endpoints.add(it)
         }
         BUILTIN_ENDPOINTS.forEach {
             if (it !in endpoints) endpoints.add(it)
@@ -121,52 +131,84 @@ object LosslessAudioProvider {
 
         val endpoints = getCandidateEndpoints()
 
-        // 1. Fast path: try cached healthy endpoint first
-        val healthy = lastHealthyEndpoint
-        if (healthy != null && healthy in endpoints) {
-            try {
-                val candidate = searchCandidates(healthy, encodedQuery, normTitle, normArtist, durationSec)
-                if (candidate != null) {
-                    val streamResult = fetchStream(healthy, candidate.id, qualityTier)
-                    if (streamResult != null) {
-                        synchronized(memoryCache) {
-                            memoryCache.put(cacheKey, CacheEntry(streamResult, System.currentTimeMillis()))
+        // 1. Instant Start: If we have a cached winning mirror, try it with a 1.5s timeout for instant start
+        val winning = lastHealthyEndpoint
+        if (winning != null && winning in endpoints) {
+            val quickResult = runCatching {
+                withTimeoutOrNull(1500L) {
+                    probeSingleMirror(winning, encodedQuery, normTitle, normArtist, durationSec, qualityTier)
+                }
+            }.getOrNull()
+            if (quickResult != null) {
+                synchronized(memoryCache) {
+                    memoryCache.put(cacheKey, CacheEntry(quickResult, System.currentTimeMillis()))
+                }
+                Log.d(TAG, "Instant FLAC stream resolved from cached winner $winning: ${quickResult.streamUrl}")
+                return@withContext quickResult
+            }
+        }
+
+        // 2. Fast Parallel Racing: Race top mirrors in parallel
+        val probeEndpoints = (listOfNotNull(winning) + endpoints.filter { it != winning }).distinct().take(6)
+        val resultDeferred = CompletableDeferred<LosslessStreamResult?>()
+        val atomicFinished = AtomicBoolean(false)
+
+        try {
+            coroutineScope {
+                probeEndpoints.forEach { ep ->
+                    launch {
+                        try {
+                            val res = probeSingleMirror(ep, encodedQuery, normTitle, normArtist, durationSec, qualityTier)
+                            if (res != null && atomicFinished.compareAndSet(false, true)) {
+                                lastHealthyEndpoint = ep
+                                resultDeferred.complete(res)
+                                coroutineContext.cancelChildren() // Cancel all slower in-flight mirror requests immediately
+                            }
+                        } catch (e: Exception) {
+                            // mirror probe failed
                         }
-                        Log.d(TAG, "Resolved lossless track '$title' from healthy $healthy: ${streamResult.streamUrl}")
-                        return@withContext streamResult
                     }
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Cached healthy endpoint $healthy failed, probing mirrors: ${e.message}")
-            }
-        }
 
-        // 2. Parallel probe across candidate mirrors with fast failover
-        val probeEndpoints = endpoints.filter { it != healthy }.take(5)
-        val deferredList = probeEndpoints.map { ep ->
-            async {
-                runCatching {
-                    val candidate = searchCandidates(ep, encodedQuery, normTitle, normArtist, durationSec) ?: return@runCatching null
-                    val streamResult = fetchStream(ep, candidate.id, qualityTier) ?: return@runCatching null
-                    Pair(ep, streamResult)
-                }.getOrNull()
-            }
-        }
-
-        for (deferred in deferredList) {
-            val resolved = deferred.await()
-            if (resolved != null) {
-                val (ep, streamResult) = resolved
-                lastHealthyEndpoint = ep
-                synchronized(memoryCache) {
-                    memoryCache.put(cacheKey, CacheEntry(streamResult, System.currentTimeMillis()))
+                // Race timeout of 3500ms
+                withTimeoutOrNull(3500L) {
+                    resultDeferred.await()
+                }?.let { winningResult ->
+                    synchronized(memoryCache) {
+                        memoryCache.put(cacheKey, CacheEntry(winningResult, System.currentTimeMillis()))
+                    }
+                    Log.d(TAG, "Race won by $lastHealthyEndpoint: ${winningResult.streamUrl}")
+                    return@coroutineScope winningResult
                 }
-                Log.d(TAG, "Resolved lossless track '$title' from $ep: ${streamResult.streamUrl}")
-                return@withContext streamResult
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Parallel mirror race timed out or failed: ${e.message}")
+        }
+
+        if (resultDeferred.isCompleted) {
+            val res = resultDeferred.getCompleted()
+            if (res != null) {
+                synchronized(memoryCache) {
+                    memoryCache.put(cacheKey, CacheEntry(res, System.currentTimeMillis()))
+                }
+                return@withContext res
             }
         }
 
         null
+    }
+
+    private fun probeSingleMirror(
+        endpoint: String,
+        encodedQuery: String,
+        normTitle: String,
+        normArtist: String,
+        durationSec: Int?,
+        qualityTier: String,
+    ): LosslessStreamResult? {
+        val candidate = searchCandidates(endpoint, encodedQuery, normTitle, normArtist, durationSec) ?: return null
+        val streamResult = fetchStream(endpoint, candidate.id, qualityTier) ?: return null
+        return if (isStreamUrlPlayable(streamResult.streamUrl)) streamResult else null
     }
 
     private fun searchCandidates(
@@ -183,12 +225,13 @@ object LosslessAudioProvider {
             "$base/search?s=$encodedQuery",
             "$base/search/?q=$encodedQuery",
             "$base/search?q=$encodedQuery",
+            "$base/api/search?q=$encodedQuery",
         )
 
         for (url in searchUrls) {
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "UMtify/1.0 (Android; Hi-Res Audio)")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                 .header("Accept", "application/json")
                 .build()
 
@@ -199,6 +242,23 @@ object LosslessAudioProvider {
                 return candidates.maxByOrNull { it.score }
             }
         }
+
+        // Fast Deezer public search fallback to obtain metadata & ID
+        val deezerUrl = "https://api.deezer.com/search?q=$encodedQuery"
+        val deezerRequest = Request.Builder()
+            .url(deezerUrl)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            .header("Accept", "application/json")
+            .build()
+        val deezerResponse = runCatching { httpClient.newCall(deezerRequest).execute() }.getOrNull()
+        val deezerBody = deezerResponse?.use { if (it.isSuccessful) it.body?.string() else null }
+        if (deezerBody != null) {
+            val deezerCandidates = parseSearchResults(deezerBody, normTitle, normArtist, targetDurationSec)
+            if (deezerCandidates.isNotEmpty()) {
+                return deezerCandidates.maxByOrNull { it.score }
+            }
+        }
+
         return null
     }
 
@@ -261,7 +321,9 @@ object LosslessAudioProvider {
                     is String -> artistObj
                     else -> item.optJSONArray("artists")?.optJSONObject(0)?.optString("name").orEmpty()
                 }
-                val duration = item.optInt("duration", 0)
+                val duration = item.optInt("duration", 0).takeIf { it > 0 }
+                    ?: (item.optInt("duration_ms", 0) / 1000).takeIf { it > 0 }
+                    ?: 0
                 val quality = item.optString("audioQuality").ifBlank {
                     item.optString("quality", "LOSSLESS")
                 }
@@ -294,9 +356,9 @@ object LosslessAudioProvider {
                     }
                 }
 
-                if (quality.contains("HI_RES", ignoreCase = true)) {
+                if (quality.contains("HI_RES", ignoreCase = true) || item.optInt("maximum_bit_depth", 0) >= 24) {
                     score += 15
-                } else if (quality.contains("LOSSLESS", ignoreCase = true)) {
+                } else if (quality.contains("LOSSLESS", ignoreCase = true) || item.optInt("maximum_bit_depth", 0) >= 16) {
                     score += 10
                 }
 
@@ -316,6 +378,8 @@ object LosslessAudioProvider {
             "$base/track/?id=$trackId&quality=$qualityTier",
             "$base/track?id=$trackId&quality=$qualityTier",
             "$base/v1/track?id=$trackId&quality=$qualityTier",
+            "$base/download-url/$trackId?quality=$qualityTier",
+            "$base/api/download-url/$trackId?quality=$qualityTier",
             "$base/dl/dzr?id=$trackId",
             "$base/dl/tid?id=$trackId",
         )
@@ -323,7 +387,7 @@ object LosslessAudioProvider {
         for (url in trackUrls) {
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "UMtify/1.0 (Android; Hi-Res Audio)")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                 .header("Accept", "application/json")
                 .build()
 
@@ -341,18 +405,25 @@ object LosslessAudioProvider {
             val root = JSONObject(body)
             val dataObj = root.optJSONObject("data") ?: root
 
+            // Check common direct stream & download URL keys (Tidal, Qobuz, DAB, Deezer)
             var streamUrl = dataObj.optString("url").takeIf { it.isNotBlank() }
                 ?: dataObj.optString("OriginalTrackUrl").takeIf { it.isNotBlank() }
                 ?: dataObj.optString("flacUrl").takeIf { it.isNotBlank() }
                 ?: dataObj.optString("streamUrl").takeIf { it.isNotBlank() }
+                ?: dataObj.optString("stream_url").takeIf { it.isNotBlank() }
                 ?: dataObj.optString("downloadUrl").takeIf { it.isNotBlank() }
+                ?: dataObj.optString("download_url").takeIf { it.isNotBlank() }
                 ?: dataObj.optString("directURL").takeIf { it.isNotBlank() }
+                ?: dataObj.optString("playbackUrl").takeIf { it.isNotBlank() }
                 ?: root.optString("url").takeIf { it.isNotBlank() }
                 ?: root.optString("OriginalTrackUrl").takeIf { it.isNotBlank() }
                 ?: root.optString("flacUrl").takeIf { it.isNotBlank() }
                 ?: root.optString("streamUrl").takeIf { it.isNotBlank() }
+                ?: root.optString("stream_url").takeIf { it.isNotBlank() }
                 ?: root.optString("downloadUrl").takeIf { it.isNotBlank() }
+                ?: root.optString("download_url").takeIf { it.isNotBlank() }
                 ?: root.optString("directURL").takeIf { it.isNotBlank() }
+                ?: root.optString("playbackUrl").takeIf { it.isNotBlank() }
 
             val manifestStr = dataObj.optString("manifest").takeIf { it.isNotBlank() }
                 ?: root.optString("manifest").takeIf { it.isNotBlank() }
@@ -362,8 +433,19 @@ object LosslessAudioProvider {
             var sampleRate = if (qualityTier == "HI_RES_LOSSLESS") 96000 else 44100
 
             if (dataObj.has("bitDepth")) bitDepth = dataObj.optInt("bitDepth", bitDepth)
-            if (dataObj.has("sampleRate")) sampleRate = dataObj.optInt("sampleRate", sampleRate)
+            else if (dataObj.has("bit_depth")) bitDepth = dataObj.optInt("bit_depth", bitDepth)
+            else if (dataObj.has("maximum_bit_depth")) bitDepth = dataObj.optInt("maximum_bit_depth", bitDepth)
 
+            if (dataObj.has("sampleRate")) sampleRate = dataObj.optInt("sampleRate", sampleRate)
+            else if (dataObj.has("sample_rate")) {
+                val sr = dataObj.optDouble("sample_rate", sampleRate.toDouble())
+                sampleRate = if (sr <= 192.0) (sr * 1000).toInt() else sr.toInt()
+            } else if (dataObj.has("maximum_sampling_rate")) {
+                val sr = dataObj.optDouble("maximum_sampling_rate", sampleRate.toDouble())
+                sampleRate = if (sr <= 192.0) (sr * 1000).toInt() else sr.toInt()
+            }
+
+            // Tidal Base64 manifest decoding
             if (streamUrl == null && manifestStr != null) {
                 val decoded = runCatching {
                     String(Base64.decode(manifestStr, Base64.DEFAULT), Charsets.UTF_8)
@@ -409,11 +491,15 @@ object LosslessAudioProvider {
         if (!url.startsWith("http")) return false
         val req = Request.Builder()
             .url(url)
-            .header("User-Agent", "UMtify/1.0 (Android; Hi-Res Audio)")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
             .header("Range", "bytes=0-1024")
             .build()
+        val probeClient = httpClient.newBuilder()
+            .connectTimeout(2000, TimeUnit.MILLISECONDS)
+            .readTimeout(2000, TimeUnit.MILLISECONDS)
+            .build()
         return runCatching {
-            httpClient.newCall(req).execute().use { resp ->
+            probeClient.newCall(req).execute().use { resp ->
                 resp.isSuccessful || resp.code in 200..206 || resp.code in 301..308 || resp.code == 416
             }
         }.getOrDefault(false)
@@ -426,6 +512,7 @@ object LosslessAudioProvider {
         val testUrls = listOf(
             "$target/v1/health",
             "$target/health",
+            "$target/api/health",
             "$target/search/?s=test",
             "$target/search?s=test",
             "$target/search/?q=test",
@@ -435,7 +522,7 @@ object LosslessAudioProvider {
         for (url in testUrls) {
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "UMtify/1.0 (Android; Hi-Res Audio)")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                 .header("Accept", "application/json")
                 .build()
             val ok = runCatching {

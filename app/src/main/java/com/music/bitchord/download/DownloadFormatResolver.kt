@@ -28,7 +28,7 @@ object DownloadFormatResolver {
         coroutineScope {
             val flacHiResDeferred = async {
                 runCatching {
-                    withTimeoutOrNull(3500L) {
+                    withTimeoutOrNull(4000L) {
                         LosslessAudioProvider.resolveLosslessTrack(
                             title = song.title,
                             artist = song.artist,
@@ -41,7 +41,7 @@ object DownloadFormatResolver {
 
             val flacLosslessDeferred = async {
                 runCatching {
-                    withTimeoutOrNull(3500L) {
+                    withTimeoutOrNull(4000L) {
                         LosslessAudioProvider.resolveLosslessTrack(
                             title = song.title,
                             artist = song.artist,
@@ -137,14 +137,14 @@ object DownloadFormatResolver {
             if (flacHiRes != null && flacHiRes.streamUrl.isNotBlank() && flacHiRes.bitDepth > 16) {
                 val probedBytes = probeContentLength(flacHiRes.streamUrl)
                 val isEst = probedBytes == null
-                val bytes = probedBytes ?: calculateEstimatedBytes(bitrateKbps = 2400, durationSec = durationSec)
+                val bytes = probedBytes ?: calculateEstimatedBytes(bitrateKbps = 2200, durationSec = durationSec)
                 val sampleRateKhz = flacHiRes.sampleRate / 1000.0
                 options.add(
                     DownloadFormatOption(
                         id = "flac_hires",
                         label = "FLAC • ${flacHiRes.bitDepth}-bit / ${String.format(Locale.US, "%.1f", sampleRateKhz)} kHz",
                         codec = "flac",
-                        bitrateKbps = 2400,
+                        bitrateKbps = 2200,
                         sampleRateHz = flacHiRes.sampleRate,
                         bitDepth = flacHiRes.bitDepth,
                         sizeBytes = bytes,
@@ -166,13 +166,13 @@ object DownloadFormatResolver {
             if (losslessCandidate != null && losslessCandidate.streamUrl.isNotBlank()) {
                 val probedBytes = probeContentLength(losslessCandidate.streamUrl)
                 val isEst = probedBytes == null
-                val bytes = probedBytes ?: calculateEstimatedBytes(bitrateKbps = 800, durationSec = durationSec)
+                val bytes = probedBytes ?: calculateEstimatedBytes(bitrateKbps = 950, durationSec = durationSec)
                 options.add(
                     DownloadFormatOption(
                         id = "flac_16",
                         label = "FLAC • 16-bit Lossless (44.1 kHz)",
                         codec = "flac",
-                        bitrateKbps = 800,
+                        bitrateKbps = 950,
                         sampleRateHz = losslessCandidate.sampleRate,
                         bitDepth = 16,
                         sizeBytes = bytes,
@@ -270,7 +270,7 @@ object DownloadFormatResolver {
             val headRequest = Request.Builder()
                 .url(url)
                 .head()
-                .header("User-Agent", "UMtify/1.0 (Android; Audio Format Probe)")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                 .build()
             val probeClient = Http.client.newBuilder()
                 .connectTimeout(1500, TimeUnit.MILLISECONDS)
@@ -287,7 +287,7 @@ object DownloadFormatResolver {
             // Fallback: Range request for Content-Range header
             val rangeRequest = Request.Builder()
                 .url(url)
-                .header("User-Agent", "UMtify/1.0 (Android; Audio Format Probe)")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                 .header("Range", "bytes=0-0")
                 .build()
             probeClient.newCall(rangeRequest).execute().use { response ->

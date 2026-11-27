@@ -586,6 +586,7 @@ object AppSettings {
     val jamendoClientId = MutableStateFlow("")
 
     fun hasAnyBuiltInLossless(): Boolean =
+        enableLosslessStreaming.value ||
         enableInternetArchiveLossless.value ||
         enableJamendoLossless.value ||
         com.music.bitchord.data.sources.builtin.SoundCloudProvider.isEnabled ||
@@ -1427,6 +1428,9 @@ object AppSettings {
     fun setEnableLosslessStreaming(value: Boolean) {
         enableLosslessStreaming.value = value
         prefs.edit().putBoolean(KEY_ENABLE_LOSSLESS_STREAMING, value).apply()
+        runCatching {
+            com.music.bitchord.data.sources.SourceRegistry.syncLosslessSource(value)
+        }
     }
 
     fun setEnableLosslessDownloads(value: Boolean) {

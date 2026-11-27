@@ -1693,60 +1693,23 @@ class PlaybackService : MediaLibraryService() {
             // the end of the cached bytes. Deciding afresh each time is how
             // the middle of an MP4 ended up appended to a WebM. See
             // [StreamChoice].
-            StreamChoice.of(videoId)?.let { serving ->
-                // What the stream claims to be, restated on every open rather
-                // than only on the one that chose it.
-                //
-                // The race below is what used to report this, and it was enough
-                // while the race was the only way a substitution could be made.
-                // Read-ahead now pins one before the track is reached, so a
-                // warmed track arrives *here* on its very first open and never
-                // reaches the race at all — leaving the player with a 320kbps
-                // stream and nothing on record saying so, and the quality badge
-                // reading blank until the decoder got far enough to measure it
-                // for itself.
-                //
-                // Only when the format states something. A plain YouTube choice
-                // is remembered with an empty one, and writing that over a
-                // claim some other path made would be worse than saying nothing.
-                val sourceName = serving.sourceName
-                    ?: serving.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
-                    ?: if (StreamChoice.isSubstitute(videoId)) "Module" else "YouTube"
-                if (serving.format != StreamFormat()) {
-                    NerdStats.onSourceStream(videoId, serving.format, sourceName)
-                }
+            val wantsLossless = (AppSettings.enableLosslessStreaming.value || AppSettings.effectiveAudioQuality == AudioQuality.LOSSLESS) && !StreamChoice.substitutesRefused(videoId)
+            val existingServing = StreamChoice.of(videoId)
+
+            // If we already have a chosen stream that is lossless FLAC, serve it immediately
+            if (existingServing != null && existingServing.format.isLossless == true) {
+                val sourceName = existingServing.sourceName
+                    ?: existingServing.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
+                    ?: "Hi-Res FLAC"
+                NerdStats.onSourceStream(videoId, existingServing.format, sourceName)
                 NerdStats.recordSource(videoId, sourceName)
-                // Read-ahead can pin JioSaavn's quick 320kbps answer before
-                // this track becomes current.  It is the right answer for an
-                // immediate start, but it is not the final quality verdict:
-                // returning here used to bypass [resolveWithModulePriority],
-                // the only path which calls [QualityUpgrade.settledForLess].
-                // Consequently a warmed track displayed its high-quality
-                // source but never kept the upgrading state or asked the
-                // module for its lossless copy.
-                //
-                // Only substituted, non-lossless choices need this. A pinned
-                // YouTube URL has no source result to promote, and a lossless
-                // module result already satisfies the request.
-                if (StreamChoice.isSubstitute(videoId) &&
-                    serving.format.isLossless != true &&
-                    QualityUpgrade.couldStillUpgrade(videoId, dataSpec.uri)
-                ) {
-                    val pending = QualityUpgrade.settledForLess(
-                        mediaId = videoId,
-                        target = SourceResolver.targetIn(dataSpec.uri),
-                        playing = serving.format,
-                        servedBy = serving.sourceConfigId,
-                    )
-                    if (!pending) NerdStats.onLosslessRaceEnd(videoId)
-                }
                 return@Resolver dataSpec.buildUpon()
-                    .setUri(Uri.parse(serving.url))
-                    .setHttpRequestHeaders(serving.headers)
+                    .setUri(Uri.parse(existingServing.url))
+                    .setHttpRequestHeaders(existingServing.headers)
                     .build()
             }
+
             // Hi-Res Lossless streaming provider check (when enabled and not refused)
-            val wantsLossless = (AppSettings.enableLosslessStreaming.value || AppSettings.effectiveAudioQuality == AudioQuality.LOSSLESS) && !StreamChoice.substitutesRefused(videoId)
             if (wantsLossless) {
                 val target = SourceResolver.targetIn(dataSpec.uri)
                 if (target.title.isNotBlank()) {
@@ -1771,21 +1734,49 @@ class PlaybackService : MediaLibraryService() {
                         )
                         NerdStats.onSourceStream(videoId, format, lossless.sourceName)
                         NerdStats.recordSource(videoId, lossless.sourceName)
+                        val flacHeaders = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                         val sourceStream = SourceStream(
                             url = lossless.streamUrl,
                             format = format,
-                            headers = emptyMap(),
+                            headers = flacHeaders,
                             sourceName = lossless.sourceName,
                         )
                         StreamChoice.remember(videoId, sourceStream, substituted = true)
                         TrackLog.d("BitChord", "serving Hi-Res Lossless FLAC for $videoId (${lossless.sourceName})", about = videoId)
                         return@Resolver dataSpec.buildUpon()
                             .setUri(Uri.parse(lossless.streamUrl))
+                            .setHttpRequestHeaders(flacHeaders)
                             .build()
                     } else {
                         NerdStats.clearDeclared(videoId)
                     }
                 }
+            }
+
+            existingServing?.let { serving ->
+                val sourceName = serving.sourceName
+                    ?: serving.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
+                    ?: if (StreamChoice.isSubstitute(videoId)) "Module" else "YouTube"
+                if (serving.format != StreamFormat()) {
+                    NerdStats.onSourceStream(videoId, serving.format, sourceName)
+                }
+                NerdStats.recordSource(videoId, sourceName)
+                if (StreamChoice.isSubstitute(videoId) &&
+                    serving.format.isLossless != true &&
+                    QualityUpgrade.couldStillUpgrade(videoId, dataSpec.uri)
+                ) {
+                    val pending = QualityUpgrade.settledForLess(
+                        mediaId = videoId,
+                        target = SourceResolver.targetIn(dataSpec.uri),
+                        playing = serving.format,
+                        servedBy = serving.sourceConfigId,
+                    )
+                    if (!pending) NerdStats.onLosslessRaceEnd(videoId)
+                }
+                return@Resolver dataSpec.buildUpon()
+                    .setUri(Uri.parse(serving.url))
+                    .setHttpRequestHeaders(serving.headers)
+                    .build()
             }
             // A track queued from YouTube may be held by a source the user
             // ranked above it — see [SourceResolver.substituteForYouTube] and

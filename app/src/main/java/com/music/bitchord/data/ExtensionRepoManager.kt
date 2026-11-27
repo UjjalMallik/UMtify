@@ -51,6 +51,8 @@ object ExtensionRepoManager {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var prefs: SharedPreferences? = null
+    @Volatile
+    private var appContext: Context? = null
 
     private val _extensions = MutableStateFlow<List<RepoExtension>>(emptyList())
     val extensions: StateFlow<List<RepoExtension>> = _extensions.asStateFlow()
@@ -68,6 +70,7 @@ object ExtensionRepoManager {
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     fun init(context: Context) {
+        appContext = context.applicationContext
         val p = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs = p
 
@@ -354,5 +357,41 @@ object ExtensionRepoManager {
             }
             true
         }.getOrDefault(false)
+    }
+
+    fun getExtractedEndpoints(): List<String> {
+        val ctx = appContext ?: return emptyList()
+        val endpoints = mutableListOf<String>()
+        val extDir = File(ctx.filesDir, "extensions")
+        if (!extDir.exists() || !extDir.isDirectory) return emptyList()
+
+        val files = extDir.listFiles { _, name -> name.endsWith(".sflx") } ?: return emptyList()
+        val urlRegex = Regex("""https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?::[0-9]+)?(?:/[a-zA-Z0-9._~-]+)*""")
+
+        for (file in files) {
+            runCatching {
+                java.util.zip.ZipFile(file).use { zip ->
+                    val entries = listOfNotNull(zip.getEntry("index.js"), zip.getEntry("manifest.json"))
+                    for (entry in entries) {
+                        val text = zip.getInputStream(entry).bufferedReader().readText()
+                        urlRegex.findAll(text).forEach { match ->
+                            val url = match.value.trimEnd('/')
+                            if (url.startsWith("http") &&
+                                !url.contains("github.com") &&
+                                !url.contains("w3.org") &&
+                                !url.contains("schema.org") &&
+                                !url.contains("google.com") &&
+                                (url.contains("api") || url.contains("zarz") || url.contains("qqdl") ||
+                                 url.contains("tidal") || url.contains("qobuz") || url.contains("hifi") ||
+                                 url.contains("yeet.su") || url.contains("spotisaver") || url.contains("kinoko"))
+                            ) {
+                                if (url !in endpoints) endpoints.add(url)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return endpoints
     }
 }
