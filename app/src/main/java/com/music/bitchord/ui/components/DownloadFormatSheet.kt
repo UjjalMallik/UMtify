@@ -371,10 +371,11 @@ private fun FormatOptionRow(
                 )
                 Spacer(Modifier.height(2.dp))
                 val subtext = buildString {
-                    if (option.isLossless) {
-                        append("Lossless FLAC Audio")
-                    } else {
-                        append("${option.codec.uppercase()} • YouTube Music")
+                    when {
+                        option.id == "flac_hires" -> append("FLAC • 24-bit Hi-Res Audio")
+                        option.isLossless -> append("FLAC • 16-bit Lossless Audio")
+                        option.id == "jiosaavn_320" || option.label.contains("JioSaavn", ignoreCase = true) -> append("AAC • JioSaavn")
+                        else -> append("${option.codec.uppercase()} • YouTube Music")
                     }
                 }
                 Text(

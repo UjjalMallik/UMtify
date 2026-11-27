@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 import com.music.bitchord.playback.audio.LosslessOutput
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
@@ -41,15 +43,20 @@ import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.font.FontWeight
-import com.music.bitchord.data.LosslessAudioProvider
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
+import com.music.bitchord.data.ExtensionRepoManager
+import com.music.bitchord.data.RepoExtension
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
@@ -70,7 +77,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -146,10 +152,7 @@ fun SourcesScreen(
     val enableLosslessStreaming by AppSettings.enableLosslessStreaming.collectAsStateWithLifecycle()
     val enableLosslessDownloads by AppSettings.enableLosslessDownloads.collectAsStateWithLifecycle()
     val losslessQualityTier by AppSettings.losslessQualityTier.collectAsStateWithLifecycle()
-    val customLosslessEndpoint by AppSettings.customLosslessEndpoint.collectAsStateWithLifecycle()
 
-    var endpointInput by remember(customLosslessEndpoint) { mutableStateOf(customLosslessEndpoint) }
-    var testStatus by remember { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
     /** Last known reachability per source, filled in as the probes come back. */
@@ -218,18 +221,16 @@ fun SourcesScreen(
             modifier = Modifier.padding(start = 72.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
         )
 
-        // Active Audio Sources List
-        val jioSaavnConfig = configs.firstOrNull { it.kind == SourceKind.JIOSAAVN }
+        // Compact Lossless Streaming & Download Toggles
         SettingsGroup(
-            header = "Active Audio Sources",
-            footer = "UMtify streams audio dynamically from configured providers with automatic fallbacks.",
+            header = "Hi-Res Lossless Audio",
+            footer = "Stream and download CD-quality (16-bit) and Studio Master (24-bit) FLAC audio automatically.",
         ) {
-            // 1. Hi-Res Lossless (FLAC)
+            // Lossless Streaming (FLAC)
             SettingsRow(
                 icon = Icons.Rounded.GraphicEq,
-                title = "Hi-Res Lossless (FLAC)",
-                subtitle = "16-bit / 24-bit FLAC via Hi-Res API",
-                value = if (!enableLosslessStreaming) "Disabled" else if (customLosslessEndpoint.isNotBlank()) "Custom" else "Ready",
+                title = "Lossless Streaming (FLAC)",
+                subtitle = "Stream 16-bit/24-bit FLAC when available, auto-fallback to standard",
                 trailing = {
                     Switch(
                         checked = enableLosslessStreaming,
@@ -245,182 +246,154 @@ fun SourcesScreen(
 
             RowDivider()
 
-            // 2. JioSaavn (320 kbps)
-            val jioEnabled = jioSaavnConfig?.enabled == true
+            // Lossless Downloads (FLAC)
             SettingsRow(
-                icon = Icons.Rounded.GraphicEq,
-                title = "JioSaavn (320 kbps)",
-                subtitle = "High-bitrate 320 kbps AAC streams & downloads",
-                value = if (jioEnabled) "Ready" else "Disabled",
+                icon = Icons.Rounded.Download,
+                title = "Lossless Downloads (FLAC)",
+                subtitle = "Save offline downloads as lossless FLAC files",
                 trailing = {
                     Switch(
-                        checked = jioEnabled,
-                        onCheckedChange = { enabled ->
-                            if (enabled && !jioEnabled) {
-                                onConfirmJioSaavn()
-                            } else if (jioSaavnConfig != null) {
-                                SourceRegistry.setEnabled(jioSaavnConfig.id, enabled)
-                            }
-                        },
+                        checked = enableLosslessDownloads,
+                        onCheckedChange = AppSettings::setEnableLosslessDownloads,
                         colors = SwitchDefaults.colors(
                             checkedTrackColor = MaterialTheme.colorScheme.primary,
                             checkedBorderColor = MaterialTheme.colorScheme.primary,
                         ),
                     )
                 },
-                onClick = {
-                    if (!jioEnabled) {
-                        onConfirmJioSaavn()
-                    } else if (jioSaavnConfig != null) {
-                        SourceRegistry.setEnabled(jioSaavnConfig.id, false)
-                    }
-                },
+                onClick = { AppSettings.setEnableLosslessDownloads(!enableLosslessDownloads) },
             )
 
             RowDivider()
 
-            // 3. YouTube Music
+            // Quality Tier selector
             SettingsRow(
-                icon = Icons.Rounded.PlayCircle,
-                title = "YouTube Music",
-                subtitle = "Opus 160 kbps & M4A fallback (Always available)",
-                value = "Ready",
-                trailing = {
-                    Switch(
-                        checked = true,
-                        onCheckedChange = null,
-                        enabled = false,
-                    )
+                icon = Icons.Rounded.Tune,
+                title = "Quality Tier",
+                subtitle = if (losslessQualityTier == "HI_RES_LOSSLESS") "Up to 24-bit / 192kHz Studio Master" else "16-bit / 44.1kHz CD Quality",
+                value = if (losslessQualityTier == "HI_RES_LOSSLESS") "24-bit Hi-Res" else "16-bit Lossless",
+                onClick = {
+                    val next = if (losslessQualityTier == "HI_RES_LOSSLESS") "LOSSLESS" else "HI_RES_LOSSLESS"
+                    AppSettings.setLosslessQualityTier(next)
                 },
             )
         }
 
-        // Lossless Configuration Card (shown when Hi-Res Lossless is ON)
-        if (enableLosslessStreaming) {
-            SettingsGroup(
-                header = "Lossless Configuration (FLAC)",
-                footer = "Configure streaming and download quality for 16-bit Lossless and 24-bit Studio Master audio.",
+        // Extension Repo (Live from GitHub) Section
+        val allRepoExtensions by ExtensionRepoManager.extensions.collectAsStateWithLifecycle()
+        val installedExtensionIds by ExtensionRepoManager.installedIds.collectAsStateWithLifecycle()
+        val enabledExtensionIds by ExtensionRepoManager.enabledIds.collectAsStateWithLifecycle()
+        val installedVersions by ExtensionRepoManager.installedVersions.collectAsStateWithLifecycle()
+        val isRepoLoading by ExtensionRepoManager.isLoading.collectAsStateWithLifecycle()
+
+        var selectedCategory by remember { mutableStateOf("All") }
+        val categories = listOf("All", "Integration", "Download", "Metadata", "Utility")
+
+        val filteredExtensions = remember(allRepoExtensions, selectedCategory) {
+            if (selectedCategory == "All") {
+                allRepoExtensions
+            } else {
+                allRepoExtensions.filter {
+                    it.category.equals(selectedCategory, ignoreCase = true) ||
+                        it.tags.any { tag -> tag.equals(selectedCategory, ignoreCase = true) }
+                }
+            }
+        }
+
+        SettingsGroup(
+            header = "Extension Repo (Live from GitHub)",
+            footer = "Official Mornye extensions repo automatically checked and updated from GitHub.",
+        ) {
+            // Category Filter Chips
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
-                // Lossless Downloads toggle
-                SettingsRow(
-                    icon = Icons.Rounded.Download,
-                    title = "Lossless Downloads (FLAC)",
-                    subtitle = "Save offline downloads as lossless FLAC files",
-                    trailing = {
-                        Switch(
-                            checked = enableLosslessDownloads,
-                            onCheckedChange = AppSettings::setEnableLosslessDownloads,
-                            colors = SwitchDefaults.colors(
-                                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                checkedBorderColor = MaterialTheme.colorScheme.primary,
-                            ),
-                        )
-                    },
-                    onClick = { AppSettings.setEnableLosslessDownloads(!enableLosslessDownloads) },
-                )
-
-                RowDivider()
-
-                // Quality Tier selector
-                SettingsRow(
-                    icon = Icons.Rounded.Tune,
-                    title = "Quality Tier",
-                    subtitle = if (losslessQualityTier == "HI_RES_LOSSLESS") "Up to 24-bit / 192kHz Studio Master" else "16-bit / 44.1kHz CD Quality",
-                    value = if (losslessQualityTier == "HI_RES_LOSSLESS") "24-bit Hi-Res" else "16-bit Lossless",
-                    onClick = {
-                        val next = if (losslessQualityTier == "HI_RES_LOSSLESS") "LOSSLESS" else "HI_RES_LOSSLESS"
-                        AppSettings.setLosslessQualityTier(next)
-                    },
-                )
-
-                RowDivider()
-
-                // Custom Endpoint & Test Connection
-                Column(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    categories.forEach { cat ->
+                        val isSelected = selectedCategory == cat
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            border = androidx.compose.foundation.BorderStroke(
+                                0.6.dp,
+                                if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                            ),
+                            modifier = Modifier.clickable { selectedCategory = cat },
+                        ) {
+                            Text(
+                                text = cat,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
+            RowDivider()
+
+            if (isRepoLoading && allRepoExtensions.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(28.dp),
+                        strokeWidth = 2.5.dp,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            } else if (filteredExtensions.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 20.dp, horizontal = 16.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = "Hi-Res API Server / Endpoint URL",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "Leave blank to use the built-in pool (api.monochrome.tf, tidal.kinoko.eu.org, etc.) or set your custom API endpoint.",
+                        text = "No extensions found in this category.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            } else {
+                filteredExtensions.forEachIndexed { index, ext ->
+                    if (index > 0) RowDivider()
 
-                    OutlinedTextField(
-                        value = endpointInput,
-                        onValueChange = {
-                            endpointInput = it
-                            testStatus = null
+                    val isInstalled = ext.id in installedExtensionIds
+                    val isEnabled = ext.id in enabledExtensionIds
+                    val localVer = installedVersions[ext.id]
+                    val hasUpdate = isInstalled && localVer != null && localVer != ext.version
+
+                    ExtensionRow(
+                        extension = ext,
+                        isInstalled = isInstalled,
+                        isEnabled = isEnabled,
+                        hasUpdate = hasUpdate,
+                        onToggle = { enabled ->
+                            ExtensionRepoManager.toggleExtension(ext.id, enabled)
                         },
-                        placeholder = { Text("https://api.monochrome.tf") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Button(
-                            onClick = {
-                                AppSettings.setCustomLosslessEndpoint(endpointInput.trim())
-                            },
-                        ) {
-                            Text(stringResource(R.string.save))
-                        }
-
-                        if (endpointInput.isNotBlank() || customLosslessEndpoint.isNotBlank()) {
-                            TextButton(
-                                onClick = {
-                                    AppSettings.setCustomLosslessEndpoint("")
-                                    endpointInput = ""
-                                    testStatus = null
-                                },
-                            ) {
-                                Text("Clear")
+                        onInstallOrUpdate = {
+                            coroutineScope.launch {
+                                ExtensionRepoManager.installExtension(context, ext)
                             }
-                        }
-
-                        Spacer(Modifier.weight(1f))
-
-                        Button(
-                            onClick = {
-                                testStatus = "testing"
-                                coroutineScope.launch {
-                                    val success = LosslessAudioProvider.testEndpoint(endpointInput.trim().ifBlank { null })
-                                    testStatus = if (success) "connected" else "offline"
-                                }
-                            },
-                            enabled = testStatus != "testing",
-                        ) {
-                            Text(if (testStatus == "testing") "Testing..." else "Test Connection")
-                        }
-                    }
-
-                    if (testStatus == "connected") {
-                        Text(
-                            text = "● Connected",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    } else if (testStatus == "offline") {
-                        Text(
-                            text = "● Offline — try another URL",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
+                        },
+                        onUninstall = {
+                            ExtensionRepoManager.uninstallExtension(context, ext.id)
+                        },
+                    )
                 }
             }
         }
@@ -1236,3 +1209,117 @@ internal fun SourceEditorAlert(
         onDismiss = onDismiss,
     )
 }
+
+@Composable
+private fun ExtensionRow(
+    extension: RepoExtension,
+    isInstalled: Boolean,
+    isEnabled: Boolean,
+    hasUpdate: Boolean,
+    onToggle: (Boolean) -> Unit,
+    onInstallOrUpdate: () -> Unit,
+    onUninstall: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Icon
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+            modifier = Modifier.size(40.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Rounded.Extension,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+
+        Spacer(Modifier.width(12.dp))
+
+        // Title, version pill & description
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = extension.displayName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                // Version Pill
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Text(
+                        text = "v${extension.version}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(3.dp))
+
+            Text(
+                text = extension.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        Spacer(Modifier.width(10.dp))
+
+        // Action button / Toggle
+        when {
+            hasUpdate -> {
+                Button(
+                    onClick = onInstallOrUpdate,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.height(34.dp),
+                ) {
+                    Text("Update", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            isInstalled -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(
+                        checked = isEnabled,
+                        onCheckedChange = onToggle,
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                }
+            }
+            else -> {
+                OutlinedButton(
+                    onClick = onInstallOrUpdate,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.height(34.dp),
+                ) {
+                    Text("Install", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+    }
+}
+

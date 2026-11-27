@@ -1746,7 +1746,8 @@ class PlaybackService : MediaLibraryService() {
                     .build()
             }
             // Hi-Res Lossless streaming provider check (when enabled and not refused)
-            if (AppSettings.enableLosslessStreaming.value && !StreamChoice.substitutesRefused(videoId)) {
+            val wantsLossless = (AppSettings.enableLosslessStreaming.value || AppSettings.effectiveAudioQuality == AudioQuality.LOSSLESS) && !StreamChoice.substitutesRefused(videoId)
+            if (wantsLossless) {
                 val target = SourceResolver.targetIn(dataSpec.uri)
                 if (target.title.isNotBlank()) {
                     val lossless = runBlocking(about) {

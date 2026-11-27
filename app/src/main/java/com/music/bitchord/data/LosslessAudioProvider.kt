@@ -5,6 +5,7 @@ import android.util.LruCache
 import com.music.bitchord.data.DebugLog as Log
 import com.music.bitchord.data.settings.AppSettings
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -28,6 +29,12 @@ object LosslessAudioProvider {
     private const val TAG = "LosslessAudioProvider"
 
     val BUILTIN_ENDPOINTS = listOf(
+        "https://api.zarz.moe",
+        "https://wolf.qqdl.site",
+        "https://maus.qqdl.site",
+        "https://katze.qqdl.site",
+        "https://hund.qqdl.site",
+        "https://vogel.qqdl.site",
         "https://api.monochrome.tf",
         "https://hifi.monochrome.tf",
         "https://trident.monochrome.tf",
@@ -114,22 +121,48 @@ object LosslessAudioProvider {
 
         val endpoints = getCandidateEndpoints()
 
-        for (endpoint in endpoints) {
+        // 1. Fast path: try cached healthy endpoint first
+        val healthy = lastHealthyEndpoint
+        if (healthy != null && healthy in endpoints) {
             try {
-                val candidate = searchCandidates(endpoint, encodedQuery, normTitle, normArtist, durationSec)
-                    ?: continue
-
-                val streamResult = fetchStream(endpoint, candidate.id, qualityTier)
-                if (streamResult != null) {
-                    lastHealthyEndpoint = endpoint
-                    synchronized(memoryCache) {
-                        memoryCache.put(cacheKey, CacheEntry(streamResult, System.currentTimeMillis()))
+                val candidate = searchCandidates(healthy, encodedQuery, normTitle, normArtist, durationSec)
+                if (candidate != null) {
+                    val streamResult = fetchStream(healthy, candidate.id, qualityTier)
+                    if (streamResult != null) {
+                        synchronized(memoryCache) {
+                            memoryCache.put(cacheKey, CacheEntry(streamResult, System.currentTimeMillis()))
+                        }
+                        Log.d(TAG, "Resolved lossless track '$title' from healthy $healthy: ${streamResult.streamUrl}")
+                        return@withContext streamResult
                     }
-                    Log.d(TAG, "Resolved lossless track '$title' from $endpoint: ${streamResult.streamUrl}")
-                    return@withContext streamResult
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Failed resolving lossless track from $endpoint: ${e.message}")
+                Log.w(TAG, "Cached healthy endpoint $healthy failed, probing mirrors: ${e.message}")
+            }
+        }
+
+        // 2. Parallel probe across candidate mirrors with fast failover
+        val probeEndpoints = endpoints.filter { it != healthy }.take(5)
+        val deferredList = probeEndpoints.map { ep ->
+            async {
+                runCatching {
+                    val candidate = searchCandidates(ep, encodedQuery, normTitle, normArtist, durationSec) ?: return@runCatching null
+                    val streamResult = fetchStream(ep, candidate.id, qualityTier) ?: return@runCatching null
+                    Pair(ep, streamResult)
+                }.getOrNull()
+            }
+        }
+
+        for (deferred in deferredList) {
+            val resolved = deferred.await()
+            if (resolved != null) {
+                val (ep, streamResult) = resolved
+                lastHealthyEndpoint = ep
+                synchronized(memoryCache) {
+                    memoryCache.put(cacheKey, CacheEntry(streamResult, System.currentTimeMillis()))
+                }
+                Log.d(TAG, "Resolved lossless track '$title' from $ep: ${streamResult.streamUrl}")
+                return@withContext streamResult
             }
         }
 
@@ -143,11 +176,13 @@ object LosslessAudioProvider {
         normArtist: String,
         targetDurationSec: Int?,
     ): TrackCandidate? {
+        val base = endpoint.trimEnd('/')
         val searchUrls = listOf(
-            "$endpoint/search/?s=$encodedQuery",
-            "$endpoint/search?s=$encodedQuery",
-            "$endpoint/search/?q=$encodedQuery",
-            "$endpoint/search?q=$encodedQuery",
+            "$base/v1/search?q=$encodedQuery",
+            "$base/search/?s=$encodedQuery",
+            "$base/search?s=$encodedQuery",
+            "$base/search/?q=$encodedQuery",
+            "$base/search?q=$encodedQuery",
         )
 
         for (url in searchUrls) {
@@ -181,6 +216,20 @@ object LosslessAudioProvider {
                 trimmed.startsWith("{") -> {
                     val root = JSONObject(trimmed)
                     when {
+                        root.has("results") -> {
+                            val results = root.optJSONArray("results")
+                            val combined = JSONArray()
+                            if (results != null) {
+                                for (j in 0 until results.length()) {
+                                    val rObj = results.optJSONObject(j) ?: continue
+                                    val items = rObj.optJSONArray("items") ?: continue
+                                    for (k in 0 until items.length()) {
+                                        items.optJSONObject(k)?.let { combined.put(it) }
+                                    }
+                                }
+                            }
+                            combined
+                        }
                         root.has("data") -> {
                             val data = root.get("data")
                             if (data is JSONArray) data
@@ -203,9 +252,9 @@ object LosslessAudioProvider {
 
             for (i in 0 until itemsArray.length()) {
                 val item = itemsArray.optJSONObject(i) ?: continue
-                val id = item.optString("id").ifBlank { item.optString("trackId") }
+                val id = item.optString("id").ifBlank { item.optString("trackId") }.ifBlank { item.optString("track_id") }
                 if (id.isBlank()) continue
-                val title = item.optString("title")
+                val title = item.optString("title").ifBlank { item.optString("name") }
                 val artistObj = item.opt("artist")
                 val artist = when (artistObj) {
                     is JSONObject -> artistObj.optString("name")
@@ -213,7 +262,9 @@ object LosslessAudioProvider {
                     else -> item.optJSONArray("artists")?.optJSONObject(0)?.optString("name").orEmpty()
                 }
                 val duration = item.optInt("duration", 0)
-                val quality = item.optString("audioQuality", "LOSSLESS")
+                val quality = item.optString("audioQuality").ifBlank {
+                    item.optString("quality", "LOSSLESS")
+                }
 
                 val cNormTitle = normalize(title)
                 val cNormArtist = normalize(artist)
@@ -260,9 +311,13 @@ object LosslessAudioProvider {
         trackId: String,
         qualityTier: String,
     ): LosslessStreamResult? {
+        val base = endpoint.trimEnd('/')
         val trackUrls = listOf(
-            "$endpoint/track/?id=$trackId&quality=$qualityTier",
-            "$endpoint/track?id=$trackId&quality=$qualityTier",
+            "$base/track/?id=$trackId&quality=$qualityTier",
+            "$base/track?id=$trackId&quality=$qualityTier",
+            "$base/v1/track?id=$trackId&quality=$qualityTier",
+            "$base/dl/dzr?id=$trackId",
+            "$base/dl/tid?id=$trackId",
         )
 
         for (url in trackUrls) {
@@ -289,9 +344,15 @@ object LosslessAudioProvider {
             var streamUrl = dataObj.optString("url").takeIf { it.isNotBlank() }
                 ?: dataObj.optString("OriginalTrackUrl").takeIf { it.isNotBlank() }
                 ?: dataObj.optString("flacUrl").takeIf { it.isNotBlank() }
+                ?: dataObj.optString("streamUrl").takeIf { it.isNotBlank() }
+                ?: dataObj.optString("downloadUrl").takeIf { it.isNotBlank() }
+                ?: dataObj.optString("directURL").takeIf { it.isNotBlank() }
                 ?: root.optString("url").takeIf { it.isNotBlank() }
                 ?: root.optString("OriginalTrackUrl").takeIf { it.isNotBlank() }
                 ?: root.optString("flacUrl").takeIf { it.isNotBlank() }
+                ?: root.optString("streamUrl").takeIf { it.isNotBlank() }
+                ?: root.optString("downloadUrl").takeIf { it.isNotBlank() }
+                ?: root.optString("directURL").takeIf { it.isNotBlank() }
 
             val manifestStr = dataObj.optString("manifest").takeIf { it.isNotBlank() }
                 ?: root.optString("manifest").takeIf { it.isNotBlank() }
@@ -317,6 +378,7 @@ object LosslessAudioProvider {
                         } else {
                             streamUrl = manifestJson.optString("url").takeIf { it.isNotBlank() }
                                 ?: manifestJson.optString("flacUrl").takeIf { it.isNotBlank() }
+                                ?: manifestJson.optString("streamUrl").takeIf { it.isNotBlank() }
                         }
                         if (manifestJson.has("bitDepth")) bitDepth = manifestJson.optInt("bitDepth", bitDepth)
                         if (manifestJson.has("sampleRate")) sampleRate = manifestJson.optInt("sampleRate", sampleRate)
@@ -352,7 +414,7 @@ object LosslessAudioProvider {
             .build()
         return runCatching {
             httpClient.newCall(req).execute().use { resp ->
-                resp.isSuccessful || resp.code in 200..206 || resp.code == 416
+                resp.isSuccessful || resp.code in 200..206 || resp.code in 301..308 || resp.code == 416
             }
         }.getOrDefault(false)
     }
@@ -362,6 +424,8 @@ object LosslessAudioProvider {
             .ifBlank { BUILTIN_ENDPOINTS.first() }
 
         val testUrls = listOf(
+            "$target/v1/health",
+            "$target/health",
             "$target/search/?s=test",
             "$target/search?s=test",
             "$target/search/?q=test",
