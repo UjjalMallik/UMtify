@@ -2349,7 +2349,9 @@ private fun NerdStats.Snapshot.describe(): String? {
     val parts = buildList {
         val codec = when {
             isDolbyAtmos -> "E-AC-3 Atmos"
-            else -> codecLabel(mimeType) ?: claimed?.codec?.uppercase(Locale.ROOT)
+            isLossless -> codecLabel(mimeType) ?: "FLAC"
+            else -> codecLabel(mimeType)
+                ?: claimed?.codec?.uppercase(Locale.ROOT)?.takeIf { !it.equals("FLAC", ignoreCase = true) }
         }
         codec?.let(::add)
         bitDepth?.let { add(stringResource(Res.string.bit_depth, it)) }
@@ -2372,18 +2374,7 @@ private fun NerdStats.Snapshot.describe(): String? {
 }
 
 /** The codec under its usual name rather than its MIME type. */
-private fun codecLabel(mimeType: String?): String? = when {
-    mimeType == null -> null
-    mimeType.endsWith("opus") -> "Opus"
-    mimeType.endsWith("mp4a-latm") -> "AAC"
-    mimeType.endsWith("vorbis") -> "Vorbis"
-    mimeType.endsWith("mpeg") -> "MP3"
-    mimeType.endsWith("flac") -> "FLAC"
-    mimeType.endsWith("alac") -> "ALAC"
-    mimeType.endsWith("wav") || mimeType == "audio/x-wav" || mimeType == "audio/wav" -> "WAV"
-    mimeType.endsWith("eac3-joc") || mimeType.endsWith("eac3") -> "E-AC-3 Atmos"
-    else -> mimeType.substringAfter('/').uppercase(Locale.ROOT)
-}
+private fun codecLabel(mimeType: String?): String? = NerdStats.codecLabel(mimeType)
 
 /** Wording for the stats line; see [TrackAnalysisState]. */
 @Composable

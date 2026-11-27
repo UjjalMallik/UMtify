@@ -27,7 +27,7 @@ data class LosslessStreamResult(
 object LosslessAudioProvider {
     private const val TAG = "LosslessAudioProvider"
 
-    private val BUILTIN_ENDPOINTS = listOf(
+    val BUILTIN_ENDPOINTS = listOf(
         "https://api.monochrome.tf",
         "https://hifi.monochrome.tf",
         "https://trident.monochrome.tf",
@@ -146,6 +146,8 @@ object LosslessAudioProvider {
         val searchUrls = listOf(
             "$endpoint/search/?s=$encodedQuery",
             "$endpoint/search?s=$encodedQuery",
+            "$endpoint/search/?q=$encodedQuery",
+            "$endpoint/search?q=$encodedQuery",
         )
 
         for (url in searchUrls) {
@@ -274,7 +276,7 @@ object LosslessAudioProvider {
             val body = response.use { if (it.isSuccessful) it.body?.string() else null } ?: continue
 
             val result = parseTrackResponse(body, qualityTier)
-            if (result != null) return result
+            if (result != null && isStreamUrlPlayable(result.streamUrl)) return result
         }
         return null
     }
@@ -285,8 +287,15 @@ object LosslessAudioProvider {
             val dataObj = root.optJSONObject("data") ?: root
 
             var streamUrl = dataObj.optString("url").takeIf { it.isNotBlank() }
+                ?: dataObj.optString("OriginalTrackUrl").takeIf { it.isNotBlank() }
+                ?: dataObj.optString("flacUrl").takeIf { it.isNotBlank() }
+                ?: root.optString("url").takeIf { it.isNotBlank() }
+                ?: root.optString("OriginalTrackUrl").takeIf { it.isNotBlank() }
+                ?: root.optString("flacUrl").takeIf { it.isNotBlank() }
+
             val manifestStr = dataObj.optString("manifest").takeIf { it.isNotBlank() }
                 ?: root.optString("manifest").takeIf { it.isNotBlank() }
+                ?: dataObj.optJSONObject("track")?.optString("manifest")?.takeIf { it.isNotBlank() }
 
             var bitDepth = if (qualityTier == "HI_RES_LOSSLESS") 24 else 16
             var sampleRate = if (qualityTier == "HI_RES_LOSSLESS") 96000 else 44100
@@ -305,6 +314,9 @@ object LosslessAudioProvider {
                         val urls = manifestJson.optJSONArray("urls")
                         if (urls != null && urls.length() > 0) {
                             streamUrl = urls.optString(0).takeIf { it.isNotBlank() }
+                        } else {
+                            streamUrl = manifestJson.optString("url").takeIf { it.isNotBlank() }
+                                ?: manifestJson.optString("flacUrl").takeIf { it.isNotBlank() }
                         }
                         if (manifestJson.has("bitDepth")) bitDepth = manifestJson.optInt("bitDepth", bitDepth)
                         if (manifestJson.has("sampleRate")) sampleRate = manifestJson.optInt("sampleRate", sampleRate)
@@ -329,5 +341,46 @@ object LosslessAudioProvider {
                 )
             } else null
         }.getOrNull()
+    }
+
+    private fun isStreamUrlPlayable(url: String): Boolean {
+        if (!url.startsWith("http")) return false
+        val req = Request.Builder()
+            .url(url)
+            .header("User-Agent", "UMtify/1.0 (Android; Hi-Res Audio)")
+            .header("Range", "bytes=0-1024")
+            .build()
+        return runCatching {
+            httpClient.newCall(req).execute().use { resp ->
+                resp.isSuccessful || resp.code in 200..206 || resp.code == 416
+            }
+        }.getOrDefault(false)
+    }
+
+    suspend fun testEndpoint(endpointUrl: String? = null): Boolean = withContext(Dispatchers.IO) {
+        val target = (endpointUrl?.trim()?.trimEnd('/') ?: AppSettings.customLosslessEndpoint.value.trim().trimEnd('/'))
+            .ifBlank { BUILTIN_ENDPOINTS.first() }
+
+        val testUrls = listOf(
+            "$target/search/?s=test",
+            "$target/search?s=test",
+            "$target/search/?q=test",
+            "$target/search?q=test",
+            "$target/",
+        )
+        for (url in testUrls) {
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "UMtify/1.0 (Android; Hi-Res Audio)")
+                .header("Accept", "application/json")
+                .build()
+            val ok = runCatching {
+                httpClient.newCall(request).execute().use { resp ->
+                    resp.isSuccessful || resp.code in 200..399
+                }
+            }.getOrDefault(false)
+            if (ok) return@withContext true
+        }
+        false
     }
 }

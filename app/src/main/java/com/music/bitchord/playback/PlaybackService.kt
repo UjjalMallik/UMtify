@@ -1781,6 +1781,8 @@ class PlaybackService : MediaLibraryService() {
                         return@Resolver dataSpec.buildUpon()
                             .setUri(Uri.parse(lossless.streamUrl))
                             .build()
+                    } else {
+                        NerdStats.clearDeclared(videoId)
                     }
                 }
             }
@@ -4188,6 +4190,7 @@ class PlaybackService : MediaLibraryService() {
         // leaving the old claim behind is how a badge earned by a FLAC ends up
         // sitting over the Opus that replaced it.
         NerdStats.clearDeclared(mediaId)
+        uri?.getQueryParameter("v")?.let { NerdStats.clearDeclared(it) }
         // A track that died on a substituted stream died on the *substitution*,
         // and the retry must not be free to make the same one again. The lookup
         // behind it is deterministic and, by the second attempt, cached — so it
@@ -4278,6 +4281,7 @@ class PlaybackService : MediaLibraryService() {
             StreamChoice.forget(it)
         }
         NerdStats.clearDeclared(mediaId)
+        uri?.getQueryParameter("v")?.let { NerdStats.clearDeclared(it) }
         recoveries.remove(mediaId)
         TrackLog.w(
             "BitChord",
@@ -5508,6 +5512,7 @@ class PlaybackService : MediaLibraryService() {
                 NerdStats.onSourceStream(mediaId, previousFormat, prevSource)
             } else {
                 NerdStats.clearDeclared(mediaId)
+                item.localConfiguration?.uri?.getQueryParameter("v")?.let { NerdStats.clearDeclared(it) }
             }
             swappingMediaId = mediaId
             val abandoned = item.localConfiguration?.uri
@@ -6091,6 +6096,14 @@ class PlaybackService : MediaLibraryService() {
         val isRawPcm = NerdStats.isRawPcm(format?.sampleMimeType)
         val pcmDataRate = measured?.pcmBitrateKbps
 
+        val declared = NerdStats.declaredFormat(mediaId)
+        val validClaimed = if (!isLossless && format?.sampleMimeType != null && declared?.isLossless == true) {
+            NerdStats.clearDeclared(mediaId)
+            null
+        } else {
+            declared
+        }
+
         val (bitrate, provenance) = when {
             format?.averageBitrate != null && format.averageBitrate > 0 ->
                 Pair((format.averageBitrate + 500) / 1000, TelemetryProvenance.AUTHORITATIVE)
@@ -6098,14 +6111,21 @@ class PlaybackService : MediaLibraryService() {
                 Pair((format.bitrate + 500) / 1000, TelemetryProvenance.AUTHORITATIVE)
             mediaId != null && localBitrateCache.containsKey(mediaId) ->
                 Pair(localBitrateCache[mediaId], TelemetryProvenance.AUTHORITATIVE)
-            NerdStats.declaredFormat(mediaId)?.kbps != null ->
-                Pair(NerdStats.declaredFormat(mediaId)?.kbps, TelemetryProvenance.AUTHORITATIVE)
+            validClaimed?.kbps != null ->
+                Pair(validClaimed.kbps, TelemetryProvenance.AUTHORITATIVE)
             NerdStats.pickedBitrateKbps(mediaId) != null ->
                 Pair(NerdStats.pickedBitrateKbps(mediaId), TelemetryProvenance.AUTHORITATIVE)
             dsd == null && isRawPcm && pcmDataRate != null ->
                 Pair(pcmDataRate, TelemetryProvenance.DERIVED)
             else ->
                 Pair(null, TelemetryProvenance.UNKNOWN)
+        }
+
+        val rawSourceName = providerLabel(currentSourceName(mediaId, player.currentMediaItem))
+        val safeSourceName = if (!isLossless && (rawSourceName == "Hi-Res FLAC" || rawSourceName == "FLAC Lossless")) {
+            "YouTube"
+        } else {
+            rawSourceName
         }
 
         NerdStats.current.value = NerdStats.Snapshot(
@@ -6116,8 +6136,8 @@ class PlaybackService : MediaLibraryService() {
             sampleRateHz = dsdRateHz ?: measured?.sampleRateHz,
             channels = measured?.channels,
             bitDepth = if (dsd != null) 1 else if (isLossless) measured?.bitDepth else null,
-            claimed = NerdStats.declaredFormat(mediaId),
-            sourceName = providerLabel(currentSourceName(mediaId, player.currentMediaItem)),
+            claimed = validClaimed,
+            sourceName = safeSourceName,
             requestedQuality = AppSettings.effectiveAudioQuality,
             container = when (format?.containerMimeType) {
                 "audio/x-dsf" -> "DSF"

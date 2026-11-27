@@ -5,6 +5,12 @@ import com.music.bitchord.data.LosslessAudioProvider
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.durationMillis
+import com.music.bitchord.data.sources.JioSaavnSource
+import com.music.bitchord.data.sources.SourceConfig
+import com.music.bitchord.data.sources.SourceKind
+import com.music.bitchord.data.sources.SourceRegistry
+import com.music.bitchord.data.sources.StreamRequest
+import com.music.bitchord.data.sources.TrackMatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -46,6 +52,53 @@ object DownloadFormatResolver {
                 }.getOrNull()
             }
 
+            val jioSaavnDeferred = async {
+                runCatching {
+                    withTimeoutOrNull(3500L) {
+                        val jioSaavnConfig = SourceRegistry.configs.value.firstOrNull { it.kind == SourceKind.JIOSAAVN }
+                            ?: SourceConfig(kind = SourceKind.JIOSAAVN, enabled = true)
+                        val source = JioSaavnSource(jioSaavnConfig)
+                        val target = TrackMatcher.targetOf(song)
+                        val queries = TrackMatcher.queries(target)
+                        var bestMatch: Song? = null
+                        for (q in queries) {
+                            val candidates = source.search(q, limit = 10)
+                            if (candidates.isEmpty()) continue
+                            val ranked = TrackMatcher.ranked(candidates, target)
+                            val close = ranked.firstOrNull { TrackMatcher.withinSeconds(it, target, 3) }
+                                ?: ranked.firstOrNull()
+                            if (close != null) {
+                                bestMatch = close
+                                break
+                            }
+                        }
+                        if (bestMatch != null) {
+                            val trackId = SourceRegistry.parseTrackKey(bestMatch.videoId)?.second ?: bestMatch.videoId
+                            val stream = source.stream(trackId, StreamRequest.Best)
+                            if (stream != null && stream.url.isNotBlank() && (stream.format.kbps ?: 0) >= 160) {
+                                val kbps = stream.format.kbps ?: 320
+                                val probedBytes = probeContentLength(stream.url)
+                                val isEst = probedBytes == null
+                                val bytes = probedBytes ?: calculateEstimatedBytes(bitrateKbps = kbps, durationSec = durationSec)
+                                DownloadFormatOption(
+                                    id = "jiosaavn_320",
+                                    label = "M4A / AAC • ${kbps} kbps (JioSaavn)",
+                                    codec = "aac",
+                                    bitrateKbps = kbps,
+                                    sampleRateHz = 44100,
+                                    bitDepth = 16,
+                                    sizeBytes = bytes,
+                                    formattedSize = formatSize(bytes, isEst),
+                                    streamUrl = stream.url,
+                                    fileExtension = "m4a",
+                                    isLossless = false,
+                                )
+                            } else null
+                        } else null
+                    }
+                }.getOrNull()
+            }
+
             val opusHighDeferred = async {
                 runCatching {
                     withTimeoutOrNull(3500L) {
@@ -72,6 +125,7 @@ object DownloadFormatResolver {
 
             val flacHiRes = flacHiResDeferred.await()
             val flacLossless = flacLosslessDeferred.await()
+            val jioSaavnOption = jioSaavnDeferred.await()
             val opusHigh = opusHighDeferred.await()
             val m4a = m4aDeferred.await()
             val opusMed = opusMedDeferred.await()
@@ -131,7 +185,13 @@ object DownloadFormatResolver {
                 seenUrls.add(losslessCandidate.streamUrl)
             }
 
-            // 3. Opus High
+            // 3. JioSaavn 320 kbps (High Quality M4A / AAC)
+            if (jioSaavnOption != null && jioSaavnOption.streamUrl !in seenUrls) {
+                options.add(jioSaavnOption)
+                seenUrls.add(jioSaavnOption.streamUrl)
+            }
+
+            // 4. Opus High
             if (opusHigh != null && opusHigh.url.isNotBlank() && opusHigh.url !in seenUrls) {
                 val probedBytes = probeContentLength(opusHigh.url)
                 val isEst = probedBytes == null
@@ -154,7 +214,7 @@ object DownloadFormatResolver {
                 seenUrls.add(opusHigh.url)
             }
 
-            // 4. M4A / AAC Standard
+            // 5. M4A / AAC Standard
             if (m4a != null && m4a.url.isNotBlank() && m4a.url !in seenUrls) {
                 val probedBytes = probeContentLength(m4a.url)
                 val isEst = probedBytes == null
@@ -177,7 +237,7 @@ object DownloadFormatResolver {
                 seenUrls.add(m4a.url)
             }
 
-            // 5. Opus Medium (if distinct from Opus High)
+            // 6. Opus Medium (if distinct from Opus High)
             if (opusMed != null && opusMed.url.isNotBlank() && opusMed.url !in seenUrls && (opusHigh == null || opusMed.kbps < opusHigh.kbps)) {
                 val probedBytes = probeContentLength(opusMed.url)
                 val isEst = probedBytes == null
@@ -207,23 +267,35 @@ object DownloadFormatResolver {
     private fun probeContentLength(url: String): Long? {
         if (!url.startsWith("http")) return null
         return runCatching {
-            val request = Request.Builder()
+            val headRequest = Request.Builder()
                 .url(url)
                 .head()
                 .header("User-Agent", "UMtify/1.0 (Android; Audio Format Probe)")
                 .build()
-            Http.client.newBuilder()
+            val probeClient = Http.client.newBuilder()
                 .connectTimeout(1500, TimeUnit.MILLISECONDS)
                 .readTimeout(1500, TimeUnit.MILLISECONDS)
                 .build()
-                .newCall(request)
-                .execute()
-                .use { response ->
-                    if (response.isSuccessful) {
-                        val len = response.header("Content-Length")?.toLongOrNull()
-                        if (len != null && len > 0L) len else null
-                    } else null
-                }
+
+            val headLen = probeClient.newCall(headRequest).execute().use { response ->
+                if (response.isSuccessful) {
+                    response.header("Content-Length")?.toLongOrNull()?.takeIf { it > 0L }
+                } else null
+            }
+            if (headLen != null) return@runCatching headLen
+
+            // Fallback: Range request for Content-Range header
+            val rangeRequest = Request.Builder()
+                .url(url)
+                .header("User-Agent", "UMtify/1.0 (Android; Audio Format Probe)")
+                .header("Range", "bytes=0-0")
+                .build()
+            probeClient.newCall(rangeRequest).execute().use { response ->
+                val contentRange = response.header("Content-Range")
+                if (contentRange != null && contentRange.contains("/")) {
+                    contentRange.substringAfterLast("/").trim().toLongOrNull()?.takeIf { it > 0L }
+                } else null
+            }
         }.getOrNull()
     }
 

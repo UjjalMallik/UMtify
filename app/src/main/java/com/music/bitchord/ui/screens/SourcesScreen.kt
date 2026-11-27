@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 import com.music.bitchord.playback.audio.LosslessOutput
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -32,17 +33,23 @@ import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.font.FontWeight
+import com.music.bitchord.data.LosslessAudioProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
@@ -136,6 +143,14 @@ fun SourcesScreen(
     val smbShare by AppSettings.smbShare.collectAsStateWithLifecycle()
     val smbUsername by AppSettings.smbUsername.collectAsStateWithLifecycle()
     val smbPassword by AppSettings.smbPassword.collectAsStateWithLifecycle()
+    val enableLosslessStreaming by AppSettings.enableLosslessStreaming.collectAsStateWithLifecycle()
+    val enableLosslessDownloads by AppSettings.enableLosslessDownloads.collectAsStateWithLifecycle()
+    val losslessQualityTier by AppSettings.losslessQualityTier.collectAsStateWithLifecycle()
+    val customLosslessEndpoint by AppSettings.customLosslessEndpoint.collectAsStateWithLifecycle()
+
+    var endpointInput by remember(customLosslessEndpoint) { mutableStateOf(customLosslessEndpoint) }
+    var testStatus by remember { mutableStateOf<String?>(null) }
+    val coroutineScope = rememberCoroutineScope()
 
     /** Last known reachability per source, filled in as the probes come back. */
     val health = remember { mutableStateMapOf<String, SourceHealth>() }
@@ -202,6 +217,213 @@ fun SourcesScreen(
             color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier.padding(start = 72.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
         )
+
+        // Active Audio Sources List
+        val jioSaavnConfig = configs.firstOrNull { it.kind == SourceKind.JIOSAAVN }
+        SettingsGroup(
+            header = "Active Audio Sources",
+            footer = "UMtify streams audio dynamically from configured providers with automatic fallbacks.",
+        ) {
+            // 1. Hi-Res Lossless (FLAC)
+            SettingsRow(
+                icon = Icons.Rounded.GraphicEq,
+                title = "Hi-Res Lossless (FLAC)",
+                subtitle = "16-bit / 24-bit FLAC via Hi-Res API",
+                value = if (!enableLosslessStreaming) "Disabled" else if (customLosslessEndpoint.isNotBlank()) "Custom" else "Ready",
+                trailing = {
+                    Switch(
+                        checked = enableLosslessStreaming,
+                        onCheckedChange = AppSettings::setEnableLosslessStreaming,
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                },
+                onClick = { AppSettings.setEnableLosslessStreaming(!enableLosslessStreaming) },
+            )
+
+            RowDivider()
+
+            // 2. JioSaavn (320 kbps)
+            val jioEnabled = jioSaavnConfig?.enabled == true
+            SettingsRow(
+                icon = Icons.Rounded.GraphicEq,
+                title = "JioSaavn (320 kbps)",
+                subtitle = "High-bitrate 320 kbps AAC streams & downloads",
+                value = if (jioEnabled) "Ready" else "Disabled",
+                trailing = {
+                    Switch(
+                        checked = jioEnabled,
+                        onCheckedChange = { enabled ->
+                            if (enabled && !jioEnabled) {
+                                onConfirmJioSaavn()
+                            } else if (jioSaavnConfig != null) {
+                                SourceRegistry.setEnabled(jioSaavnConfig.id, enabled)
+                            }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                },
+                onClick = {
+                    if (!jioEnabled) {
+                        onConfirmJioSaavn()
+                    } else if (jioSaavnConfig != null) {
+                        SourceRegistry.setEnabled(jioSaavnConfig.id, false)
+                    }
+                },
+            )
+
+            RowDivider()
+
+            // 3. YouTube Music
+            SettingsRow(
+                icon = Icons.Rounded.PlayCircle,
+                title = "YouTube Music",
+                subtitle = "Opus 160 kbps & M4A fallback (Always available)",
+                value = "Ready",
+                trailing = {
+                    Switch(
+                        checked = true,
+                        onCheckedChange = null,
+                        enabled = false,
+                    )
+                },
+            )
+        }
+
+        // Lossless Configuration Card (shown when Hi-Res Lossless is ON)
+        if (enableLosslessStreaming) {
+            SettingsGroup(
+                header = "Lossless Configuration (FLAC)",
+                footer = "Configure streaming and download quality for 16-bit Lossless and 24-bit Studio Master audio.",
+            ) {
+                // Lossless Downloads toggle
+                SettingsRow(
+                    icon = Icons.Rounded.Download,
+                    title = "Lossless Downloads (FLAC)",
+                    subtitle = "Save offline downloads as lossless FLAC files",
+                    trailing = {
+                        Switch(
+                            checked = enableLosslessDownloads,
+                            onCheckedChange = AppSettings::setEnableLosslessDownloads,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setEnableLosslessDownloads(!enableLosslessDownloads) },
+                )
+
+                RowDivider()
+
+                // Quality Tier selector
+                SettingsRow(
+                    icon = Icons.Rounded.Tune,
+                    title = "Quality Tier",
+                    subtitle = if (losslessQualityTier == "HI_RES_LOSSLESS") "Up to 24-bit / 192kHz Studio Master" else "16-bit / 44.1kHz CD Quality",
+                    value = if (losslessQualityTier == "HI_RES_LOSSLESS") "24-bit Hi-Res" else "16-bit Lossless",
+                    onClick = {
+                        val next = if (losslessQualityTier == "HI_RES_LOSSLESS") "LOSSLESS" else "HI_RES_LOSSLESS"
+                        AppSettings.setLosslessQualityTier(next)
+                    },
+                )
+
+                RowDivider()
+
+                // Custom Endpoint & Test Connection
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        text = "Hi-Res API Server / Endpoint URL",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "Leave blank to use the built-in pool (api.monochrome.tf, tidal.kinoko.eu.org, etc.) or set your custom API endpoint.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    OutlinedTextField(
+                        value = endpointInput,
+                        onValueChange = {
+                            endpointInput = it
+                            testStatus = null
+                        },
+                        placeholder = { Text("https://api.monochrome.tf") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Button(
+                            onClick = {
+                                AppSettings.setCustomLosslessEndpoint(endpointInput.trim())
+                            },
+                        ) {
+                            Text(stringResource(R.string.save))
+                        }
+
+                        if (endpointInput.isNotBlank() || customLosslessEndpoint.isNotBlank()) {
+                            TextButton(
+                                onClick = {
+                                    AppSettings.setCustomLosslessEndpoint("")
+                                    endpointInput = ""
+                                    testStatus = null
+                                },
+                            ) {
+                                Text("Clear")
+                            }
+                        }
+
+                        Spacer(Modifier.weight(1f))
+
+                        Button(
+                            onClick = {
+                                testStatus = "testing"
+                                coroutineScope.launch {
+                                    val success = LosslessAudioProvider.testEndpoint(endpointInput.trim().ifBlank { null })
+                                    testStatus = if (success) "connected" else "offline"
+                                }
+                            },
+                            enabled = testStatus != "testing",
+                        ) {
+                            Text(if (testStatus == "testing") "Testing..." else "Test Connection")
+                        }
+                    }
+
+                    if (testStatus == "connected") {
+                        Text(
+                            text = "● Connected",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    } else if (testStatus == "offline") {
+                        Text(
+                            text = "● Offline — try another URL",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            }
+        }
 
         SettingsGroup(
             header = stringResource(R.string.sources_order_header),
