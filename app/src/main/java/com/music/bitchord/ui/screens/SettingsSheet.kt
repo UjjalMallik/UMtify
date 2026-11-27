@@ -95,6 +95,7 @@ import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.MusicOff
 import androidx.compose.material.icons.rounded.MotionPhotosOff
 import androidx.compose.material.icons.rounded.Extension
@@ -244,6 +245,10 @@ fun SettingsScreen(
 
     val wifiQuality by AppSettings.audioQualityWifi.collectAsStateWithLifecycle()
     val cellularQuality by AppSettings.audioQualityCellular.collectAsStateWithLifecycle()
+    val enableLosslessStreaming by AppSettings.enableLosslessStreaming.collectAsStateWithLifecycle()
+    val enableLosslessDownloads by AppSettings.enableLosslessDownloads.collectAsStateWithLifecycle()
+    val losslessQualityTier by AppSettings.losslessQualityTier.collectAsStateWithLifecycle()
+    val customLosslessEndpoint by AppSettings.customLosslessEndpoint.collectAsStateWithLifecycle()
     val metered by AppSettings.meteredConnection.collectAsStateWithLifecycle()
     val offlineMode by AppSettings.offlineModeEnabled.collectAsStateWithLifecycle()
     val crossfade by AppSettings.crossfadeSeconds.collectAsStateWithLifecycle()
@@ -356,6 +361,7 @@ fun SettingsScreen(
     var picking by remember { mutableStateOf<QualityTarget?>(null) }
     var pickingDownloadQuality by remember { mutableStateOf(false) }
     var pickingAutomixPerformance by remember { mutableStateOf(false) }
+    var showCustomEndpointDialog by remember { mutableStateOf(false) }
     // What the last export or import did, shown on the row that did it rather
     // than as a toast: a backup is the one action here whose outcome nobody can
     // check by looking at the app afterwards. Held per direction, or an import's
@@ -637,6 +643,85 @@ fun SettingsScreen(
                         )
                     },
                     onClick = { AppSettings.setDolbyAtmos(!dolbyAtmos) },
+                )
+            }
+
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+            )
+
+            // Hi-Res Lossless (FLAC) Subsection
+            val losslessSectionTitle = "Hi-Res Lossless (FLAC)"
+            row(losslessSectionTitle, "flac", "lossless", "hires") {
+                Text(
+                    text = losslessSectionTitle,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+            }
+            val losslessStreamingTitle = "Lossless Streaming (FLAC)"
+            row(losslessStreamingTitle, "flac", "streaming") {
+                SettingsRow(
+                    icon = Icons.Rounded.GraphicEq,
+                    title = losslessStreamingTitle,
+                    subtitle = "Stream 16-bit/24-bit FLAC when available, auto-fallback to standard",
+                    trailing = {
+                        Switch(
+                            checked = enableLosslessStreaming,
+                            onCheckedChange = AppSettings::setEnableLosslessStreaming,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setEnableLosslessStreaming(!enableLosslessStreaming) },
+                )
+            }
+            val losslessDownloadsTitle = "Lossless Downloads (FLAC)"
+            row(losslessDownloadsTitle, "flac", "offline") {
+                SettingsRow(
+                    icon = Icons.Rounded.Download,
+                    title = losslessDownloadsTitle,
+                    subtitle = "Save offline downloads as lossless FLAC files",
+                    trailing = {
+                        Switch(
+                            checked = enableLosslessDownloads,
+                            onCheckedChange = AppSettings::setEnableLosslessDownloads,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setEnableLosslessDownloads(!enableLosslessDownloads) },
+                )
+            }
+            val qualityTierTitle = "Quality Tier"
+            row(qualityTierTitle, "tier", "bit") {
+                SettingsRow(
+                    icon = Icons.Rounded.Tune,
+                    title = qualityTierTitle,
+                    subtitle = if (losslessQualityTier == "HI_RES_LOSSLESS") "Up to 24-bit / 192kHz Studio Master" else "16-bit / 44.1kHz CD Quality",
+                    value = if (losslessQualityTier == "HI_RES_LOSSLESS") "24-bit Hi-Res" else "16-bit Lossless",
+                    onClick = {
+                        val next = if (losslessQualityTier == "HI_RES_LOSSLESS") "LOSSLESS" else "HI_RES_LOSSLESS"
+                        AppSettings.setLosslessQualityTier(next)
+                    },
+                )
+            }
+            val customEndpointTitle = "Custom Hi-Res Endpoint URL"
+            row(customEndpointTitle, "hifi", "api", "url") {
+                SettingsRow(
+                    icon = Icons.Rounded.Link,
+                    title = customEndpointTitle,
+                    subtitle = if (customLosslessEndpoint.isNotBlank()) customLosslessEndpoint else "Built-in pool (api.monochrome.tf, tidal.kinoko.eu.org)",
+                    value = if (customLosslessEndpoint.isNotBlank()) "Custom" else "Default",
+                    onClick = { showCustomEndpointDialog = true },
                 )
             }
         }
@@ -2262,6 +2347,55 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showListenBrainzTokenDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+
+    if (showCustomEndpointDialog) {
+        var endpointInput by remember { mutableStateOf(customLosslessEndpoint) }
+        AlertDialog(
+            onDismissRequest = { showCustomEndpointDialog = false },
+            title = { Text("Custom Hi-Res Endpoint URL") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Set a custom hifi-api / lossless server URL. Leave blank to use the built-in pool.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = endpointInput,
+                        onValueChange = { endpointInput = it },
+                        label = { Text("API Endpoint URL") },
+                        placeholder = { Text("https://api.monochrome.tf") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (endpointInput.isNotBlank() || customLosslessEndpoint.isNotBlank()) {
+                        TextButton(onClick = {
+                            AppSettings.setCustomLosslessEndpoint("")
+                            endpointInput = ""
+                            showCustomEndpointDialog = false
+                        }) {
+                            Text("Reset / Clear")
+                        }
+                    }
+                    Button(onClick = {
+                        AppSettings.setCustomLosslessEndpoint(endpointInput.trim())
+                        showCustomEndpointDialog = false
+                    }) {
+                        Text(stringResource(R.string.save))
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomEndpointDialog = false }) {
                     Text(stringResource(R.string.cancel))
                 }
             },

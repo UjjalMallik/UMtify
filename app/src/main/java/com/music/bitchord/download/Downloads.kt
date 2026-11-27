@@ -12,6 +12,7 @@ import android.provider.MediaStore
 import com.music.bitchord.data.DebugLog as Log
 import androidx.core.content.ContextCompat
 import com.music.bitchord.data.LocalMediaRepository
+import com.music.bitchord.data.LosslessAudioProvider
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.playback.AudioCache
 import com.music.bitchord.data.model.Song
@@ -1468,6 +1469,52 @@ object Downloads {
      *   a mid-download refusal and has to ask for the same rung it started on.
      */
     private suspend fun routeFor(context: Context, track: Song, quality: DownloadQuality): Route {
+        if (AppSettings.enableLosslessDownloads.value) {
+            val lossless = runCatching {
+                withTimeoutOrNull(6000L) {
+                    LosslessAudioProvider.resolveLosslessTrack(
+                        title = track.title,
+                        artist = track.artist,
+                        durationSec = track.durationSec,
+                    )
+                }
+            }.getOrNull()
+            if (lossless != null && lossless.streamUrl.isNotBlank()) {
+                val streamFormat = StreamFormat(
+                    codec = "flac",
+                    bitDepth = lossless.bitDepth,
+                    sampleRateHz = lossless.sampleRate,
+                )
+                val dash = OfflineDash.handles(lossless.streamUrl)
+                val hls = lossless.streamUrl.substringBefore('?').endsWith(".m3u8", ignoreCase = true)
+                val packaged = hls || dash
+                if (packaged) {
+                    return Route(
+                        extension = "flac",
+                        mimeType = "audio/flac",
+                        describe = "${streamFormat.summary} (assembled from ${if (dash) "DASH" else "HLS"})",
+                        downloadFormat = streamFormat.downloadBadge(),
+                        write = { sink, onProgress ->
+                            ManifestFile.write(
+                                context.cacheDir, lossless.streamUrl, emptyMap(), dash,
+                                "flac", sink, onProgress,
+                            )
+                        },
+                    )
+                } else {
+                    return Route(
+                        extension = "flac",
+                        mimeType = "audio/flac",
+                        describe = streamFormat.summary,
+                        downloadFormat = streamFormat.downloadBadge(),
+                        taggable = true,
+                        write = { sink, onProgress ->
+                            Downloader.fetchDirect(lossless.streamUrl, emptyMap(), sink, onProgress)
+                        },
+                    )
+                }
+            }
+        }
         fromSources(track, quality)?.let { (stream, storable) ->
             // A manifest is an index, not audio. Whichever kind it is, fetching
             // it as a file writes the index into something named `.flac` —

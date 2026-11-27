@@ -126,6 +126,7 @@ import java.util.concurrent.atomic.AtomicLong
 import com.music.bitchord.data.Http
 import com.music.bitchord.auth.SignedIn
 import com.music.bitchord.data.LikeState
+import com.music.bitchord.data.LosslessAudioProvider
 import com.music.bitchord.data.NerdStats
 import com.music.bitchord.data.TrackLog
 import com.music.bitchord.data.discord.DiscordRPC
@@ -1743,6 +1744,45 @@ class PlaybackService : MediaLibraryService() {
                     .setUri(Uri.parse(serving.url))
                     .setHttpRequestHeaders(serving.headers)
                     .build()
+            }
+            // Hi-Res Lossless streaming provider check (when enabled and not refused)
+            if (AppSettings.enableLosslessStreaming.value && !StreamChoice.substitutesRefused(videoId)) {
+                val target = SourceResolver.targetIn(dataSpec.uri)
+                if (target.title.isNotBlank()) {
+                    val lossless = runBlocking(about) {
+                        try {
+                            withTimeoutOrNull(4000L) {
+                                LosslessAudioProvider.resolveLosslessTrack(
+                                    title = target.title,
+                                    artist = target.artist,
+                                    durationSec = target.durationSec,
+                                )
+                            }
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    if (lossless != null && lossless.streamUrl.isNotBlank()) {
+                        val format = StreamFormat(
+                            codec = "flac",
+                            bitDepth = lossless.bitDepth,
+                            sampleRateHz = lossless.sampleRate,
+                        )
+                        NerdStats.onSourceStream(videoId, format, lossless.sourceName)
+                        NerdStats.recordSource(videoId, lossless.sourceName)
+                        val sourceStream = SourceStream(
+                            url = lossless.streamUrl,
+                            format = format,
+                            headers = emptyMap(),
+                            sourceName = lossless.sourceName,
+                        )
+                        StreamChoice.remember(videoId, sourceStream, substituted = true)
+                        TrackLog.d("BitChord", "serving Hi-Res Lossless FLAC for $videoId (${lossless.sourceName})", about = videoId)
+                        return@Resolver dataSpec.buildUpon()
+                            .setUri(Uri.parse(lossless.streamUrl))
+                            .build()
+                    }
+                }
             }
             // A track queued from YouTube may be held by a source the user
             // ranked above it — see [SourceResolver.substituteForYouTube] and

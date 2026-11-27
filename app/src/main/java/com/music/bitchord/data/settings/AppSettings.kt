@@ -410,6 +410,18 @@ object AppSettings {
     /** Put the playing track's codec, bitrate and sample rate on the player. */
     val showNerdStats = MutableStateFlow(true)
 
+    /** Stream 16-bit/24-bit FLAC when available, auto-fallback to standard. */
+    val enableLosslessStreaming = MutableStateFlow(false)
+
+    /** Save offline downloads as lossless FLAC files. */
+    val enableLosslessDownloads = MutableStateFlow(false)
+
+    /** Quality tier for lossless requests: "LOSSLESS" (16-bit) or "HI_RES_LOSSLESS" (24-bit). */
+    val losslessQualityTier = MutableStateFlow("HI_RES_LOSSLESS")
+
+    /** Custom Hi-Res API endpoint URL. Empty string uses the built-in pool. */
+    val customLosslessEndpoint = MutableStateFlow("")
+
     /** Display name of the listener's imported .ttf/.otf, or null for the app's own face. */
     val customFont = MutableStateFlow<String?>(null)
 
@@ -947,6 +959,10 @@ object AppSettings {
         ).coerceIn(MIN_UPGRADE_LENGTH_SLACK_SECONDS, MAX_UPGRADE_LENGTH_SLACK_SECONDS)
         migrateDownloadQuality()
         downloadQuality.value = readDownloadQuality()
+        enableLosslessStreaming.value = prefs.getBoolean(KEY_ENABLE_LOSSLESS_STREAMING, false)
+        enableLosslessDownloads.value = prefs.getBoolean(KEY_ENABLE_LOSSLESS_DOWNLOADS, false)
+        losslessQualityTier.value = prefs.getString(KEY_LOSSLESS_QUALITY_TIER, "HI_RES_LOSSLESS") ?: "HI_RES_LOSSLESS"
+        customLosslessEndpoint.value = prefs.getString(KEY_CUSTOM_LOSSLESS_ENDPOINT, "") ?: ""
         wifiOnlyDownloads.value = prefs.getBoolean(KEY_WIFI_ONLY_DOWNLOADS, true)
         exportDownloads.value = prefs.getBoolean(KEY_EXPORT_DOWNLOADS, true)
         crossfadeSeconds.value = prefs.getInt(KEY_CROSSFADE, 0)
@@ -1406,6 +1422,26 @@ object AppSettings {
     fun setShowNerdStats(value: Boolean) {
         showNerdStats.value = value
         prefs.edit().putBoolean(KEY_NERD_STATS, value).apply()
+    }
+
+    fun setEnableLosslessStreaming(value: Boolean) {
+        enableLosslessStreaming.value = value
+        prefs.edit().putBoolean(KEY_ENABLE_LOSSLESS_STREAMING, value).apply()
+    }
+
+    fun setEnableLosslessDownloads(value: Boolean) {
+        enableLosslessDownloads.value = value
+        prefs.edit().putBoolean(KEY_ENABLE_LOSSLESS_DOWNLOADS, value).apply()
+    }
+
+    fun setLosslessQualityTier(value: String) {
+        losslessQualityTier.value = value
+        prefs.edit().putString(KEY_LOSSLESS_QUALITY_TIER, value).apply()
+    }
+
+    fun setCustomLosslessEndpoint(value: String) {
+        customLosslessEndpoint.value = value.trim()
+        prefs.edit().putString(KEY_CUSTOM_LOSSLESS_ENDPOINT, value.trim()).apply()
     }
 
     fun setCustomFont(value: String?) {
@@ -2601,6 +2637,11 @@ object AppSettings {
     private const val KEY_ENABLE_INTERNET_ARCHIVE_LOSSLESS = "enable_internet_archive_lossless"
     private const val KEY_ENABLE_JAMENDO_LOSSLESS = "enable_jamendo_lossless"
     private const val KEY_JAMENDO_CLIENT_ID = "jamendo_client_id"
+
+    private const val KEY_ENABLE_LOSSLESS_STREAMING = "enable_lossless_streaming"
+    private const val KEY_ENABLE_LOSSLESS_DOWNLOADS = "enable_lossless_downloads"
+    private const val KEY_LOSSLESS_QUALITY_TIER = "lossless_quality_tier"
+    private const val KEY_CUSTOM_LOSSLESS_ENDPOINT = "custom_lossless_endpoint"
 }
 
 
