@@ -52,6 +52,22 @@ object LosslessAudioProvider {
     @Volatile
     private var lastHealthyEndpoint: String? = null
 
+    private val mirrorLatencies = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val mirrorFailures = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+    fun recordMirrorSuccess(endpoint: String, latencyMs: Long) {
+        mirrorLatencies[endpoint] = latencyMs
+        mirrorFailures[endpoint] = 0
+    }
+
+    fun recordMirrorFailure(endpoint: String) {
+        val fails = (mirrorFailures[endpoint] ?: 0) + 1
+        mirrorFailures[endpoint] = fails
+        if (fails >= 2) {
+            mirrorLatencies[endpoint] = 99999L
+        }
+    }
+
     private data class CacheEntry(val result: LosslessStreamResult, val timestamp: Long)
     private val memoryCache = object : LruCache<String, CacheEntry>(150) {}
     private const val CACHE_TTL_MS = 15 * 60 * 1000L // 15 minutes
@@ -81,7 +97,7 @@ object LosslessAudioProvider {
         BUILTIN_ENDPOINTS.forEach {
             if (it !in endpoints) endpoints.add(it)
         }
-        return endpoints
+        return endpoints.sortedBy { mirrorLatencies[it] ?: 400L }
     }
 
     private fun cleanTitle(raw: String): String {
@@ -206,9 +222,24 @@ object LosslessAudioProvider {
         durationSec: Int?,
         qualityTier: String,
     ): LosslessStreamResult? {
-        val candidate = searchCandidates(endpoint, encodedQuery, normTitle, normArtist, durationSec) ?: return null
-        val streamResult = fetchStream(endpoint, candidate.id, qualityTier) ?: return null
-        return if (isStreamUrlPlayable(streamResult.streamUrl)) streamResult else null
+        val start = System.currentTimeMillis()
+        val candidate = searchCandidates(endpoint, encodedQuery, normTitle, normArtist, durationSec)
+        if (candidate == null) {
+            recordMirrorFailure(endpoint)
+            return null
+        }
+        val streamResult = fetchStream(endpoint, candidate.id, qualityTier)
+        if (streamResult == null) {
+            recordMirrorFailure(endpoint)
+            return null
+        }
+        if (isStreamUrlPlayable(streamResult.streamUrl)) {
+            recordMirrorSuccess(endpoint, System.currentTimeMillis() - start)
+            return streamResult
+        } else {
+            recordMirrorFailure(endpoint)
+            return null
+        }
     }
 
     private fun searchCandidates(

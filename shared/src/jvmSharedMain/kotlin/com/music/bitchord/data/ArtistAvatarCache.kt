@@ -13,7 +13,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.Request
 import java.io.File
+import java.net.URLEncoder
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
@@ -142,6 +144,28 @@ object ArtistAvatarCache {
                     YtMusicRepository.artistPage(foundId).getOrNull()?.let { page ->
                         if (!page.thumbnailUrl.isNullOrBlank()) {
                             photoUrl = page.thumbnailUrl
+                        }
+                    }
+                }
+            }
+        }
+
+        // Deezer / Public Music API fallback for official high-resolution artist portraits
+        if (photoUrl.isNullOrBlank()) {
+            runCatching {
+                val encoded = URLEncoder.encode(cleanName, "UTF-8")
+                val req = Request.Builder()
+                    .url("https://api.deezer.com/search/artist?q=$encoded&limit=1")
+                    .header("User-Agent", "UMtify/1.0")
+                    .build()
+                Http.client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string().orEmpty()
+                        val pic = Regex(""""picture_xl"\s*:\s*"([^"]+)"""").find(body)?.groupValues?.get(1)
+                            ?: Regex(""""picture_big"\s*:\s*"([^"]+)"""").find(body)?.groupValues?.get(1)
+                            ?: Regex(""""picture_medium"\s*:\s*"([^"]+)"""").find(body)?.groupValues?.get(1)
+                        if (!pic.isNullOrBlank()) {
+                            photoUrl = pic.replace("\\/", "/")
                         }
                     }
                 }

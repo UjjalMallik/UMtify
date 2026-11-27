@@ -137,6 +137,7 @@ import com.music.bitchord.data.innertube.PlayerClient
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.LikeStatus
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.model.durationMillis
 import com.music.bitchord.data.model.isUnresolvedSpotify
 import com.music.bitchord.data.scrobbling.ListenBrainzManager
 import com.music.bitchord.data.settings.AppSettings
@@ -1173,6 +1174,7 @@ class PlaybackService : MediaLibraryService() {
             loadLyricsForCurrentTrack()
             if (exoPlayer.isPlaying) startLyricsTicker()
             refreshCustomLayouts()
+            prefetchNextQueueItem(exoPlayer)
         }
 
         /**
@@ -1713,39 +1715,81 @@ class PlaybackService : MediaLibraryService() {
             if (wantsLossless) {
                 val target = SourceResolver.targetIn(dataSpec.uri)
                 if (target.title.isNotBlank()) {
-                    val lossless = runBlocking(about) {
-                        try {
-                            withTimeoutOrNull(4000L) {
+                    val (losslessResult, fallbackResult) = runBlocking(about) {
+                        coroutineScope {
+                            val losslessDeferred = async {
+                                runCatching {
+                                    withTimeoutOrNull(1800L) {
+                                        LosslessAudioProvider.resolveLosslessTrack(
+                                            title = target.title,
+                                            artist = target.artist,
+                                            durationSec = target.durationSec,
+                                        )
+                                    }
+                                }.getOrNull()
+                            }
+
+                            val fallbackDeferred = if (existingServing != null) {
+                                CompletableDeferred(existingServing)
+                            } else {
+                                async {
+                                    runCatching {
+                                        withTimeoutOrNull(1500L) {
+                                            SourceResolver.substituteForYouTube(target)
+                                        }
+                                    }.getOrNull()
+                                }
+                            }
+
+                            val lossless = losslessDeferred.await()
+                            if (lossless != null && lossless.streamUrl.isNotBlank()) {
+                                Pair(lossless, null)
+                            } else {
+                                Pair(null, fallbackDeferred.await())
+                            }
+                        }
+                    }
+
+                    if (losslessResult != null && losslessResult.streamUrl.isNotBlank()) {
+                        val format = StreamFormat(
+                            codec = "flac",
+                            bitDepth = losslessResult.bitDepth,
+                            sampleRateHz = losslessResult.sampleRate,
+                        )
+                        NerdStats.onSourceStream(videoId, format, losslessResult.sourceName)
+                        NerdStats.recordSource(videoId, losslessResult.sourceName)
+                        val flacHeaders = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                        val sourceStream = SourceStream(
+                            url = losslessResult.streamUrl,
+                            format = format,
+                            headers = flacHeaders,
+                            sourceName = losslessResult.sourceName,
+                        )
+                        StreamChoice.remember(videoId, sourceStream, substituted = true)
+                        TrackLog.d("BitChord", "serving Hi-Res Lossless FLAC for $videoId (${losslessResult.sourceName})", about = videoId)
+                        return@Resolver dataSpec.buildUpon()
+                            .setUri(Uri.parse(losslessResult.streamUrl))
+                            .setHttpRequestHeaders(flacHeaders)
+                            .build()
+                    } else if (fallbackResult != null && fallbackResult.url.isNotBlank()) {
+                        // Play fast fallback stream (JioSaavn 320 kbps or module) with zero stall!
+                        val sourceName = fallbackResult.sourceName ?: "High Quality"
+                        NerdStats.onSourceStream(videoId, fallbackResult.format, sourceName)
+                        NerdStats.recordSource(videoId, sourceName)
+                        StreamChoice.remember(videoId, fallbackResult, substituted = true)
+                        // Trigger background FLAC resolve into cache for future playback/replay
+                        scope.launch(Dispatchers.IO) {
+                            runCatching {
                                 LosslessAudioProvider.resolveLosslessTrack(
                                     title = target.title,
                                     artist = target.artist,
                                     durationSec = target.durationSec,
                                 )
                             }
-                        } catch (e: Exception) {
-                            null
                         }
-                    }
-                    if (lossless != null && lossless.streamUrl.isNotBlank()) {
-                        val format = StreamFormat(
-                            codec = "flac",
-                            bitDepth = lossless.bitDepth,
-                            sampleRateHz = lossless.sampleRate,
-                        )
-                        NerdStats.onSourceStream(videoId, format, lossless.sourceName)
-                        NerdStats.recordSource(videoId, lossless.sourceName)
-                        val flacHeaders = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                        val sourceStream = SourceStream(
-                            url = lossless.streamUrl,
-                            format = format,
-                            headers = flacHeaders,
-                            sourceName = lossless.sourceName,
-                        )
-                        StreamChoice.remember(videoId, sourceStream, substituted = true)
-                        TrackLog.d("BitChord", "serving Hi-Res Lossless FLAC for $videoId (${lossless.sourceName})", about = videoId)
                         return@Resolver dataSpec.buildUpon()
-                            .setUri(Uri.parse(lossless.streamUrl))
-                            .setHttpRequestHeaders(flacHeaders)
+                            .setUri(Uri.parse(fallbackResult.url))
+                            .setHttpRequestHeaders(fallbackResult.headers)
                             .build()
                     } else {
                         NerdStats.clearDeclared(videoId)
@@ -6785,16 +6829,42 @@ class PlaybackService : MediaLibraryService() {
             val nextIndex = exoPlayer.nextMediaItemIndex
             if (nextIndex != C.INDEX_UNSET && nextIndex != lastPrefetchedNearEndIndex) {
                 lastPrefetchedNearEndIndex = nextIndex
-                val nextItem = exoPlayer.getMediaItemAt(nextIndex).toSong()
-                scope.launch(Dispatchers.IO) {
-                    val target = TrackMatcher.targetOf(nextItem)
-                    if (SourceResolver.canSubstituteForYouTube()) {
-                        runCatching { SourceResolver.prefetchSubstitute(target) }
-                            .getOrNull()
-                            ?.also { StreamChoice.remember(nextItem.videoId, it, substituted = true) }
+                prefetchNextQueueItem(exoPlayer)
+            }
+        }
+    }
+
+    private fun prefetchNextQueueItem(exoPlayer: Player) {
+        val nextIdx = exoPlayer.nextMediaItemIndex
+        if (nextIdx != C.INDEX_UNSET) {
+            val nextItem = runCatching { exoPlayer.getMediaItemAt(nextIdx).toSong() }.getOrNull() ?: return
+            scope.launch(Dispatchers.IO) {
+                val target = TrackMatcher.targetOf(nextItem)
+                if (AppSettings.enableLosslessStreaming.value || AppSettings.effectiveAudioQuality == AudioQuality.LOSSLESS) {
+                    runCatching {
+                        val durationSec = (nextItem.durationMillis() / 1000).toInt().takeIf { it > 0 } ?: 210
+                        LosslessAudioProvider.resolveLosslessTrack(
+                            title = nextItem.title,
+                            artist = nextItem.artist,
+                            durationSec = durationSec,
+                        )
+                    }.getOrNull()?.let { lossless ->
+                        val flacHeaders = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                        val sourceStream = SourceStream(
+                            url = lossless.streamUrl,
+                            format = StreamFormat(codec = "flac", bitDepth = lossless.bitDepth, sampleRateHz = lossless.sampleRate),
+                            headers = flacHeaders,
+                            sourceName = lossless.sourceName,
+                        )
+                        StreamChoice.remember(nextItem.videoId, sourceStream, substituted = true)
                     }
-                    runCatching { StreamResolver.resolve(nextItem.videoId) }
                 }
+                if (SourceResolver.canSubstituteForYouTube()) {
+                    runCatching { SourceResolver.prefetchSubstitute(target) }
+                        .getOrNull()
+                        ?.also { StreamChoice.remember(nextItem.videoId, it, substituted = true) }
+                }
+                runCatching { StreamResolver.resolve(nextItem.videoId) }
             }
         }
     }

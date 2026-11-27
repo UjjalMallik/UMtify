@@ -277,6 +277,16 @@ fun SourcesScreen(
                     AppSettings.setLosslessQualityTier(next)
                 },
             )
+
+            RowDivider()
+
+            // Fastest-Source Priority indicator
+            SettingsRow(
+                icon = Icons.Rounded.PlayCircle,
+                title = "Fastest-Source Priority",
+                subtitle = "Race active Hi-Res FLAC mirrors with instant 320 kbps fallback (Zero lag)",
+                value = "Active",
+            )
         }
 
         // Extension Repo (Live from GitHub) Section
@@ -396,82 +406,6 @@ fun SourcesScreen(
                     )
                 }
             }
-        }
-
-        SettingsGroup(
-            header = stringResource(R.string.sources_order_header),
-            footer = buildString {
-                append(stringResource(R.string.sources_order_footer))
-                if (cappedByQuality) {
-                    append("\n\n")
-                    append(stringResource(R.string.sources_quality_capped))
-                } else if (!anyLosslessSource) {
-                    append("\n\n")
-                    append(stringResource(R.string.sources_no_lossless))
-                }
-            },
-        ) {
-            // The addons are split out from the rest because they are the only
-            // rows whose order is the *user's*. Everything else ranks by kind,
-            // which is fixed in [SourceKind] and not something a drag should be
-            // able to argue with — a gesture that let JioSaavn be dragged above
-            // an addon would be offering a choice the resolver does not
-            // actually honour.
-            //
-            // They are still one continuously numbered list. The numbers say
-            // what order the sources are tried in, and restarting the count
-            // under a second heading would break the one thing this screen is
-            // for.
-            val row: @Composable (Int, SourceConfig, (@Composable () -> Unit)?) -> Unit =
-                { position, config, handle ->
-                    SourceRow(
-                        position = position,
-                        config = config,
-                        health = health[config.id],
-                        // Switched on, but not reached on this connection. Said
-                        // on the row rather than by moving the switch, so the
-                        // switch keeps meaning "I want this source" and the
-                        // connection keeps meaning "…and here is what it costs
-                        // today".
-                        skippedByQuality = config.enabled && !ceiling.permits(config.kind),
-                        awaitingOutput = if (config.enabled && config.awaitsLosslessOutput) losslessOutput else null,
-                        onMetered = metered == true,
-                        ceiling = ceiling,
-                        // Anything the user configured is theirs to edit or
-                        // delete. JioSaavn and YouTube have no address to
-                        // change, so a tap on them would open an empty editor.
-                        onClick = if (config.kind.needsServer) ({ onEditSource(config) }) else null,
-                        onToggle = if (config.kind == SourceKind.YOUTUBE) null else { enabled ->
-                            if (config.kind == SourceKind.JIOSAAVN && enabled && !config.enabled) {
-                                onConfirmJioSaavn()
-                            } else {
-                                SourceRegistry.setEnabled(config.id, enabled)
-                            }
-                        },
-                        handle = handle,
-                    )
-                }
-
-            ReorderableSources(
-                sources = configs,
-                onReorder = { SourceRegistry.reorder(it.map(SourceConfig::id)) },
-                row = row,
-            )
-
-            // The one shut-out an addon can't tell apart from "not lossless":
-            // headphones on LDAC, LHDC or SSC UHQ whose codec Android won't name without
-            // the Nearby devices permission. Offered only then, and only from
-            // here, where the reason for asking is on screen.
-            val waiting = configs.any { it.enabled && it.awaitsLosslessOutput }
-            if (waiting && losslessOutput.bluetoothCodecUnknown) {
-                RowDivider()
-                BluetoothCodecPermissionRow()
-            }
-
-            RowDivider()
-            AddSourceRow(
-                onClick = { onEditSource(SourceConfig(kind = SourceKind.ADDON)) },
-            )
         }
 
         // A personal library rather than a catalogue in the order above: it

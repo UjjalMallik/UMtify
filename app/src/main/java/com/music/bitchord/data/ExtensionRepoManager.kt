@@ -82,16 +82,16 @@ object ExtensionRepoManager {
         val initialEnabled: Set<String>
 
         if (!isInitialized || savedInstalled == null) {
-            initialInstalled = CORE_DEFAULT_IDS
-            initialEnabled = CORE_DEFAULT_IDS
+            initialInstalled = CORE_DEFAULT_IDS - "jellyfin"
+            initialEnabled = CORE_DEFAULT_IDS - "jellyfin"
             p.edit()
                 .putStringSet(KEY_INSTALLED_IDS, initialInstalled)
                 .putStringSet(KEY_ENABLED_IDS, initialEnabled)
                 .putBoolean(KEY_INITIALIZED, true)
                 .apply()
         } else {
-            initialInstalled = savedInstalled
-            initialEnabled = savedEnabled ?: savedInstalled
+            initialInstalled = savedInstalled - "jellyfin"
+            initialEnabled = (savedEnabled ?: savedInstalled) - "jellyfin"
         }
 
         _installedIds.value = initialInstalled
