@@ -6,6 +6,7 @@ import com.music.bitchord.data.Http
 import com.music.bitchord.data.LosslessAudioProvider
 import com.music.bitchord.data.NativeDownloadProviders
 import com.music.bitchord.data.NerdStats
+import com.music.bitchord.data.WebViewSflxRuntime
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.durationMillis
@@ -138,9 +139,14 @@ object DownloadFormatResolver {
                 }
                 finalized.forEach { opt ->
                     val slug = NativeDownloadProviders.providerSlug(opt.sourceName ?: providerName ?: "source")
-                    // Dedup by (provider, codec, bitDepth, kbps, url) — preserves 24-bit Hi-Res alongside 16-bit Lossless
+                    // Dedup by (provider, codec, bitDepth, kbps, url) AND (provider, url)
+                    // so active 24-bit UMtify stream emitted in step 1 prevents step 2 from
+                    // adding a duplicate 16-bit copy of the exact same URL.
                     val tierKey = "${slug}_${opt.codec}_${opt.bitDepth ?: 0}_${opt.bitrateKbps ?: 0}_${opt.streamUrl}"
-                    if (seenProviderFormatKeys.add(tierKey)) {
+                    val urlKey = "url:${slug}:${opt.streamUrl}"
+                    val isNewTier = seenProviderFormatKeys.add(tierKey)
+                    val isNewUrl = seenProviderFormatKeys.add(urlKey)
+                    if (isNewTier && isNewUrl) {
                         // Ensure globally unique option ID across all providers & LazyColumn items
                         val baseId = if (opt.id.startsWith(slug)) opt.id else "${slug}_${opt.id}"
                         val uniqueId = if (collected.any { it.id == baseId }) "${baseId}_${collected.size}" else baseId
@@ -187,29 +193,30 @@ object DownloadFormatResolver {
                 }
             }
 
-            // 3. Enabled Native Download Providers (Tidal, Qobuz, Deezer, Amazon Music, Beatport)
-            // Pure Kotlin OkHttpClient + org.json — zero QuickJS / TypeConverter crashes.
+            // 3. Enabled .sflx Download Providers via Headless WebView V8 + Native Kotlin lossless fallback
             extSources.forEach { ext ->
                 launch(Dispatchers.IO) {
                     val startMs = System.currentTimeMillis()
                     val extId = SourceRegistry.extensionIdFor(ext.configId) ?: ext.configId
+                    val isrc = LosslessAudioProvider.cachedIsrcFor(song.title, song.artist)
                     val drafts = mutableListOf<OptionDraft>()
 
-                    val nativeRes = runCatching {
-                        NativeDownloadProviders.resolveFormats(
+                    // A. Execute real Mornye `.sflx` (index.js) inside Chromium V8 WebView
+                    val v8Res = runCatching {
+                        WebViewSflxRuntime.resolveDownloadFormatsDetailed(
                             extensionId = extId,
                             displayName = ext.displayName,
                             title = song.title,
                             artist = song.artist,
                             album = song.albumName,
                             durationSec = durationSec,
-                            isrc = LosslessAudioProvider.cachedIsrcFor(song.title, song.artist),
+                            isrc = isrc,
                         )
                     }.getOrElse { err ->
-                        NativeDownloadProviders.ResolutionResult(emptyList(), err.message ?: "Network error")
+                        WebViewSflxRuntime.SflxResolutionResult(emptyList(), err.message ?: "V8 runtime error")
                     }
 
-                    nativeRes.options.forEach { opt ->
+                    v8Res.options.forEach { opt ->
                         val safeUrl = LosslessAudioProvider.forceHttps(opt.streamUrl)
                         if (safeUrl.startsWith("https://")) {
                             drafts.add(
@@ -231,11 +238,48 @@ object DownloadFormatResolver {
                         }
                     }
 
+                    // B. Native Kotlin lossless mirror fallback when upstream .sflx API (e.g. zarz) throttles or returns partial tiers
+                    if (drafts.isEmpty() || drafts.none { it.isLossless }) {
+                        val nativeRes = runCatching {
+                            NativeDownloadProviders.resolveFormats(
+                                extensionId = extId,
+                                displayName = ext.displayName,
+                                title = song.title,
+                                artist = song.artist,
+                                album = song.albumName,
+                                durationSec = durationSec,
+                                isrc = isrc,
+                            )
+                        }.getOrNull()
+
+                        nativeRes?.options?.forEach { opt ->
+                            val safeUrl = LosslessAudioProvider.forceHttps(opt.streamUrl)
+                            if (safeUrl.startsWith("https://")) {
+                                drafts.add(
+                                    OptionDraft(
+                                        id = opt.id,
+                                        label = opt.label,
+                                        codec = opt.codec,
+                                        bitrateKbps = opt.bitrateKbps ?: if (opt.isLossless) 1411 else 320,
+                                        sampleRateHz = opt.sampleRateHz ?: 44100,
+                                        bitDepth = opt.bitDepth ?: 16,
+                                        streamUrl = safeUrl,
+                                        fileExtension = opt.fileExtension,
+                                        isLossless = opt.isLossless,
+                                        isDolbyAtmos = opt.isDolbyAtmos,
+                                        headers = opt.headers,
+                                        sourceName = ext.displayName,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+
                     if (drafts.isNotEmpty()) {
                         SourceHealthTracker.recordReady(ext.configId, System.currentTimeMillis() - startMs)
                     } else {
-                        val diag = nativeRes.failureReason ?: "No matching streams"
-                        Log.w("NativeDownloadProviders", "${ext.displayName} ($extId) returned 0 downloadable formats: $diag")
+                        val diag = v8Res.failureReason ?: "No matching streams"
+                        Log.w("WebViewSflxRuntime", "${ext.displayName} ($extId) returned 0 downloadable formats: $diag")
                         SourceHealthTracker.recordError(ext.configId, diag)
                     }
                     finalizeDraftsAndEmit(ext.displayName, drafts)
@@ -471,12 +515,14 @@ object DownloadFormatResolver {
         if (candidate.url.isBlank()) return null
 
         val declared = NerdStats.declaredFormat(id)
+        val measured = NerdStats.measuredFormat(id)
         val recordedSource = NerdStats.sourceFor(id)
         val urlLower = candidate.url.substringBefore('?').lowercase(Locale.ROOT)
         val isManifest = com.music.bitchord.playback.StreamContainer.isManifest(candidate.url)
         val isLosslessOrPremium = candidate.format.isLossless == true ||
             candidate.format.isDolbyAtmos ||
             declared?.isLossless == true ||
+            measured?.isLossless == true ||
             declared?.isDolbyAtmos == true ||
             urlLower.endsWith(".flac") ||
             isManifest ||
@@ -489,18 +535,29 @@ object DownloadFormatResolver {
             ?: if (candidate.format.isDolbyAtmos || declared?.isDolbyAtmos == true) "Dolby Atmos" else "UMtify"
 
         val inferredCodec = candidate.format.codec
+            ?: measured?.codec
             ?: declared?.codec
             ?: when {
                 urlLower.endsWith(".flac") -> "flac"
-                declared?.isLossless == true -> "flac"
+                measured?.isLossless == true || declared?.isLossless == true -> "flac"
                 else -> null
             }
-        val bestBitDepth = maxOf(candidate.format.bitDepth ?: 0, declared?.bitDepth ?: 0).takeIf { it > 0 }
-        val bestSampleRate = maxOf(candidate.format.sampleRateHz ?: 0, declared?.sampleRateHz ?: 0).takeIf { it > 0 }
+        val bestBitDepth = maxOf(
+            candidate.format.bitDepth ?: 0,
+            declared?.bitDepth ?: 0,
+            measured?.bitDepth ?: 0,
+        ).takeIf { it > 0 }
+        val bestSampleRate = maxOf(
+            candidate.format.sampleRateHz ?: 0,
+            declared?.sampleRateHz ?: 0,
+            measured?.sampleRateHz ?: 0,
+        ).takeIf { it > 0 }
         val bestKbps = when {
+            (measured?.kbps ?: 0) > 0 && (measured?.isLossless == true || declared?.isLossless == true || candidate.format.isLossless == true) ->
+                maxOf(measured?.kbps ?: 0, declared?.kbps ?: 0, candidate.format.kbps ?: 0).takeIf { it > 0 }
             declared?.kbps != null && (declared.isLossless == true || candidate.format.isLossless == true) ->
                 maxOf(declared.kbps ?: 0, candidate.format.kbps ?: 0).takeIf { it > 0 }
-            else -> candidate.format.kbps ?: declared?.kbps
+            else -> candidate.format.kbps ?: measured?.kbps ?: declared?.kbps
         }
         val mergedFormat = candidate.format.copy(
             codec = inferredCodec,

@@ -6211,6 +6211,15 @@ class PlaybackService : MediaLibraryService() {
                 else -> null
             },
         )
+        NerdStats.onMeasuredFormat(
+            mediaId,
+            StreamFormat(
+                codec = if (isLossless) (dsd ?: "flac") else null,
+                kbps = bitrate,
+                sampleRateHz = dsdRateHz ?: measured?.sampleRateHz,
+                bitDepth = if (dsd != null) 1 else if (isLossless) measured?.bitDepth else null,
+            ),
+        )
     }
 
     /** Serialize only the bounded window needed for a future cold-start resume. */

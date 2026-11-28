@@ -26,6 +26,11 @@ class RepoExtensionSource(
         if (config.metadataOnly) {
             return@withContext SourceHealth.Ok("Metadata & Lyrics only")
         }
+        val v8Health = com.music.bitchord.data.WebViewSflxRuntime.probeHealth(extensionId, config.id)
+        if (v8Health.isSuccess) {
+            val latencyMs = v8Health.getOrDefault(1L)
+            return@withContext SourceHealth.Ok("${latencyMs}ms · V8 FLAC")
+        }
         val nativeHealth = com.music.bitchord.data.NativeDownloadProviders.probeHealth(extensionId, config.id)
         nativeHealth.fold(
             onSuccess = { latencyMs ->
@@ -33,7 +38,10 @@ class RepoExtensionSource(
                 SourceHealth.Ok("${latencyMs}ms · FLAC")
             },
             onFailure = { failure ->
-                val reason = failure.message?.takeIf { it.isNotBlank() } ?: "Unavailable"
+                val reason = v8Health.exceptionOrNull()?.message
+                    ?.takeIf { it.isNotBlank() && it != "Unavailable" && it != "Not installed" }
+                    ?: failure.message?.takeIf { it.isNotBlank() }
+                    ?: "Unavailable"
                 SourceHealthTracker.recordError(config.id, reason)
                 SourceHealth.Unreachable(reason)
             },

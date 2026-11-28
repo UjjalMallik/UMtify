@@ -280,6 +280,9 @@ object NerdStats {
     /** As [picked], for the richer format a non-YouTube source can state. */
     private val declared = ConcurrentHashMap<String, StreamFormat>()
 
+    /** Actual decoded stream parameters measured by [PlaybackService.measure], keyed by mediaId. */
+    private val measured = ConcurrentHashMap<String, StreamFormat>()
+
     /** Authoritative source name that supplied the stream, keyed by media/track id. */
     private val sources = ConcurrentHashMap<String, String>()
 
@@ -335,8 +338,21 @@ object NerdStats {
     fun clearDeclared(trackId: String?) {
         if (trackId != null) {
             declared.remove(trackId)
+            measured.remove(trackId)
             sources.remove(trackId)
         }
+    }
+
+    fun onMeasuredFormat(mediaId: String?, format: StreamFormat) {
+        if (mediaId.isNullOrBlank()) return
+        if (measured.size >= MAX_REMEMBERED) measured.clear()
+        measured[mediaId] = format
+    }
+
+    fun measuredFormat(mediaId: String?): StreamFormat? {
+        val key = mediaId ?: return null
+        return measured[key]
+            ?: SourceTrackKeys.parse(key)?.second?.let { measured[it] }
     }
 
     /**
