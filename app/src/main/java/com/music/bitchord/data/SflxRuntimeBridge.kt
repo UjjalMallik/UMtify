@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.util.Base64
 import com.dokar.quickjs.QuickJs
+import com.dokar.quickjs.binding.AsyncFunctionBinding
 import com.dokar.quickjs.binding.FunctionBinding
 import com.dokar.quickjs.binding.define
 import com.music.bitchord.data.sources.SourceHealthTracker
@@ -477,8 +478,9 @@ object SflxRuntimeBridge {
                         """.trimIndent(),
                     )
 
-                    val resultJson = qjs.evaluate<String>("__sflx_resolved_json || '{\"ok\":false,\"formats\":[]}'")
-                    val root = JSONObject(resultJson)
+                    val resultJson = qjs.evaluate<String>("(typeof __sflx_resolved_json === 'string') ? __sflx_resolved_json : '{\"ok\":false,\"formats\":[],\"reason\":\"Async IIFE did not complete\"}'")
+                    val safeResultJson = resultJson.trim().let { if (it.startsWith("{") || it.startsWith("[")) it else "{\"ok\":false,\"formats\":[],\"reason\":\"Unexpected JS return type\"}" }
+                    val root = JSONObject(safeResultJson)
                     val formatsArr = root.optJSONArray("formats") ?: JSONArray()
                     val reason = root.optString("reason").takeIf { it.isNotBlank() }
                     val latencyMs = (System.currentTimeMillis() - startMs).coerceAtLeast(1L)
@@ -638,8 +640,9 @@ object SflxRuntimeBridge {
         val signedBaseUrl = signedSessionObj?.optString("baseUrl").orEmpty().trimEnd('/')
 
         qjs.define("__host") {
-            function("httpRequest", object : FunctionBinding<String> {
-                override fun invoke(args: Array<Any?>): String {
+            // ── HTTP (async so the QJS event loop drives Promise resolution) ─────
+            asyncFunction("httpRequest", object : AsyncFunctionBinding<String> {
+                override suspend fun invoke(args: Array<Any?>): String {
                     val method = args.getOrNull(0)?.toString()?.uppercase(Locale.ROOT) ?: "GET"
                     val rawUrl = args.getOrNull(1)?.toString().orEmpty()
                     val bodyStr = args.getOrNull(2)?.toString()
@@ -648,10 +651,25 @@ object SflxRuntimeBridge {
                 }
             })
 
-            function("clearCookies", object : FunctionBinding<String> {
-                override fun invoke(args: Array<Any?>): String {
-                    cookieJar.clear()
-                    return "ok"
+            asyncFunction("sessionSignedFetch", object : AsyncFunctionBinding<String> {
+                override suspend fun invoke(args: Array<Any?>): String {
+                    val method = args.getOrNull(0)?.toString()?.uppercase(Locale.ROOT) ?: "GET"
+                    val path = args.getOrNull(1)?.toString().orEmpty()
+                    val bodyStr = args.getOrNull(2)?.toString()
+                    val headersJson = args.getOrNull(3)?.toString() ?: "{}"
+                    if (signedBaseUrl.isBlank()) {
+                        return JSONObject().apply {
+                            put("statusCode", 403)
+                            put("status", 403)
+                            put("error", "No signedSession baseUrl")
+                        }.toString()
+                    }
+                    val fullUrl = if (path.startsWith("http", ignoreCase = true)) {
+                        path
+                    } else {
+                        "$signedBaseUrl/${path.trimStart('/')}"
+                    }
+                    return executeHttpJson(fullUrl, method, bodyStr, headersJson, deadlineMs)
                 }
             })
 
@@ -727,25 +745,10 @@ object SflxRuntimeBridge {
                 }
             })
 
-            function("sessionSignedFetch", object : FunctionBinding<String> {
+            function("clearCookies", object : FunctionBinding<String> {
                 override fun invoke(args: Array<Any?>): String {
-                    val method = args.getOrNull(0)?.toString()?.uppercase(Locale.ROOT) ?: "GET"
-                    val path = args.getOrNull(1)?.toString().orEmpty()
-                    val bodyStr = args.getOrNull(2)?.toString()
-                    val headersJson = args.getOrNull(3)?.toString() ?: "{}"
-                    if (signedBaseUrl.isBlank()) {
-                        return JSONObject().apply {
-                            put("statusCode", 403)
-                            put("status", 403)
-                            put("error", "No signedSession baseUrl")
-                        }.toString()
-                    }
-                    val fullUrl = if (path.startsWith("http", ignoreCase = true)) {
-                        path
-                    } else {
-                        "$signedBaseUrl/${path.trimStart('/')}"
-                    }
-                    return executeHttpJson(fullUrl, method, bodyStr, headersJson, deadlineMs)
+                    cookieJar.clear()
+                    return "ok"
                 }
             })
 
@@ -943,12 +946,42 @@ object SflxRuntimeBridge {
                     });
                 };
             }
+            if (typeof setTimeout === 'undefined') {
+                var setTimeout = function(fn, delay) {
+                    try { fn(); } catch (_) {}
+                    return 0;
+                };
+                var clearTimeout = function() {};
+                var setInterval = function(fn, delay) {
+                    try { fn(); } catch (_) {}
+                    return 0;
+                };
+                var clearInterval = function() {};
+            }
             """.trimIndent()
         )
     }
 
     private suspend fun evaluateScriptWithBridge(qjs: QuickJs, manifestJson: String?, indexJs: String) {
-        qjs.evaluate<Unit>(indexJs)
+        val preprocessed = preprocessIndexJs(indexJs)
+        qjs.evaluate<Unit>(preprocessed)
+    }
+
+    /**
+     * Strips ES-module syntax (import/export) so raw .sflx index.js files
+     * evaluate cleanly inside QuickJS without needing native module support.
+     * Mirrors the approach used by QuickJsExecutor.preprocessModuleCode().
+     */
+    private fun preprocessIndexJs(code: String): String {
+        // Remove ES module export keywords so plain eval works
+        var result = code
+        result = result.replace(Regex("""^\s*export\s+default\s+(?=function|class|const|let|var|async)""", RegexOption.MULTILINE), "")
+        result = result.replace(Regex("""\bexport\s+(default\s+)?(const|let|var|function|class|async)\b"""), "$2")
+        result = result.replace(Regex("""\bexport\s*\{[^}]*\}\s*;?"""), "")
+        // Convert bare `import ... from '...'` to no-op (extensions rely on globalThis polyfills)
+        result = result.replace(Regex("""^\s*import\s+.*?from\s+['"][^'"]*['"]\s*;?\s*$""", setOf(RegexOption.MULTILINE, RegexOption.DOT_MATCHES_ALL)), "")
+        result = result.replace(Regex("""^\s*import\s*\{[^}]*\}\s*from\s+['"][^'"]*['"]\s*;?\s*$""", RegexOption.MULTILINE), "")
+        return result
     }
 
     private fun buildSettingsJson(manifestJson: String?): String {

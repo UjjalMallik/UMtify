@@ -135,8 +135,14 @@ object DownloadFormatResolver {
                 }
                 finalized.forEach { opt ->
                     val slug = SflxRuntimeBridge.providerSlug(opt.sourceName ?: providerName ?: "source")
+                    // Dedup by (provider, codec, bitDepth, kbps, url) — prevents duplicate tiers
                     val tierKey = "${slug}_${opt.codec}_${opt.bitDepth ?: 0}_${opt.bitrateKbps ?: 0}_${opt.streamUrl}"
-                    if (seenProviderFormatKeys.add(tierKey)) {
+                    // Also dedup by (provider, url) — prevents same URL from same provider appearing twice
+                    // even with different label text (e.g. JioSaavn 320 kbps appearing twice)
+                    val urlKey = "url:${slug}:${opt.streamUrl}"
+                    val isNewTier = seenProviderFormatKeys.add(tierKey)
+                    val isNewUrl = seenProviderFormatKeys.add(urlKey)
+                    if (isNewTier && isNewUrl) {
                         // Ensure globally unique option ID across all providers & LazyColumn items
                         val baseId = if (opt.id.startsWith(slug)) opt.id else "${slug}_${opt.id}"
                         val uniqueId = if (collected.any { it.id == baseId }) "${baseId}_${collected.size}" else baseId
