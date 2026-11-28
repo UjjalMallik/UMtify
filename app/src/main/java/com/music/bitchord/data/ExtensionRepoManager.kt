@@ -169,6 +169,7 @@ object ExtensionRepoManager {
         }
 
         val entries = allIds.mapNotNull { extId ->
+            if (isDuplicateBuiltIn(extId)) return@mapNotNull null
             val ext = catalogById[extId]
             val endpoints = (getExtractedEndpointsFor(extId) + LosslessAudioProvider.endpointsForExtension(extId)).distinct()
             if (ext != null) {
@@ -186,7 +187,6 @@ object ExtensionRepoManager {
                     metadataOnly = metadataOnly,
                 )
             } else {
-                if (isDuplicateBuiltIn(extId)) return@mapNotNull null
                 val metadataOnly = isMetadataOnlyExtension(extId, null)
                 val isKnownDefault = extId in CORE_DEFAULT_IDS || extId in EXTRA_CATALOG_FALLBACK_IDS
                 if (!isKnownDefault && endpoints.isEmpty() && !metadataOnly) return@mapNotNull null
@@ -251,6 +251,7 @@ object ExtensionRepoManager {
             lower.contains("internet-archive") ||
             lower.contains("internetarchive") ||
             lower.contains("archive.org") ||
+            lower.contains("jellyfin") ||
             lower.contains("umtify")
     }
 
@@ -350,17 +351,17 @@ object ExtensionRepoManager {
 
                 val name = item.optString("name", id)
                 val displayName = item.optString("display_name").ifBlank { name }
-                // Hide duplicate JioSaavn extension since JioSaavn is built-in to the main Sources list
-                if (id.contains("jiosaavn", ignoreCase = true) ||
-                    name.contains("jiosaavn", ignoreCase = true) ||
-                    displayName.contains("jiosaavn", ignoreCase = true)
+                // Hide duplicate JioSaavn extension and unconfigured Jellyfin
+                if (isDuplicateBuiltIn(id) ||
+                    isDuplicateBuiltIn(name) ||
+                    isDuplicateBuiltIn(displayName)
                 ) {
                     continue
                 }
                 val version = item.optString("version", "1.0.0")
                 val description = item.optString("description")
-                val downloadUrl = item.optString("download_url")
-                val iconUrl = item.optString("icon_url").takeIf { it.isNotBlank() }
+                val downloadUrl = forceHttps(item.optString("download_url"))
+                val iconUrl = item.optString("icon_url").takeIf { it.isNotBlank() }?.let(::forceHttps)
                 val category = item.optString("category", "general")
 
                 val tags = mutableListOf<String>()
@@ -547,11 +548,33 @@ object ExtensionRepoManager {
         prefs?.edit()?.putString(KEY_INSTALLED_VERSIONS, obj.toString())?.apply()
     }
 
+    private fun forceHttps(url: String): String {
+        val trimmed = url.trim()
+        return if (trimmed.startsWith("http://", ignoreCase = true)) {
+            "https://" + trimmed.substring(7)
+        } else {
+            trimmed
+        }
+    }
+
+    private fun isAuthWalledOfficialApi(url: String): Boolean {
+        val lower = url.lowercase(Locale.ROOT)
+        return "api.tidal.com" in lower ||
+            "openapi.tidal.com" in lower ||
+            "qobuz.com/api" in lower ||
+            "api.deezer.com" in lower ||
+            "api.spotify.com" in lower ||
+            "api.beatport.com" in lower ||
+            "music.amazon" in lower ||
+            "api.amazon" in lower
+    }
+
     private fun downloadExtensionFile(context: Context, extension: RepoExtension): Boolean {
         if (extension.downloadUrl.isBlank()) return true
         return runCatching {
+            val safeUrl = forceHttps(extension.downloadUrl)
             val request = Request.Builder()
-                .url(extension.downloadUrl)
+                .url(safeUrl)
                 .header("User-Agent", "UMtify/1.0 (Android; Mornye Extension Repo)")
                 .build()
 
@@ -609,15 +632,17 @@ object ExtensionRepoManager {
                 for (entry in entries) {
                     val text = zip.getInputStream(entry).bufferedReader().readText()
                     urlRegex.findAll(text).forEach { match ->
-                        val url = match.value.trimEnd('/')
-                        if (url.startsWith("http") &&
+                        val url = forceHttps(match.value.trimEnd('/'))
+                        if (url.startsWith("https://") &&
+                            !isAuthWalledOfficialApi(url) &&
                             !url.contains("github.com") &&
                             !url.contains("w3.org") &&
                             !url.contains("schema.org") &&
                             !url.contains("google.com") &&
-                            (url.contains("api") || url.contains("zarz") || url.contains("qqdl") ||
-                             url.contains("tidal") || url.contains("qobuz") || url.contains("hifi") ||
-                             url.contains("yeet.su") || url.contains("spotisaver") || url.contains("kinoko"))
+                            (url.contains("zarz") || url.contains("qqdl") ||
+                             url.contains("monochrome") || url.contains("hifi") ||
+                             url.contains("yeet.su") || url.contains("squid") ||
+                             url.contains("spotisaver") || url.contains("kinoko"))
                         ) {
                             if (url !in endpoints) endpoints.add(url)
                         }

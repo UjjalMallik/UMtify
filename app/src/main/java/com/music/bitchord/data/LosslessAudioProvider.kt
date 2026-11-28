@@ -190,21 +190,32 @@ object LosslessAudioProvider {
             .build()
     }
 
+    fun forceHttps(url: String): String {
+        val trimmed = url.trim()
+        return if (trimmed.startsWith("http://", ignoreCase = true)) {
+            "https://" + trimmed.substring(7)
+        } else {
+            trimmed
+        }
+    }
+
     private fun getCandidateEndpoints(): List<String> {
-        val custom = AppSettings.customLosslessEndpoint.value.trim().trimEnd('/')
+        val custom = forceHttps(AppSettings.customLosslessEndpoint.value.trim().trimEnd('/'))
         val endpoints = mutableListOf<String>()
         if (custom.isNotBlank()) {
             endpoints.add(custom)
         }
-        val healthy = lastHealthyEndpoint
+        val healthy = lastHealthyEndpoint?.let(::forceHttps)
         if (healthy != null && healthy !in endpoints) {
             endpoints.add(healthy)
         }
-        ExtensionRepoManager.getExtractedEndpoints().forEach {
-            if (it !in endpoints) endpoints.add(it)
+        ExtensionRepoManager.getExtractedEndpoints().forEach { raw ->
+            val ep = forceHttps(raw)
+            if (ep.startsWith("https://") && ep !in endpoints) endpoints.add(ep)
         }
-        BUILTIN_ENDPOINTS.forEach {
-            if (it !in endpoints) endpoints.add(it)
+        BUILTIN_ENDPOINTS.forEach { raw ->
+            val ep = forceHttps(raw)
+            if (ep !in endpoints) endpoints.add(ep)
         }
         return endpoints.sortedBy { mirrorLatencies[it] ?: 400L }
     }
@@ -318,7 +329,7 @@ object LosslessAudioProvider {
 
     fun endpointsForExtension(extensionId: String): List<String> {
         val id = extensionId.lowercase(Locale.ROOT)
-        return when {
+        val raw = when {
             "tidal" in id -> listOf(
                 "https://tidal.kinoko.eu.org",
                 "https://hifi-api.vercel.app",
@@ -335,72 +346,89 @@ object LosslessAudioProvider {
                 "https://dab.yeet.su",
                 "https://squid.wtf",
                 "https://api.zarz.moe",
+                "https://hifi-api.vercel.app",
             )
             "deezer" in id -> listOf(
                 "https://api.zarz.moe",
                 "https://squid.wtf",
                 "https://dab.yeet.su",
+                "https://hifi-api.vercel.app",
             )
-            else -> emptyList()
+            "amazon" in id || "beatport" in id -> listOf(
+                "https://dab.yeet.su",
+                "https://squid.wtf",
+                "https://api.zarz.moe",
+                "https://hifi-api.vercel.app",
+                "https://api.monochrome.tf",
+            )
+            else -> BUILTIN_ENDPOINTS.take(4)
         }
+        return raw.map(::forceHttps)
     }
 
     suspend fun probeEndpointHealth(endpoints: List<String>): Result<Long> = withContext(Dispatchers.IO) {
-        if (endpoints.isEmpty()) {
-            return@withContext Result.failure(IllegalStateException("No audio endpoint"))
+        val safeEndpoints = (endpoints + BUILTIN_ENDPOINTS.take(4))
+            .map { forceHttps(it).trimEnd('/') }
+            .filter { it.startsWith("https://") }
+            .distinct()
+        if (safeEndpoints.isEmpty()) {
+            return@withContext Result.failure(IllegalStateException("Unavailable"))
         }
         val probeClient = httpClient.newBuilder()
-            .connectTimeout(1200, TimeUnit.MILLISECONDS)
-            .readTimeout(1500, TimeUnit.MILLISECONDS)
-            .callTimeout(1800, TimeUnit.MILLISECONDS)
+            .connectTimeout(1500, TimeUnit.MILLISECONDS)
+            .readTimeout(1800, TimeUnit.MILLISECONDS)
+            .callTimeout(2200, TimeUnit.MILLISECONDS)
             .build()
 
-        var lastError: String? = null
-        for (ep in endpoints.take(3)) {
-            val base = ep.trimEnd('/')
-            // Probe actual search endpoints that return track items, not bare /health pages
-            val searchUrls = listOf("$base/v1/search?q=test", "$base/search/?s=test", "$base/search?q=test")
-            val start = System.currentTimeMillis()
-            for (u in searchUrls) {
-                val req = Request.Builder()
-                    .url(u)
-                    .header("User-Agent", BROWSER_USER_AGENT)
-                    .header("Accept", "application/json")
-                    .build()
-                try {
-                    probeClient.newCall(req).execute().use { resp ->
-                        if (resp.isSuccessful) {
-                            val text = resp.body?.string()?.trim().orEmpty()
-                            val parsed = parseSearchResults(text, "test", "", null)
-                            val candidate = parsed.firstOrNull()
-                            if (candidate != null) {
-                                // Verify the stream endpoint also responds with a valid audio URL
-                                val streamResult = fetchStream(base, candidate.id, "LOSSLESS", null)
-                                if (streamResult != null) {
+        val winner = CompletableDeferred<Result<Long>>()
+        val won = AtomicBoolean(false)
+
+        try {
+            withTimeoutOrNull(2500L) {
+                coroutineScope {
+                    safeEndpoints.take(5).forEach { base ->
+                        launch {
+                            val searchUrls = listOf("$base/v1/search?q=test", "$base/search/?s=test", "$base/search?q=test")
+                            val start = System.currentTimeMillis()
+                            for (u in searchUrls) {
+                                val req = Request.Builder()
+                                    .url(forceHttps(u))
+                                    .header("User-Agent", BROWSER_USER_AGENT)
+                                    .header("Accept", "application/json")
+                                    .build()
+                                val streamFound = runCatching {
+                                    probeClient.newCall(req).execute().use { resp ->
+                                        if (!resp.isSuccessful) return@use false
+                                        val text = resp.body?.string()?.trim().orEmpty()
+                                        val candidate = parseSearchResults(text, "test", "", null).firstOrNull()
+                                        if (candidate != null) {
+                                            fetchStream(base, candidate.id, "LOSSLESS", null) != null
+                                        } else false
+                                    }
+                                }.getOrDefault(false)
+                                if (streamFound) {
                                     val latency = (System.currentTimeMillis() - start).coerceAtLeast(1L)
-                                    recordMirrorSuccess(ep, latency)
-                                    return@withContext Result.success(latency)
-                                } else {
-                                    lastError = "404"
+                                    recordMirrorSuccess(base, latency)
+                                    if (won.compareAndSet(false, true)) {
+                                        winner.complete(Result.success(latency))
+                                        coroutineContext.cancelChildren()
+                                    }
+                                    return@launch
                                 }
-                            } else {
-                                lastError = "No stream items"
                             }
-                        } else {
-                            lastError = "${resp.code}"
+                            recordMirrorFailure(base)
                         }
-                    }
-                } catch (e: Exception) {
-                    lastError = when (e) {
-                        is java.net.SocketTimeoutException -> "Timeout"
-                        is java.net.UnknownHostException -> "Unreachable"
-                        else -> e.javaClass.simpleName
                     }
                 }
             }
-            recordMirrorFailure(ep)
+        } catch (_: Exception) {
+            // Ignored; winner check below handles fallback
         }
-        Result.failure(IllegalStateException(lastError ?: "Unreachable"))
+
+        if (winner.isCompleted) {
+            return@withContext winner.getCompleted()
+        }
+        Result.failure(IllegalStateException("Unavailable"))
     }
 
     suspend fun searchTracksForExtension(
@@ -420,8 +448,8 @@ object LosslessAudioProvider {
         val normTitle = normalize(cleanTitle(query))
         var anyHttp200 = false
         var lastError: String? = null
-        for (ep in endpointsOverride.take(2)) {
-            val base = ep.trimEnd('/')
+        for (ep in endpointsOverride.take(4)) {
+            val base = forceHttps(ep.trimEnd('/'))
             val searchUrls = listOf(
                 "$base/v1/search?q=$encodedQuery",
                 "$base/search/?s=$encodedQuery",
@@ -430,7 +458,7 @@ object LosslessAudioProvider {
             )
             for (url in searchUrls) {
                 val request = Request.Builder()
-                    .url(url)
+                    .url(forceHttps(url))
                     .header("User-Agent", BROWSER_USER_AGENT)
                     .header("Accept", "application/json")
                     .build()
@@ -456,19 +484,18 @@ object LosslessAudioProvider {
                                 }
                             }
                         } else {
-                            lastError = "HTTP ${resp.code}"
+                            lastError = "Unavailable"
                         }
                     }
                 } catch (e: Exception) {
-                    lastError = when {
-                        e is java.net.SocketTimeoutException -> "Timeout"
-                        e is java.net.UnknownHostException -> "Offline"
-                        else -> e.message ?: e.javaClass.simpleName
+                    lastError = when (e) {
+                        is java.net.SocketTimeoutException -> "Timeout"
+                        else -> "Unavailable"
                     }
                 }
             }
         }
-        val errorToReport = if (anyHttp200) null else (lastError ?: "Server unreachable")
+        val errorToReport = if (anyHttp200) null else (lastError ?: "Unavailable")
         emptyList<ExtensionTrackSummary>() to errorToReport
     }
 
@@ -520,7 +547,7 @@ object LosslessAudioProvider {
         normArtist: String,
         targetDurationSec: Int?,
     ): TrackCandidate? {
-        val base = endpoint.trimEnd('/')
+        val base = forceHttps(endpoint.trimEnd('/'))
         val searchUrls = listOf(
             "$base/v1/search?q=$encodedQuery",
             "$base/search/?s=$encodedQuery",
@@ -532,8 +559,8 @@ object LosslessAudioProvider {
 
         for (url in searchUrls) {
             val request = Request.Builder()
-                .url(url)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .url(forceHttps(url))
+                .header("User-Agent", BROWSER_USER_AGENT)
                 .header("Accept", "application/json")
                 .build()
 
@@ -678,7 +705,7 @@ object LosslessAudioProvider {
         qualityTier: String,
         sourceLabel: String? = null,
     ): LosslessStreamResult? {
-        val base = endpoint.trimEnd('/')
+        val base = forceHttps(endpoint.trimEnd('/'))
         val trackUrls = listOf(
             "$base/track/?id=$trackId&quality=$qualityTier",
             "$base/track?id=$trackId&quality=$qualityTier",
@@ -691,7 +718,7 @@ object LosslessAudioProvider {
 
         for (url in trackUrls) {
             val request = Request.Builder()
-                .url(url)
+                .url(forceHttps(url))
                 .header("User-Agent", BROWSER_USER_AGENT)
                 .header("Accept", "application/json")
                 .build()
@@ -789,7 +816,8 @@ object LosslessAudioProvider {
                 .ifBlank { dataObj.optString("mimeType") }
                 .lowercase(Locale.ROOT)
 
-            if (streamUrl != null && streamUrl.startsWith("http")) {
+            if (streamUrl != null && streamUrl.startsWith("http", ignoreCase = true)) {
+                streamUrl = forceHttps(streamUrl)
                 val pathLower = streamUrl.substringBefore('?').lowercase(Locale.ROOT)
                 val explicitlyLossyExt = pathLower.endsWith(".mp3") ||
                     pathLower.endsWith(".aac") ||
@@ -822,10 +850,11 @@ object LosslessAudioProvider {
     }
 
     private fun isStreamUrlPlayable(url: String): Boolean {
-        if (!url.startsWith("http")) return false
+        val safeUrl = forceHttps(url)
+        if (!safeUrl.startsWith("https://")) return false
         val req = Request.Builder()
-            .url(url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            .url(safeUrl)
+            .header("User-Agent", BROWSER_USER_AGENT)
             .header("Range", "bytes=0-1024")
             .build()
         val probeClient = httpClient.newBuilder()

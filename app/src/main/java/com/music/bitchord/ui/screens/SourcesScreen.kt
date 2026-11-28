@@ -1088,10 +1088,14 @@ private fun SourceRow(
                     }
                     is SourceRuntimeStatus.Error -> {
                         Spacer(Modifier.height(4.dp))
-                        val errText = if (effectiveStatus.reason.startsWith("Offline", ignoreCase = true)) {
-                            effectiveStatus.reason
-                        } else {
-                            "Offline • ${effectiveStatus.reason}"
+                        val rawReason = effectiveStatus.reason.trim()
+                        val errText = when {
+                            rawReason.equals("Unavailable", ignoreCase = true) ||
+                                rawReason.startsWith("Offline", ignoreCase = true) ||
+                                rawReason.contains("401") ||
+                                rawReason.contains("403") ||
+                                rawReason.contains("404") -> "Unavailable"
+                            else -> "Unavailable • $rawReason"
                         }
                         StatusBadgePill(
                             text = errText,
@@ -1176,14 +1180,20 @@ private fun AudioQuality.localizedLabel(): String = stringResource(
 @Composable
 private fun SourceConfig.statusLine(health: SourceHealth?, isDownloadRow: Boolean = false): String = when {
     id == SourceRegistry.UMTIFY_HQ_ADDON_ID || baseUrl.contains("umtifyhq") -> {
-        val baseDesc = "UMtify HQ · FLAC · Lossless · Hi-Res"
-        if (!allowDownloads) {
-            "$baseDesc · " + stringResource(R.string.source_downloads_off)
+        if (isDownloadRow) {
+            if (isDownloadEnabled) "UMtify HQ · FLAC · Lossless · Downloads enabled" else "UMtify HQ · Disabled for downloads"
         } else {
-            baseDesc
+            "UMtify HQ · FLAC · Lossless · Hi-Res"
         }
     }
     !isComplete -> stringResource(R.string.source_setup_required)
+    kind == SourceKind.ADDON -> {
+        if (isDownloadRow) {
+            if (isDownloadEnabled) "Custom Addon · FLAC · Lossless · Downloads enabled" else "Custom Addon · Disabled for downloads"
+        } else {
+            (health as? SourceHealth.Ok)?.detail ?: "Custom Addon · FLAC · Lossless"
+        }
+    }
     kind == SourceKind.EXTENSION && metadataOnly -> "Charts, Artist Portraits & Lyrics"
     kind == SourceKind.EXTENSION && isDownloadRow -> "Download Provider · FLAC · Lossless"
     kind == SourceKind.EXTENSION -> "Audio Extension · FLAC · Lossless"
@@ -1191,9 +1201,7 @@ private fun SourceConfig.statusLine(health: SourceHealth?, isDownloadRow: Boolea
     health is SourceHealth.Ok -> listOfNotNull(
         health.detail,
         kind.labels.take(3).joinToString(" · "),
-        // The addon's own `allowDownloads: 0`, said where the user will look
-        // when a download from it came from somewhere else.
-        stringResource(R.string.source_downloads_off).takeIf { !allowDownloads },
+        stringResource(R.string.source_downloads_off).takeIf { !allowDownloads && isDownloadRow },
     ).joinToString(" · ")
     health is SourceHealth.Rejected -> health.reason
     health is SourceHealth.Unreachable -> stringResource(R.string.source_unreachable, health.reason)

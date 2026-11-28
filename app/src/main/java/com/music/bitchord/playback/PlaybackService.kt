@@ -5147,7 +5147,10 @@ class PlaybackService : MediaLibraryService() {
                     .build(),
             )
             val upgradedSourceName = stream.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
-                ?: "Upgrade"
+                ?: stream.sourceName
+                ?: "UMtify"
+            val recordedStream = stream.copy(sourceName = upgradedSourceName)
+            StreamChoice.recordDownloadCandidate(mediaId, recordedStream)
             NerdStats.onSourceStream(mediaId, stream.format, upgradedSourceName)
             NerdStats.recordSource(mediaId, upgradedSourceName)
             player.seekTo(player.currentMediaItemIndex, now.position)

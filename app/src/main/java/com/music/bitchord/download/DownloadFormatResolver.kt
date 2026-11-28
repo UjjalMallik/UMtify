@@ -48,16 +48,8 @@ object DownloadFormatResolver {
         val youtubeEnabled = SourceRegistry.isDownloadProviderEnabled { it.kind == SourceKind.YOUTUBE }
         val losslessFallbackEnabled = addonSourcesEnabled || extSources.isNotEmpty()
 
-        // 1. Capture active / recently resolved playing stream if its provider is enabled for downloads
-        val activeStream = resolveActivePlayingStream(song)?.takeIf { stream ->
-            val cfg = stream.sourceConfigId?.let { SourceRegistry.config(it) }
-            when {
-                cfg != null -> cfg.isDownloadEnabled && !cfg.metadataOnly
-                stream.sourceName?.contains("JioSaavn", ignoreCase = true) == true -> jioSaavnEnabled
-                stream.sourceName?.contains("YouTube", ignoreCase = true) == true -> youtubeEnabled
-                else -> losslessFallbackEnabled
-            }
-        }
+        // 1. Always capture active / recently cached playing FLAC / Hi-Res / Dolby stream (zero wait)
+        val activeStream = resolveActivePlayingStream(song)
 
         coroutineScope {
             // 2. Query ONLY enabled Group 2 custom addons (UMtify, custom servers) in parallel
@@ -79,7 +71,7 @@ object DownloadFormatResolver {
                 async {
                     val startMs = System.currentTimeMillis()
                     runCatching {
-                        withTimeoutOrNull(4000L) {
+                        withTimeoutOrNull(3000L) {
                             val extId = SourceRegistry.extensionIdFor(ext.configId) ?: ext.configId
                             val endpoints = (
                                 ExtensionRepoManager.getExtractedEndpointsFor(extId) +
@@ -90,7 +82,7 @@ object DownloadFormatResolver {
                                 artist = song.artist,
                                 durationSec = durationSec,
                                 preferredQuality = "HI_RES_LOSSLESS",
-                                timeoutMs = 3500L,
+                                timeoutMs = 2500L,
                                 endpointsOverride = endpoints,
                                 sourceLabel = ext.displayName,
                             )
@@ -98,9 +90,7 @@ object DownloadFormatResolver {
                                 SourceHealthTracker.recordReady(ext.configId, System.currentTimeMillis() - startMs)
                                 ext.displayName to res
                             } else {
-                                if (endpoints.isEmpty()) {
-                                    SourceHealthTracker.recordError(ext.configId, "No streaming endpoint")
-                                }
+                                SourceHealthTracker.recordError(ext.configId, "Unavailable")
                                 null
                             }
                         }
@@ -216,11 +206,16 @@ object DownloadFormatResolver {
                 stream: SourceStream,
                 fallbackSourceName: String,
             ) {
-                if (stream.url.isBlank() || !seenUrls.add(stream.url)) return
+                val safeUrl = LosslessAudioProvider.forceHttps(stream.url)
+                if (safeUrl.isBlank() || !seenUrls.add(safeUrl)) return
                 val srcName = stream.sourceName?.takeIf { it.isNotBlank() }
                     ?: stream.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
                     ?: fallbackSourceName
-                val headers = stream.headers
+                val headers = if (stream.headers.any { it.key.equals("User-Agent", ignoreCase = true) }) {
+                    stream.headers
+                } else {
+                    stream.headers + ("User-Agent" to DEFAULT_UA)
+                }
 
                 when {
                     stream.format.isDolbyAtmos -> {
@@ -233,7 +228,7 @@ object DownloadFormatResolver {
                                 bitrateKbps = kbps,
                                 sampleRateHz = stream.format.sampleRateHz ?: 48000,
                                 bitDepth = 16,
-                                streamUrl = stream.url,
+                                streamUrl = safeUrl,
                                 fileExtension = "m4a",
                                 isLossless = false,
                                 isDolbyAtmos = true,
@@ -242,22 +237,22 @@ object DownloadFormatResolver {
                             )
                         )
                     }
-                    stream.format.isLossless == true || stream.url.substringBefore('?').endsWith(".flac", ignoreCase = true) -> {
+                    stream.format.isLossless == true || safeUrl.substringBefore('?').endsWith(".flac", ignoreCase = true) -> {
                         val bd = stream.format.bitDepth ?: 16
                         val sr = stream.format.sampleRateHz ?: if (bd > 16) 96000 else 44100
                         val khz = String.format(Locale.US, "%.1f", sr / 1000.0)
                         val isHiRes = bd > 16 || sr > 48000
-                        val estKbps = if (isHiRes) 2200 else 1411
+                        val estKbps = stream.format.kbps ?: if (isHiRes) 2304 else 1411
                         val id = if (isHiRes) "${idPrefix}_hires_${rawDrafts.size}" else "${idPrefix}_16_${rawDrafts.size}"
                         rawDrafts.add(
                             OptionDraft(
                                 id = id,
-                                label = "FLAC • $bd-bit / $khz kHz ($srcName)",
+                                label = "FLAC • $bd-bit • $khz kHz • $estKbps kbps ($srcName)",
                                 codec = "flac",
                                 bitrateKbps = estKbps,
                                 sampleRateHz = sr,
                                 bitDepth = bd,
-                                streamUrl = stream.url,
+                                streamUrl = safeUrl,
                                 fileExtension = "flac",
                                 isLossless = true,
                                 isDolbyAtmos = false,
@@ -276,7 +271,7 @@ object DownloadFormatResolver {
                                 bitrateKbps = kbps,
                                 sampleRateHz = stream.format.sampleRateHz ?: 44100,
                                 bitDepth = 16,
-                                streamUrl = stream.url,
+                                streamUrl = safeUrl,
                                 fileExtension = "m4a",
                                 isLossless = false,
                                 isDolbyAtmos = false,
@@ -446,7 +441,7 @@ object DownloadFormatResolver {
                     val probedBytes = probeContentLength(draft.streamUrl, draft.headers)
                     val isEst = probedBytes == null
                     val estKbps = when {
-                        draft.isLossless -> if ((draft.bitDepth ?: 16) > 16) 2200 else 950
+                        draft.isLossless -> draft.bitrateKbps.takeIf { it > 0 } ?: if ((draft.bitDepth ?: 16) > 16) 2304 else 1411
                         else -> draft.bitrateKbps
                     }
                     val bytes = probedBytes ?: calculateEstimatedBytes(bitrateKbps = estKbps, durationSec = durationSec)
@@ -474,9 +469,12 @@ object DownloadFormatResolver {
     private fun resolveActivePlayingStream(song: Song): SourceStream? {
         val id = song.videoId
         val rawTrackId = SourceRegistry.parseTrackKey(id)?.second
-        val candidate = QualityUpgrade.forcedForMediaId(id)
+        val candidate = StreamChoice.downloadCandidateFor(id)
+            ?: QualityUpgrade.forcedForMediaId(id)
             ?: StreamChoice.of(id)
-            ?: rawTrackId?.let { StreamChoice.of(it) }
+            ?: rawTrackId?.let {
+                StreamChoice.downloadCandidateFor(it) ?: StreamChoice.of(it)
+            }
             ?: return null
         if (candidate.url.isBlank()) return null
 
@@ -536,7 +534,8 @@ object DownloadFormatResolver {
         url: String,
         headers: Map<String, String> = emptyMap(),
     ): Long? {
-        if (!url.startsWith("http")) return null
+        val safeUrl = LosslessAudioProvider.forceHttps(url)
+        if (!safeUrl.startsWith("https://")) return null
         return runCatching {
             val probeClient = Http.client.newBuilder()
                 .connectTimeout(1500, TimeUnit.MILLISECONDS)
@@ -552,7 +551,7 @@ object DownloadFormatResolver {
             }
 
             val headRequest = Request.Builder()
-                .url(url)
+                .url(safeUrl)
                 .head()
                 .applyHeaders()
                 .build()
@@ -565,7 +564,7 @@ object DownloadFormatResolver {
             if (headLen != null) return@runCatching headLen
 
             val rangeRequest = Request.Builder()
-                .url(url)
+                .url(safeUrl)
                 .applyHeaders()
                 .header("Range", "bytes=0-0")
                 .build()

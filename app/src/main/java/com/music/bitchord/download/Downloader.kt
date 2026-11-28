@@ -169,8 +169,14 @@ object Downloader {
         sink: OutputStream,
         onProgress: (written: Long, total: Long) -> Unit,
     ): Long = withContext(Dispatchers.IO) {
-        fun buildRequest(reqHeaders: Map<String, String>) = Request.Builder().url(url)
-            .apply { reqHeaders.forEach { (name, value) -> header(name, value) } }
+        val safeUrl = com.music.bitchord.data.LosslessAudioProvider.forceHttps(url)
+        fun buildRequest(reqHeaders: Map<String, String>) = Request.Builder().url(safeUrl)
+            .apply {
+                if (reqHeaders.none { it.key.equals("User-Agent", ignoreCase = true) }) {
+                    header("User-Agent", com.music.bitchord.data.LosslessAudioProvider.BROWSER_USER_AGENT)
+                }
+                reqHeaders.forEach { (name, value) -> header(name, value) }
+            }
             .build()
 
         var response = Http.client.newCall(buildRequest(headers)).execute()

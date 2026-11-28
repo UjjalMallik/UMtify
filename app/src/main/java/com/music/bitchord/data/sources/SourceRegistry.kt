@@ -70,11 +70,18 @@ data class SourceConfig(
 
     /** Whether this source can directly stream audio in Group 1 (`AUDIO STREAMING`). */
     val isStreamingCapable: Boolean
-        get() = !metadataOnly && (kind != SourceKind.EXTENSION || baseUrl.isNotBlank())
+        get() = !metadataOnly &&
+            kind != SourceKind.EXTENSION &&
+            !(id.contains("jellyfin", ignoreCase = true) && baseUrl.isBlank()) &&
+            !(label.contains("jellyfin", ignoreCase = true) && baseUrl.isBlank())
 
     /** Whether this source is enabled in Group 2 (`DOWNLOAD PROVIDERS`). */
     val isDownloadEnabled: Boolean
-        get() = allowDownloads && (downloadEnabled ?: enabled)
+        get() = when {
+            metadataOnly -> false
+            kind == SourceKind.ADDON -> downloadEnabled ?: true
+            else -> allowDownloads && (downloadEnabled ?: enabled)
+        }
 
     /** The two manifest switches, without the parts of the config the user set. */
     internal fun withPolicyOf(other: SourceConfig) =
@@ -137,20 +144,23 @@ object SourceRegistry {
 
         val stored = prefs.getString(KEY_SOURCES, null)?.let(::decodeStored) ?: emptyList()
         val defaultSourcesV4Done = prefs.getBoolean(KEY_DEFAULT_SOURCES_V4, false)
+        val umtifyFirstV5Done = prefs.getBoolean(KEY_UMTIFY_FIRST_V5, false)
         val after = sourcesForInit(
             stored,
             applyDefaultSourcesV4 = !defaultSourcesV4Done,
+            promoteUmtifyFirst = !umtifyFirstV5Done,
         )
 
         // Publish state and the migration marker in one preferences edit.
         publish(after, persist = false)
-        if (after != stored || !defaultSourcesV4Done) {
+        if (after != stored || !defaultSourcesV4Done || !umtifyFirstV5Done) {
             prefs.edit()
                 .putString(KEY_SOURCES, json.encodeToString(ListSerializer(SourceConfig.serializer()), after))
                 .putBoolean(KEY_JIOSAAVN_OPT_IN_V1, true)
                 .putBoolean(KEY_DEFAULT_SOURCES_V2, true)
                 .putBoolean(KEY_YOUTUBE_FALLBACK_ORDER_V3, true)
                 .putBoolean(KEY_DEFAULT_SOURCES_V4, true)
+                .putBoolean(KEY_UMTIFY_FIRST_V5, true)
                 .apply()
         }
     }
@@ -163,21 +173,22 @@ object SourceRegistry {
         forceJioSaavnOff: Boolean = false,
         applyDefaultSourcesV2: Boolean = false,
         applyDefaultSourcesV4: Boolean = false,
+        promoteUmtifyFirst: Boolean = false,
     ): List<SourceConfig> {
         val hqConfig = createUmtifyHqConfig()
 
         // Default order:
-        // 1. SoundCloud (Default: ON)
-        // 2. JioSaavn (Default: OFF)
-        // 3. YouTube Music (Always on)
-        // 4. UMtify HQ (https://umtifyhq-nine.vercel.app/) (Default: OFF)
+        // 1. UMtify HQ (https://umtifyhq-nine.vercel.app/) (Default: ON)
+        // 2. SoundCloud (Default: ON)
+        // 3. JioSaavn (Default: OFF)
+        // 4. YouTube Music (Always on)
         // 5. Jamendo (Default: OFF)
         // 6. Internet Archive (Default: OFF)
         val defaultOrder = listOf(
+            hqConfig,
             SourceConfig(kind = SourceKind.SOUNDCLOUD, enabled = true),
             SourceConfig(kind = SourceKind.JIOSAAVN, enabled = false),
             SourceConfig(kind = SourceKind.YOUTUBE, enabled = true),
-            hqConfig,
             SourceConfig(kind = SourceKind.JAMENDO, enabled = false),
             SourceConfig(kind = SourceKind.INTERNET_ARCHIVE, enabled = false),
         )
@@ -192,16 +203,15 @@ object SourceRegistry {
                 (it.kind == SourceKind.ADDON && canonicalUrl(it.baseUrl) == canonicalUrl(UMTIFY_HQ_BASE_URL))
         }
 
-        var list = stored.filterNot { it.kind == SourceKind.MODULE }
+        var list = stored.filterNot {
+            it.kind == SourceKind.MODULE ||
+                (it.id.contains("jellyfin", ignoreCase = true) && it.baseUrl.isBlank()) ||
+                (it.label.contains("jellyfin", ignoreCase = true) && it.baseUrl.isBlank())
+        }
 
-        // If UMtify HQ is not in list, insert right after YouTube Music
+        // If UMtify HQ is not in list, place at #1
         if (existingHq == null) {
-            val ytIndex = list.indexOfFirst { it.kind == SourceKind.YOUTUBE }
-            list = if (ytIndex >= 0) {
-                list.subList(0, ytIndex + 1) + hqConfig + list.subList(ytIndex + 1, list.size)
-            } else {
-                list + hqConfig
-            }
+            list = listOf(hqConfig) + list
         }
 
         // Add any missing built-in kinds
@@ -211,11 +221,29 @@ object SourceRegistry {
 
         list = list + missing
 
-        val listWithLabels = list.map { config ->
+        var listWithLabels = list.map { config ->
             if (config.id == UMTIFY_HQ_ADDON_ID || (config.kind == SourceKind.ADDON && canonicalUrl(config.baseUrl) == canonicalUrl(UMTIFY_HQ_BASE_URL))) {
-                config.copy(label = "UMtify")
+                config.copy(
+                    label = "UMtify",
+                    allowDownloads = true,
+                    downloadEnabled = config.downloadEnabled ?: true,
+                )
+            } else if (config.kind == SourceKind.ADDON) {
+                config.copy(
+                    allowDownloads = true,
+                    downloadEnabled = config.downloadEnabled ?: true,
+                )
             } else {
                 config
+            }
+        }
+
+        if (promoteUmtifyFirst) {
+            val hqItem = listWithLabels.firstOrNull {
+                it.id == UMTIFY_HQ_ADDON_ID || (it.kind == SourceKind.ADDON && canonicalUrl(it.baseUrl) == canonicalUrl(UMTIFY_HQ_BASE_URL))
+            }?.copy(enabled = true, allowDownloads = true, downloadEnabled = true)
+            if (hqItem != null) {
+                listWithLabels = listOf(hqItem) + listWithLabels.filterNot { it.id == hqItem.id }
             }
         }
 
@@ -327,6 +355,8 @@ object SourceRegistry {
     fun downloadGroupConfigs(all: List<SourceConfig> = configs.value): List<SourceConfig> =
         all.filter {
             !it.metadataOnly &&
+                !(it.id.contains("jellyfin", ignoreCase = true) && it.baseUrl.isBlank()) &&
+                !(it.label.contains("jellyfin", ignoreCase = true) && it.baseUrl.isBlank()) &&
                 (it.kind == SourceKind.ADDON ||
                     it.kind == SourceKind.EXTENSION ||
                     it.kind == SourceKind.JIOSAAVN ||
@@ -783,7 +813,9 @@ object SourceRegistry {
         kind = SourceKind.ADDON,
         label = "UMtify",
         baseUrl = UMTIFY_HQ_BASE_URL,
-        enabled = false,
+        enabled = true,
+        allowDownloads = true,
+        downloadEnabled = true,
     )
 
     val BUILT_IN_KINDS = listOf(
@@ -800,6 +832,7 @@ object SourceRegistry {
     private const val KEY_DEFAULT_SOURCES_V2 = "default_sources_v2"
     private const val KEY_YOUTUBE_FALLBACK_ORDER_V3 = "youtube_fallback_order_v3"
     private const val KEY_DEFAULT_SOURCES_V4 = "default_sources_v4"
+    private const val KEY_UMTIFY_FIRST_V5 = "umtify_first_v5"
     private const val PREFIX = "src:"
     private const val SEPARATOR = "::"
     private const val REPO_EXT_PREFIX = "repo_ext:"

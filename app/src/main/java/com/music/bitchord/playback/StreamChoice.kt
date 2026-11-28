@@ -52,6 +52,33 @@ object StreamChoice {
     private class Choice(val stream: SourceStream, val at: Long, val substituted: Boolean)
 
     private val chosen = ConcurrentHashMap<String, Choice>()
+    private val downloadCandidates = ConcurrentHashMap<String, Choice>()
+
+    /**
+     * Records a live playback stream solely for instant download resolution so
+     * [QualityUpgrade.unshelve] or [forget] never hides the currently playing stream
+     * from `Select Audio Format & Size`.
+     */
+    fun recordDownloadCandidate(videoId: String, stream: SourceStream) {
+        if (videoId.isBlank() || stream.url.isBlank()) return
+        if (downloadCandidates.size >= MAX_REMEMBERED) {
+            val now = SystemClock.elapsedRealtime()
+            downloadCandidates.entries.removeIf { now - it.value.at > TTL_MS }
+            if (downloadCandidates.size >= MAX_REMEMBERED) {
+                downloadCandidates.minByOrNull { it.value.at }?.let { downloadCandidates.remove(it.key) }
+            }
+        }
+        downloadCandidates[videoId] = Choice(stream, SystemClock.elapsedRealtime(), substituted = true)
+    }
+
+    fun downloadCandidateFor(videoId: String): SourceStream? {
+        val choice = downloadCandidates[videoId] ?: return null
+        if (SystemClock.elapsedRealtime() - choice.at > TTL_MS) {
+            downloadCandidates.remove(videoId)
+            return null
+        }
+        return choice.stream
+    }
 
     /**
      * The stream already serving [videoId], or null if this is the first read
@@ -98,6 +125,7 @@ object StreamChoice {
             }
         }
         chosen[videoId] = Choice(stream, SystemClock.elapsedRealtime(), substituted)
+        recordDownloadCandidate(videoId, stream)
     }
 
     /**
