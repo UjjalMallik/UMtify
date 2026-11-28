@@ -49,6 +49,65 @@ import kotlinx.coroutines.withTimeoutOrNull
 object SourceResolver {
 
     private const val TAG = "BitChord"
+    private const val UMTIFY_STREAM_CACHE_TTL_MS = 15 * 60 * 1000L
+
+    private data class CachedUMtifyEntry(
+        val streams: List<SourceStream>,
+        val cachedAtMs: Long,
+    )
+
+    private val umtifyStreamCache = java.util.concurrent.ConcurrentHashMap<String, CachedUMtifyEntry>()
+
+    private fun umtifyCacheKey(title: String, artist: String): String {
+        val cleanT = LosslessAudioProvider.cleanTrackTitle(title).lowercase(java.util.Locale.ROOT).trim()
+        val cleanA = LosslessAudioProvider.primaryArtistName(
+            LosslessAudioProvider.cleanTrackTitle(artist),
+        ).lowercase(java.util.Locale.ROOT).trim()
+        return "$cleanT|$cleanA"
+    }
+
+    /**
+     * Stores resolved UMtify / custom-addon FLAC & Atmos streams in a thread-safe 15-minute TTL cache
+     * shared between Streaming ([SourceResolver] / [PlaybackService]) and Downloads ([DownloadFormatResolver]).
+     */
+    fun rememberUMtifyStreams(title: String, artist: String, streams: List<SourceStream>) {
+        if (title.isBlank() || streams.isEmpty()) return
+        val key = umtifyCacheKey(title, artist)
+        if (key == "|") return
+        val usable = streams.filter { it.url.isNotBlank() && (it.format.isLossless == true || it.format.isDolbyAtmos || it.format.kbps == null) }
+        if (usable.isEmpty()) return
+        umtifyStreamCache.compute(key) { _, prev ->
+            val now = System.currentTimeMillis()
+            val prevFresh = prev?.takeIf { now - it.cachedAtMs < UMTIFY_STREAM_CACHE_TTL_MS }?.streams.orEmpty()
+            val merged = (usable + prevFresh).distinctBy { it.url }.take(6)
+            CachedUMtifyEntry(streams = merged, cachedAtMs = now)
+        }
+        if (umtifyStreamCache.size > 160) {
+            val cutoff = System.currentTimeMillis() - UMTIFY_STREAM_CACHE_TTL_MS
+            umtifyStreamCache.entries.removeIf { it.value.cachedAtMs < cutoff }
+        }
+    }
+
+    fun rememberUMtifyStream(title: String, artist: String, stream: SourceStream) {
+        rememberUMtifyStreams(title, artist, listOf(stream))
+    }
+
+    /** Returns fresh (<15m) cached UMtify / custom-addon streams for both playback and download flows. */
+    fun getCachedUMtifyStreams(target: TrackMatcher.Target, allowAtmos: Boolean = false): List<SourceStream> {
+        if (target.title.isBlank() || target.isVideo) return emptyList()
+        val key = umtifyCacheKey(target.title, target.artist)
+        val entry = umtifyStreamCache[key] ?: return emptyList()
+        if (System.currentTimeMillis() - entry.cachedAtMs >= UMTIFY_STREAM_CACHE_TTL_MS) {
+            umtifyStreamCache.remove(key, entry)
+            return emptyList()
+        }
+        return entry.streams.filter { stream ->
+            if (!allowAtmos && stream.format.isDolbyAtmos) return@filter false
+            val targetDur = target.durationSec
+            val streamDur = stream.durationSec
+            targetDur == null || streamDur == null || kotlin.math.abs(targetDur - streamDur) <= SAME_RECORDING_SEC
+        }
+    }
 
     /**
      * What to ask a source for, right now.
@@ -266,11 +325,25 @@ object SourceResolver {
         val active = SourceRegistry.activeForPlayback()
         val youtube = active.firstOrNull { it.kind == SourceKind.YOUTUBE }
         val request = requestForNow()
+        val wantsLossless = request is StreamRequest.Lossless || AppSettings.effectiveAudioQuality == AudioQuality.LOSSLESS
 
-        // Fast parallel resolution with 2.5s timeout strictly respecting user-defined source order:
-        val resolved = withTimeoutOrNull(2500L) {
+        // Instant hit from the shared 15-minute UMtify lossless/Atmos cache when enabled.
+        if (wantsLossless && active.any { it is AddonSource }) {
+            val allowAtmos = AppSettings.dolbyAtmos.value
+            val cached = getCachedUMtifyStreams(target, allowAtmos = allowAtmos).firstOrNull {
+                !it.belowRequest && (it.format.isLossless == true || (allowAtmos && it.format.isDolbyAtmos))
+            }
+            if (cached != null) {
+                TrackLog.d(TAG, "cache hit: '${target.title}' served instantly by ${cached.sourceName ?: "UMtify"} at ${cached.format.summary}")
+                return cached
+            }
+        }
+
+        // Give Lossless / UMtify a 5-second budget matching DownloadFormatResolver; keep 2.5s otherwise.
+        val timeoutMs = if (wantsLossless && active.any { it.kind.canServeLossless || it is AddonSource }) 5000L else 2500L
+        val resolved = withTimeoutOrNull(timeoutMs) {
             coroutineScope {
-                val candidateSources = if (request is StreamRequest.Lossless || AppSettings.effectiveAudioQuality == AudioQuality.LOSSLESS) {
+                val candidateSources = if (wantsLossless) {
                     val losslessCandidates = active.filter { it.kind.canServeLossless || it is AddonSource }
                     val others = if (youtube != null) rankedAbove(youtube.configId, active) - losslessCandidates.toSet() else active - losslessCandidates.toSet()
                     losslessCandidates + others
@@ -283,12 +356,16 @@ object SourceResolver {
 
                 val winner = bestAcross(candidateSources, target, request)
                 winner?.let { (source, stream) ->
+                    val tagged = stream.copy(sourceName = source.displayName)
+                    if (source is AddonSource && tagged.format.isLossless == true) {
+                        rememberUMtifyStream(target.title, target.artist, tagged)
+                    }
                     TrackLog.d(
                         TAG,
                         "substituted: '${target.title}' served by ${source.displayName} over YouTube" +
-                            " at ${stream.format.summary}" + if (stream.belowRequest) " (below request)" else "",
+                            " at ${tagged.format.summary}" + if (tagged.belowRequest) " (below request)" else "",
                     )
-                    stream.copy(sourceName = source.displayName)
+                    tagged
                 }
             }
         }
@@ -1260,6 +1337,11 @@ object SourceResolver {
         val addons = SourceRegistry.downloadableAddonSources()
         if (addons.isEmpty()) return@coroutineScope emptyList()
 
+        val cached = getCachedUMtifyStreams(target, allowAtmos = wantsDolbyAtmos)
+        if (cached.isNotEmpty()) {
+            return@coroutineScope cached
+        }
+
         val perAddon = addons.map { addon ->
             async(Dispatchers.IO) {
                 val results = mutableListOf<SourceStream>()
@@ -1310,7 +1392,11 @@ object SourceResolver {
             }
         }.awaitAll()
 
-        perAddon.flatten()
+        perAddon.flatten().also { resolved ->
+            if (resolved.isNotEmpty()) {
+                rememberUMtifyStreams(target.title, target.artist, resolved)
+            }
+        }
     }
 
     private suspend fun querySingleAddonStreams(

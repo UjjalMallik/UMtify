@@ -1236,7 +1236,7 @@ fun NowPlayingScreen(
     val artScale by animateFloatAsState(
         targetValue = if (isPlaying) 1f else 0.92f,
         animationSpec = spring(
-            dampingRatio = 0.72f,
+            dampingRatio = Spring.DampingRatioNoBouncy,
             stiffness = Spring.StiffnessMediumLow,
         ),
         label = "artScale",
@@ -1353,7 +1353,8 @@ fun NowPlayingScreen(
     // had and never re-emits, so the `onState` that is the sole writer here
     // never fires again. Keyed on the cover there is nothing to reset: the
     // bitmap really is still loaded, so the state stays true.
-    val art = rememberPlayerArtwork(remoteArt, if (heroMode) ART_PX else CARD_ART_PX)
+    val stableTrackId = song.videoId
+    val art = rememberPlayerArtwork(remoteArt, if (heroMode) ART_PX else CARD_ART_PX, trackId = stableTrackId)
     // Sticky, unlike [PlayerArtwork.loaded]: the banner is the shape of the player rather
     // than a property of the track in it. Waiting on each new cover would
     // collapse the banner into a card and blow it back out on every skip —

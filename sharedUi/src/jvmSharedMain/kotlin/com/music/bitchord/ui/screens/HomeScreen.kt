@@ -376,7 +376,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedShelves(
                     )
                 }
                 shelf.title.equals("Your Top Artists", ignoreCase = true) ||
-                shelf.title.equals("Top Artists", ignoreCase = true) -> {
+                shelf.title.equals("Top Artists", ignoreCase = true) ||
+                shelf.title.equals("Trending Artists • Deezer", ignoreCase = true) -> {
                     CircularTopArtistsShelf(
                         shelf = shelf,
                         onItemClick = openItem,
@@ -454,8 +455,8 @@ private fun CircularArtistItem(
     }
 
     val avatarRevision by com.music.bitchord.data.ArtistAvatarCache.revision.collectAsStateWithLifecycle()
-    val officialAvatar = remember(item.title, avatarRevision) {
-        com.music.bitchord.data.ArtistAvatarCache.get(item.title)
+    val officialAvatar = remember(item.title, avatarRevision, item.thumbnailUrl) {
+        com.music.bitchord.data.ArtistAvatarCache.get(item.title) ?: item.thumbnailUrl
     }
     val verifiedArtistName = remember(item.title, avatarRevision) {
         com.music.bitchord.data.ArtistAvatarCache.getDisplayName(item.title) ?: item.title

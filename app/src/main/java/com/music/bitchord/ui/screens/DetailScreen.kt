@@ -380,8 +380,17 @@ fun DetailScreen(
     // nobody, so a title that reads as several artists waits for that swap; any
     // other name starts the moment the page opens.
     val nameSettled = !page.title.looksLikeCredit() || page.songs !is UiState.Loading
+    val avatarRevision by com.music.bitchord.data.ArtistAvatarCache.revision.collectAsStateWithLifecycle()
+    val cachedArtistPortrait = remember(page.title, avatarRevision) {
+        if (isArtist) com.music.bitchord.data.ArtistAvatarCache.get(page.title) else null
+    }
     LaunchedEffect(page.browseId, page.title, nameSettled) {
-        if (isArtist && nameSettled) appleArt = AppleArtistArtRepository.artFor(page.title) ?: appleArt
+        if (isArtist && nameSettled) {
+            appleArt = AppleArtistArtRepository.artFor(page.title) ?: appleArt
+            if (com.music.bitchord.data.ArtistAvatarCache.get(page.title) == null) {
+                com.music.bitchord.data.ArtistAvatarCache.resolveInBackground(page.title)
+            }
+        }
     }
     LaunchedEffect(page.browseId, page.title, nameSettled, signatureEnabled, signatureBaseUrl, signatureUpdates) {
         if (!isArtist || !nameSettled) return@LaunchedEffect
@@ -403,8 +412,9 @@ fun DetailScreen(
             if (signature != null) return@LaunchedEffect
         }
     }
+    val effectiveArtistHeroUrl = appleArt?.heroUrl ?: cachedArtistPortrait
     val palette = rememberArtworkPalette(
-        imageUrl = appleArt?.heroUrl ?: page.thumbnailUrl,
+        imageUrl = effectiveArtistHeroUrl ?: page.thumbnailUrl,
         keyColors = appleArt?.keyColors(),
     )
 
@@ -537,7 +547,7 @@ fun DetailScreen(
                         canvas = canvas,
                         artHeight = artHeight,
                         listState = listState,
-                        heroUrl = appleArt?.heroUrl,
+                        heroUrl = effectiveArtistHeroUrl,
                         modifier = Modifier.matchParentSize(),
                     )
                 }
@@ -783,13 +793,14 @@ fun DetailScreen(
             // Tracks YouTube offers to round the playlist out, never folded
             // into the list above — see [DetailPage.suggestedSongs].
             if (suggested.isNotEmpty()) {
-                item(key = "suggested-heading") {
+                item(key = "suggested-heading", contentType = "section_heading") {
                     SectionHeading(stringResource(R.string.suggested), palette)
                 }
                 val isSuggestedCurrent = playingRowMatcher(suggested, currentSong)
                 itemsIndexed(
                     suggested,
                     key = { _, song -> "suggested-${song.videoId}" },
+                    contentType = { _, _ -> "suggested_song" },
                 ) { index, song ->
                     SuggestedSongRow(
                         song = song,

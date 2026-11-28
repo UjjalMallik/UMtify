@@ -51,23 +51,26 @@ fun rememberRemoteArtworkUrl(song: Song?, ignoreCustom: Boolean = false): String
         cachedLocal ?: song?.thumbnailUrl
     }
 
-    var resolved by remember(key, song?.thumbnailUrl, cachedLocal) {
+    var resolved by remember(key) {
         mutableStateOf(initialArt)
+    }
+    if (resolved == null && initialArt != null) {
+        resolved = initialArt
     }
 
     LaunchedEffect(key, custom, song?.thumbnailUrl, cachedLocal) {
         if (custom != null) {
-            resolved = custom
+            if (resolved != custom) resolved = custom
             return@LaunchedEffect
         }
         if (cachedLocal != null) {
-            resolved = cachedLocal
+            if (resolved != cachedLocal) resolved = cachedLocal
             return@LaunchedEffect
         }
         if (isLocal && localKey != null) {
             withContext(Dispatchers.IO) {
                 val art = LocalMediaRepository.extractAndCacheLocalArt(context, localKey, localKey)
-                if (art != null) {
+                if (art != null && resolved != art) {
                     resolved = art
                 }
             }
@@ -76,9 +79,12 @@ fun rememberRemoteArtworkUrl(song: Song?, ignoreCustom: Boolean = false): String
         if (song != null && song.thumbnailUrl == null &&
             (song.videoId.startsWith("webdav:") || song.videoId.startsWith("smb:"))
         ) {
-            resolved = RemoteArtworkStore.resolveArt(context, song)
-        } else if (song?.thumbnailUrl != null) {
-            resolved = song.thumbnailUrl
+            val remoteResolved = RemoteArtworkStore.resolveArt(context, song)
+            if (remoteResolved != null && resolved != remoteResolved) {
+                resolved = remoteResolved
+            }
+        } else if (!song?.thumbnailUrl.isNullOrBlank() && resolved != song?.thumbnailUrl) {
+            resolved = song?.thumbnailUrl
         }
     }
     return custom ?: resolved

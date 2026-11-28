@@ -62,13 +62,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import com.music.bitchord.data.ArtistAvatarCache
 import com.music.bitchord.data.model.BrowseItem
 import com.music.bitchord.data.model.BrowseType
 import com.music.bitchord.data.model.ROW_ART_PX
@@ -1255,6 +1258,19 @@ private fun RecentSearchEntityRow(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BrowseRow(item: BrowseItem, onClick: () -> Unit, onLongPress: (() -> Unit)? = null) {
+    val isArtist = item.type == BrowseType.ARTIST
+    val avatarRevision by ArtistAvatarCache.revision.collectAsStateWithLifecycle()
+    val officialPortrait = remember(item.title, avatarRevision, isArtist) {
+        if (isArtist) ArtistAvatarCache.get(item.title) else null
+    }
+    LaunchedEffect(item.title, isArtist) {
+        if (isArtist && officialPortrait == null) {
+            ArtistAvatarCache.resolveInBackground(item.title)
+        }
+    }
+    val rowModel = remember(item.thumbnailUrl, officialPortrait) {
+        officialPortrait ?: item.thumbnailUrl.artworkAt(ROW_ART_PX)
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1264,16 +1280,17 @@ private fun BrowseRow(item: BrowseItem, onClick: () -> Unit, onLongPress: (() ->
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AsyncImage(
-            model = item.thumbnailUrl.artworkAt(ROW_ART_PX),
+            model = rowModel,
             contentDescription = null,
+            contentScale = ContentScale.Crop,
             modifier = Modifier
                 .size(52.dp)
                 .clip(
-                    if (item.type == BrowseType.ARTIST) CircleShape
+                    if (isArtist) CircleShape
                     else RoundedCornerShape(8.dp),
                 )
                 .thumbnailBorder(
-                    if (item.type == BrowseType.ARTIST) CircleShape
+                    if (isArtist) CircleShape
                     else RoundedCornerShape(8.dp),
                 )
                 .background(MaterialTheme.colorScheme.surfaceVariant),

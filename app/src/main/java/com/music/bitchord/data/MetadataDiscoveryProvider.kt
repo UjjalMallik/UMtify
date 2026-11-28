@@ -89,12 +89,19 @@ object MetadataDiscoveryProvider {
 
     private val trackCache = ConcurrentHashMap<String, TrackEnrichment>()
     private val resolvedVideoIds = ConcurrentHashMap<String, String>()
+    private val resolvedArtistBrowseIds = ConcurrentHashMap<String, String>()
 
     private val _providerStates = MutableStateFlow<Map<String, MetadataProviderStatus>>(emptyMap())
     val providerStates: StateFlow<Map<String, MetadataProviderStatus>> = _providerStates.asStateFlow()
 
     @Volatile
     private var cachedChartShelf: HomeShelf? = null
+
+    @Volatile
+    private var cachedAppleChartsShelf: HomeShelf? = null
+
+    @Volatile
+    private var cachedDeezerArtistsShelf: HomeShelf? = null
 
     @Volatile
     private var cachedChartTimestamp: Long = 0L
@@ -274,46 +281,166 @@ object MetadataDiscoveryProvider {
     fun getCachedChartShelf(): HomeShelf? {
         val sig = providerSignature()
         if (sig.isEmpty() || sig != cachedProviderSignature) return null
-        return cachedChartShelf
+        return cachedAppleChartsShelf ?: cachedChartShelf
     }
 
     /**
-     * Refreshes the cached Charts & Discovery shelf asynchronously from enabled native
-     * metadata/chart providers (Apple Music, Spotify & Deezer).
+     * Returns all cached Home discovery shelves for enabled native providers:
+     *  - "Top Charts • Apple Music" when Apple Music is enabled
+     *  - "Trending Artists • Deezer" when Spotify & Deezer are enabled
+     */
+    fun getCachedHomeDiscoveryShelves(): List<HomeShelf> {
+        val sig = providerSignature()
+        if (sig.isEmpty() || sig != cachedProviderSignature) return emptyList()
+        return buildList {
+            if (_appleEnabled.value) {
+                (cachedAppleChartsShelf ?: cachedChartShelf)?.takeIf { it.items.isNotEmpty() }?.let(::add)
+            }
+            if (_spotifyDeezerEnabled.value) {
+                cachedDeezerArtistsShelf?.takeIf { it.items.isNotEmpty() }?.let(::add)
+            }
+        }
+    }
+
+    suspend fun refreshHomeDiscoveryShelves(): List<HomeShelf> = withContext(Dispatchers.IO) {
+        refreshChartDiscoveryShelf()
+        getCachedHomeDiscoveryShelves()
+    }
+
+    /**
+     * Refreshes the cached Apple Music Charts & Deezer Trending Artists shelves asynchronously
+     * from enabled native metadata/chart providers.
      */
     suspend fun refreshChartDiscoveryShelf(): HomeShelf? = withContext(Dispatchers.IO) {
         val sig = providerSignature()
         if (sig.isEmpty()) {
             cachedChartShelf = null
+            cachedAppleChartsShelf = null
+            cachedDeezerArtistsShelf = null
             cachedProviderSignature = ""
             return@withContext null
         }
         val now = System.currentTimeMillis()
-        val existing = cachedChartShelf
-        if (existing != null && sig == cachedProviderSignature && now - cachedChartTimestamp < CHART_CACHE_TTL_MS) {
-            return@withContext existing
+        if (sig == cachedProviderSignature && now - cachedChartTimestamp < CHART_CACHE_TTL_MS &&
+            (cachedAppleChartsShelf != null || cachedDeezerArtistsShelf != null)
+        ) {
+            return@withContext cachedAppleChartsShelf ?: cachedChartShelf
         }
 
         val useApple = _appleEnabled.value
         val useDeezer = _spotifyDeezerEnabled.value
 
-        val rawTracks: List<ChartCandidate> = coroutineScope {
-            val tasks = mutableListOf<Deferred<List<ChartCandidate>>>()
-            if (useApple) {
-                tasks += async<List<ChartCandidate>> { runCatching { fetchAppleTopCharts() }.getOrDefault(emptyList()) }
-            }
-            if (useDeezer) {
-                tasks += async<List<ChartCandidate>> { runCatching { fetchDeezerCharts() }.getOrDefault(emptyList()) }
-            }
-            tasks.awaitAll().flatten()
+        val (appleCandidates, deezerTracks, deezerArtists) = coroutineScope {
+            val appleTask = if (useApple) {
+                async<List<ChartCandidate>> { runCatching { fetchAppleTopCharts() }.getOrDefault(emptyList()) }
+            } else null
+            val deezerTracksTask = if (useDeezer) {
+                async<List<ChartCandidate>> { runCatching { fetchDeezerCharts() }.getOrDefault(emptyList()) }
+            } else null
+            val deezerArtistsTask = if (useDeezer) {
+                async<List<ArtistChartCandidate>> { runCatching { fetchDeezerPopularArtists() }.getOrDefault(emptyList()) }
+            } else null
+            Triple(
+                appleTask?.await().orEmpty(),
+                deezerTracksTask?.await().orEmpty(),
+                deezerArtistsTask?.await().orEmpty(),
+            )
         }
 
-        val deduped = deduplicateTracks(rawTracks).take(15)
-        if (deduped.isEmpty()) return@withContext cachedChartShelf
+        val appleShelf = if (useApple) {
+            val topApple = deduplicateTracks(appleCandidates).take(15)
+            if (topApple.isNotEmpty()) {
+                val appleItems = resolvePlayableChartItems(topApple)
+                if (appleItems.isNotEmpty()) {
+                    HomeShelf(
+                        title = "Top Charts • Apple Music",
+                        subtitle = "Apple Music Most-Played",
+                        items = appleItems,
+                    )
+                } else null
+            } else null
+        } else null
 
-        // Resolve playable YouTube videoIds for top chart tracks in parallel (short timeout)
-        val shelfItems = coroutineScope {
-            deduped.map { candidate ->
+        val deezerArtistShelf = if (useDeezer) {
+            val topArtists = deezerArtists.distinctBy { it.name.trim().lowercase(Locale.ROOT) }.take(15)
+            if (topArtists.isNotEmpty()) {
+                val artistItems = coroutineScope {
+                    topArtists.map { artist ->
+                        async {
+                            val key = artist.name.trim().lowercase(Locale.ROOT)
+                            val browseId = resolvedArtistBrowseIds[key]
+                                ?: withTimeoutOrNull(1800L) {
+                                    runCatching {
+                                        YtMusicRepository.searchPage(artist.name, SearchFilter.ARTISTS)
+                                            .getOrNull()?.rows
+                                            ?.mapNotNull { (it as? SearchResult.Browse)?.item }
+                                            ?.firstOrNull()
+                                            ?.browseId
+                                    }.getOrNull()
+                                }?.also { resolvedArtistBrowseIds[key] = it }
+
+                            ArtistAvatarCache.put(
+                                artist = artist.name,
+                                photoUrl = artist.portraitUrl,
+                                browseId = browseId,
+                            )
+
+                            ShelfItem(
+                                title = artist.name,
+                                subtitle = "Artist • Popular on Deezer",
+                                thumbnailUrl = artist.portraitUrl,
+                                browseId = browseId,
+                                videoId = null,
+                            )
+                        }
+                    }.awaitAll()
+                }.filter { !it.browseId.isNullOrBlank() || !it.thumbnailUrl.isNullOrBlank() }
+
+                if (artistItems.isNotEmpty()) {
+                    HomeShelf(
+                        title = "Trending Artists • Deezer",
+                        subtitle = "Popular on Deezer",
+                        items = artistItems,
+                    )
+                } else null
+            } else null
+        } else null
+
+        // Preserve fallback combined chart shelf if Apple yielded nothing while Deezer tracks succeeded.
+        val combinedFallbackShelf = if (appleShelf == null && useDeezer) {
+            val topCombined = deduplicateTracks(deezerTracks).take(15)
+            if (topCombined.isNotEmpty()) {
+                val items = resolvePlayableChartItems(topCombined)
+                if (items.isNotEmpty()) {
+                    HomeShelf(
+                        title = "Popular on Deezer",
+                        subtitle = "Spotify & Deezer Charts",
+                        items = items,
+                    )
+                } else null
+            } else null
+        } else null
+
+        if (appleShelf != null) {
+            cachedAppleChartsShelf = appleShelf
+            cachedChartShelf = appleShelf
+        } else if (!useApple) {
+            cachedAppleChartsShelf = null
+            cachedChartShelf = combinedFallbackShelf
+        }
+        if (deezerArtistShelf != null) {
+            cachedDeezerArtistsShelf = deezerArtistShelf
+        } else if (!useDeezer) {
+            cachedDeezerArtistsShelf = null
+        }
+        cachedChartTimestamp = System.currentTimeMillis()
+        cachedProviderSignature = sig
+        cachedAppleChartsShelf ?: cachedChartShelf
+    }
+
+    private suspend fun resolvePlayableChartItems(candidates: List<ChartCandidate>): List<ShelfItem> =
+        coroutineScope {
+            candidates.map { candidate ->
                 async {
                     val cacheKey = "${candidate.title.lowercase(Locale.ROOT)}|${candidate.artist.lowercase(Locale.ROOT)}"
                     val videoId = candidate.videoId
@@ -338,29 +465,12 @@ object MetadataDiscoveryProvider {
                     )
                 }
             }.awaitAll()
-        }
+        }.filter { !it.videoId.isNullOrBlank() || !it.thumbnailUrl.isNullOrBlank() }
 
-        val sourcesUsed = buildList {
-            if (useApple) add("Apple Music")
-            if (useDeezer) add("Spotify & Deezer")
-        }
-
-        val subtitle = if (sourcesUsed.isNotEmpty()) {
-            "Charts & Discovery • ${sourcesUsed.take(3).joinToString(" · ")}"
-        } else {
-            "Trending Charts & Discovery"
-        }
-
-        val shelf = HomeShelf(
-            title = "Charts & Discovery",
-            subtitle = subtitle,
-            items = shelfItems,
-        )
-        cachedChartShelf = shelf
-        cachedChartTimestamp = System.currentTimeMillis()
-        cachedProviderSignature = sig
-        shelf
-    }
+    private data class ArtistChartCandidate(
+        val name: String,
+        val portraitUrl: String?,
+    )
 
     private data class ChartCandidate(
         val title: String,
@@ -657,6 +767,37 @@ object MetadataDiscoveryProvider {
             }
         }
         return list
+    }
+
+    private fun fetchDeezerPopularArtists(): List<ArtistChartCandidate> {
+        val start = System.currentTimeMillis()
+        val req = Request.Builder()
+            .url("https://api.deezer.com/chart/0/artists?limit=15")
+            .header("User-Agent", "UMtify/1.0")
+            .build()
+        val artists = httpClient.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return@use emptyList()
+            val data = JSONObject(resp.body?.string().orEmpty()).optJSONArray("data") ?: return@use emptyList()
+            buildList {
+                for (i in 0 until data.length()) {
+                    val obj = data.optJSONObject(i) ?: continue
+                    val name = obj.optString("name").trim()
+                    val portrait = obj.optString("picture_xl").takeIf { it.isNotBlank() }
+                        ?: obj.optString("picture_big").takeIf { it.isNotBlank() }
+                        ?: obj.optString("picture_medium").takeIf { it.isNotBlank() }
+                    if (name.isNotBlank() && portrait != null) {
+                        add(ArtistChartCandidate(name = name, portraitUrl = portrait.replace("\\/", "/")))
+                    }
+                }
+            }
+        }
+        if (artists.isNotEmpty()) {
+            recordProviderReady("deezer", System.currentTimeMillis() - start, itemsDelta = artists.size)
+            if (_spotifyDeezerEnabled.value) {
+                recordProviderReady("spotify", System.currentTimeMillis() - start, itemsDelta = artists.size)
+            }
+        }
+        return artists
     }
 
     private fun findBestJsonArtist(items: JSONArray, wanted: String): JSONObject? {

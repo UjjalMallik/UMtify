@@ -6536,6 +6536,10 @@ class PlaybackService : MediaLibraryService() {
         preferredPrefetchJob?.cancel()
 
         fun warm(songs: List<Song>) {
+            // Pre-resolve the next track's UMtify FLAC stream as soon as the queue enters this item.
+            if (upcomingSongs.isNotEmpty()) {
+                prefetchNextQueueItem(player)
+            }
             AudioCache.prefetchQueue(
                 songs.map { song ->
                     // The title, artist and runtime the item was built with —
@@ -6854,6 +6858,10 @@ class PlaybackService : MediaLibraryService() {
         .build()
 
     private var lastPrefetchedNearEndIndex: Int = C.INDEX_UNSET
+    @Volatile
+    private var lastPrefetchedNextMediaId: String? = null
+    @Volatile
+    private var lastPrefetchedNextAtMs: Long = 0L
 
     /**
      * Pre-resolves the next track's stream URL in the queue 15 seconds before the
@@ -6873,10 +6881,19 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
-    private fun prefetchNextQueueItem(exoPlayer: Player) {
+    private fun prefetchNextQueueItem(exoPlayer: Player, forceRefresh: Boolean = false) {
         val nextIdx = exoPlayer.nextMediaItemIndex
         if (nextIdx != C.INDEX_UNSET) {
             val nextItem = runCatching { exoPlayer.getMediaItemAt(nextIdx).toSong() }.getOrNull() ?: return
+            val now = System.currentTimeMillis()
+            if (!forceRefresh &&
+                nextItem.videoId == lastPrefetchedNextMediaId &&
+                now - lastPrefetchedNextAtMs < 120_000L
+            ) {
+                return
+            }
+            lastPrefetchedNextMediaId = nextItem.videoId
+            lastPrefetchedNextAtMs = now
             scope.launch(Dispatchers.IO) {
                 val target = TrackMatcher.targetOf(nextItem)
                 val wantsAtmos = AppSettings.dolbyAtmos.value
@@ -6896,6 +6913,7 @@ class PlaybackService : MediaLibraryService() {
                         else -> null
                     }
                     if (chosenAddon != null) {
+                        SourceResolver.rememberUMtifyStream(nextItem.title, nextItem.artist, chosenAddon)
                         StreamChoice.remember(nextItem.videoId, chosenAddon, substituted = true)
                         prefetched = true
                     } else if (wantsLossless) {
@@ -6914,6 +6932,7 @@ class PlaybackService : MediaLibraryService() {
                                 headers = flacHeaders,
                                 sourceName = lossless.sourceName,
                             )
+                            SourceResolver.rememberUMtifyStream(nextItem.title, nextItem.artist, sourceStream)
                             StreamChoice.remember(nextItem.videoId, sourceStream, substituted = true)
                             prefetched = true
                         }

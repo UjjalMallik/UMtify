@@ -409,8 +409,8 @@ object RecommendationEngine {
         if (cachedBridgeShelf != null && System.currentTimeMillis() - cachedBridgeTimestamp < BRIDGE_CACHE_DURATION_MS) {
             cachedBridgeShelf?.let { result.add(it) }
         }
-        // 4. Charts & Discovery from enabled Group 3 Metadata extensions (cached in memory, zero shimmer lag)
-        com.music.bitchord.data.MetadataDiscoveryProvider.getCachedChartShelf()?.let { result.add(it) }
+        // 4. Native Apple Music Charts & Deezer/Spotify Artist Discovery shelves (cached in memory, zero shimmer lag)
+        result.addAll(com.music.bitchord.data.MetadataDiscoveryProvider.getCachedHomeDiscoveryShelves())
         return result
     }
 
@@ -424,7 +424,7 @@ object RecommendationEngine {
         }
         if (!AppSettings.isOffline) {
             runCatching {
-                com.music.bitchord.data.MetadataDiscoveryProvider.refreshChartDiscoveryShelf()
+                com.music.bitchord.data.MetadataDiscoveryProvider.refreshHomeDiscoveryShelves()
             }
         }
     }

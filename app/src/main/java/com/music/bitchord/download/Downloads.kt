@@ -29,6 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -1143,21 +1144,72 @@ object Downloads {
         _active.update { it + (id to DownloadState.Running(0f)) }
         DownloadSession.running(id, 0f)
 
-        try {
-            val plan = prepare(context, song)
-            // The manager is showing the row that was tapped, which for a music
-            // video is the wrong title and the wrong cover for the file actually
-            // being written. Corrected here rather than left to disagree with
-            // the notification and with the Downloads page afterwards.
-            DownloadSession.retitle(id, plan.track)
-            transfer(context, song, plan)
-        } catch (e: CancellationException) {
-            clear(id)
-            throw e
-        } catch (e: Exception) {
-            Log.w(TAG, "download failed for $id: ${e.message}", e)
-            fail(id, e.friendly())
+        val maxRetries = 2
+        val retryDelaysMs = longArrayOf(1_000L, 2_500L)
+        var cachedPlan: Prepared? = null
+        var lastError: Exception? = null
+
+        for (attempt in 0..maxRetries) {
+            try {
+                // Retry #2 (or any HTTP 401/403/404/410 failure) re-fetches a fresh provider URL cleanly.
+                val needsFreshPlan = cachedPlan == null || attempt >= 2 || lastError?.isExpiredOrForbiddenUrl() == true
+                val plan = if (needsFreshPlan) {
+                    prepare(context, song).also {
+                        cachedPlan = it
+                        // The manager is showing the row that was tapped, which for a music
+                        // video is the wrong title and the wrong cover for the file actually
+                        // being written. Corrected here rather than left to disagree with
+                        // the notification and with the Downloads page afterwards.
+                        DownloadSession.retitle(id, it.track)
+                    }
+                } else {
+                    cachedPlan!!
+                }
+                transfer(context, song, plan)
+                return@withContext
+            } catch (e: CancellationException) {
+                clear(id)
+                throw e
+            } catch (e: Exception) {
+                lastError = e
+                if (attempt < maxRetries && e.isTransientDownloadFailure()) {
+                    val waitMs = retryDelaysMs[attempt]
+                    Log.w(TAG, "transient download failure for $id (attempt ${attempt + 1}/${maxRetries + 1}), retrying silently in ${waitMs}ms: ${e.message}")
+                    delay(waitMs)
+                } else {
+                    Log.w(TAG, "download failed for $id after ${attempt + 1} attempt(s): ${e.message}", e)
+                    fail(id, e.friendly())
+                    return@withContext
+                }
+            }
         }
+    }
+
+    private fun Throwable.isExpiredOrForbiddenUrl(): Boolean {
+        val msg = message.orEmpty()
+        return msg.contains("HTTP 403", ignoreCase = true) ||
+            msg.contains("HTTP 401", ignoreCase = true) ||
+            msg.contains("HTTP 410", ignoreCase = true) ||
+            msg.contains("HTTP 404", ignoreCase = true)
+    }
+
+    private fun Throwable.isTransientDownloadFailure(): Boolean {
+        if (this is java.io.IOException ||
+            this is java.net.SocketTimeoutException ||
+            this is java.net.SocketException ||
+            this is java.net.UnknownHostException ||
+            this is java.io.EOFException
+        ) {
+            return true
+        }
+        val msg = message.orEmpty()
+        return msg.contains("timeout", ignoreCase = true) ||
+            msg.contains("reset", ignoreCase = true) ||
+            msg.contains("stopped at", ignoreCase = true) ||
+            msg.contains("nothing was sent", ignoreCase = true) ||
+            msg.contains("HTTP 403", ignoreCase = true) ||
+            msg.contains("HTTP 429", ignoreCase = true) ||
+            msg.contains("HTTP 5", ignoreCase = true)
     }
 
     /**

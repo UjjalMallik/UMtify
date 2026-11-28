@@ -99,63 +99,42 @@ internal class PlayerArtwork(
     private val context: PlatformContext,
     /** The decode's longest side: the card's 800, or the banner's source size. */
     private val artPx: Int = ART_PX,
+    val trackId: String? = null,
+    private val previousMemoryCacheKey: String? = null,
+    initiallyLoaded: Boolean = false,
 ) {
-    /**
-     * Whether the cover is on screen. Keyed on the artwork rather than on the
-     * track, because that is what it actually describes and because only Coil
-     * can set it back to true.
-     */
-    var loaded by mutableStateOf(false)
-        internal set
+    /** Stable Coil memory cache key anchored to the artwork URL & target decode size. */
+    val cacheKey: String? = url?.takeIf { it.isNotBlank() }?.let { "player_art:${it}_$artPx" }
 
     /**
-     * Which go at this cover we are on, and the reason there is more than one.
-     *
-     * Coil does not retry: a request that fails is over, and the state it leaves
-     * behind is the state this screen keeps until the model changes — which,
-     * keyed on the cover, means until the next track. One dropped connection at
-     * the wrong moment and the player showed its placeholder tile for a song it
-     * would have drawn perfectly a second later, with the widget and the
-     * notification both showing the cover from cache the whole time.
-     *
-     * Bounded and spaced, because the usual reason a cover fails is that there
-     * is no network at all, and a retry per recomposition — which is what an
-     * unremembered request effectively gave — is a spin, not a recovery.
+     * Whether the cover is on screen. Seeded from [initiallyLoaded] when reusing
+     * an already-warmed cover on app resume so Coil never blinks the frame out.
      */
+    var loaded by mutableStateOf(initiallyLoaded)
+        internal set
+
     var attempt by mutableIntStateOf(0)
         private set
 
     /** Latched on an error, and only upwards — cleared by the retry itself. */
     internal var failed by mutableStateOf(false)
 
-    /**
-     * The one request for this cover, built once.
-     *
-     * Built once rather than inline at the sleeve, because Coil compares models
-     * to decide whether to start a new load, and two separately built requests
-     * are never equal — `ImageRequest` has no `equals`, and neither does the
-     * size resolver `.size()` hands it. Inline, *every recomposition* was a new
-     * load. The player recomposes at least twice a second off the position
-     * tick, and each pass pushed the painter back through Loading before it
-     * settled on Success again, which is exactly the [loaded] this screen hangs
-     * the full-bleed banner, the sleeve's shadow and its placeholder icon on.
-     *
-     * Remembered on the cover and the attempt, so it changes when the picture
-     * changes and when a retry is deliberately asked for, and at no other time.
-     */
     val request: ImageRequest by derivedStateOf {
         val attempt = attempt
+        val memKey = if (attempt > 0 && cacheKey != null) "${cacheKey}_retry_$attempt" else cacheKey
         ImageRequest.Builder(context)
             .data(url)
             .size(artPx)
             .crossfade(false)
-            // What makes a retry a new request as far as Coil's model comparison
-            // is concerned. Only from the second go onwards, so the ordinary
-            // request stays byte-identical across recompositions — and, in the
-            // banner, to the one the mesh and the palette make of the same
-            // cover, sharing their memory-cache entry. The disk key is
-            // unaffected either way.
-            .apply { if (attempt > 0) memoryCacheKeyExtra("attempt", attempt.toString()) }
+            .apply {
+                if (memKey != null) {
+                    memoryCacheKey(memKey)
+                    placeholderMemoryCacheKey(previousMemoryCacheKey ?: memKey)
+                } else if (previousMemoryCacheKey != null) {
+                    placeholderMemoryCacheKey(previousMemoryCacheKey)
+                }
+                if (attempt > 0) memoryCacheKeyExtra("attempt", attempt.toString())
+            }
             .build()
     }
 
@@ -163,15 +142,24 @@ internal class PlayerArtwork(
     fun onState(state: AsyncImagePainter.State) {
         val isLocal = url != null && (url.startsWith("file://") || url.startsWith("/"))
         if (isLocal) return
-        loaded = state is AsyncImagePainter.State.Success
-        // Only the failure is latched, and only upwards: the retry that clears
-        // it is [failed]'s own effect, and clearing it from a Loading state here
-        // would cancel that effect's wait every time the painter passed back
-        // through Loading.
-        if (state is AsyncImagePainter.State.Success) failed = false
-        if (state is AsyncImagePainter.State.Error) {
-            failed = true
-            url?.let { com.music.bitchord.ui.components.FailedArtworkCache.markFailed(it) }
+        when (state) {
+            is AsyncImagePainter.State.Success -> {
+                loaded = true
+                failed = false
+            }
+            is AsyncImagePainter.State.Error -> {
+                if (previousMemoryCacheKey == null) loaded = false
+                failed = true
+                url?.let { com.music.bitchord.ui.components.FailedArtworkCache.markFailed(it) }
+            }
+            is AsyncImagePainter.State.Loading -> {
+                // Keep [loaded] intact when we already hold a warm placeholder in memory cache
+                // (e.g., on ON_RESUME or same-track high-res swap) to prevent blank/blink frames.
+                if (previousMemoryCacheKey == null && !loaded) {
+                    loaded = false
+                }
+            }
+            else -> Unit
         }
     }
 
@@ -182,11 +170,31 @@ internal class PlayerArtwork(
 }
 
 @Composable
-internal fun rememberPlayerArtwork(remoteArt: String?, artPx: Int = ART_PX): PlayerArtwork {
+internal fun rememberPlayerArtwork(
+    remoteArt: String?,
+    artPx: Int = ART_PX,
+    trackId: String? = null,
+): PlayerArtwork {
     val context = LocalPlatformContext.current
     val artUrl = remoteArt?.artworkAt(artPx)
-    val art = remember(artUrl, artPx) { PlayerArtwork(artUrl, context, artPx) }
-    LaunchedEffect(artUrl, art.failed) {
+    val trackHistory = remember(trackId) { arrayOfNulls<String>(2) } // [0]=lastUrl, [1]=lastCacheKey
+    val currentKey = artUrl?.takeIf { it.isNotBlank() }?.let { "player_art:${it}_$artPx" }
+    val sameTrackWarm = !trackId.isNullOrBlank() && trackHistory[0] != null && trackHistory[1] != null
+    val art = remember(trackId, artUrl, artPx) {
+        PlayerArtwork(
+            url = artUrl,
+            context = context,
+            artPx = artPx,
+            trackId = trackId,
+            previousMemoryCacheKey = if (sameTrackWarm) trackHistory[1] else currentKey,
+            initiallyLoaded = sameTrackWarm && (artUrl == trackHistory[0]),
+        )
+    }
+    if (!artUrl.isNullOrBlank() && currentKey != null) {
+        trackHistory[0] = artUrl
+        trackHistory[1] = currentKey
+    }
+    LaunchedEffect(trackId, artUrl, art.failed) {
         // A track with no artwork at all fails immediately and would fail
         // identically three more times: there is no request to make, so there is
         // nothing a second go could do differently.

@@ -180,7 +180,7 @@ object DownloadFormatResolver {
             if (addonSourcesEnabled) {
                 launch(Dispatchers.IO) {
                     val addonStreams = runCatching {
-                        withTimeoutOrNull(4500L) {
+                        withTimeoutOrNull(5000L) {
                             SourceResolver.resolveAllAddonDownloadStreams(
                                 target = target,
                                 wantsDolbyAtmos = allowAtmos,
