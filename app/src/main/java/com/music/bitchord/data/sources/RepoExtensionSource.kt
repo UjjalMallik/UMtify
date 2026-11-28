@@ -26,11 +26,13 @@ class RepoExtensionSource(
         if (config.metadataOnly) {
             return@withContext SourceHealth.Ok("Metadata & Lyrics only")
         }
-        val endpoints = resolveEndpoints()
-        if (endpoints.isEmpty()) {
-            SourceHealthTracker.recordError(config.id, "No audio endpoint")
-            return@withContext SourceHealth.Unreachable("No audio endpoint")
+        val bridgeHealth = com.music.bitchord.data.SflxRuntimeBridge.probeHealth(extensionId, config.id)
+        if (bridgeHealth.isSuccess) {
+            val latencyMs = bridgeHealth.getOrDefault(1L)
+            return@withContext SourceHealth.Ok("${latencyMs}ms · QuickJS FLAC")
         }
+
+        val endpoints = resolveEndpoints()
         val probed = LosslessAudioProvider.probeEndpointHealth(endpoints, providerKey = extensionId)
         probed.fold(
             onSuccess = { latencyMs ->
@@ -38,7 +40,10 @@ class RepoExtensionSource(
                 SourceHealth.Ok("${latencyMs}ms · FLAC")
             },
             onFailure = { failure ->
-                val reason = failure.message ?: "Unreachable"
+                val reason = bridgeHealth.exceptionOrNull()?.message
+                    ?.takeIf { it.isNotBlank() && it != "Unavailable" && it != "Not installed" }
+                    ?: failure.message
+                    ?: "Unavailable"
                 SourceHealthTracker.recordError(config.id, reason)
                 SourceHealth.Unreachable(reason)
             },

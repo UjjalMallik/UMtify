@@ -167,6 +167,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
         // one to hand — see SpotifyToken's doc for why.
         SpotifyToken.init(this)
         com.music.bitchord.data.ExtensionRepoManager.init(this)
+        com.music.bitchord.data.SflxRuntimeBridge.init(this)
         backgroundInit.join()
         com.music.bitchord.data.ExtensionRepoManager.syncWithSourceRegistry()
         // Smart connection-aware benchmark across enabled lossless mirrors and custom addons

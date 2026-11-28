@@ -4,6 +4,7 @@ import com.music.bitchord.data.ExtensionRepoManager
 import com.music.bitchord.data.Http
 import com.music.bitchord.data.LosslessAudioProvider
 import com.music.bitchord.data.NerdStats
+import com.music.bitchord.data.SflxRuntimeBridge
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.durationMillis
@@ -43,7 +44,7 @@ object DownloadFormatResolver {
 
         // Strict Group 2 (DOWNLOAD PROVIDERS) gating
         val addonSourcesEnabled = SourceRegistry.downloadableAddonSources().isNotEmpty()
-        val extSources = SourceRegistry.downloadableExtensionSources().take(6)
+        val extSources = SourceRegistry.downloadableExtensionSources()
         val jioSaavnEnabled = SourceRegistry.isDownloadProviderEnabled { it.kind == SourceKind.JIOSAAVN }
         val youtubeEnabled = SourceRegistry.isDownloadProviderEnabled { it.kind == SourceKind.YOUTUBE }
         val losslessFallbackEnabled = addonSourcesEnabled || extSources.isNotEmpty()
@@ -66,13 +67,30 @@ object DownloadFormatResolver {
                 }.getOrNull().orEmpty()
             }
 
-            // 3. Race enabled Group 2 audio/download extension sources in parallel
+            // 3. Execute QuickJS .sflx Runtime Bridge + lossless mirror fallback concurrently for all enabled extensions
             val extDeferreds = extSources.map { ext ->
                 async {
                     val startMs = System.currentTimeMillis()
-                    runCatching {
+                    val extId = SourceRegistry.extensionIdFor(ext.configId) ?: ext.configId
+                    val sflxOptions = runCatching {
+                        withTimeoutOrNull(4000L) {
+                            SflxRuntimeBridge.resolveDownloadFormats(
+                                extensionId = extId,
+                                displayName = ext.displayName,
+                                title = song.title,
+                                artist = song.artist,
+                                album = song.albumName,
+                                durationSec = durationSec,
+                            )
+                        }
+                    }.getOrNull().orEmpty()
+                    if (sflxOptions.isNotEmpty()) {
+                        SourceHealthTracker.recordReady(ext.configId, System.currentTimeMillis() - startMs)
+                        return@async sflxOptions to null
+                    }
+
+                    val mirrorRes = runCatching {
                         withTimeoutOrNull(3000L) {
-                            val extId = SourceRegistry.extensionIdFor(ext.configId) ?: ext.configId
                             val endpoints = LosslessAudioProvider.getPreferredEndpointsForExtension(
                                 extensionId = extId,
                                 extraEndpoints = ExtensionRepoManager.getExtractedEndpointsFor(extId),
@@ -90,11 +108,11 @@ object DownloadFormatResolver {
                                 SourceHealthTracker.recordReady(ext.configId, System.currentTimeMillis() - startMs)
                                 ext.displayName to res
                             } else {
-                                SourceHealthTracker.recordError(ext.configId, "Unavailable")
                                 null
                             }
                         }
                     }.getOrNull()
+                    emptyList<DownloadFormatOption>() to mirrorRes
                 }
             }
 
@@ -190,7 +208,9 @@ object DownloadFormatResolver {
             }
 
             val addonStreams = addonsDeferred.await()
-            val extResults = extDeferreds.awaitAll().filterNotNull()
+            val extPairs = extDeferreds.awaitAll()
+            val sflxDirectOptions = extPairs.flatMap { it.first }
+            val extResults = extPairs.mapNotNull { it.second }
             val flacHiRes = flacHiResDeferred.await()
             val flacLossless = flacLosslessDeferred.await()
             val jioSaavnStream = jioSaavnDeferred.await()
@@ -291,6 +311,29 @@ object DownloadFormatResolver {
             // B. Addon streams (UMtify + custom addons)
             addonStreams.forEach { stream ->
                 addStreamDraft("flac_addon", stream, "UMtify")
+            }
+
+            // B2. QuickJS .sflx Runtime Bridge options
+            sflxDirectOptions.forEach { opt ->
+                val safeUrl = LosslessAudioProvider.forceHttps(opt.streamUrl)
+                if (safeUrl.isNotBlank() && seenUrls.add(safeUrl)) {
+                    rawDrafts.add(
+                        OptionDraft(
+                            id = opt.id,
+                            label = opt.label,
+                            codec = opt.codec,
+                            bitrateKbps = opt.bitrateKbps ?: if (opt.isLossless) 1411 else 320,
+                            sampleRateHz = opt.sampleRateHz ?: 44100,
+                            bitDepth = opt.bitDepth ?: 16,
+                            streamUrl = safeUrl,
+                            fileExtension = opt.fileExtension,
+                            isLossless = opt.isLossless,
+                            isDolbyAtmos = opt.isDolbyAtmos,
+                            headers = opt.headers,
+                            sourceName = opt.sourceName,
+                        )
+                    )
+                }
             }
 
             // C. Enabled Repo Extensions (Tidal, Qobuz, Deezer, etc.)
@@ -435,7 +478,7 @@ object DownloadFormatResolver {
                 )
             }
 
-            // Probe all stream Content-Lengths concurrently so the sheet stays fast
+            // Probe all stream Content-Lengths concurrently & sort highest quality first
             rawDrafts.map { draft ->
                 async {
                     val probedBytes = probeContentLength(draft.streamUrl, draft.headers)
@@ -462,7 +505,13 @@ object DownloadFormatResolver {
                         sourceName = draft.sourceName,
                     )
                 }
-            }.awaitAll()
+            }.awaitAll().sortedWith(
+                compareByDescending<DownloadFormatOption> { it.isDolbyAtmos }
+                    .thenByDescending { it.isLossless && (it.bitDepth ?: 16) > 16 }
+                    .thenByDescending { it.isLossless }
+                    .thenByDescending { it.fileExtension.equals("m4a", ignoreCase = true) && (it.bitrateKbps ?: 0) >= 256 }
+                    .thenByDescending { it.bitrateKbps ?: 0 },
+            )
         }
     }
 

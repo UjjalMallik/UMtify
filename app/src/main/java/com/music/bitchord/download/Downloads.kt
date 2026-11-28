@@ -1730,7 +1730,7 @@ object Downloads {
     }
 
     private fun routeForOption(context: Context, track: Song, option: DownloadFormatOption): Route {
-        val streamUrl = option.streamUrl
+        val streamUrl = com.music.bitchord.data.LosslessAudioProvider.forceHttps(option.streamUrl)
         val manifestMime = com.music.bitchord.playback.StreamContainer.manifestMimeOf(streamUrl)
         val dash = OfflineDash.handles(streamUrl) || manifestMime == androidx.media3.common.MimeTypes.APPLICATION_MPD
         val hls = streamUrl.substringBefore('?').endsWith(".m3u8", ignoreCase = true) ||
@@ -1751,9 +1751,13 @@ object Downloads {
             else -> "OPUS ${option.bitrateKbps ?: 160}k"
         }
         val effectiveHeaders = when {
-            option.headers.isNotEmpty() -> option.headers
+            option.headers.isNotEmpty() -> if (option.headers.any { it.key.equals("User-Agent", ignoreCase = true) }) {
+                option.headers
+            } else {
+                option.headers + ("User-Agent" to com.music.bitchord.data.LosslessAudioProvider.BROWSER_USER_AGENT)
+            }
             streamUrl.contains("googlevideo.com") -> StreamResolver.mediaHeadersFor(streamUrl)
-            else -> emptyMap()
+            else -> mapOf("User-Agent" to com.music.bitchord.data.LosslessAudioProvider.BROWSER_USER_AGENT)
         }
         if (packaged) {
             return Route(

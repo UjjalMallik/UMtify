@@ -27,6 +27,7 @@ data class RepoExtension(
     val version: String,
     val description: String,
     val downloadUrl: String,
+    val sha256: String = "",
     val iconUrl: String? = null,
     val category: String = "general",
     val tags: List<String> = emptyList(),
@@ -40,6 +41,7 @@ object ExtensionRepoManager {
     private const val KEY_INSTALLED_IDS = "installed_ids"
     private const val KEY_ENABLED_IDS = "enabled_ids"
     private const val KEY_INSTALLED_VERSIONS = "installed_versions"
+    private const val KEY_INSTALLED_SHAS = "installed_shas"
     private const val KEY_CACHED_REGISTRY = "cached_registry_json"
     private const val KEY_INITIALIZED = "repo_initialized_v2"
     private const val KEY_LAST_REGISTRY_CHECK_MS = "last_registry_check_ms"
@@ -77,6 +79,9 @@ object ExtensionRepoManager {
 
     private val _installedVersions = MutableStateFlow<Map<String, String>>(emptyMap())
     val installedVersions: StateFlow<Map<String, String>> = _installedVersions.asStateFlow()
+
+    private val _installedShas = MutableStateFlow<Map<String, String>>(emptyMap())
+    val installedShas: StateFlow<Map<String, String>> = _installedShas.asStateFlow()
 
     private val _autoUpdatedIds = MutableStateFlow<Set<String>>(emptySet())
     val autoUpdatedIds: StateFlow<Set<String>> = _autoUpdatedIds.asStateFlow()
@@ -124,6 +129,18 @@ object ExtensionRepoManager {
             }
         }
         _installedVersions.value = versionsMap
+
+        val shasMap = mutableMapOf<String, String>()
+        val shasJson = p.getString(KEY_INSTALLED_SHAS, null)
+        if (!shasJson.isNullOrBlank()) {
+            runCatching {
+                val obj = JSONObject(shasJson)
+                obj.keys().forEach { key ->
+                    shasMap[key] = obj.optString(key)
+                }
+            }
+        }
+        _installedShas.value = shasMap
 
         // Load cached registry if present
         val cached = p.getString(KEY_CACHED_REGISTRY, null)
@@ -383,6 +400,7 @@ object ExtensionRepoManager {
                 val version = item.optString("version", "1.0.0")
                 val description = item.optString("description")
                 val downloadUrl = forceHttps(item.optString("download_url"))
+                val sha256 = item.optString("sha256", "")
                 val iconUrl = item.optString("icon_url").takeIf { it.isNotBlank() }?.let(::forceHttps)
                 val category = item.optString("category", "general")
 
@@ -403,6 +421,7 @@ object ExtensionRepoManager {
                         version = version,
                         description = description,
                         downloadUrl = downloadUrl,
+                        sha256 = sha256,
                         iconUrl = iconUrl,
                         category = category,
                         tags = tags,
@@ -415,18 +434,34 @@ object ExtensionRepoManager {
 
     private suspend fun checkForUpdatesAndApply(context: Context, registry: List<RepoExtension>) = withContext(Dispatchers.IO) {
         val versions = _installedVersions.value.toMutableMap()
+        val shas = _installedShas.value.toMutableMap()
         val autoUpdated = _autoUpdatedIds.value.toMutableSet()
         var changed = false
 
         for (ext in registry) {
             val currentVer = versions[ext.id]
-            val localBundleMissing = ext.downloadUrl.isNotBlank() &&
-                !File(context.filesDir, "extensions/${ext.id}.sflx").exists()
-            if (currentVer == null || isNewerVersion(ext.version, currentVer) || localBundleMissing) {
+            val currentSha = shas[ext.id]
+            val extSflxFile = File(context.filesDir, "extensions/${ext.id}.sflx")
+            val extractedJs = File(context.filesDir, "extensions/${ext.id}/index.js")
+            val shaChanged = ext.sha256.isNotBlank() && currentSha != null && !ext.sha256.equals(currentSha, ignoreCase = true)
+
+            if (extSflxFile.exists() && !extractedJs.exists()) {
+                extractSflxPackage(extSflxFile, File(context.filesDir, "extensions/${ext.id}"))
+            }
+
+            val needsDownload = currentVer == null ||
+                isNewerVersion(ext.version, currentVer) ||
+                shaChanged ||
+                (ext.downloadUrl.isNotBlank() && (!extSflxFile.exists() || !extractedJs.exists()))
+
+            if (needsDownload) {
                 Log.i(TAG, "Auto-updating extension ${ext.displayName} from ${currentVer ?: "none"} to v${ext.version}")
                 val success = downloadExtensionFile(context, ext)
                 if (success) {
                     versions[ext.id] = ext.version
+                    if (ext.sha256.isNotBlank()) {
+                        shas[ext.id] = ext.sha256
+                    }
                     autoUpdated.add(ext.id)
                     SourceHealthTracker.clear(SourceRegistry.repoExtensionConfigId(ext.id))
                     changed = true
@@ -436,8 +471,10 @@ object ExtensionRepoManager {
 
         if (changed) {
             _installedVersions.value = versions
+            _installedShas.value = shas
             _autoUpdatedIds.value = autoUpdated
             persistVersions(versions)
+            persistShas(shas)
         }
     }
 
@@ -572,6 +609,12 @@ object ExtensionRepoManager {
         prefs?.edit()?.putString(KEY_INSTALLED_VERSIONS, obj.toString())?.apply()
     }
 
+    private fun persistShas(shas: Map<String, String>) {
+        val obj = JSONObject()
+        shas.forEach { (k, v) -> obj.put(k, v) }
+        prefs?.edit()?.putString(KEY_INSTALLED_SHAS, obj.toString())?.apply()
+    }
+
     private fun forceHttps(url: String): String {
         val trimmed = url.trim()
         return if (trimmed.startsWith("http://", ignoreCase = true)) {
@@ -604,7 +647,7 @@ object ExtensionRepoManager {
 
             val client = Http.client.newBuilder()
                 .connectTimeout(8000, TimeUnit.MILLISECONDS)
-                .readTimeout(10000, TimeUnit.MILLISECONDS)
+                .readTimeout(12000, TimeUnit.MILLISECONDS)
                 .build()
 
             val response = client.newCall(request).execute()
@@ -612,15 +655,73 @@ object ExtensionRepoManager {
 
             val extDir = File(context.filesDir, "extensions").apply { if (!exists()) mkdirs() }
             val targetFile = File(extDir, "${extension.id}.sflx")
+            val extractedDir = File(extDir, extension.id)
 
-            response.body?.byteStream()?.use { input ->
-                FileOutputStream(targetFile).use { output ->
-                    input.copyTo(output)
-                }
+            val bytes = response.body?.bytes() ?: return false
+            if (bytes.isEmpty()) return false
+            targetFile.writeBytes(bytes)
+
+            val actualSha = runCatching {
+                java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(bytes)
+                    .joinToString("") { "%02x".format(it) }
+            }.getOrNull()
+            if (actualSha != null) {
+                val updatedShas = _installedShas.value.toMutableMap().apply { put(extension.id, actualSha) }
+                _installedShas.value = updatedShas
+                persistShas(updatedShas)
             }
+
+            extractSflxPackage(targetFile, extractedDir)
             true
         }.getOrDefault(false)
     }
+
+    private fun extractSflxPackage(sflxFile: File, destDir: File) {
+        if (!sflxFile.exists()) return
+        runCatching {
+            destDir.mkdirs()
+            val canonicalDest = destDir.canonicalPath + File.separator
+            java.util.zip.ZipFile(sflxFile).use { zip ->
+                val entries = zip.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    if (entry.isDirectory) continue
+                    val outFile = File(destDir, entry.name)
+                    if (!outFile.canonicalPath.startsWith(canonicalDest)) continue
+                    outFile.parentFile?.mkdirs()
+                    zip.getInputStream(entry).use { input ->
+                        FileOutputStream(outFile).use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fun getExtensionDir(extensionId: String): File? {
+        val ctx = appContext ?: return null
+        val extractedDir = File(ctx.filesDir, "extensions/$extensionId")
+        val indexFile = File(extractedDir, "index.js")
+        if (!indexFile.exists()) {
+            val sflxFile = File(ctx.filesDir, "extensions/$extensionId.sflx")
+            if (sflxFile.exists()) {
+                extractSflxPackage(sflxFile, extractedDir)
+            }
+        }
+        return extractedDir.takeIf { it.exists() && File(it, "index.js").exists() }
+    }
+
+    fun getExtractedManifestJson(extensionId: String): String? = runCatching {
+        val dir = getExtensionDir(extensionId) ?: return null
+        File(dir, "manifest.json").takeIf { it.exists() }?.readText()
+    }.getOrNull()
+
+    fun getExtractedIndexJs(extensionId: String): String? = runCatching {
+        val dir = getExtensionDir(extensionId) ?: return null
+        File(dir, "index.js").takeIf { it.exists() }?.readText()
+    }.getOrNull()
 
     fun getExtractedEndpoints(): List<String> {
         val ctx = appContext ?: return emptyList()
