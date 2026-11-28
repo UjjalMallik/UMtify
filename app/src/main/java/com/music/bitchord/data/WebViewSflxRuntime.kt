@@ -499,20 +499,34 @@ object WebViewSflxRuntime {
             val safeUrl = LosslessAudioProvider.forceHttps(serviceHealthUrl)
             val cached = sharedHealthResponses[safeUrl]
                 ?.takeIf { System.currentTimeMillis() - it.timestampMs < HEALTH_CACHE_TTL_MS }
+            var healthChallengeDetected = false
             val code = cached?.code ?: runCatching {
-                val req = Request.Builder()
+                val host = CloudflareSessionManager.hostOf(safeUrl)
+                val cfSession = CloudflareSessionManager.sessionForHost(host)
+                val reqBuilder = Request.Builder()
                     .url(safeUrl)
-                    .header("User-Agent", LosslessAudioProvider.BROWSER_USER_AGENT)
+                    .header("User-Agent", cfSession?.userAgent ?: LosslessAudioProvider.BROWSER_USER_AGENT)
                     .header("Accept", "application/json")
-                    .build()
-                asyncHttpClient.newCall(req).execute().use { resp ->
+                if (!cfSession?.cookieHeader.isNullOrBlank()) {
+                    reqBuilder.header("Cookie", cfSession!!.cookieHeader)
+                }
+                asyncHttpClient.newCall(reqBuilder.build()).execute().use { resp ->
                     val b = resp.body?.string().orEmpty()
-                    if (resp.isSuccessful) {
+                    if (CloudflareSessionManager.isChallengeResponse(resp.code, resp.headers, b)) {
+                        healthChallengeDetected = true
+                    }
+                    if (resp.isSuccessful && !healthChallengeDetected) {
                         sharedHealthResponses[safeUrl] = CachedHealthResponse(resp.code, b, System.currentTimeMillis())
                     }
                     resp.code
                 }
             }.getOrDefault(0)
+
+            if (healthChallengeDetected || code == 403 || code == 503) {
+                val reason = "Verification required"
+                SourceHealthTracker.recordError(configId, reason)
+                return@withContext Result.failure(IllegalStateException(reason))
+            }
 
             if (code !in 200..299) {
                 val endpoints = LosslessAudioProvider.getPreferredEndpointsForExtension(
@@ -818,8 +832,14 @@ object WebViewSflxRuntime {
                 wv.evaluateJavascript(runnerJs, null)
             }
 
-            val resultJson = withTimeoutOrNull(DEFAULT_BUDGET_MS) { deferred.await() }
-                ?: return@withContext SflxResolutionResult(emptyList(), "V8 timeout")
+            var resultJson = withTimeoutOrNull(DEFAULT_BUDGET_MS) { deferred.await() }
+            if (resultJson == null && CloudflareSessionManager.pendingVerification.value != null) {
+                // Allow user/auto Turnstile verification dialog up to 45s to complete before resuming
+                resultJson = withTimeoutOrNull(45_000L) { deferred.await() }
+            }
+            if (resultJson == null) {
+                return@withContext SflxResolutionResult(emptyList(), "V8 timeout")
+            }
 
             val root = runCatching { JSONObject(resultJson) }.getOrNull()
                 ?: return@withContext SflxResolutionResult(emptyList(), "Invalid JSON result")
@@ -1286,6 +1306,7 @@ object WebViewSflxRuntime {
         bodyStr: String?,
         headersJson: String,
         useSyncTimeout: Boolean = false,
+        allowChallengeRetry: Boolean = true,
     ): String {
         val safeUrl = LosslessAudioProvider.forceHttps(rawUrl)
         if (!safeUrl.startsWith("https://")) {
@@ -1300,26 +1321,37 @@ object WebViewSflxRuntime {
         }
 
         return runCatching {
+            val host = CloudflareSessionManager.hostOf(safeUrl)
+            val cfSession = CloudflareSessionManager.sessionForHost(host)
             val reqBuilder = Request.Builder().url(safeUrl)
-            var hasUa = false
             var contentType: String? = null
+            var callerCookie: String? = null
+            var callerUa: String? = null
             runCatching {
                 val hObj = JSONObject(headersJson)
                 hObj.keys().forEach { k ->
                     val v = hObj.optString(k)
                     if (v.isNotBlank()) {
-                        if (k.equals("User-Agent", ignoreCase = true)) hasUa = true
-                        if (k.equals("Content-Type", ignoreCase = true)) contentType = v
-                        reqBuilder.header(k, v)
+                        when {
+                            k.equals("User-Agent", ignoreCase = true) -> callerUa = v
+                            k.equals("Content-Type", ignoreCase = true) -> contentType = v
+                            k.equals("Cookie", ignoreCase = true) -> callerCookie = v
+                            else -> reqBuilder.header(k, v)
+                        }
                     }
                 }
             }
-            if (!hasUa) reqBuilder.header("User-Agent", LosslessAudioProvider.BROWSER_USER_AGENT)
+            // Cloudflare requires the User-Agent to match the WebView that solved Turnstile
+            val effectiveUa = cfSession?.userAgent ?: callerUa ?: LosslessAudioProvider.BROWSER_USER_AGENT
+            reqBuilder.header("User-Agent", effectiveUa)
 
-            if (cookieJar.isNotEmpty()) {
-                val host = runCatching { java.net.URI(safeUrl).host }.getOrNull().orEmpty()
-                val cookie = cookieJar[host]
-                if (!cookie.isNullOrBlank()) reqBuilder.header("Cookie", cookie)
+            val combinedCookies = listOfNotNull(
+                cfSession?.cookieHeader?.takeIf { it.isNotBlank() },
+                cookieJar[host]?.takeIf { it.isNotBlank() },
+                callerCookie?.takeIf { it.isNotBlank() },
+            ).joinToString("; ")
+            if (combinedCookies.isNotBlank()) {
+                reqBuilder.header("Cookie", combinedCookies)
             }
 
             when (method) {
@@ -1333,14 +1365,36 @@ object WebViewSflxRuntime {
             val client = if (useSyncTimeout) syncHttpClient else asyncHttpClient
             client.newCall(reqBuilder.build()).execute().use { resp ->
                 val respBody = resp.body?.string().orEmpty()
+                if (allowChallengeRetry &&
+                    CloudflareSessionManager.isChallengeResponse(resp.code, resp.headers, respBody)
+                ) {
+                    resp.close()
+                    val verified = kotlinx.coroutines.runBlocking {
+                        CloudflareSessionManager.requestVerification(safeUrl)
+                    }
+                    if (verified) {
+                        return@runCatching executeHttpJson(
+                            rawUrl = rawUrl,
+                            method = method,
+                            bodyStr = bodyStr,
+                            headersJson = headersJson,
+                            useSyncTimeout = useSyncTimeout,
+                            allowChallengeRetry = false,
+                        )
+                    }
+                }
+
                 val respHeaders = JSONObject()
                 resp.headers.names().forEach { name ->
                     respHeaders.put(name, resp.headers[name] ?: "")
                 }
-                val host = runCatching { java.net.URI(safeUrl).host }.getOrNull().orEmpty()
                 val setCookie = resp.headers("Set-Cookie")
                 if (host.isNotBlank() && setCookie.isNotEmpty()) {
-                    cookieJar[host] = setCookie.joinToString("; ") { it.substringBefore(';') }
+                    val merged = setCookie.joinToString("; ") { it.substringBefore(';') }
+                    cookieJar[host] = merged
+                    if (merged.contains("cf_clearance=", ignoreCase = true)) {
+                        CloudflareSessionManager.saveSession(host, merged, effectiveUa)
+                    }
                 }
                 JSONObject().apply {
                     put("status", resp.code)

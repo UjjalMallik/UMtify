@@ -167,6 +167,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
         // one to hand — see SpotifyToken's doc for why.
         SpotifyToken.init(this)
         com.music.bitchord.data.ExtensionRepoManager.init(this)
+        com.music.bitchord.data.CloudflareSessionManager.init(this)
         com.music.bitchord.data.SflxRuntimeBridge.init(this)
         com.music.bitchord.data.WebViewSflxRuntime.init(this)
         backgroundInit.join()

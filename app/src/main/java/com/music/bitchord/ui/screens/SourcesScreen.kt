@@ -156,6 +156,7 @@ fun SourcesScreen(
     val autoUpdatedIds by ExtensionRepoManager.autoUpdatedIds.collectAsStateWithLifecycle()
     val runtimeStates by SourceHealthTracker.states.collectAsStateWithLifecycle()
     val metadataStates by com.music.bitchord.data.MetadataDiscoveryProvider.providerStates.collectAsStateWithLifecycle()
+    val cfEpoch by com.music.bitchord.data.CloudflareSessionManager.verificationEpoch.collectAsStateWithLifecycle()
 
     val coroutineScope = rememberCoroutineScope()
     var updatingExtIds by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -163,6 +164,15 @@ fun SourcesScreen(
     /** Last known reachability per source, filled in as the probes come back. */
     val health = remember { mutableStateMapOf<String, SourceHealth>() }
     val losslessOutput by LosslessOutput.state.collectAsStateWithLifecycle()
+
+    LaunchedEffect(cfEpoch) {
+        if (cfEpoch > 0L) {
+            SourceRegistry.downloadableExtensionSources().forEach { src ->
+                SourceHealthTracker.clear(src.id)
+                health.remove(src.id)
+            }
+        }
+    }
 
     // Live GitHub silent auto-update check whenever Sources opens (throttled to 30m)
     LaunchedEffect(Unit) {
@@ -182,7 +192,7 @@ fun SourcesScreen(
 
     // Probe enabled audio-capable addons and synced extensions concurrently (skip metadata-only)
     val probeKey = configs.filter { (it.kind.needsServer || (it.kind == SourceKind.EXTENSION && (it.enabled || it.isDownloadEnabled))) && !it.metadataOnly }
-        .joinToString { "${it.id}@${it.baseUrl}@${it.enabled}@${it.downloadEnabled}@${it.checkValidLossless}" } + "@${losslessOutput.capable}"
+        .joinToString { "${it.id}@${it.baseUrl}@${it.enabled}@${it.downloadEnabled}@${it.checkValidLossless}" } + "@${losslessOutput.capable}@$cfEpoch"
     LaunchedEffect(probeKey) {
         coroutineScope {
             configs.filter {
@@ -923,7 +933,44 @@ private fun ManagedSourceRow(
         awaitingOutput = if (applyPlaybackQualityGate && config.enabled && config.awaitsLosslessOutput) losslessOutput else null,
         onMetered = metered,
         ceiling = ceiling,
-        onClick = if (config.kind.needsServer) ({ onEditSource(config) }) else null,
+        onClick = when {
+            config.kind.needsServer -> ({ onEditSource(config) })
+            isDownloadRow && extId != null && (
+                (runtimeStatus is SourceRuntimeStatus.Error && (
+                    runtimeStatus.reason.contains("Verification", ignoreCase = true) ||
+                        runtimeStatus.reason.contains("Rate", ignoreCase = true) ||
+                        runtimeStatus.reason.contains("403") ||
+                        runtimeStatus.reason.contains("503")
+                    )) ||
+                    (health is SourceHealth.Unreachable && (
+                        health.reason.contains("Verification", ignoreCase = true) ||
+                            health.reason.contains("Rate", ignoreCase = true) ||
+                            health.reason.contains("403") ||
+                            health.reason.contains("503")
+                        ))
+                ) -> ({
+                coroutineScope.launch {
+                    val verifyUrl = com.music.bitchord.data.ExtensionRepoManager.getExtractedManifestJson(extId)
+                        ?.let {
+                            runCatching {
+                                org.json.JSONObject(it).optJSONObject("signedSession")?.optString("baseUrl")
+                            }.getOrNull()
+                        }
+                        ?.takeIf { it.isNotBlank() }
+                        ?: "https://api.zarz.moe/v2/health"
+                    val ok = com.music.bitchord.data.CloudflareSessionManager.requestVerification(
+                        url = verifyUrl,
+                        forceInteractive = true,
+                    )
+                    if (ok) {
+                        com.music.bitchord.data.sources.SourceRegistry.downloadableExtensionSources().forEach { src ->
+                            SourceHealthTracker.clear(src.id)
+                        }
+                    }
+                }
+            })
+            else -> null
+        },
         onToggle = when {
             onToggleOverride != null -> onToggleOverride
             config.kind == SourceKind.YOUTUBE && !allowYoutubeToggle -> null
