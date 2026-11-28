@@ -8,8 +8,8 @@ import kotlinx.coroutines.withContext
 import java.util.Locale
 
 /**
- * A [MusicSource] representing an installed audio/download extension synced from
- * [ExtensionRepoManager] into the draggable `SOURCES, TRIED IN THIS ORDER` list.
+ * A [MusicSource] representing an installed/available audio/download extension synced
+ * from [ExtensionRepoManager] into the single unified `SOURCES` list.
  */
 class RepoExtensionSource(
     override val config: SourceConfig,
@@ -25,9 +25,21 @@ class RepoExtensionSource(
     override suspend fun health(): SourceHealth = withContext(Dispatchers.IO) {
         val endpoints = resolveEndpoints()
         if (endpoints.isEmpty()) {
-            return@withContext SourceHealth.Unreachable("No active endpoints")
+            SourceHealthTracker.recordError(config.id, "No streaming endpoint")
+            return@withContext SourceHealth.Unreachable("No streaming endpoint")
         }
-        SourceHealth.Ok("Extension Repo · Lossless FLAC")
+        val probed = LosslessAudioProvider.probeEndpointHealth(endpoints)
+        probed.fold(
+            onSuccess = { latencyMs ->
+                SourceHealthTracker.recordReady(config.id, latencyMs)
+                SourceHealth.Ok("${latencyMs}ms · FLAC")
+            },
+            onFailure = { failure ->
+                val reason = failure.message ?: "Server unreachable"
+                SourceHealthTracker.recordError(config.id, reason)
+                SourceHealth.Unreachable(reason)
+            },
+        )
     }
 
     override suspend fun search(
@@ -38,12 +50,19 @@ class RepoExtensionSource(
     ): List<Song> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
         val endpoints = resolveEndpoints()
-        if (endpoints.isEmpty()) return@withContext emptyList()
-        val tracks = LosslessAudioProvider.searchTracksForExtension(
+        if (endpoints.isEmpty()) {
+            SourceHealthTracker.recordError(config.id, "No streaming endpoint")
+            return@withContext emptyList()
+        }
+        val (tracks, errorReason) = LosslessAudioProvider.searchTracksForExtensionChecked(
             query = query,
             endpointsOverride = endpoints,
             limit = limit,
         )
+        if (errorReason != null) {
+            SourceHealthTracker.recordError(config.id, errorReason)
+            return@withContext emptyList()
+        }
         tracks.map { track ->
             Song(
                 videoId = SourceRegistry.trackKey(config.id, track.encodedId),
@@ -61,6 +80,7 @@ class RepoExtensionSource(
 
     override suspend fun stream(trackId: String, request: StreamRequest): SourceStream? =
         withContext(Dispatchers.IO) {
+            val startMs = System.currentTimeMillis()
             val qualityTier = when (request) {
                 is StreamRequest.Lossless -> "HI_RES_LOSSLESS"
                 is StreamRequest.Best, is StreamRequest.Capped -> "LOSSLESS"
@@ -70,7 +90,13 @@ class RepoExtensionSource(
                 fallbackEndpoints = resolveEndpoints(),
                 qualityTier = qualityTier,
                 sourceLabel = displayName,
-            ) ?: return@withContext null
+            )
+            if (result == null) {
+                SourceHealthTracker.recordError(config.id, "No FLAC stream")
+                return@withContext null
+            }
+            val latencyMs = (System.currentTimeMillis() - startMs).coerceAtLeast(1L)
+            SourceHealthTracker.recordReady(config.id, latencyMs)
 
             SourceStream(
                 url = result.streamUrl,

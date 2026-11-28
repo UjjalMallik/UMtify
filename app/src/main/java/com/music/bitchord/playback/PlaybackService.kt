@@ -1738,7 +1738,7 @@ class PlaybackService : MediaLibraryService() {
                                         target = target,
                                         wantsDolbyAtmos = wantsDolbyAtmos,
                                         wantsLossless = wantsLossless,
-                                        timeoutMs = 2500L,
+                                        timeoutMs = 1800L,
                                     )
                                 }.getOrNull()
                             }
@@ -1748,7 +1748,7 @@ class PlaybackService : MediaLibraryService() {
                             } else {
                                 async {
                                     runCatching {
-                                        withTimeoutOrNull(2500L) {
+                                        withTimeoutOrNull(1800L) {
                                             SourceResolver.substituteForYouTube(target)
                                         }
                                     }.getOrNull()
@@ -4251,6 +4251,9 @@ class PlaybackService : MediaLibraryService() {
         uri?.getQueryParameter("v")
             ?.takeIf { diedOnModuleStream || StreamChoice.isSubstitute(it) }
             ?.let { videoId ->
+                StreamChoice.of(videoId)?.sourceConfigId?.let { cfgId ->
+                    com.music.bitchord.data.sources.SourceHealthTracker.recordError(cfgId, "Stream playback failed")
+                }
                 StreamChoice.refuseSubstitutes(videoId)
                 TrackLog.w(
                     "BitChord",

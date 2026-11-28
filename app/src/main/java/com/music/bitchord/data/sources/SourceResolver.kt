@@ -1061,16 +1061,16 @@ object SourceResolver {
     private fun atmosWanted(): Boolean = AppSettings.dolbyAtmos.value
 
     /**
-     * Races the top 2–3 enabled sources from `SOURCES, TRIED IN THIS ORDER` concurrently
-     * within [timeoutMs] (default 2.5s), preferring Dolby Atmos (if enabled) or Lossless FLAC
-     * from the highest-ranked healthy source. If #1 is slow or offline, immediately returns
-     * the fastest healthy stream from #2 or #3 so playback starts smoothly with zero lag.
+     * Races the top 2–3 healthy enabled sources from the unified `SOURCES` list concurrently
+     * within [timeoutMs] (strict 1.8s cap), preferring Dolby Atmos (if enabled) or Lossless FLAC
+     * from the fastest healthy source. Skips sources in error cooldown and records live health
+     * metrics in [SourceHealthTracker].
      */
     suspend fun raceTopPlaybackSources(
         target: TrackMatcher.Target,
         wantsDolbyAtmos: Boolean,
         wantsLossless: Boolean,
-        timeoutMs: Long = 2500L,
+        timeoutMs: Long = 1800L,
     ): SourceStream? {
         if (target.title.isBlank() || target.isVideo) return null
         val topSources = SourceRegistry.topPlaybackSources(3)
@@ -1118,9 +1118,20 @@ object SourceResolver {
             coroutineScope {
                 topSources.forEachIndexed { rank, source ->
                     launch(Dispatchers.IO) {
-                        val stream = runCatching {
-                            matchAndStream(source, target, request, waitForAll = false)
-                        }.getOrNull()?.let { s ->
+                        val startMs = System.currentTimeMillis()
+                        val stream = try {
+                            matchAndStream(source, target, request, waitForAll = false)?.also {
+                                SourceHealthTracker.recordReady(source.configId, System.currentTimeMillis() - startMs)
+                            }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            SourceHealthTracker.recordError(
+                                source.configId,
+                                e.message ?: e.javaClass.simpleName,
+                            )
+                            null
+                        }?.let { s ->
                             s.copy(
                                 sourceConfigId = s.sourceConfigId ?: source.configId,
                                 sourceName = s.sourceName ?: source.displayName,
@@ -1186,7 +1197,7 @@ object SourceResolver {
                             }
                             val now = System.currentTimeMillis()
                             if (graceDeadlineMs == 0L) {
-                                graceDeadlineMs = now + 300L
+                                graceDeadlineMs = now + 250L
                             } else if (now >= graceDeadlineMs) {
                                 return@coroutineScope bestStream
                             }
@@ -1436,6 +1447,10 @@ object SourceResolver {
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
+        SourceHealthTracker.recordError(
+            source.configId,
+            e.message ?: e.javaClass.simpleName,
+        )
         TrackLog.w(TAG, "${source.displayName} failed: ${e.javaClass.simpleName}: ${e.message}")
         null
     }

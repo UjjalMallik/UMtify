@@ -183,9 +183,9 @@ object LosslessAudioProvider {
 
     private val httpClient: OkHttpClient by lazy {
         Http.client.newBuilder()
-            .connectTimeout(2500, TimeUnit.MILLISECONDS)
-            .readTimeout(3000, TimeUnit.MILLISECONDS)
-            .callTimeout(4500, TimeUnit.MILLISECONDS)
+            .connectTimeout(1200, TimeUnit.MILLISECONDS)
+            .readTimeout(1500, TimeUnit.MILLISECONDS)
+            .callTimeout(1800, TimeUnit.MILLISECONDS)
             .followRedirects(true)
             .build()
     }
@@ -235,7 +235,7 @@ object LosslessAudioProvider {
         artist: String,
         durationSec: Int? = null,
         preferredQuality: String? = null,
-        timeoutMs: Long = 2500L,
+        timeoutMs: Long = 1800L,
         endpointsOverride: List<String>? = null,
         sourceLabel: String? = null,
     ): LosslessStreamResult? = withContext(Dispatchers.IO) {
@@ -341,18 +341,74 @@ object LosslessAudioProvider {
                 "https://squid.wtf",
                 "https://dab.yeet.su",
             )
-            else -> getTopBenchmarkedServers(4)
+            else -> emptyList()
         }
+    }
+
+    suspend fun probeEndpointHealth(endpoints: List<String>): Result<Long> = withContext(Dispatchers.IO) {
+        if (endpoints.isEmpty()) {
+            return@withContext Result.failure(IllegalStateException("No streaming endpoint"))
+        }
+        val probeClient = httpClient.newBuilder()
+            .connectTimeout(1200, TimeUnit.MILLISECONDS)
+            .readTimeout(1200, TimeUnit.MILLISECONDS)
+            .callTimeout(1500, TimeUnit.MILLISECONDS)
+            .build()
+
+        var lastError: String? = null
+        for (ep in endpoints.take(3)) {
+            val base = ep.trimEnd('/')
+            val urls = listOf("$base/v1/health", "$base/health", "$base/v1/search?q=test", "$base/search/?s=test")
+            val start = System.currentTimeMillis()
+            for (u in urls) {
+                val req = Request.Builder()
+                    .url(u)
+                    .header("User-Agent", BROWSER_USER_AGENT)
+                    .header("Accept", "application/json")
+                    .build()
+                try {
+                    probeClient.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            val text = resp.body?.string()?.trim().orEmpty()
+                            if (text.startsWith("{") || text.startsWith("[") || text.equals("ok", ignoreCase = true)) {
+                                val latency = (System.currentTimeMillis() - start).coerceAtLeast(1L)
+                                recordMirrorSuccess(ep, latency)
+                                return@withContext Result.success(latency)
+                            }
+                        } else {
+                            lastError = "HTTP ${resp.code}"
+                        }
+                    }
+                } catch (e: Exception) {
+                    lastError = when {
+                        e is java.net.SocketTimeoutException -> "Timeout"
+                        e is java.net.UnknownHostException -> "Server offline"
+                        else -> e.javaClass.simpleName
+                    }
+                }
+            }
+            recordMirrorFailure(ep)
+        }
+        Result.failure(IllegalStateException(lastError ?: "Server unreachable"))
     }
 
     suspend fun searchTracksForExtension(
         query: String,
         endpointsOverride: List<String>,
         limit: Int = 10,
-    ): List<ExtensionTrackSummary> = withContext(Dispatchers.IO) {
-        if (query.isBlank() || endpointsOverride.isEmpty()) return@withContext emptyList()
+    ): List<ExtensionTrackSummary> = searchTracksForExtensionChecked(query, endpointsOverride, limit).first
+
+    suspend fun searchTracksForExtensionChecked(
+        query: String,
+        endpointsOverride: List<String>,
+        limit: Int = 10,
+    ): Pair<List<ExtensionTrackSummary>, String?> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext emptyList<ExtensionTrackSummary>() to null
+        if (endpointsOverride.isEmpty()) return@withContext emptyList<ExtensionTrackSummary>() to "No streaming endpoint"
         val encodedQuery = runCatching { URLEncoder.encode(query.trim(), "UTF-8") }.getOrDefault(query.trim())
         val normTitle = normalize(cleanTitle(query))
+        var anyHttp200 = false
+        var lastError: String? = null
         for (ep in endpointsOverride.take(2)) {
             val base = ep.trimEnd('/')
             val searchUrls = listOf(
@@ -367,25 +423,42 @@ object LosslessAudioProvider {
                     .header("User-Agent", BROWSER_USER_AGENT)
                     .header("Accept", "application/json")
                     .build()
-                val response = runCatching { httpClient.newCall(request).execute() }.getOrNull() ?: continue
-                val body = response.use { if (it.isSuccessful) it.body?.string() else null } ?: continue
-                val parsed = parseSearchResults(body, normTitle, "", null)
-                    .sortedByDescending { it.score }
-                    .take(limit)
-                if (parsed.isNotEmpty()) {
-                    return@withContext parsed.map { c ->
-                        ExtensionTrackSummary(
-                            encodedId = "$base|${c.id}",
-                            title = c.title,
-                            artist = c.artist,
-                            durationSec = c.durationSec,
-                            quality = c.quality,
-                        )
+                try {
+                    httpClient.newCall(request).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            anyHttp200 = true
+                            val body = resp.body?.string()
+                            if (!body.isNullOrBlank()) {
+                                val parsed = parseSearchResults(body, normTitle, "", null)
+                                    .sortedByDescending { it.score }
+                                    .take(limit)
+                                if (parsed.isNotEmpty()) {
+                                    return@withContext parsed.map { c ->
+                                        ExtensionTrackSummary(
+                                            encodedId = "$base|${c.id}",
+                                            title = c.title,
+                                            artist = c.artist,
+                                            durationSec = c.durationSec,
+                                            quality = c.quality,
+                                        )
+                                    } to null
+                                }
+                            }
+                        } else {
+                            lastError = "HTTP ${resp.code}"
+                        }
+                    }
+                } catch (e: Exception) {
+                    lastError = when {
+                        e is java.net.SocketTimeoutException -> "Timeout"
+                        e is java.net.UnknownHostException -> "Offline"
+                        else -> e.message ?: e.javaClass.simpleName
                     }
                 }
             }
         }
-        emptyList()
+        val errorToReport = if (anyHttp200) null else (lastError ?: "Server unreachable")
+        emptyList<ExtensionTrackSummary>() to errorToReport
     }
 
     suspend fun fetchStreamForExtension(
@@ -461,19 +534,21 @@ object LosslessAudioProvider {
             }
         }
 
-        // Fast Deezer public search fallback to obtain metadata & ID
-        val deezerUrl = "https://api.deezer.com/search?q=$encodedQuery"
-        val deezerRequest = Request.Builder()
-            .url(deezerUrl)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            .header("Accept", "application/json")
-            .build()
-        val deezerResponse = runCatching { httpClient.newCall(deezerRequest).execute() }.getOrNull()
-        val deezerBody = deezerResponse?.use { if (it.isSuccessful) it.body?.string() else null }
-        if (deezerBody != null) {
-            val deezerCandidates = parseSearchResults(deezerBody, normTitle, normArtist, targetDurationSec)
-            if (deezerCandidates.isNotEmpty()) {
-                return deezerCandidates.maxByOrNull { it.score }
+        // Fast Deezer public search fallback only for Zarz/Squid/Yeet endpoints
+        if (endpoint.contains("zarz") || endpoint.contains("squid") || endpoint.contains("yeet")) {
+            val deezerUrl = "https://api.deezer.com/search?q=$encodedQuery"
+            val deezerRequest = Request.Builder()
+                .url(deezerUrl)
+                .header("User-Agent", BROWSER_USER_AGENT)
+                .header("Accept", "application/json")
+                .build()
+            val deezerResponse = runCatching { httpClient.newCall(deezerRequest).execute() }.getOrNull()
+            val deezerBody = deezerResponse?.use { if (it.isSuccessful) it.body?.string() else null }
+            if (deezerBody != null) {
+                val deezerCandidates = parseSearchResults(deezerBody, normTitle, normArtist, targetDurationSec)
+                if (deezerCandidates.isNotEmpty()) {
+                    return deezerCandidates.maxByOrNull { it.score }
+                }
             }
         }
 

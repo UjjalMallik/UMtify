@@ -283,7 +283,7 @@ object SourceRegistry {
      */
     fun downloadableAddonSources(): List<AddonSource> =
         enabledConfigs(configs.value)
-            .filter { it.kind == SourceKind.ADDON && it.allowDownloads }
+            .filter { it.kind == SourceKind.ADDON && it.allowDownloads && !SourceHealthTracker.isInErrorCooldown(it.id) }
             .mapNotNull { instances[it.id] as? AddonSource }
             .sortedByDescending {
                 val cfg = config(it.configId)
@@ -295,16 +295,22 @@ object SourceRegistry {
     /** All enabled synced Extension Repo sources eligible for downloads, in list order. */
     fun downloadableExtensionSources(): List<RepoExtensionSource> =
         enabledConfigs(configs.value)
-            .filter { it.kind == SourceKind.EXTENSION && it.allowDownloads }
+            .filter { it.kind == SourceKind.EXTENSION && it.allowDownloads && !SourceHealthTracker.isInErrorCooldown(it.id) }
             .mapNotNull { instances[it.id] as? RepoExtensionSource }
 
     /**
-     * Top [limit] enabled non-YouTube sources in the user's `SOURCES, TRIED IN THIS ORDER`
-     * list for parallel streaming race.
+     * Top [limit] enabled non-YouTube sources in the user's unified `SOURCES`
+     * list for parallel streaming race, skipping any source in error cooldown.
      */
     fun topPlaybackSources(limit: Int = 3): List<MusicSource> =
         activeForPlayback()
-            .filter { it.kind != SourceKind.YOUTUBE }
+            .filter { it.kind != SourceKind.YOUTUBE && !SourceHealthTracker.isInErrorCooldown(it.configId) }
+            .take(limit)
+
+    /** Top [limit] enabled non-YouTube sources eligible for download racing. */
+    fun topDownloadSources(limit: Int = 3): List<MusicSource> =
+        activeForDownload()
+            .filter { it.kind != SourceKind.YOUTUBE && !SourceHealthTracker.isInErrorCooldown(it.configId) }
             .take(limit)
 
     /**
@@ -412,10 +418,12 @@ object SourceRegistry {
 
     fun add(config: SourceConfig) = publish(configs.value + config.tidied())
 
-    fun update(config: SourceConfig) =
+    fun update(config: SourceConfig) {
+        SourceHealthTracker.clear(config.id)
         config.tidied().let { tidied ->
             publish(configs.value.map { if (it.id == tidied.id) tidied else it })
         }
+    }
 
     /**
      * The config as it should be stored, rather than as it was typed.
@@ -449,6 +457,7 @@ object SourceRegistry {
      * see [SourcesScreen][com.music.bitchord.ui.screens.SourcesScreen].
      */
     fun setEnabled(configId: String, enabled: Boolean) {
+        if (enabled) SourceHealthTracker.clear(configId)
         val target = config(configId)
         if (target?.kind == SourceKind.YOUTUBE) {
             AppSettings.setEnableYouTubeMusic(true)

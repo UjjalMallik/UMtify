@@ -11,9 +11,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.music.bitchord.playback.audio.LosslessOutput
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -35,28 +36,25 @@ import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Dns
-import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import com.music.bitchord.data.ExtensionRepoManager
-import com.music.bitchord.data.RepoExtension
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
@@ -89,11 +87,14 @@ import com.music.bitchord.data.settings.AudioQuality
 import com.music.bitchord.data.sources.AddonSource
 import com.music.bitchord.data.sources.SourceConfig
 import com.music.bitchord.data.sources.SourceHealth
+import com.music.bitchord.data.sources.SourceHealthTracker
 import com.music.bitchord.data.sources.SourceKind
 import com.music.bitchord.data.sources.SourceRegistry
+import com.music.bitchord.data.sources.SourceRuntimeStatus
 import com.music.bitchord.ui.components.AddonEditorAlert
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -152,65 +153,66 @@ fun SourcesScreen(
 
     val allRepoExtensions by ExtensionRepoManager.extensions.collectAsStateWithLifecycle()
     val installedExtensionIds by ExtensionRepoManager.installedIds.collectAsStateWithLifecycle()
-    val enabledExtensionIds by ExtensionRepoManager.enabledIds.collectAsStateWithLifecycle()
     val installedVersions by ExtensionRepoManager.installedVersions.collectAsStateWithLifecycle()
-    val isRepoLoading by ExtensionRepoManager.isLoading.collectAsStateWithLifecycle()
+    val runtimeStates by SourceHealthTracker.states.collectAsStateWithLifecycle()
 
     val coroutineScope = rememberCoroutineScope()
+    var updatingExtIds by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     /** Last known reachability per source, filled in as the probes come back. */
     val health = remember { mutableStateMapOf<String, SourceHealth>() }
     val losslessOutput by LosslessOutput.state.collectAsStateWithLifecycle()
 
-    // Every source that has a server to reach is probed, so an addon gets a
-    // reachability line — which is the only feedback that a URL just pasted in
-    // was any good, and the only place a manifest that fails validation gets to
-    // say why. Except an addon waiting on a lossless output: it is not to be
-    // contacted at all until one is connected, and connecting one re-runs this.
-    val probeKey = configs.filter { it.kind.needsServer }
-        .joinToString { "${it.id}@${it.baseUrl}@${it.checkValidLossless}" } + "@${losslessOutput.capable}"
+    // Live GitHub update detection whenever Sources opens
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            ExtensionRepoManager.refreshRegistry(context, autoUpdate = false)
+        }
+    }
+
+    // Probe enabled server-backed addons and synced extensions concurrently to populate live latency/error badges
+    val probeKey = configs.filter { it.kind.needsServer || (it.kind == SourceKind.EXTENSION && it.enabled) }
+        .joinToString { "${it.id}@${it.baseUrl}@${it.enabled}@${it.checkValidLossless}" } + "@${losslessOutput.capable}"
     LaunchedEffect(probeKey) {
-        configs.filter { it.kind.needsServer && it.isComplete && !it.awaitsLosslessOutput }.forEach { config ->
-            val source = SourceRegistry.instance(config.id) ?: return@forEach
-            health[config.id] = withContext(Dispatchers.IO) {
-                runCatching { source.health() }
-                    .getOrElse { SourceHealth.Unreachable(it.message ?: "Failed") }
-            }
-            // An addon names itself, so the row takes that name rather than a
-            // hostname — and rather than a field asking the user to make one up.
-            //
-            // Written here, off the probe that has just fetched the manifest
-            // anyway, because this is the one place that both talks to every
-            // configured source and is allowed to change what is stored. It
-            // settles after one pass: the next probe finds the label already
-            // equal and writes nothing, so there is no loop between this and
-            // the [configs] it is reading. A rename on the addon's side is
-            // picked up the next time this screen is opened.
-            if (source is AddonSource) {
-                val isUmtifyHq = config.id == SourceRegistry.UMTIFY_HQ_ADDON_ID || config.baseUrl.contains("umtifyhq")
-                val named = if (isUmtifyHq) "UMtify" else withContext(Dispatchers.IO) { runCatching { source.manifestName() }.getOrNull() }
-                if (named != null && named != config.label) {
-                    SourceRegistry.update(config.copy(label = named))
+        coroutineScope {
+            configs.filter {
+                ((it.kind.needsServer && it.isComplete) || (it.kind == SourceKind.EXTENSION && it.enabled)) &&
+                    !it.awaitsLosslessOutput
+            }.forEach { config ->
+                launch {
+                    val source = SourceRegistry.instance(config.id) ?: return@launch
+                    val startMs = System.currentTimeMillis()
+                    val probed = withContext(Dispatchers.IO) {
+                        runCatching { source.health() }
+                            .getOrElse { SourceHealth.Unreachable(it.message ?: "Failed") }
+                    }
+                    health[config.id] = probed
+                    val latencyMs = (System.currentTimeMillis() - startMs).coerceAtLeast(1L)
+                    when (probed) {
+                        is SourceHealth.Ok -> {
+                            if (SourceHealthTracker.statusOf(config.id) !is SourceRuntimeStatus.Ready) {
+                                SourceHealthTracker.recordReady(config.id, latencyMs)
+                            }
+                        }
+                        is SourceHealth.Rejected -> SourceHealthTracker.recordError(config.id, probed.reason)
+                        is SourceHealth.Unreachable -> SourceHealthTracker.recordError(config.id, probed.reason)
+                    }
+                    if (source is AddonSource) {
+                        val isUmtifyHq = config.id == SourceRegistry.UMTIFY_HQ_ADDON_ID || config.baseUrl.contains("umtifyhq")
+                        val named = if (isUmtifyHq) "UMtify" else withContext(Dispatchers.IO) { runCatching { source.manifestName() }.getOrNull() }
+                        if (named != null && named != config.label) {
+                            SourceRegistry.update(config.copy(label = named))
+                        }
+                    }
                 }
             }
         }
     }
 
-    // The ceiling in force *right now*, which is the only one this screen can
-    // speak for: the rows below are switches the user set once, and whether a
-    // given source is reached also depends on which connection is up. Reading
-    // it here rather than baking it into the switches is deliberate — the
-    // preset write that used to do that is what made a mobile-data rung follow
-    // the user onto Wi-Fi. See [AudioQuality.permits].
     val ceiling = if (metered == true) cellularQuality else wifiQuality
-
-    /** Whether the ceiling in force right now would cap a lossless stream anyway. */
     val cappedByQuality = ceiling != AudioQuality.LOSSLESS
-    // Asked of the kinds themselves rather than of the module specifically, so
-    // a source added later answers this on its own terms instead of being
-    // invisible to it.
-    val anyLosslessSource = configs.any { it.enabled && it.isComplete && it.kind.canServeLossless } ||
-        enabledExtensionIds.isNotEmpty()
+    val anyLosslessSource = configs.any { it.enabled && it.isComplete && it.kind.canServeLossless }
+    val extensionsById = remember(allRepoExtensions) { allRepoExtensions.associateBy { it.id } }
 
     Column(
         modifier = modifier
@@ -225,7 +227,7 @@ fun SourcesScreen(
             modifier = Modifier.padding(start = 72.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
         )
 
-        // Original SOURCES / Addons card (custom UMtify addon, SoundCloud, JioSaavn, YouTube Music, etc.)
+        // Single Unified SOURCES list (Custom addons, Repo extensions, Built-in sources)
         SettingsGroup(
             header = stringResource(R.string.sources_order_header),
             footer = buildString {
@@ -241,10 +243,34 @@ fun SourcesScreen(
         ) {
             val row: @Composable (Int, SourceConfig, (@Composable () -> Unit)?) -> Unit =
                 { position, config, handle ->
+                    val extId = if (config.kind == SourceKind.EXTENSION) {
+                        SourceRegistry.extensionIdFor(config.id)
+                    } else null
+                    val repoExt = extId?.let { extensionsById[it] }
+                    val isInstalled = extId != null && extId in installedExtensionIds
+                    val localVer = extId?.let { installedVersions[it] }
+                    val updateAvailable = repoExt != null && isInstalled &&
+                        ExtensionRepoManager.isNewerVersion(repoExt.version, localVer ?: "1.0.0")
+                    val isUpdating = extId != null && extId in updatingExtIds
+
                     SourceRow(
                         position = position,
                         config = config,
                         health = health[config.id],
+                        runtimeStatus = runtimeStates[config.id],
+                        updateVersion = repoExt?.version?.takeIf { updateAvailable },
+                        isUpdating = isUpdating,
+                        onUpdateClick = if (extId != null && repoExt != null && updateAvailable) {
+                            {
+                                if (extId !in updatingExtIds) {
+                                    updatingExtIds = updatingExtIds + extId
+                                    coroutineScope.launch {
+                                        ExtensionRepoManager.updateExtension(context, repoExt)
+                                        updatingExtIds = updatingExtIds - extId
+                                    }
+                                }
+                            }
+                        } else null,
                         skippedByQuality = config.enabled && !ceiling.permits(config.kind),
                         awaitingOutput = if (config.enabled && config.awaitsLosslessOutput) losslessOutput else null,
                         onMetered = metered == true,
@@ -253,13 +279,10 @@ fun SourcesScreen(
                         onToggle = if (config.kind == SourceKind.YOUTUBE) null else { enabled ->
                             if (config.kind == SourceKind.JIOSAAVN && enabled && !config.enabled) {
                                 onConfirmJioSaavn()
+                            } else if (config.kind == SourceKind.EXTENSION && extId != null) {
+                                ExtensionRepoManager.toggleExtension(extId, enabled, syncSourceRegistry = true)
                             } else {
                                 SourceRegistry.setEnabled(config.id, enabled)
-                                if (config.kind == SourceKind.EXTENSION) {
-                                    SourceRegistry.extensionIdFor(config.id)?.let { extId ->
-                                        ExtensionRepoManager.toggleExtension(extId, enabled, syncSourceRegistry = false)
-                                    }
-                                }
                             }
                         },
                         handle = handle,
@@ -282,127 +305,6 @@ fun SourcesScreen(
             AddSourceRow(
                 onClick = { onEditSource(SourceConfig(kind = SourceKind.ADDON)) },
             )
-        }
-
-        // Extension Repo (Live from GitHub) Section
-        var selectedCategory by remember { mutableStateOf("All") }
-        val categories = listOf("All", "Integration", "Download", "Metadata", "Utility")
-
-        val nonDuplicateExtensions = remember(allRepoExtensions) {
-            allRepoExtensions.filterNot {
-                it.id.contains("jiosaavn", ignoreCase = true) ||
-                    it.name.contains("jiosaavn", ignoreCase = true) ||
-                    it.displayName.contains("jiosaavn", ignoreCase = true)
-            }
-        }
-
-        val filteredExtensions = remember(nonDuplicateExtensions, selectedCategory) {
-            if (selectedCategory == "All") {
-                nonDuplicateExtensions
-            } else {
-                nonDuplicateExtensions.filter {
-                    it.category.equals(selectedCategory, ignoreCase = true) ||
-                        it.tags.any { tag -> tag.equals(selectedCategory, ignoreCase = true) }
-                }
-            }
-        }
-
-        SettingsGroup(
-            header = "Extension Repo (Live from GitHub)",
-            footer = "Official Mornye extensions repo automatically checked and updated from GitHub.",
-        ) {
-            // Category Filter Chips
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    categories.forEach { cat ->
-                        val isSelected = selectedCategory == cat
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            border = androidx.compose.foundation.BorderStroke(
-                                0.6.dp,
-                                if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                            ),
-                            modifier = Modifier.clickable { selectedCategory = cat },
-                        ) {
-                            Text(
-                                text = cat,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            )
-                        }
-                    }
-                }
-            }
-
-            RowDivider()
-
-            if (isRepoLoading && allRepoExtensions.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 24.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(28.dp),
-                        strokeWidth = 2.5.dp,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            } else if (filteredExtensions.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 20.dp, horizontal = 16.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = "No extensions found in this category.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            } else {
-                filteredExtensions.forEachIndexed { index, ext ->
-                    if (index > 0) RowDivider()
-
-                    val isInstalled = ext.id in installedExtensionIds
-                    val isEnabled = ext.id in enabledExtensionIds
-                    val localVer = installedVersions[ext.id]
-                    val hasUpdate = isInstalled && localVer != null && localVer != ext.version
-
-                    ExtensionRow(
-                        extension = ext,
-                        isInstalled = isInstalled,
-                        isEnabled = isEnabled,
-                        hasUpdate = hasUpdate,
-                        onToggle = { enabled ->
-                            ExtensionRepoManager.toggleExtension(ext.id, enabled)
-                        },
-                        onInstallOrUpdate = {
-                            coroutineScope.launch {
-                                ExtensionRepoManager.installExtension(context, ext)
-                            }
-                        },
-                        onUninstall = {
-                            ExtensionRepoManager.uninstallExtension(context, ext.id)
-                        },
-                    )
-                }
-            }
         }
 
         // A personal library rather than a catalogue in the order above: it
@@ -850,6 +752,10 @@ private fun SourceRow(
     position: Int,
     config: SourceConfig,
     health: SourceHealth?,
+    runtimeStatus: SourceRuntimeStatus? = null,
+    updateVersion: String? = null,
+    isUpdating: Boolean = false,
+    onUpdateClick: (() -> Unit)? = null,
     onClick: (() -> Unit)?,
     /** Null for a source that cannot be switched off, which gets a label instead. */
     onToggle: ((Boolean) -> Unit)?,
@@ -868,10 +774,16 @@ private fun SourceRow(
      */
     handle: (@Composable () -> Unit)? = null,
 ) {
-    // Dimmed for the same reason an off source is: it is not in the walk. The
-    // switch stays where the user left it, so the row reads "on, but not
-    // today" rather than "off".
     val dimmed = !config.enabled || skippedByQuality || awaitingOutput != null
+    val effectiveStatus: SourceRuntimeStatus = when {
+        runtimeStatus is SourceRuntimeStatus.Error -> runtimeStatus
+        runtimeStatus is SourceRuntimeStatus.Ready -> runtimeStatus
+        health is SourceHealth.Rejected -> SourceRuntimeStatus.Error(health.reason)
+        health is SourceHealth.Unreachable -> SourceRuntimeStatus.Error(health.reason)
+        health is SourceHealth.Ok -> SourceRuntimeStatus.Ready(0L)
+        else -> SourceRuntimeStatus.Idle
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -908,22 +820,50 @@ private fun SourceRow(
         Column(
             Modifier
                 .weight(1f)
-                .alpha(if (dimmed) 0.4f else 1f),
+                .alpha(if (dimmed && effectiveStatus !is SourceRuntimeStatus.Error) 0.4f else 1f),
         ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = config.displayName,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (updateVersion != null && onUpdateClick != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable(enabled = !isUpdating, onClick = onUpdateClick),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            if (isUpdating) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(10.dp),
+                                    strokeWidth = 1.5.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                )
+                            }
+                            Text(
+                                text = if (isUpdating) "Updating..." else "Update v$updateVersion",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                            )
+                        }
+                    }
+                }
+            }
             Text(
-                text = config.displayName,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onBackground,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                // The ceiling outranks the health line: a source that isn't
-                // going to be asked at all is not usefully described by
-                // whether its server answered a probe.
                 text = when {
-                    // Outranks the ceiling: this one is not reached on *any*
-                    // connection until the output changes.
                     awaitingOutput != null -> when {
                         awaitingOutput.bluetoothCodecUnknown ->
                             stringResource(R.string.source_needs_lossless_bt_unknown)
@@ -940,20 +880,43 @@ private fun SourceRow(
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = when {
-                    // A warning, not a fault: the addon is fine, the output is
-                    // what has to change — but it is something to act on.
                     awaitingOutput != null -> MaterialTheme.colorScheme.error
-                    // Only a rejection is coloured, and only when it is what
-                    // the line actually says. A server that is merely down
-                    // will be up again without anyone doing anything, and
-                    // painting that red trains people to ignore the colour by
-                    // the time it means something.
                     skippedByQuality -> MaterialTheme.colorScheme.onSurfaceVariant
                     health is SourceHealth.Rejected -> MaterialTheme.colorScheme.error
                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                 },
                 maxLines = 2,
             )
+
+            // Live Error & Health Status Badge
+            if (config.enabled && awaitingOutput == null && !skippedByQuality) {
+                when (effectiveStatus) {
+                    is SourceRuntimeStatus.Ready -> {
+                        Spacer(Modifier.height(4.dp))
+                        val label = if (effectiveStatus.latencyMs > 0L) {
+                            "Active • ${effectiveStatus.latencyMs}ms"
+                        } else {
+                            "Active"
+                        }
+                        StatusBadgePill(
+                            text = label,
+                            dotColor = Color(0xFF4CAF50),
+                            containerColor = Color(0xFF4CAF50).copy(alpha = 0.14f),
+                            textColor = Color(0xFF2E7D32),
+                        )
+                    }
+                    is SourceRuntimeStatus.Error -> {
+                        Spacer(Modifier.height(4.dp))
+                        StatusBadgePill(
+                            text = "Error: ${effectiveStatus.reason}",
+                            dotColor = MaterialTheme.colorScheme.error,
+                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
+                            textColor = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    SourceRuntimeStatus.Idle -> Unit
+                }
+            }
         }
         Spacer(Modifier.width(8.dp))
         if (onToggle == null) {
@@ -972,12 +935,43 @@ private fun SourceRow(
                 ),
             )
         }
-        // Outside the dimming above, and last in the row. A source switched off
-        // still has a position worth setting for when it is switched back on,
-        // so the grip stays at full strength on a row that is otherwise faded.
         if (handle != null) {
             Spacer(Modifier.width(4.dp))
             handle()
+        }
+    }
+}
+
+@Composable
+private fun StatusBadgePill(
+    text: String,
+    dotColor: Color,
+    containerColor: Color,
+    textColor: Color,
+) {
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = containerColor,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(dotColor),
+            )
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+                color = textColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -1140,118 +1134,5 @@ internal fun SourceEditorAlert(
         onRemove = if (isNew) null else onDelete,
         onDismiss = onDismiss,
     )
-}
-
-@Composable
-private fun ExtensionRow(
-    extension: RepoExtension,
-    isInstalled: Boolean,
-    isEnabled: Boolean,
-    hasUpdate: Boolean,
-    onToggle: (Boolean) -> Unit,
-    onInstallOrUpdate: () -> Unit,
-    onUninstall: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // Icon
-        Surface(
-            shape = RoundedCornerShape(10.dp),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-            modifier = Modifier.size(40.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = Icons.Rounded.Extension,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-        }
-
-        Spacer(Modifier.width(12.dp))
-
-        // Title, version pill & description
-        Column(modifier = Modifier.weight(1f)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text(
-                    text = extension.displayName,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-
-                // Version Pill
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                ) {
-                    Text(
-                        text = "v${extension.version}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(3.dp))
-
-            Text(
-                text = extension.description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-
-        Spacer(Modifier.width(10.dp))
-
-        // Action button / Toggle
-        when {
-            hasUpdate -> {
-                Button(
-                    onClick = onInstallOrUpdate,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    modifier = Modifier.height(34.dp),
-                ) {
-                    Text("Update", style = MaterialTheme.typography.labelMedium)
-                }
-            }
-            isInstalled -> {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Switch(
-                        checked = isEnabled,
-                        onCheckedChange = onToggle,
-                        colors = SwitchDefaults.colors(
-                            checkedTrackColor = MaterialTheme.colorScheme.primary,
-                            checkedBorderColor = MaterialTheme.colorScheme.primary,
-                        ),
-                    )
-                }
-            }
-            else -> {
-                OutlinedButton(
-                    onClick = onInstallOrUpdate,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    modifier = Modifier.height(34.dp),
-                ) {
-                    Text("Install", style = MaterialTheme.typography.labelMedium)
-                }
-            }
-        }
-    }
 }
 

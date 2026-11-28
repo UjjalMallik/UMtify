@@ -3,6 +3,7 @@ package com.music.bitchord.data
 import android.content.Context
 import android.content.SharedPreferences
 import com.music.bitchord.data.DebugLog as Log
+import com.music.bitchord.data.sources.SourceHealthTracker
 import com.music.bitchord.data.sources.SourceRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -118,15 +119,14 @@ object ExtensionRepoManager {
             val parsed = parseRegistry(cached)
             if (parsed.isNotEmpty()) {
                 _extensions.value = parsed
-                // Populate default versions if missing
+                // Seed default version as 1.0.0 for bundled core IDs that have no local bundle yet
+                // so newer GitHub versions are surfaced as one-tap Update badges.
                 var updatedVersions = false
                 val updatedMap = versionsMap.toMutableMap()
                 for (id in initialInstalled) {
                     if (!updatedMap.containsKey(id)) {
-                        parsed.firstOrNull { it.id == id }?.let {
-                            updatedMap[id] = it.version
-                            updatedVersions = true
-                        }
+                        updatedMap[id] = "1.0.0"
+                        updatedVersions = true
                     }
                 }
                 if (updatedVersions) {
@@ -136,9 +136,9 @@ object ExtensionRepoManager {
             }
         }
 
-        // Trigger live refresh, auto-update, and smart server benchmark on background Dispatchers.IO
+        // Fetch live GitHub registry in background without silently hiding update badges
         scope.launch {
-            refreshRegistry(context, autoUpdate = true)
+            refreshRegistry(context, autoUpdate = false)
             LosslessAudioProvider.benchmarkTopServers("repo-init")
         }
     }
@@ -146,16 +146,21 @@ object ExtensionRepoManager {
     fun syncWithSourceRegistry() {
         val installed = _installedIds.value
         val enabled = _enabledIds.value
-        val catalogById = _extensions.value.associateBy { it.id }
+        val catalog = _extensions.value
+        val catalogById = catalog.associateBy { it.id }
 
-        val entries = installed.mapNotNull { extId ->
+        val allIds = linkedSetOf<String>()
+        installed.forEach { allIds.add(it) }
+        catalog.forEach { allIds.add(it.id) }
+
+        val entries = allIds.mapNotNull { extId ->
             val ext = catalogById[extId]
             if (ext != null) {
                 if (!isAudioDownloadExtension(ext)) return@mapNotNull null
                 SourceRegistry.RepoSyncEntry(
                     extensionId = extId,
                     displayName = ext.displayName,
-                    enabled = extId in enabled,
+                    enabled = extId in installed && extId in enabled,
                     endpointUrl = getExtractedEndpointsFor(extId).firstOrNull().orEmpty(),
                 )
             } else {
@@ -165,7 +170,7 @@ object ExtensionRepoManager {
                 SourceRegistry.RepoSyncEntry(
                     extensionId = extId,
                     displayName = fallbackDisplayName(extId),
-                    enabled = extId in enabled,
+                    enabled = extId in installed && extId in enabled,
                     endpointUrl = endpoints.firstOrNull().orEmpty(),
                 )
             }
@@ -346,7 +351,7 @@ object ExtensionRepoManager {
         }
     }
 
-    private fun isNewerVersion(repoVer: String, localVer: String): Boolean {
+    fun isNewerVersion(repoVer: String, localVer: String): Boolean {
         if (repoVer == localVer) return false
         val repoParts = repoVer.split(".").mapNotNull { it.toIntOrNull() }
         val localParts = localVer.split(".").mapNotNull { it.toIntOrNull() }
@@ -357,6 +362,36 @@ object ExtensionRepoManager {
             if (r < l) return false
         }
         return repoVer != localVer
+    }
+
+    suspend fun updateExtension(context: Context, extension: RepoExtension): Boolean = withContext(Dispatchers.IO) {
+        val success = downloadExtensionFile(context, extension)
+        if (success) {
+            val wasInstalled = extension.id in _installedIds.value
+            val newInstalled = _installedIds.value + extension.id
+            val newEnabled = if (wasInstalled) _enabledIds.value else (_enabledIds.value + extension.id)
+            val newVersions = _installedVersions.value.toMutableMap().apply {
+                put(extension.id, extension.version)
+            }
+            _installedIds.value = newInstalled
+            _enabledIds.value = newEnabled
+            _installedVersions.value = newVersions
+            prefs?.edit()
+                ?.putStringSet(KEY_INSTALLED_IDS, newInstalled)
+                ?.putStringSet(KEY_ENABLED_IDS, newEnabled)
+                ?.apply()
+            persistVersions(newVersions)
+            SourceHealthTracker.clear(SourceRegistry.repoExtensionConfigId(extension.id))
+            syncWithSourceRegistry()
+            Log.i(TAG, "Updated extension ${extension.displayName} (${extension.id}) to v${extension.version}")
+            true
+        } else {
+            SourceHealthTracker.recordError(
+                SourceRegistry.repoExtensionConfigId(extension.id),
+                "Update download failed",
+            )
+            false
+        }
     }
 
     suspend fun installExtension(context: Context, extension: RepoExtension): Boolean = withContext(Dispatchers.IO) {
@@ -378,6 +413,7 @@ object ExtensionRepoManager {
                 ?.apply()
 
             persistVersions(newVersions)
+            SourceHealthTracker.clear(SourceRegistry.repoExtensionConfigId(extension.id))
             syncWithSourceRegistry()
             Log.i(TAG, "Installed extension ${extension.displayName} (${extension.id}) v${extension.version}")
             true
@@ -414,13 +450,27 @@ object ExtensionRepoManager {
     }
 
     fun toggleExtension(extensionId: String, enabled: Boolean, syncSourceRegistry: Boolean = true) {
+        val newInstalled = if (enabled) _installedIds.value + extensionId else _installedIds.value
         val newEnabled = if (enabled) {
             _enabledIds.value + extensionId
         } else {
             _enabledIds.value - extensionId
         }
+        _installedIds.value = newInstalled
         _enabledIds.value = newEnabled
-        prefs?.edit()?.putStringSet(KEY_ENABLED_IDS, newEnabled)?.apply()
+        prefs?.edit()
+            ?.putStringSet(KEY_INSTALLED_IDS, newInstalled)
+            ?.putStringSet(KEY_ENABLED_IDS, newEnabled)
+            ?.apply()
+        if (enabled) {
+            SourceHealthTracker.clear(SourceRegistry.repoExtensionConfigId(extensionId))
+            // Background download if not yet downloaded locally
+            val ctx = appContext
+            val ext = _extensions.value.firstOrNull { it.id == extensionId }
+            if (ctx != null && ext != null && !File(ctx.filesDir, "extensions/$extensionId.sflx").exists()) {
+                scope.launch { installExtension(ctx, ext) }
+            }
+        }
         if (syncSourceRegistry) {
             SourceRegistry.syncRepoExtensionEnabled(extensionId, enabled)
         }

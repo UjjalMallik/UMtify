@@ -8,12 +8,16 @@ import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.durationMillis
 import com.music.bitchord.data.settings.AppSettings
+import com.music.bitchord.data.sources.AddonSource
 import com.music.bitchord.data.sources.JioSaavnSource
+import com.music.bitchord.data.sources.RepoExtensionSource
 import com.music.bitchord.data.sources.SourceConfig
+import com.music.bitchord.data.sources.SourceHealthTracker
 import com.music.bitchord.data.sources.SourceKind
 import com.music.bitchord.data.sources.SourceRegistry
 import com.music.bitchord.data.sources.SourceResolver
 import com.music.bitchord.data.sources.SourceStream
+import com.music.bitchord.data.sources.StreamFormat
 import com.music.bitchord.data.sources.StreamRequest
 import com.music.bitchord.data.sources.TrackMatcher
 import com.music.bitchord.playback.QualityUpgrade
@@ -41,10 +45,10 @@ object DownloadFormatResolver {
         val activeStream = resolveActivePlayingStream(song)
 
         coroutineScope {
-            // 2. Query ALL configured custom addons (UMtify, custom servers) in parallel
+            // 2. Query ALL configured healthy addons (UMtify, custom servers) in parallel
             val addonsDeferred = async {
                 runCatching {
-                    withTimeoutOrNull(6000L) {
+                    withTimeoutOrNull(4500L) {
                         SourceResolver.resolveAllAddonDownloadStreams(
                             target = target,
                             wantsDolbyAtmos = allowAtmos,
@@ -54,26 +58,40 @@ object DownloadFormatResolver {
                 }.getOrNull().orEmpty()
             }
 
-            // 3. Query each enabled Extension Repo lossless provider (Tidal, Qobuz, Deezer, etc.) in parallel
-            val extSources = SourceRegistry.downloadableExtensionSources()
+            // 3. Race Top-3 healthy enabled lossless/extension sources in parallel (skipping errored ones)
+            val topDownloadSources = SourceRegistry.topDownloadSources(3)
+                .filter { it is RepoExtensionSource || (it.kind.canServeLossless && it !is AddonSource) }
+            val extSources = (topDownloadSources.filterIsInstance<RepoExtensionSource>() + SourceRegistry.downloadableExtensionSources())
+                .distinctBy { it.configId }
+                .take(3)
             val extDeferreds = extSources.map { ext ->
                 async {
+                    val startMs = System.currentTimeMillis()
                     runCatching {
-                        withTimeoutOrNull(5500L) {
+                        withTimeoutOrNull(4000L) {
                             val extId = SourceRegistry.extensionIdFor(ext.configId) ?: ext.configId
                             val endpoints = (
                                 ExtensionRepoManager.getExtractedEndpointsFor(extId) +
                                     LosslessAudioProvider.endpointsForExtension(extId)
                                 ).distinct()
-                            LosslessAudioProvider.resolveLosslessTrack(
+                            val res = LosslessAudioProvider.resolveLosslessTrack(
                                 title = song.title,
                                 artist = song.artist,
                                 durationSec = durationSec,
                                 preferredQuality = "HI_RES_LOSSLESS",
-                                timeoutMs = 5000L,
+                                timeoutMs = 3500L,
                                 endpointsOverride = endpoints,
                                 sourceLabel = ext.displayName,
-                            )?.let { ext.displayName to it }
+                            )
+                            if (res != null) {
+                                SourceHealthTracker.recordReady(ext.configId, System.currentTimeMillis() - startMs)
+                                ext.displayName to res
+                            } else {
+                                if (endpoints.isEmpty()) {
+                                    SourceHealthTracker.recordError(ext.configId, "No streaming endpoint")
+                                }
+                                null
+                            }
                         }
                     }.getOrNull()
                 }
@@ -82,13 +100,13 @@ object DownloadFormatResolver {
             // 4. Fallback benchmarked LosslessAudioProvider mirrors (Hi-Res & 16-bit)
             val flacHiResDeferred = async {
                 runCatching {
-                    withTimeoutOrNull(5500L) {
+                    withTimeoutOrNull(4000L) {
                         LosslessAudioProvider.resolveLosslessTrack(
                             title = song.title,
                             artist = song.artist,
                             durationSec = durationSec,
                             preferredQuality = "HI_RES_LOSSLESS",
-                            timeoutMs = 5000L,
+                            timeoutMs = 3500L,
                         )
                     }
                 }.getOrNull()
@@ -96,13 +114,13 @@ object DownloadFormatResolver {
 
             val flacLosslessDeferred = async {
                 runCatching {
-                    withTimeoutOrNull(5500L) {
+                    withTimeoutOrNull(4000L) {
                         LosslessAudioProvider.resolveLosslessTrack(
                             title = song.title,
                             artist = song.artist,
                             durationSec = durationSec,
                             preferredQuality = "LOSSLESS",
-                            timeoutMs = 5000L,
+                            timeoutMs = 3500L,
                         )
                     }
                 }.getOrNull()
