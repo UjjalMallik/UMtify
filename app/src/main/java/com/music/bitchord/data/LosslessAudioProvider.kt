@@ -228,7 +228,7 @@ object LosslessAudioProvider {
     }
 
     private fun cleanTitle(raw: String): String =
-        SflxRuntimeBridge.cleanTrackTitle(raw)
+        NativeDownloadProviders.cleanTrackTitle(raw)
             .replace(Regex("""[-_]"""), " ")
             .replace(Regex("""\s+"""), " ")
             .trim()
@@ -267,7 +267,7 @@ object LosslessAudioProvider {
         }
 
         val cleanedTitle = cleanTitle(title)
-        val cleanedArtist = SflxRuntimeBridge.primaryArtistName(cleanTitle(artist))
+        val cleanedArtist = NativeDownloadProviders.primaryArtistName(cleanTitle(artist))
         val query = "$cleanedTitle $cleanedArtist".trim()
         val encodedQuery = runCatching { URLEncoder.encode(query, "UTF-8") }.getOrDefault(query)
 
@@ -355,7 +355,7 @@ object LosslessAudioProvider {
     ): List<LosslessStreamResult> = withContext(Dispatchers.IO) {
         if (title.isBlank()) return@withContext emptyList()
         val cleanedTitle = cleanTitle(title)
-        val cleanedArtist = SflxRuntimeBridge.primaryArtistName(cleanTitle(artist))
+        val cleanedArtist = NativeDownloadProviders.primaryArtistName(cleanTitle(artist))
         val query = "$cleanedTitle $cleanedArtist".trim()
         val encodedQuery = runCatching { URLEncoder.encode(query, "UTF-8") }.getOrDefault(query)
         val normTitle = normalize(cleanedTitle)
