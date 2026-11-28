@@ -167,10 +167,12 @@ fun SourcesScreen(
 
     LaunchedEffect(cfEpoch) {
         if (cfEpoch > 0L) {
-            SourceRegistry.downloadableExtensionSources().forEach { src ->
-                SourceHealthTracker.clear(src.id)
-                health.remove(src.id)
-            }
+            SourceRegistry.configs.value
+                .filter { it.kind == SourceKind.EXTENSION && !it.metadataOnly }
+                .forEach { cfg ->
+                    SourceHealthTracker.clear(cfg.id)
+                    health.remove(cfg.id)
+                }
         }
     }
 
@@ -963,9 +965,11 @@ private fun ManagedSourceRow(
                         forceInteractive = true,
                     )
                     if (ok) {
-                        com.music.bitchord.data.sources.SourceRegistry.downloadableExtensionSources().forEach { src ->
-                            SourceHealthTracker.clear(src.id)
-                        }
+                        SourceRegistry.configs.value
+                            .filter { it.kind == SourceKind.EXTENSION && !it.metadataOnly }
+                            .forEach { cfg ->
+                                SourceHealthTracker.clear(cfg.id)
+                            }
                     }
                 }
             })
