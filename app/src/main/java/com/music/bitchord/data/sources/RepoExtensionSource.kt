@@ -31,7 +31,7 @@ class RepoExtensionSource(
             SourceHealthTracker.recordError(config.id, "No audio endpoint")
             return@withContext SourceHealth.Unreachable("No audio endpoint")
         }
-        val probed = LosslessAudioProvider.probeEndpointHealth(endpoints)
+        val probed = LosslessAudioProvider.probeEndpointHealth(endpoints, providerKey = extensionId)
         probed.fold(
             onSuccess = { latencyMs ->
                 SourceHealthTracker.recordReady(config.id, latencyMs)
@@ -116,9 +116,9 @@ class RepoExtensionSource(
             )
         }
 
-    private fun resolveEndpoints(): List<String> {
-        val extracted = ExtensionRepoManager.getExtractedEndpointsFor(extensionId)
-        val provider = LosslessAudioProvider.endpointsForExtension(extensionId)
-        return (extracted + provider).distinct()
-    }
+    private fun resolveEndpoints(): List<String> =
+        LosslessAudioProvider.getPreferredEndpointsForExtension(
+            extensionId = extensionId,
+            extraEndpoints = ExtensionRepoManager.getExtractedEndpointsFor(extensionId),
+        )
 }

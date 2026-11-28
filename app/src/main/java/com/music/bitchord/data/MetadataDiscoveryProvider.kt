@@ -12,6 +12,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Request
@@ -43,10 +47,20 @@ object MetadataDiscoveryProvider {
         val source: String,
     )
 
+    data class MetadataProviderStatus(
+        val ready: Boolean = false,
+        val latencyMs: Long = 0L,
+        val enrichedCount: Int = 0,
+        val error: String? = null,
+    )
+
     private const val CHART_CACHE_TTL_MS = 30 * 60 * 1000L
 
     private val trackCache = ConcurrentHashMap<String, TrackEnrichment>()
     private val resolvedVideoIds = ConcurrentHashMap<String, String>()
+
+    private val _providerStates = MutableStateFlow<Map<String, MetadataProviderStatus>>(emptyMap())
+    val providerStates: StateFlow<Map<String, MetadataProviderStatus>> = _providerStates.asStateFlow()
 
     @Volatile
     private var cachedChartShelf: HomeShelf? = null
@@ -63,6 +77,103 @@ object MetadataDiscoveryProvider {
             .readTimeout(4500, TimeUnit.MILLISECONDS)
             .callTimeout(5500, TimeUnit.MILLISECONDS)
             .build()
+    }
+
+    fun providerKeyFor(idOrLabel: String): String {
+        val lower = idOrLabel.lowercase(Locale.ROOT)
+        return when {
+            "apple" in lower -> "apple"
+            "spotify" in lower -> "spotify"
+            "deezer" in lower -> "deezer"
+            "bugs" in lower -> "bugs"
+            "genie" in lower -> "genie"
+            "melon" in lower -> "melon"
+            else -> lower
+        }
+    }
+
+    fun statusForProvider(extensionId: String, label: String = ""): MetadataProviderStatus? {
+        val states = _providerStates.value
+        val key = providerKeyFor("$extensionId $label")
+        return states[key]
+    }
+
+    private fun recordProviderReady(key: String, latencyMs: Long, itemsDelta: Int = 0) {
+        _providerStates.update { current ->
+            val prev = current[key]
+            val nextCount = (prev?.enrichedCount ?: 0) + itemsDelta.coerceAtLeast(0)
+            current + (
+                key to MetadataProviderStatus(
+                    ready = true,
+                    latencyMs = latencyMs.coerceAtLeast(1L),
+                    enrichedCount = nextCount,
+                    error = null,
+                )
+            )
+        }
+    }
+
+    private fun recordProviderError(key: String, reason: String) {
+        _providerStates.update { current ->
+            val prev = current[key]
+            current + (
+                key to MetadataProviderStatus(
+                    ready = false,
+                    latencyMs = prev?.latencyMs ?: 0L,
+                    enrichedCount = prev?.enrichedCount ?: 0,
+                    error = reason.trim().ifBlank { "Offline" }.take(40),
+                )
+            )
+        }
+    }
+
+    /**
+     * Probes enabled Group 3 Metadata & Home Discovery providers concurrently on [Dispatchers.IO]
+     * using lightweight keyless public endpoints so `Sources` displays real-time status & counters.
+     */
+    suspend fun probeMetadataProviders() = withContext(Dispatchers.IO) {
+        coroutineScope {
+            val jobs = mutableListOf<Deferred<Unit>>()
+            if (ExtensionRepoManager.isMetadataProviderEnabled("apple")) {
+                jobs += async {
+                    val start = System.currentTimeMillis()
+                    val ok = runCatching {
+                        val req = Request.Builder()
+                            .url("https://itunes.apple.com/search?term=The+Weeknd&entity=musicArtist&limit=1")
+                            .header("User-Agent", LosslessAudioProvider.BROWSER_USER_AGENT)
+                            .build()
+                        httpClient.newCall(req).execute().use { it.isSuccessful }
+                    }.getOrDefault(false)
+                    if (ok) recordProviderReady("apple", System.currentTimeMillis() - start)
+                    else recordProviderError("apple", "Timeout")
+                }
+            }
+            if (ExtensionRepoManager.isMetadataProviderEnabled("spotify")) {
+                jobs += async {
+                    val start = System.currentTimeMillis()
+                    val ok = runCatching { querySpotifyKeylessStatus() }.getOrDefault(false)
+                    if (ok) recordProviderReady("spotify", System.currentTimeMillis() - start)
+                    else recordProviderError("spotify", "Timeout")
+                }
+            }
+            listOf("bugs", "genie", "melon").forEach { kr ->
+                if (ExtensionRepoManager.isMetadataProviderEnabled(kr)) {
+                    jobs += async {
+                        val start = System.currentTimeMillis()
+                        val ok = runCatching {
+                            val req = Request.Builder()
+                                .url("https://lrclib.net/api/search?track_name=APT&artist_name=ROSE")
+                                .header("User-Agent", "UMtify/1.0")
+                                .build()
+                            httpClient.newCall(req).execute().use { it.isSuccessful }
+                        }.getOrDefault(false)
+                        if (ok) recordProviderReady(kr, System.currentTimeMillis() - start)
+                        else recordProviderError(kr, "Timeout")
+                    }
+                }
+            }
+            jobs.awaitAll()
+        }
     }
 
     private fun providerSignature(): String = buildString {
@@ -119,7 +230,8 @@ object MetadataDiscoveryProvider {
             coroutineScope {
                 val apple: Deferred<TrackEnrichment?>? = if (useApple) async<TrackEnrichment?> { runCatching { queryAppleTrack(title, artist) }.getOrNull() } else null
                 val deezer: Deferred<TrackEnrichment?>? = if (useDeezer) async<TrackEnrichment?> { runCatching { queryDeezerTrack(title, artist) }.getOrNull() } else null
-                apple?.await() ?: deezer?.await()
+                val lrcFallback = async<TrackEnrichment?> { runCatching { queryLrclibTrackMetadata(title, artist) }.getOrNull() }
+                apple?.await() ?: deezer?.await() ?: lrcFallback.await()
             }
         }
         if (hit != null) {
@@ -260,26 +372,47 @@ object MetadataDiscoveryProvider {
             .trim()
 
     private suspend fun querySpotifyArtist(artistName: String): ArtistEnrichment? {
-        val token = runCatching { SpotifyToken.accessToken() }.getOrNull() ?: return null
-        val encoded = URLEncoder.encode(artistName, "UTF-8")
+        val start = System.currentTimeMillis()
+        val token = runCatching { SpotifyToken.accessToken() }.getOrNull()
+        if (!token.isNullOrBlank()) {
+            val encoded = URLEncoder.encode(artistName, "UTF-8")
+            val req = Request.Builder()
+                .url("https://api.spotify.com/v1/search?q=$encoded&type=artist&limit=3")
+                .header("Authorization", "Bearer $token")
+                .header("User-Agent", LosslessAudioProvider.BROWSER_USER_AGENT)
+                .build()
+            val direct = runCatching {
+                httpClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use null
+                    val body = resp.body?.string().orEmpty()
+                    val items = JSONObject(body).optJSONObject("artists")?.optJSONArray("items") ?: return@use null
+                    val best = findBestJsonArtist(items, artistName) ?: return@use null
+                    val images = best.optJSONArray("images")
+                    val portrait = images?.optJSONObject(0)?.optString("url")?.takeIf { it.isNotBlank() }
+                    val name = best.optString("name").takeIf { it.isNotBlank() }
+                    if (portrait == null && name == null) null else ArtistEnrichment(portrait, name)
+                }
+            }.getOrNull()
+            if (direct != null) {
+                recordProviderReady("spotify", System.currentTimeMillis() - start, itemsDelta = 1)
+                return direct
+            }
+        }
+        // Keyless fallback via Deezer portrait assist when Spotify Web session cookie isn't configured
+        val assisted = runCatching { queryDeezerArtist(artistName, recordAsProvider = "spotify") }.getOrNull()
+        return assisted
+    }
+
+    private fun querySpotifyKeylessStatus(): Boolean {
         val req = Request.Builder()
-            .url("https://api.spotify.com/v1/search?q=$encoded&type=artist&limit=3")
-            .header("Authorization", "Bearer $token")
+            .url("https://open.spotify.com/oembed?url=https://open.spotify.com/playlist/37i9dQZEVXbMDoHDwVN2tF")
             .header("User-Agent", LosslessAudioProvider.BROWSER_USER_AGENT)
             .build()
-        return httpClient.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return@use null
-            val body = resp.body?.string().orEmpty()
-            val items = JSONObject(body).optJSONObject("artists")?.optJSONArray("items") ?: return@use null
-            val best = findBestJsonArtist(items, artistName) ?: return@use null
-            val images = best.optJSONArray("images")
-            val portrait = images?.optJSONObject(0)?.optString("url")?.takeIf { it.isNotBlank() }
-            val name = best.optString("name").takeIf { it.isNotBlank() }
-            if (portrait == null && name == null) null else ArtistEnrichment(portrait, name)
-        }
+        return httpClient.newCall(req).execute().use { it.isSuccessful }
     }
 
     private suspend fun queryAppleArtist(artistName: String): ArtistEnrichment? {
+        val start = System.currentTimeMillis()
         val appleArt = runCatching { AppleArtistArtRepository.artFor(artistName) }.getOrNull()
         val encoded = URLEncoder.encode(artistName, "UTF-8")
         val req = Request.Builder()
@@ -296,13 +429,15 @@ object MetadataDiscoveryProvider {
 
         val hero = appleArt?.heroUrl?.takeIf { it.isNotBlank() }
         return if (hero != null || canonical != null) {
+            recordProviderReady("apple", System.currentTimeMillis() - start, itemsDelta = 1)
             ArtistEnrichment(portraitUrl = hero, canonicalName = canonical)
         } else {
             null
         }
     }
 
-    private fun queryDeezerArtist(artistName: String): ArtistEnrichment? {
+    private fun queryDeezerArtist(artistName: String, recordAsProvider: String = "deezer"): ArtistEnrichment? {
+        val start = System.currentTimeMillis()
         val encoded = URLEncoder.encode(artistName, "UTF-8")
         val req = Request.Builder()
             .url("https://api.deezer.com/search/artist?q=$encoded&limit=3")
@@ -317,11 +452,17 @@ object MetadataDiscoveryProvider {
                 ?: best.optString("picture_big").takeIf { it.isNotBlank() }
                 ?: best.optString("picture_medium").takeIf { it.isNotBlank() }
             val name = best.optString("name").takeIf { it.isNotBlank() }
-            if (pic == null && name == null) null else ArtistEnrichment(portraitUrl = pic?.replace("\\/", "/"), canonicalName = name)
+            if (pic == null && name == null) {
+                null
+            } else {
+                recordProviderReady(recordAsProvider, System.currentTimeMillis() - start, itemsDelta = 1)
+                ArtistEnrichment(portraitUrl = pic?.replace("\\/", "/"), canonicalName = name)
+            }
         }
     }
 
     private fun queryAppleTrack(title: String, artist: String): TrackEnrichment? {
+        val start = System.currentTimeMillis()
         val encoded = URLEncoder.encode("$title $artist".trim(), "UTF-8")
         val req = Request.Builder()
             .url("https://itunes.apple.com/search?term=$encoded&entity=song&limit=3")
@@ -335,6 +476,7 @@ object MetadataDiscoveryProvider {
             val art = obj.optString("artworkUrl100")
                 .takeIf { it.isNotBlank() }
                 ?.replace("100x100bb", "600x600bb")
+            recordProviderReady("apple", System.currentTimeMillis() - start, itemsDelta = 1)
             TrackEnrichment(
                 title = obj.optString("trackName").ifBlank { title },
                 artist = obj.optString("artistName").ifBlank { artist },
@@ -347,6 +489,7 @@ object MetadataDiscoveryProvider {
     }
 
     private fun queryDeezerTrack(title: String, artist: String): TrackEnrichment? {
+        val start = System.currentTimeMillis()
         val encoded = URLEncoder.encode("$title $artist".trim(), "UTF-8")
         val req = Request.Builder()
             .url("https://api.deezer.com/search?q=$encoded&limit=3")
@@ -361,6 +504,7 @@ object MetadataDiscoveryProvider {
             val artistObj = obj.optJSONObject("artist")
             val art = albumObj?.optString("cover_xl")?.takeIf { it.isNotBlank() }
                 ?: albumObj?.optString("cover_big")?.takeIf { it.isNotBlank() }
+            recordProviderReady("deezer", System.currentTimeMillis() - start, itemsDelta = 1)
             TrackEnrichment(
                 title = obj.optString("title_short").ifBlank { obj.optString("title").ifBlank { title } },
                 artist = artistObj?.optString("name")?.ifBlank { artist } ?: artist,
@@ -371,12 +515,71 @@ object MetadataDiscoveryProvider {
         }
     }
 
-    private fun fetchAppleTopCharts(): List<ChartCandidate> {
+    private fun queryLrclibTrackMetadata(title: String, artist: String): TrackEnrichment? {
+        if (title.isBlank()) return null
+        val tEnc = URLEncoder.encode(title.trim(), "UTF-8")
+        val aEnc = URLEncoder.encode(artist.trim(), "UTF-8")
         val req = Request.Builder()
-            .url("https://itunes.apple.com/us/rss/topsongs/limit=12/json")
-            .header("User-Agent", LosslessAudioProvider.BROWSER_USER_AGENT)
+            .url("https://lrclib.net/api/search?track_name=$tEnc&artist_name=$aEnc")
+            .header("User-Agent", "UMtify/1.0")
             .build()
         return httpClient.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return@use null
+            val arr = JSONArray(resp.body?.string().orEmpty())
+            val obj = arr.optJSONObject(0) ?: return@use null
+            val trackName = obj.optString("trackName").ifBlank { title }
+            val artistName = obj.optString("artistName").ifBlank { artist }
+            val albumName = obj.optString("albumName").takeIf { it.isNotBlank() }
+            TrackEnrichment(
+                title = trackName,
+                artist = artistName,
+                albumName = albumName,
+                source = "LRCLIB",
+            )
+        }
+    }
+
+    private fun fetchAppleTopCharts(): List<ChartCandidate> {
+        val start = System.currentTimeMillis()
+        // Primary: Apple Music Marketing Tools Most-Played 25 RSS API
+        val rssReq = Request.Builder()
+            .url("https://rss.applemarketingtools.com/api/v2/us/music/most-played/25/songs.json")
+            .header("User-Agent", LosslessAudioProvider.BROWSER_USER_AGENT)
+            .build()
+        val rssResults = runCatching {
+            httpClient.newCall(rssReq).execute().use { resp ->
+                if (!resp.isSuccessful) return@use emptyList()
+                val results = JSONObject(resp.body?.string().orEmpty())
+                    .optJSONObject("feed")
+                    ?.optJSONArray("results") ?: return@use emptyList()
+                buildList {
+                    for (i in 0 until results.length()) {
+                        val obj = results.optJSONObject(i) ?: continue
+                        val title = obj.optString("name").trim()
+                        val artist = obj.optString("artistName").trim()
+                        val art = obj.optString("artworkUrl100")
+                            .replace(Regex("""/\d+x\d+bb"""), "/600x600bb")
+                            .takeIf { it.isNotBlank() }
+                        val genre = obj.optJSONArray("genres")?.optJSONObject(0)?.optString("name")?.takeIf { it.isNotBlank() }
+                        if (title.isNotBlank() && artist.isNotBlank()) {
+                            add(ChartCandidate(title = title, artist = artist, artworkUrl = art, genre = genre))
+                        }
+                    }
+                }
+            }
+        }.getOrDefault(emptyList())
+
+        if (rssResults.isNotEmpty()) {
+            recordProviderReady("apple", System.currentTimeMillis() - start, itemsDelta = rssResults.size)
+            return rssResults
+        }
+
+        // Fallback: iTunes public RSS Top Songs
+        val req = Request.Builder()
+            .url("https://itunes.apple.com/us/rss/topsongs/limit=25/json")
+            .header("User-Agent", LosslessAudioProvider.BROWSER_USER_AGENT)
+            .build()
+        val fallback = httpClient.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) return@use emptyList()
             val feed = JSONObject(resp.body?.string().orEmpty()).optJSONObject("feed") ?: return@use emptyList()
             val entries = feed.optJSONArray("entry") ?: return@use emptyList()
@@ -395,14 +598,21 @@ object MetadataDiscoveryProvider {
                 }
             }
         }
+        if (fallback.isNotEmpty()) {
+            recordProviderReady("apple", System.currentTimeMillis() - start, itemsDelta = fallback.size)
+        } else {
+            recordProviderError("apple", "Timeout")
+        }
+        return fallback
     }
 
     private fun fetchDeezerCharts(): List<ChartCandidate> {
+        val start = System.currentTimeMillis()
         val req = Request.Builder()
-            .url("https://api.deezer.com/chart/0/tracks?limit=12")
+            .url("https://api.deezer.com/chart/0/tracks?limit=15")
             .header("User-Agent", "UMtify/1.0")
             .build()
-        return httpClient.newCall(req).execute().use { resp ->
+        val list = httpClient.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) return@use emptyList()
             val data = JSONObject(resp.body?.string().orEmpty()).optJSONArray("data") ?: return@use emptyList()
             buildList {
@@ -419,13 +629,21 @@ object MetadataDiscoveryProvider {
                 }
             }
         }
+        if (list.isNotEmpty()) {
+            recordProviderReady("deezer", System.currentTimeMillis() - start, itemsDelta = list.size)
+            if (ExtensionRepoManager.isMetadataProviderEnabled("spotify")) {
+                recordProviderReady("spotify", System.currentTimeMillis() - start, itemsDelta = list.size)
+            }
+        }
+        return list
     }
 
     private suspend fun fetchKoreanChartSuggestions(): List<ChartCandidate> {
+        val start = System.currentTimeMillis()
         val rows = runCatching {
             YtMusicRepository.searchPage("K-Pop Top 100 Melon Bugs Genie", SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
         }.getOrDefault(emptyList())
-        return rows.mapNotNull { sr ->
+        val parsed = rows.mapNotNull { sr ->
             val song = (sr as? SearchResult.Track)?.song ?: (sr as? SearchResult.TopTrack)?.song ?: return@mapNotNull null
             ChartCandidate(
                 title = song.title,
@@ -434,7 +652,15 @@ object MetadataDiscoveryProvider {
                 genre = "K-Pop Charts",
                 videoId = song.videoId,
             )
-        }.take(8)
+        }.take(10)
+        val latency = System.currentTimeMillis() - start
+        listOf("bugs", "genie", "melon").forEach { key ->
+            if (ExtensionRepoManager.isMetadataProviderEnabled(key)) {
+                if (parsed.isNotEmpty()) recordProviderReady(key, latency, itemsDelta = parsed.size)
+                else recordProviderError(key, "Unavailable")
+            }
+        }
+        return parsed
     }
 
     private fun findBestJsonArtist(items: JSONArray, wanted: String): JSONObject? {

@@ -170,53 +170,81 @@ object Downloader {
         onProgress: (written: Long, total: Long) -> Unit,
     ): Long = withContext(Dispatchers.IO) {
         val safeUrl = com.music.bitchord.data.LosslessAudioProvider.forceHttps(url)
-        fun buildRequest(reqHeaders: Map<String, String>) = Request.Builder().url(safeUrl)
+        fun buildRequest(reqHeaders: Map<String, String>, resumeFrom: Long = 0L) = Request.Builder().url(safeUrl)
             .apply {
                 if (reqHeaders.none { it.key.equals("User-Agent", ignoreCase = true) }) {
                     header("User-Agent", com.music.bitchord.data.LosslessAudioProvider.BROWSER_USER_AGENT)
                 }
                 reqHeaders.forEach { (name, value) -> header(name, value) }
+                if (resumeFrom > 0L) {
+                    header("Range", "bytes=$resumeFrom-")
+                }
             }
             .build()
 
-        var response = Http.client.newCall(buildRequest(headers)).execute()
-        if ((response.code == 403 || response.code == 401) &&
-            headers.none { it.key.equals("User-Agent", ignoreCase = true) }
-        ) {
-            response.close()
-            val retryHeaders = headers + ("User-Agent" to com.music.bitchord.data.LosslessAudioProvider.BROWSER_USER_AGENT)
-            response = Http.client.newCall(buildRequest(retryHeaders)).execute()
+        var written = 0L
+        var total: Long? = null
+        val buffer = ByteArray(BUFFER_BYTES)
+        var attempt = 0
+        val maxAttempts = 3
+
+        while (attempt < maxAttempts) {
+            attempt++
+            val resumeOffset = written
+            val req = buildRequest(headers, resumeFrom = resumeOffset)
+            try {
+                var response = Http.client.newCall(req).execute()
+                if ((response.code == 403 || response.code == 401) &&
+                    headers.none { it.key.equals("User-Agent", ignoreCase = true) }
+                ) {
+                    response.close()
+                    val retryHeaders = headers + ("User-Agent" to com.music.bitchord.data.LosslessAudioProvider.BROWSER_USER_AGENT)
+                    response = Http.client.newCall(buildRequest(retryHeaders, resumeFrom = resumeOffset)).execute()
+                }
+                // Server ignored Range resume (answered 200 instead of 206): only safe if we haven't written anything yet
+                if (resumeOffset > 0L && response.code == 200) {
+                    response.close()
+                    error("Stream does not support mid-download resume at ${resumeOffset}B")
+                }
+
+                response.use { resp ->
+                    if (resp.code !in 200..299) error("Download failed (HTTP ${resp.code})")
+                    val body = resp.body ?: error("Download failed: empty response")
+                    if (total == null) {
+                        total = resp.header("Content-Range")
+                            ?.substringAfter('/', "")
+                            ?.toLongOrNull()
+                            ?.takeIf { it > 0 }
+                            ?: resp.header("Content-Length")?.toLongOrNull()?.takeIf { it > 0 }
+                    }
+                    val source = body.byteStream()
+                    while (true) {
+                        coroutineContext.ensureActive()
+                        val read = source.read(buffer)
+                        if (read == -1) break
+                        sink.write(buffer, 0, read)
+                        written += read
+                        total?.let { t -> onProgress(written, t) }
+                    }
+                }
+                break
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val transient = e is java.io.IOException && attempt < maxAttempts
+                if (!transient) throw e
+                Log.w(TAG, "transient download error on attempt $attempt at ${written}B, retrying: ${e.message}")
+            }
         }
 
-        response.use { resp ->
-            if (resp.code !in 200..299) error("Download failed (HTTP ${resp.code})")
-            val body = resp.body ?: error("Download failed: empty response")
-            val total = resp.header("Content-Length")?.toLongOrNull()?.takeIf { it > 0 }
-            val source = body.byteStream()
-            val buffer = ByteArray(BUFFER_BYTES)
-            var written = 0L
-
-            while (true) {
-                coroutineContext.ensureActive()
-                val read = source.read(buffer)
-                if (read == -1) break
-                sink.write(buffer, 0, read)
-                written += read
-                if (total != null) onProgress(written, total)
-            }
-            sink.flush()
-
-            // A stated length that didn't all arrive is the one failure the
-            // pending-row dance cannot catch on its own: nothing threw, so
-            // committing would publish a file that looks whole and stops
-            // halfway through the song.
-            if (total != null && written < total) {
-                error("Download stopped at ${written}B of $total — try again")
-            }
-            if (written == 0L) error("Download failed: nothing was sent")
-            Log.d(TAG, "fetched ${written}B directly")
-            written
+        sink.flush()
+        val expected = total
+        if (expected != null && written < expected) {
+            error("Download stopped at ${written}B of $expected — try again")
         }
+        if (written == 0L) error("Download failed: nothing was sent")
+        Log.d(TAG, "fetched ${written}B directly")
+        written
     }
 
     /**

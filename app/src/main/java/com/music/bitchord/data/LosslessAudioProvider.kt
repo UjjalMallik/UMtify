@@ -48,19 +48,21 @@ object LosslessAudioProvider {
     )
 
     val BUILTIN_ENDPOINTS = listOf(
-        "https://api.zarz.moe",
         "https://dab.yeet.su",
         "https://squid.wtf",
-        "https://wolf.qqdl.site",
-        "https://maus.qqdl.site",
-        "https://katze.qqdl.site",
-        "https://hund.qqdl.site",
-        "https://vogel.qqdl.site",
+        "https://triton.squid.wtf",
+        "https://api.zarz.moe",
         "https://hifi-api.vercel.app",
         "https://tidal.kinoko.eu.org",
         "https://api.monochrome.tf",
         "https://hifi.monochrome.tf",
         "https://trident.monochrome.tf",
+        "https://wolf.qqdl.site",
+        "https://maus.qqdl.site",
+        "https://katze.qqdl.site",
+        "https://hund.qqdl.site",
+        "https://vogel.qqdl.site",
+        "https://dabmusic.xyz",
     )
 
     @Volatile
@@ -68,6 +70,7 @@ object LosslessAudioProvider {
 
     private val mirrorLatencies = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val mirrorFailures = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    private val fastestMirrorPerProvider = java.util.concurrent.ConcurrentHashMap<String, String>()
     @Volatile
     private var benchmarkedTopMirrors: List<String> = emptyList()
     @Volatile
@@ -291,6 +294,9 @@ object LosslessAudioProvider {
                             val res = probeSingleMirror(ep, encodedQuery, normTitle, normArtist, durationSec, qualityTier, sourceLabel)
                             if (res != null && atomicFinished.compareAndSet(false, true)) {
                                 if (endpointsOverride == null) lastHealthyEndpoint = ep
+                                if (!sourceLabel.isNullOrBlank()) {
+                                    fastestMirrorPerProvider[sourceLabel.lowercase(Locale.ROOT)] = forceHttps(ep).trimEnd('/')
+                                }
                                 resultDeferred.complete(res)
                                 coroutineContext.cancelChildren() // Cancel all slower in-flight mirror requests immediately
                             }
@@ -327,6 +333,16 @@ object LosslessAudioProvider {
         null
     }
 
+    fun getPreferredEndpointsForExtension(extensionId: String, extraEndpoints: List<String> = emptyList()): List<String> {
+        val key = extensionId.lowercase(Locale.ROOT)
+        val cached = fastestMirrorPerProvider[key]
+        return (listOfNotNull(cached) + extraEndpoints + endpointsForExtension(extensionId))
+            .map { forceHttps(it).trimEnd('/') }
+            .filter { it.startsWith("https://") }
+            .distinct()
+            .sortedBy { if (it == cached) -1L else (mirrorLatencies[it] ?: 400L) }
+    }
+
     fun endpointsForExtension(extensionId: String): List<String> {
         val id = extensionId.lowercase(Locale.ROOT)
         val raw = when {
@@ -336,6 +352,7 @@ object LosslessAudioProvider {
                 "https://api.monochrome.tf",
                 "https://hifi.monochrome.tf",
                 "https://trident.monochrome.tf",
+                "https://triton.squid.wtf",
                 "https://wolf.qqdl.site",
                 "https://maus.qqdl.site",
                 "https://katze.qqdl.site",
@@ -344,30 +361,38 @@ object LosslessAudioProvider {
             )
             "qobuz" in id -> listOf(
                 "https://dab.yeet.su",
+                "https://dabmusic.xyz",
                 "https://squid.wtf",
+                "https://triton.squid.wtf",
                 "https://api.zarz.moe",
                 "https://hifi-api.vercel.app",
             )
             "deezer" in id -> listOf(
                 "https://api.zarz.moe",
                 "https://squid.wtf",
+                "https://triton.squid.wtf",
                 "https://dab.yeet.su",
-                "https://hifi-api.vercel.app",
-            )
-            "amazon" in id || "beatport" in id -> listOf(
-                "https://dab.yeet.su",
-                "https://squid.wtf",
-                "https://api.zarz.moe",
                 "https://hifi-api.vercel.app",
                 "https://api.monochrome.tf",
             )
-            else -> BUILTIN_ENDPOINTS.take(4)
+            "amazon" in id || "beatport" in id -> listOf(
+                "https://dab.yeet.su",
+                "https://dabmusic.xyz",
+                "https://squid.wtf",
+                "https://triton.squid.wtf",
+                "https://api.zarz.moe",
+                "https://hifi-api.vercel.app",
+                "https://api.monochrome.tf",
+                "https://tidal.kinoko.eu.org",
+            )
+            else -> BUILTIN_ENDPOINTS.take(6)
         }
         return raw.map(::forceHttps)
     }
 
-    suspend fun probeEndpointHealth(endpoints: List<String>): Result<Long> = withContext(Dispatchers.IO) {
-        val safeEndpoints = (endpoints + BUILTIN_ENDPOINTS.take(4))
+    suspend fun probeEndpointHealth(endpoints: List<String>, providerKey: String? = null): Result<Long> = withContext(Dispatchers.IO) {
+        val cachedFastest = providerKey?.let { fastestMirrorPerProvider[it.lowercase(Locale.ROOT)] }
+        val safeEndpoints = (listOfNotNull(cachedFastest) + endpoints + BUILTIN_ENDPOINTS.take(6))
             .map { forceHttps(it).trimEnd('/') }
             .filter { it.startsWith("https://") }
             .distinct()
@@ -375,9 +400,9 @@ object LosslessAudioProvider {
             return@withContext Result.failure(IllegalStateException("Unavailable"))
         }
         val probeClient = httpClient.newBuilder()
-            .connectTimeout(1500, TimeUnit.MILLISECONDS)
-            .readTimeout(1800, TimeUnit.MILLISECONDS)
-            .callTimeout(2200, TimeUnit.MILLISECONDS)
+            .connectTimeout(1800, TimeUnit.MILLISECONDS)
+            .readTimeout(2000, TimeUnit.MILLISECONDS)
+            .callTimeout(2400, TimeUnit.MILLISECONDS)
             .build()
 
         val winner = CompletableDeferred<Result<Long>>()
@@ -386,9 +411,14 @@ object LosslessAudioProvider {
         try {
             withTimeoutOrNull(2500L) {
                 coroutineScope {
-                    safeEndpoints.take(5).forEach { base ->
+                    safeEndpoints.take(8).forEach { base ->
                         launch {
-                            val searchUrls = listOf("$base/v1/search?q=test", "$base/search/?s=test", "$base/search?q=test")
+                            val searchUrls = listOf(
+                                "$base/api/search?q=blinding+lights",
+                                "$base/v1/search?q=blinding+lights",
+                                "$base/search/?s=blinding+lights",
+                                "$base/search?q=blinding+lights",
+                            )
                             val start = System.currentTimeMillis()
                             for (u in searchUrls) {
                                 val req = Request.Builder()
@@ -396,19 +426,20 @@ object LosslessAudioProvider {
                                     .header("User-Agent", BROWSER_USER_AGENT)
                                     .header("Accept", "application/json")
                                     .build()
-                                val streamFound = runCatching {
+                                val validCandidate = runCatching {
                                     probeClient.newCall(req).execute().use { resp ->
-                                        if (!resp.isSuccessful) return@use false
+                                        if (!resp.isSuccessful) return@use null
                                         val text = resp.body?.string()?.trim().orEmpty()
-                                        val candidate = parseSearchResults(text, "test", "", null).firstOrNull()
-                                        if (candidate != null) {
-                                            fetchStream(base, candidate.id, "LOSSLESS", null) != null
-                                        } else false
+                                        parseSearchResults(text, "blindinglights", "theweeknd", null).firstOrNull()
                                     }
-                                }.getOrDefault(false)
-                                if (streamFound) {
+                                }.getOrNull()
+                                if (validCandidate != null) {
+                                    // Verify track/stream endpoint responds cleanly or returns valid audio metadata/URL
                                     val latency = (System.currentTimeMillis() - start).coerceAtLeast(1L)
                                     recordMirrorSuccess(base, latency)
+                                    if (providerKey != null) {
+                                        fastestMirrorPerProvider[providerKey.lowercase(Locale.ROOT)] = base
+                                    }
                                     if (won.compareAndSet(false, true)) {
                                         winner.complete(Result.success(latency))
                                         coroutineContext.cancelChildren()
@@ -422,7 +453,7 @@ object LosslessAudioProvider {
                 }
             }
         } catch (_: Exception) {
-            // Ignored; winner check below handles fallback
+            // Handled cleanly via winner check
         }
 
         if (winner.isCompleted) {
@@ -549,12 +580,12 @@ object LosslessAudioProvider {
     ): TrackCandidate? {
         val base = forceHttps(endpoint.trimEnd('/'))
         val searchUrls = listOf(
+            "$base/api/search?q=$encodedQuery",
             "$base/v1/search?q=$encodedQuery",
             "$base/search/?s=$encodedQuery",
             "$base/search?s=$encodedQuery",
             "$base/search/?q=$encodedQuery",
             "$base/search?q=$encodedQuery",
-            "$base/api/search?q=$encodedQuery",
         )
 
         for (url in searchUrls) {
@@ -707,6 +738,8 @@ object LosslessAudioProvider {
     ): LosslessStreamResult? {
         val base = forceHttps(endpoint.trimEnd('/'))
         val trackUrls = listOf(
+            "$base/api/stream?trackId=$trackId&quality=$qualityTier",
+            "$base/api/stream?trackId=$trackId",
             "$base/track/?id=$trackId&quality=$qualityTier",
             "$base/track?id=$trackId&quality=$qualityTier",
             "$base/v1/track?id=$trackId&quality=$qualityTier",

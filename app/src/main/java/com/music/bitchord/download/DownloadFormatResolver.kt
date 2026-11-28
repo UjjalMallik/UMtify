@@ -73,10 +73,10 @@ object DownloadFormatResolver {
                     runCatching {
                         withTimeoutOrNull(3000L) {
                             val extId = SourceRegistry.extensionIdFor(ext.configId) ?: ext.configId
-                            val endpoints = (
-                                ExtensionRepoManager.getExtractedEndpointsFor(extId) +
-                                    LosslessAudioProvider.endpointsForExtension(extId)
-                                ).distinct()
+                            val endpoints = LosslessAudioProvider.getPreferredEndpointsForExtension(
+                                extensionId = extId,
+                                extraEndpoints = ExtensionRepoManager.getExtractedEndpointsFor(extId),
+                            )
                             val res = LosslessAudioProvider.resolveLosslessTrack(
                                 title = song.title,
                                 artist = song.artist,

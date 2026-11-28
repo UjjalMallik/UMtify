@@ -153,7 +153,9 @@ fun SourcesScreen(
     val allRepoExtensions by ExtensionRepoManager.extensions.collectAsStateWithLifecycle()
     val installedExtensionIds by ExtensionRepoManager.installedIds.collectAsStateWithLifecycle()
     val installedVersions by ExtensionRepoManager.installedVersions.collectAsStateWithLifecycle()
+    val autoUpdatedIds by ExtensionRepoManager.autoUpdatedIds.collectAsStateWithLifecycle()
     val runtimeStates by SourceHealthTracker.states.collectAsStateWithLifecycle()
+    val metadataStates by com.music.bitchord.data.MetadataDiscoveryProvider.providerStates.collectAsStateWithLifecycle()
 
     val coroutineScope = rememberCoroutineScope()
     var updatingExtIds by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -162,10 +164,19 @@ fun SourcesScreen(
     val health = remember { mutableStateMapOf<String, SourceHealth>() }
     val losslessOutput by LosslessOutput.state.collectAsStateWithLifecycle()
 
-    // Live GitHub update detection whenever Sources opens
+    // Live GitHub silent auto-update check whenever Sources opens (throttled to 30m)
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
-            ExtensionRepoManager.refreshRegistry(context, autoUpdate = false)
+            ExtensionRepoManager.refreshRegistry(context, autoUpdate = true, respectThrottle = true)
+        }
+    }
+
+    // Live Metadata & Home Discovery provider probe when Sources opens or metadata toggles change
+    val metadataProbeKey = configs.filter { it.kind == SourceKind.EXTENSION && it.metadataOnly && it.enabled }
+        .joinToString { it.id }
+    LaunchedEffect(metadataProbeKey) {
+        withContext(Dispatchers.IO) {
+            com.music.bitchord.data.MetadataDiscoveryProvider.probeMetadataProviders()
         }
     }
 
@@ -274,6 +285,8 @@ fun SourcesScreen(
                         extensionsById = extensionsById,
                         installedExtensionIds = installedExtensionIds,
                         installedVersions = installedVersions,
+                        autoUpdatedIds = autoUpdatedIds,
+                        metadataStates = metadataStates,
                         updatingExtIds = updatingExtIds,
                         onSetUpdating = { extId, busy ->
                             updatingExtIds = if (busy) updatingExtIds + extId else updatingExtIds - extId
@@ -318,6 +331,8 @@ fun SourcesScreen(
                         extensionsById = extensionsById,
                         installedExtensionIds = installedExtensionIds,
                         installedVersions = installedVersions,
+                        autoUpdatedIds = autoUpdatedIds,
+                        metadataStates = metadataStates,
                         updatingExtIds = updatingExtIds,
                         onSetUpdating = { id, busy ->
                             updatingExtIds = if (busy) updatingExtIds + id else updatingExtIds - id
@@ -369,6 +384,8 @@ fun SourcesScreen(
                         extensionsById = extensionsById,
                         installedExtensionIds = installedExtensionIds,
                         installedVersions = installedVersions,
+                        autoUpdatedIds = autoUpdatedIds,
+                        metadataStates = metadataStates,
                         updatingExtIds = updatingExtIds,
                         onSetUpdating = { id, busy ->
                             updatingExtIds = if (busy) updatingExtIds + id else updatingExtIds - id
@@ -379,11 +396,12 @@ fun SourcesScreen(
                         onEditSource = onEditSource,
                         onConfirmJioSaavn = onConfirmJioSaavn,
                         applyPlaybackQualityGate = false,
-                        showStatusPill = false,
+                        showStatusPill = true,
                         onToggleOverride = { enabled ->
                             ExtensionRepoManager.toggleExtension(extId, enabled, syncSourceRegistry = true)
                             if (enabled) {
                                 coroutineScope.launch(Dispatchers.IO) {
+                                    com.music.bitchord.data.MetadataDiscoveryProvider.probeMetadataProviders()
                                     com.music.bitchord.data.MetadataDiscoveryProvider.refreshChartDiscoveryShelf()
                                 }
                             }
@@ -846,6 +864,8 @@ private fun ManagedSourceRow(
     extensionsById: Map<String, com.music.bitchord.data.RepoExtension>,
     installedExtensionIds: Set<String>,
     installedVersions: Map<String, String>,
+    autoUpdatedIds: Set<String>,
+    metadataStates: Map<String, com.music.bitchord.data.MetadataDiscoveryProvider.MetadataProviderStatus>,
     updatingExtIds: Set<String>,
     onSetUpdating: (String, Boolean) -> Unit,
     losslessOutput: LosslessOutput.State,
@@ -872,12 +892,23 @@ private fun ManagedSourceRow(
     val updateAvailable = repoExt != null && (isInstalled || config.metadataOnly) &&
         ExtensionRepoManager.isNewerVersion(repoExt.version, localVer ?: "1.0.0")
     val isUpdating = extId != null && extId in updatingExtIds
+    val displayVer = localVer ?: repoExt?.version
+    val versionStatusLabel = if (config.kind == SourceKind.EXTENSION && displayVer != null && !updateAvailable) {
+        val statusSuffix = if (extId != null && extId in autoUpdatedIds) "Auto-updated" else "Up to date"
+        "v$displayVer • $statusSuffix"
+    } else null
+    val metadataStatus = if (config.metadataOnly) {
+        val key = com.music.bitchord.data.MetadataDiscoveryProvider.providerKeyFor("${extId ?: config.id} ${config.displayName}")
+        metadataStates[key]
+    } else null
 
     SourceRow(
         position = position,
         config = config,
         health = health,
         runtimeStatus = runtimeStatus,
+        metadataStatus = metadataStatus,
+        versionStatusLabel = versionStatusLabel,
         updateVersion = repoExt?.version?.takeIf { updateAvailable },
         isUpdating = isUpdating,
         onUpdateClick = if (extId != null && repoExt != null && updateAvailable) {
@@ -922,6 +953,8 @@ private fun SourceRow(
     config: SourceConfig,
     health: SourceHealth?,
     runtimeStatus: SourceRuntimeStatus? = null,
+    metadataStatus: com.music.bitchord.data.MetadataDiscoveryProvider.MetadataProviderStatus? = null,
+    versionStatusLabel: String? = null,
     updateVersion: String? = null,
     isUpdating: Boolean = false,
     onUpdateClick: (() -> Unit)? = null,
@@ -1033,6 +1066,19 @@ private fun SourceRow(
                             )
                         }
                     }
+                } else if (versionStatusLabel != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                    ) {
+                        Text(
+                            text = versionStatusLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
             Text(
@@ -1063,13 +1109,38 @@ private fun SourceRow(
 
             // Live Error & Health Status Badge
             if (showStatusPill && config.metadataOnly) {
-                Spacer(Modifier.height(4.dp))
-                StatusBadgePill(
-                    text = "Metadata only",
-                    dotColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                    textColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (isChecked) {
+                    when {
+                        metadataStatus?.ready == true -> {
+                            Spacer(Modifier.height(4.dp))
+                            val enrichedPart = if (metadataStatus.enrichedCount > 0) {
+                                " • Enriched ${metadataStatus.enrichedCount} items"
+                            } else {
+                                ""
+                            }
+                            val latencyPart = if (metadataStatus.latencyMs > 0L) {
+                                " • ${metadataStatus.latencyMs}ms"
+                            } else {
+                                ""
+                            }
+                            StatusBadgePill(
+                                text = "Active$latencyPart$enrichedPart",
+                                dotColor = Color(0xFF4CAF50),
+                                containerColor = Color(0xFF4CAF50).copy(alpha = 0.14f),
+                                textColor = Color(0xFF2E7D32),
+                            )
+                        }
+                        metadataStatus?.error != null -> {
+                            Spacer(Modifier.height(4.dp))
+                            StatusBadgePill(
+                                text = "Offline • ${metadataStatus.error}",
+                                dotColor = MaterialTheme.colorScheme.error,
+                                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
+                                textColor = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                }
             } else if (showStatusPill && isChecked && awaitingOutput == null && !skippedByQuality) {
                 when (effectiveStatus) {
                     is SourceRuntimeStatus.Ready -> {

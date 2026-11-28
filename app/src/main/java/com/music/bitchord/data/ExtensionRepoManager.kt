@@ -42,6 +42,8 @@ object ExtensionRepoManager {
     private const val KEY_INSTALLED_VERSIONS = "installed_versions"
     private const val KEY_CACHED_REGISTRY = "cached_registry_json"
     private const val KEY_INITIALIZED = "repo_initialized_v2"
+    private const val KEY_LAST_REGISTRY_CHECK_MS = "last_registry_check_ms"
+    private const val REGISTRY_THROTTLE_MS = 30 * 60 * 1000L
 
     val CORE_DEFAULT_IDS = setOf(
         "spotify-web",
@@ -75,6 +77,9 @@ object ExtensionRepoManager {
 
     private val _installedVersions = MutableStateFlow<Map<String, String>>(emptyMap())
     val installedVersions: StateFlow<Map<String, String>> = _installedVersions.asStateFlow()
+
+    private val _autoUpdatedIds = MutableStateFlow<Set<String>>(emptySet())
+    val autoUpdatedIds: StateFlow<Set<String>> = _autoUpdatedIds.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -143,9 +148,9 @@ object ExtensionRepoManager {
             }
         }
 
-        // Fetch live GitHub registry in background without silently hiding update badges
+        // Fetch live GitHub registry & silently auto-update all extensions in background
         scope.launch {
-            refreshRegistry(context, autoUpdate = false)
+            refreshRegistry(context, autoUpdate = true, respectThrottle = false)
             LosslessAudioProvider.benchmarkTopServers("repo-init")
         }
     }
@@ -299,7 +304,21 @@ object ExtensionRepoManager {
             .ifBlank { id }
     }
 
-    suspend fun refreshRegistry(context: Context, autoUpdate: Boolean = true): List<RepoExtension> = withContext(Dispatchers.IO) {
+    suspend fun refreshRegistry(
+        context: Context,
+        autoUpdate: Boolean = true,
+        respectThrottle: Boolean = false,
+    ): List<RepoExtension> = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val lastCheck = prefs?.getLong(KEY_LAST_REGISTRY_CHECK_MS, 0L) ?: 0L
+        if (respectThrottle && _extensions.value.isNotEmpty() && now - lastCheck < REGISTRY_THROTTLE_MS) {
+            if (autoUpdate) {
+                checkForUpdatesAndApply(context, _extensions.value)
+            }
+            syncWithSourceRegistry()
+            return@withContext _extensions.value
+        }
+
         _isLoading.value = true
         try {
             val request = Request.Builder()
@@ -320,7 +339,10 @@ object ExtensionRepoManager {
                 val parsed = parseRegistry(body)
                 if (parsed.isNotEmpty()) {
                     _extensions.value = parsed
-                    prefs?.edit()?.putString(KEY_CACHED_REGISTRY, body)?.apply()
+                    prefs?.edit()
+                        ?.putString(KEY_CACHED_REGISTRY, body)
+                        ?.putLong(KEY_LAST_REGISTRY_CHECK_MS, System.currentTimeMillis())
+                        ?.apply()
 
                     if (autoUpdate) {
                         checkForUpdatesAndApply(context, parsed)
@@ -392,27 +414,29 @@ object ExtensionRepoManager {
     }
 
     private suspend fun checkForUpdatesAndApply(context: Context, registry: List<RepoExtension>) = withContext(Dispatchers.IO) {
-        val installed = _installedIds.value
         val versions = _installedVersions.value.toMutableMap()
+        val autoUpdated = _autoUpdatedIds.value.toMutableSet()
         var changed = false
 
         for (ext in registry) {
-            if (ext.id in installed) {
-                val currentVer = versions[ext.id]
-                if (currentVer == null || isNewerVersion(ext.version, currentVer)) {
-                    Log.i(TAG, "Auto-updating extension ${ext.displayName} from ${currentVer ?: "none"} to ${ext.version}")
-                    // Download update in background
-                    val success = downloadExtensionFile(context, ext)
-                    if (success) {
-                        versions[ext.id] = ext.version
-                        changed = true
-                    }
+            val currentVer = versions[ext.id]
+            val localBundleMissing = ext.downloadUrl.isNotBlank() &&
+                !File(context.filesDir, "extensions/${ext.id}.sflx").exists()
+            if (currentVer == null || isNewerVersion(ext.version, currentVer) || localBundleMissing) {
+                Log.i(TAG, "Auto-updating extension ${ext.displayName} from ${currentVer ?: "none"} to v${ext.version}")
+                val success = downloadExtensionFile(context, ext)
+                if (success) {
+                    versions[ext.id] = ext.version
+                    autoUpdated.add(ext.id)
+                    SourceHealthTracker.clear(SourceRegistry.repoExtensionConfigId(ext.id))
+                    changed = true
                 }
             }
         }
 
         if (changed) {
             _installedVersions.value = versions
+            _autoUpdatedIds.value = autoUpdated
             persistVersions(versions)
         }
     }
