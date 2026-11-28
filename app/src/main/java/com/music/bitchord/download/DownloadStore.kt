@@ -168,22 +168,24 @@ object DownloadStore {
 
         /** @return the public uri the finished file can be reached at. */
         fun commit(): Uri {
-            if (part != null && target != null) {
-                target.parentFile?.mkdirs()
-                if (!part.renameTo(target)) {
+            val localPart = part
+            val localTarget = target
+            if (localPart != null && localTarget != null) {
+                localTarget.parentFile?.mkdirs()
+                if (!localPart.renameTo(localTarget)) {
                     // Cross-volume / OriginOS / FuntouchOS safe fallback when renameTo fails
-                    part.copyTo(target, overwrite = true)
-                    part.delete()
+                    localPart.copyTo(localTarget, overwrite = true)
+                    localPart.delete()
                 }
                 runCatching {
                     MediaScannerConnection.scanFile(
                         context,
-                        arrayOf(target.absolutePath),
+                        arrayOf(localTarget.absolutePath),
                         null,
                         null,
                     )
                 }
-                return Uri.fromFile(target)
+                return Uri.fromFile(localTarget)
             }
             val updateValues = ContentValues().apply {
                 put(MediaStore.Audio.Media.IS_PENDING, 0)
@@ -244,8 +246,9 @@ object DownloadStore {
             }
             // OEM MediaStore fallback (e.g. OriginOS / Vivo scoped storage restriction)
             val privTarget = privateFile(context, safeName)
-            privTarget.parentFile?.mkdirs()
-            val privPart = File(privTarget.parentFile, "$safeName.part")
+            val privFolder = privTarget.parentFile ?: context.filesDir
+            privFolder.mkdirs()
+            val privPart = File(privFolder, "$safeName.part")
             privPart.delete()
             return Pending(context, Uri.fromFile(privTarget), safeName, part = privPart, target = privTarget, song = song)
         }
