@@ -57,8 +57,25 @@ object DownloadStore {
             artist.isEmpty() -> title
             title.isEmpty() -> artist
             else -> "$artist - $title"
-        }.ifEmpty { song.videoId }
-        return "${stem.take(MAX_STEM_CHARS).trimEnd()}.$extension"
+        }.ifEmpty { sanitise(song.videoId).ifEmpty { "track" } }
+        val cleanExt = extension.lowercase(Locale.ROOT).replace(Regex("""[^a-z0-9]"""), "").ifEmpty { "m4a" }
+        return "${stem.take(MAX_STEM_CHARS).trimEnd('.', ' ')}.$cleanExt"
+    }
+
+    /**
+     * Strictly sanitizes any full filename (including extension) before creating
+     * a local [File] or `MediaStore.Audio.Media.DISPLAY_NAME`.
+     */
+    fun sanitiseFileName(raw: String): String {
+        val trimmed = raw.trim()
+        val dot = trimmed.lastIndexOf('.')
+        return if (dot > 0 && dot < trimmed.length - 1) {
+            val stem = sanitise(trimmed.substring(0, dot)).ifEmpty { "track" }
+            val ext = trimmed.substring(dot + 1).lowercase(Locale.ROOT).replace(Regex("""[^a-z0-9]"""), "").ifEmpty { "m4a" }
+            "${stem.take(MAX_STEM_CHARS).trimEnd('.', ' ')}.$ext"
+        } else {
+            sanitise(trimmed).take(MAX_STEM_CHARS).trimEnd('.', ' ').ifEmpty { "track" }
+        }
     }
 
     private fun sanitise(raw: String): String = raw
@@ -67,7 +84,7 @@ object DownloadStore {
         .trim()
         .trim('.')
 
-    private val ILLEGAL = Regex("""[\\/:*?"<>|\x00-\x1F]""")
+    private val ILLEGAL = Regex("""[\\/:*?"<>|\x00-\x1F\x7F]""")
     private val WHITESPACE = Regex("""\s+""")
 
     /** Long enough for anything real, short of the 255-byte filename ceiling. */
@@ -152,28 +169,39 @@ object DownloadStore {
         /** @return the public uri the finished file can be reached at. */
         fun commit(): Uri {
             if (part != null && target != null) {
-                if (!part.renameTo(target)) error("Could not finish writing $name")
-                MediaScannerConnection.scanFile(
-                    context,
-                    arrayOf(target.absolutePath),
-                    null,
-                    null,
-                )
+                target.parentFile?.mkdirs()
+                if (!part.renameTo(target)) {
+                    // Cross-volume / OriginOS / FuntouchOS safe fallback when renameTo fails
+                    part.copyTo(target, overwrite = true)
+                    part.delete()
+                }
+                runCatching {
+                    MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(target.absolutePath),
+                        null,
+                        null,
+                    )
+                }
                 return Uri.fromFile(target)
             }
             val updateValues = ContentValues().apply {
                 put(MediaStore.Audio.Media.IS_PENDING, 0)
-                song?.title?.takeIf { it.isNotBlank() }?.let { put(MediaStore.Audio.Media.TITLE, it) }
-                song?.artist?.takeIf { it.isNotBlank() }?.let { put(MediaStore.Audio.Media.ARTIST, it) }
-                song?.albumName?.takeIf { it.isNotBlank() }?.let { put(MediaStore.Audio.Media.ALBUM, it) }
+                song?.title?.takeIf { it.isNotBlank() }?.let { put(MediaStore.Audio.Media.TITLE, sanitise(it)) }
+                song?.artist?.takeIf { it.isNotBlank() }?.let { put(MediaStore.Audio.Media.ARTIST, sanitise(it)) }
+                song?.albumName?.takeIf { it.isNotBlank() }?.let { put(MediaStore.Audio.Media.ALBUM, sanitise(it)) }
                 put(MediaStore.Audio.Media.IS_MUSIC, 1)
             }
-            context.contentResolver.update(
-                uri,
-                updateValues,
-                null,
-                null,
-            )
+            runCatching {
+                context.contentResolver.update(
+                    uri,
+                    updateValues,
+                    null,
+                    null,
+                )
+            }.onFailure { err ->
+                Log.w(TAG, "MediaStore commit update failed for $name (keeping downloaded file): ${err.message}")
+            }
             return uri
         }
 
@@ -185,6 +213,7 @@ object DownloadStore {
 
     /**
      * Reserve [name] in public "Music/UMtify/" folder and return somewhere to write it.
+     * Falls back to app-private `filesDir/downloads/` if MediaStore rejects the insert (e.g. OEM scoped storage).
      */
     fun begin(
         context: Context,
@@ -192,32 +221,41 @@ object DownloadStore {
         mimeType: String,
         song: Song? = null,
     ): Pending {
+        val safeName = sanitiseFileName(name)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
-                put(MediaStore.Audio.Media.DISPLAY_NAME, name)
+                put(MediaStore.Audio.Media.DISPLAY_NAME, safeName)
                 put(MediaStore.Audio.Media.MIME_TYPE, mimeType)
                 put(MediaStore.Audio.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MUSIC}/$FOLDER")
-                song?.title?.takeIf { it.isNotBlank() }?.let { put(MediaStore.Audio.Media.TITLE, it) }
-                song?.artist?.takeIf { it.isNotBlank() }?.let { put(MediaStore.Audio.Media.ARTIST, it) }
-                song?.albumName?.takeIf { it.isNotBlank() }?.let { put(MediaStore.Audio.Media.ALBUM, it) }
+                song?.title?.takeIf { it.isNotBlank() }?.let { put(MediaStore.Audio.Media.TITLE, sanitise(it)) }
+                song?.artist?.takeIf { it.isNotBlank() }?.let { put(MediaStore.Audio.Media.ARTIST, sanitise(it)) }
+                song?.albumName?.takeIf { it.isNotBlank() }?.let { put(MediaStore.Audio.Media.ALBUM, sanitise(it)) }
                 put(MediaStore.Audio.Media.IS_MUSIC, 1)
                 put(MediaStore.Audio.Media.IS_PENDING, 1)
             }
             val uri = runCatching {
                 context.contentResolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
-            }.getOrElse { cause ->
-                Log.w(TAG, "the media store refused $mimeType for $name: ${cause.message}")
-                error("Android won't store ${name.substringAfterLast('.', mimeType)} files in Music")
-            } ?: error("Could not create $name in Music")
-            return Pending(context, uri, name, part = null, target = null, song = song)
+            }.onFailure { cause ->
+                Log.w(TAG, "MediaStore refused $mimeType for $safeName: ${cause.message}; falling back to private storage")
+            }.getOrNull()
+
+            if (uri != null) {
+                return Pending(context, uri, safeName, part = null, target = null, song = song)
+            }
+            // OEM MediaStore fallback (e.g. OriginOS / Vivo scoped storage restriction)
+            val privTarget = privateFile(context, safeName)
+            privTarget.parentFile?.mkdirs()
+            val privPart = File(privTarget.parentFile, "$safeName.part")
+            privPart.delete()
+            return Pending(context, Uri.fromFile(privTarget), safeName, part = privPart, target = privTarget, song = song)
         }
 
-        val target = legacyFile(name)
+        val target = legacyFile(safeName)
         val folder = target.parentFile ?: error("No Music folder on this device")
         if (!folder.exists() && !folder.mkdirs()) error("Could not create ${folder.path}")
-        val part = File(folder, "$name.part")
+        val part = File(folder, "$safeName.part")
         part.delete()
-        return Pending(context, Uri.fromFile(target), name, part = part, target = target, song = song)
+        return Pending(context, Uri.fromFile(target), safeName, part = part, target = target, song = song)
     }
 
     @Suppress("DEPRECATION")

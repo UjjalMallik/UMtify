@@ -478,7 +478,16 @@ object SflxRuntimeBridge {
                         """.trimIndent(),
                     )
 
-                    val resultJson = qjs.evaluate<String>("(typeof __sflx_resolved_json === 'string') ? __sflx_resolved_json : '{\"ok\":false,\"formats\":[],\"reason\":\"Async IIFE did not complete\"}'")
+                    var resultJson = qjs.evaluate<String>("(typeof __sflx_resolved_json === 'string') ? __sflx_resolved_json : ''")
+                    var pumpAttempts = 0
+                    while (resultJson.isEmpty() && pumpAttempts < 25 && System.currentTimeMillis() < deadlineMs) {
+                        kotlinx.coroutines.delay(40L)
+                        resultJson = qjs.evaluate<String>("(typeof __sflx_resolved_json === 'string') ? __sflx_resolved_json : ''")
+                        pumpAttempts++
+                    }
+                    if (resultJson.isEmpty()) {
+                        resultJson = "{\"ok\":false,\"formats\":[],\"reason\":\"Async IIFE did not complete\"}"
+                    }
                     val safeResultJson = resultJson.trim().let { if (it.startsWith("{") || it.startsWith("[")) it else "{\"ok\":false,\"formats\":[],\"reason\":\"Unexpected JS return type\"}" }
                     val root = JSONObject(safeResultJson)
                     val formatsArr = root.optJSONArray("formats") ?: JSONArray()
@@ -868,25 +877,25 @@ object SflxRuntimeBridge {
             }
 
             var http = {
-                get: function(url, headers) {
-                    return JSON.parse(__host.httpRequest("GET", String(url || ""), null, JSON.stringify(headers || {})));
+                get: async function(url, headers) {
+                    return JSON.parse(await __host.httpRequest("GET", String(url || ""), null, JSON.stringify(headers || {})));
                 },
-                post: function(url, body, headers) {
+                post: async function(url, body, headers) {
                     var bodyArg = (body === undefined || body === null) ? "" : (typeof body === "string" ? body : JSON.stringify(body));
-                    return JSON.parse(__host.httpRequest("POST", String(url || ""), bodyArg, JSON.stringify(headers || {})));
+                    return JSON.parse(await __host.httpRequest("POST", String(url || ""), bodyArg, JSON.stringify(headers || {})));
                 },
-                request: function(opts) {
+                request: async function(opts) {
                     opts = opts || {};
                     var bodyArg = (opts.body === undefined || opts.body === null) ? null : (typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body));
-                    return JSON.parse(__host.httpRequest(String(opts.method || "GET"), String(opts.url || ""), bodyArg, JSON.stringify(opts.headers || {})));
+                    return JSON.parse(await __host.httpRequest(String(opts.method || "GET"), String(opts.url || ""), bodyArg, JSON.stringify(opts.headers || {})));
                 },
                 clearCookies: function() { __host.clearCookies(); }
             };
 
             var session = {
-                signedFetch: function(method, path, body, headers) {
+                signedFetch: async function(method, path, body, headers) {
                     var bodyArg = (body === undefined || body === null) ? null : (typeof body === "string" ? body : JSON.stringify(body));
-                    return JSON.parse(__host.sessionSignedFetch(String(method || "GET"), String(path || ""), bodyArg, JSON.stringify(headers || {})));
+                    return JSON.parse(await __host.sessionSignedFetch(String(method || "GET"), String(path || ""), bodyArg, JSON.stringify(headers || {})));
                 },
                 completeGrant: function() { return { success: false }; }
             };
@@ -927,9 +936,9 @@ object SflxRuntimeBridge {
             };
 
             if (typeof fetch === 'undefined') {
-                var fetch = function(url, opts) {
+                var fetch = async function(url, opts) {
                     opts = opts || {};
-                    var res = http.request({
+                    var res = await http.request({
                         method: String(opts.method || "GET"),
                         url: String(url || ""),
                         body: opts.body,
@@ -937,13 +946,15 @@ object SflxRuntimeBridge {
                     });
                     var statusCode = Number(res.statusCode || res.status || 0);
                     var bodyText = String(res.body || "");
-                    return Promise.resolve({
+                    return {
                         ok: statusCode >= 200 && statusCode < 300,
                         status: statusCode,
+                        statusCode: statusCode,
                         headers: res.headers || {},
-                        text: function() { return Promise.resolve(bodyText); },
-                        json: function() { return Promise.resolve(JSON.parse(bodyText || "{}")); }
-                    });
+                        body: bodyText,
+                        text: async function() { return bodyText; },
+                        json: async function() { return JSON.parse(bodyText || "{}"); }
+                    };
                 };
             }
             if (typeof setTimeout === 'undefined') {
@@ -964,23 +975,90 @@ object SflxRuntimeBridge {
 
     private suspend fun evaluateScriptWithBridge(qjs: QuickJs, manifestJson: String?, indexJs: String) {
         val preprocessed = preprocessIndexJs(indexJs)
-        qjs.evaluate<Unit>(preprocessed)
+        val wrapped = """
+            var module = { exports: {} };
+            var exports = module.exports;
+            globalThis.__sflx_default_export = undefined;
+            globalThis.__sflx_named_exports = {};
+            $preprocessed
+            ;(function() {
+                var exp = globalThis.__sflx_ext || {};
+                var modExp = (module && module.exports) ? module.exports : {};
+                var defExp = globalThis.__sflx_default_export;
+                if (typeof defExp === 'function') {
+                    try { defExp = new defExp(); } catch (_) {}
+                }
+                if (typeof modExp === 'function') {
+                    try { modExp = new modExp(); } catch (_) {}
+                }
+                var sources = [modExp, defExp, globalThis.__sflx_named_exports];
+                for (var i = 0; i < sources.length; i++) {
+                    var src = sources[i];
+                    if (src && typeof src === 'object') {
+                        for (var k in src) {
+                            if (Object.prototype.hasOwnProperty.call(src, k) && exp[k] === undefined) {
+                                exp[k] = src[k];
+                            }
+                        }
+                    }
+                }
+                globalThis.__sflx_ext = exp;
+            })();
+        """.trimIndent()
+        qjs.evaluate<Unit>(wrapped)
     }
 
     /**
-     * Strips ES-module syntax (import/export) so raw .sflx index.js files
-     * evaluate cleanly inside QuickJS without needing native module support.
-     * Mirrors the approach used by QuickJsExecutor.preprocessModuleCode().
+     * Converts ES-module syntax (`export default`, `export function`, `export { ... }`, `import`)
+     * into QuickJS-compatible assignments while preserving all exported extension functions.
      */
     private fun preprocessIndexJs(code: String): String {
-        // Remove ES module export keywords so plain eval works
         var result = code
-        result = result.replace(Regex("""^\s*export\s+default\s+(?=function|class|const|let|var|async)""", RegexOption.MULTILINE), "")
-        result = result.replace(Regex("""\bexport\s+(default\s+)?(const|let|var|function|class|async)\b"""), "$2")
-        result = result.replace(Regex("""\bexport\s*\{[^}]*\}\s*;?"""), "")
-        // Convert bare `import ... from '...'` to no-op (extensions rely on globalThis polyfills)
-        result = result.replace(Regex("""^\s*import\s+.*?from\s+['"][^'"]*['"]\s*;?\s*$""", setOf(RegexOption.MULTILINE, RegexOption.DOT_MATCHES_ALL)), "")
-        result = result.replace(Regex("""^\s*import\s*\{[^}]*\}\s*from\s+['"][^'"]*['"]\s*;?\s*$""", RegexOption.MULTILINE), "")
+        val exportedNames = linkedSetOf<String>()
+
+        // Capture `export default ...` instead of deleting it
+        result = result.replace(
+            Regex("""^\s*export\s+default\s+""", RegexOption.MULTILINE),
+            "globalThis.__sflx_default_export = ",
+        )
+
+        // Capture named declarations: export const/let/var/function/async function/class <name>
+        val declRegex = Regex("""^\s*export\s+(?:async\s+)?(const|let|var|function|class)\s+([A-Za-z0-9_${'$'}]+)""", RegexOption.MULTILINE)
+        declRegex.findAll(result).forEach { match ->
+            exportedNames.add(match.groupValues[2])
+        }
+        result = result.replace(
+            Regex("""^\s*export\s+(?=(?:async\s+)?(?:const|let|var|function|class)\b)""", RegexOption.MULTILINE),
+            "",
+        )
+
+        // Capture `export { a, b as c }`
+        val braceExportRegex = Regex("""^\s*export\s*\{([^}]*)\}\s*;?""", RegexOption.MULTILINE)
+        braceExportRegex.findAll(result).forEach { match ->
+            match.groupValues[1].split(',').forEach { item ->
+                val parts = item.trim().split(Regex("""\s+as\s+"""))
+                val localName = parts.firstOrNull()?.trim().orEmpty()
+                if (localName.isNotBlank()) exportedNames.add(localName)
+            }
+        }
+        result = result.replace(braceExportRegex, "")
+
+        // Strip `import ... from '...'` and side-effect `import '...'`
+        result = result.replace(
+            Regex("""^\s*import\s+[\s\S]*?\s+from\s+['"][^'"]*['"]\s*;?\s*$""", RegexOption.MULTILINE),
+            "",
+        )
+        result = result.replace(
+            Regex("""^\s*import\s+['"][^'"]*['"]\s*;?\s*$""", RegexOption.MULTILINE),
+            "",
+        )
+
+        if (exportedNames.isNotEmpty()) {
+            val exportGlue = exportedNames.joinToString("\n") { name ->
+                "if (typeof $name !== 'undefined') globalThis.__sflx_named_exports[${JSONObject.quote(name)}] = $name;"
+            }
+            result = "$result\n$exportGlue"
+        }
         return result
     }
 

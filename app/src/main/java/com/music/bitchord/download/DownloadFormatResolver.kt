@@ -233,8 +233,8 @@ object DownloadFormatResolver {
                         }
                     }
 
-                    // B. If .sflx returned no direct URL (or partial tiers), query verified HTTPS lossless mirrors for this provider
-                    if (drafts.isEmpty()) {
+                    // B. If .sflx returned no direct URL (or is missing lossless tiers), query verified HTTPS lossless mirrors for this provider
+                    if (drafts.isEmpty() || drafts.none { it.isLossless }) {
                         val endpoints = LosslessAudioProvider.getPreferredEndpointsForExtension(
                             extensionId = extId,
                             extraEndpoints = ExtensionRepoManager.getExtractedEndpointsFor(extId),

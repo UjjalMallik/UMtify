@@ -163,6 +163,14 @@ object Downloader {
      *   indeterminate rather than dividing by zero.
      * @return how many bytes were written.
      */
+    private val downloadClient by lazy {
+        Http.client.newBuilder()
+            .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
+
     suspend fun fetchDirect(
         url: String,
         headers: Map<String, String>,
@@ -193,13 +201,13 @@ object Downloader {
             val resumeOffset = written
             val req = buildRequest(headers, resumeFrom = resumeOffset)
             try {
-                var response = Http.client.newCall(req).execute()
+                var response = downloadClient.newCall(req).execute()
                 if ((response.code == 403 || response.code == 401) &&
                     headers.none { it.key.equals("User-Agent", ignoreCase = true) }
                 ) {
                     response.close()
                     val retryHeaders = headers + ("User-Agent" to com.music.bitchord.data.LosslessAudioProvider.BROWSER_USER_AGENT)
-                    response = Http.client.newCall(buildRequest(retryHeaders, resumeFrom = resumeOffset)).execute()
+                    response = downloadClient.newCall(buildRequest(retryHeaders, resumeFrom = resumeOffset)).execute()
                 }
                 // Server ignored Range resume (answered 200 instead of 206): only safe if we haven't written anything yet
                 if (resumeOffset > 0L && response.code == 200) {
@@ -239,8 +247,11 @@ object Downloader {
 
         sink.flush()
         val expected = total
-        if (expected != null && written < expected) {
+        val toleranceBytes = expected?.let { maxOf(4096L, it / 200L) } ?: 0L
+        if (expected != null && written < expected - toleranceBytes) {
             error("Download stopped at ${written}B of $expected — try again")
+        } else if (expected != null && written < expected) {
+            Log.w(TAG, "minor Content-Length variance (${written}B vs ${expected}B); accepting completed stream")
         }
         if (written == 0L) error("Download failed: nothing was sent")
         Log.d(TAG, "fetched ${written}B directly")

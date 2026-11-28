@@ -1424,12 +1424,18 @@ object Downloads {
                         DownloadSession.running(id, fraction)
                     }
                 }
-                val words = lyrics?.await()
-                val cover = artwork?.await()
-                // Publish only after metadata is part of the file. This keeps
-                // concurrent album workers from exposing untagged tracks.
-                MediaTagger.embed(context, destination.tagUri, track, route.extension, words, cover)
-                val artworkUri = MediaTagger.persistArtwork(context, track.thumbnailUrl, cover)
+                val words = runCatching { lyrics?.await() }.getOrNull()
+                val cover = runCatching { artwork?.await() }.getOrNull()
+                // Post-download tagging & artwork persistence are best-effort:
+                // if OEM storage or tagger fails at 95%, keep the downloaded audio file.
+                runCatching {
+                    MediaTagger.embed(context, destination.tagUri, track, route.extension, words, cover)
+                }.onFailure { err ->
+                    Log.w(TAG, "post-download tagging failed for $name (keeping audio): ${err.message}")
+                }
+                val artworkUri = runCatching {
+                    MediaTagger.persistArtwork(context, track.thumbnailUrl, cover)
+                }.getOrNull()
                 val savedUri = destination.commit()
                 pending = null
                 remember(song, track, savedUri, route.downloadFormat, artworkUri)
