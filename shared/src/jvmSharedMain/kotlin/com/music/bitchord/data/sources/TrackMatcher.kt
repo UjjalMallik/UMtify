@@ -375,7 +375,7 @@ object TrackMatcher {
      * A title split into the part that is the recording's identity and the
      * parts that are the listing's.
      */
-    internal data class TitleParts(
+    data class TitleParts(
         /** The title proper, lowercased, one entry per word. */
         val words: List<String>,
         /** [words] with everything but letters and digits removed — what identity is compared on. */
@@ -386,7 +386,7 @@ object TrackMatcher {
         val context: Set<String>,
     )
 
-    internal fun parseTitle(raw: String, artist: String = ""): TitleParts {
+    fun parseTitle(raw: String, artist: String = ""): TitleParts {
         val versions = sortedSetOf<String>()
         val context = mutableSetOf<String>()
         var text = normalize(raw)
