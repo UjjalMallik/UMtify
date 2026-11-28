@@ -52,6 +52,13 @@ object ExtensionRepoManager {
         "deezer",
     )
 
+    private val EXTRA_CATALOG_FALLBACK_IDS = listOf(
+        "beatport",
+        "bugs-music",
+        "genie-music",
+        "melon-music",
+    )
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var prefs: SharedPreferences? = null
     @Volatile
@@ -152,24 +159,37 @@ object ExtensionRepoManager {
         val allIds = linkedSetOf<String>()
         installed.forEach { allIds.add(it) }
         catalog.forEach { allIds.add(it.id) }
+        val lowerExisting = allIds.joinToString(" ") { it.lowercase(Locale.ROOT) } + " " +
+            catalog.joinToString(" ") { "${it.name} ${it.displayName}".lowercase(Locale.ROOT) }
+        EXTRA_CATALOG_FALLBACK_IDS.forEach { fallbackId ->
+            val keyword = fallbackId.substringBefore('-')
+            if (!lowerExisting.contains(keyword)) {
+                allIds.add(fallbackId)
+            }
+        }
 
         val entries = allIds.mapNotNull { extId ->
             val ext = catalogById[extId]
+            val endpoints = (getExtractedEndpointsFor(extId) + LosslessAudioProvider.endpointsForExtension(extId)).distinct()
             if (ext != null) {
-                if (!isAudioDownloadExtension(ext)) return@mapNotNull null
                 val metadataOnly = isMetadataOnlyExtension(extId, ext)
+                if (!metadataOnly && !isAudioDownloadExtension(ext)) return@mapNotNull null
                 SourceRegistry.RepoSyncEntry(
                     extensionId = extId,
-                    displayName = ext.displayName,
+                    displayName = if (extId.contains("spotify", true) && !ext.displayName.contains("Web", true)) {
+                        "Spotify Web"
+                    } else {
+                        ext.displayName
+                    },
                     enabled = extId in installed && extId in enabled,
-                    endpointUrl = getExtractedEndpointsFor(extId).firstOrNull().orEmpty(),
+                    endpointUrl = endpoints.firstOrNull().orEmpty(),
                     metadataOnly = metadataOnly,
                 )
             } else {
                 if (isDuplicateBuiltIn(extId)) return@mapNotNull null
-                val endpoints = getExtractedEndpointsFor(extId)
-                if (extId !in CORE_DEFAULT_IDS && endpoints.isEmpty()) return@mapNotNull null
                 val metadataOnly = isMetadataOnlyExtension(extId, null)
+                val isKnownDefault = extId in CORE_DEFAULT_IDS || extId in EXTRA_CATALOG_FALLBACK_IDS
+                if (!isKnownDefault && endpoints.isEmpty() && !metadataOnly) return@mapNotNull null
                 SourceRegistry.RepoSyncEntry(
                     extensionId = extId,
                     displayName = fallbackDisplayName(extId),
@@ -181,6 +201,18 @@ object ExtensionRepoManager {
         }.sortedBy { it.displayName.lowercase(Locale.ROOT) }
 
         SourceRegistry.syncRepoExtensions(entries)
+    }
+
+    /** True if any Group 3 metadata/discovery or audio extension matching [keyword] is enabled. */
+    fun isMetadataProviderEnabled(keyword: String): Boolean {
+        val configs = SourceRegistry.configs.value
+        val byConfig = configs.any { cfg ->
+            cfg.kind == com.music.bitchord.data.sources.SourceKind.EXTENSION &&
+                (cfg.enabled || cfg.isDownloadEnabled) &&
+                (cfg.id.contains(keyword, ignoreCase = true) || cfg.label.contains(keyword, ignoreCase = true))
+        }
+        if (byConfig) return true
+        return _enabledIds.value.any { it.contains(keyword, ignoreCase = true) }
     }
 
     fun isMetadataOnlyExtension(extensionId: String, ext: RepoExtension? = null): Boolean {
@@ -251,8 +283,11 @@ object ExtensionRepoManager {
         "qobuz-web", "qobuz" -> "Qobuz"
         "deezer" -> "Deezer"
         "amazon", "amazon-music" -> "Amazon Music"
-        "spotify-web", "spotify" -> "Spotify"
+        "spotify-web", "spotify" -> "Spotify Web"
         "apple-music", "apple" -> "Apple Music"
+        "bugs-music", "bugs" -> "Bugs Music"
+        "genie-music", "genie" -> "Genie Music"
+        "melon-music", "melon" -> "Melon Music"
         "beatport" -> "Beatport"
         else -> id.removeSuffix("-web")
             .split('-', '_')

@@ -155,6 +155,9 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
         // After AppSettings, whose switch decides whether half of it runs.
         ArtistFacts.init(this)
         com.music.bitchord.data.ArtistAvatarCache.init(filesDir)
+        com.music.bitchord.data.ArtistAvatarCache.registerMetadataEnricher { artistName ->
+            com.music.bitchord.data.MetadataDiscoveryProvider.enrichArtist(artistName)
+        }
         // One cache directory can only be opened once per process, and
         // PlaybackService shares this one — so it's opened here, not there.
         AudioCache.init(this)

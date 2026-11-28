@@ -3532,6 +3532,18 @@ fun NowPlayingScreen(
                                     label = "playerCredits",
                                 ) {
                                     val scrolling = scrolls()
+                                    val avatarRevision by com.music.bitchord.data.ArtistAvatarCache.revision.collectAsStateWithLifecycle()
+                                    LaunchedEffect(displaySong.artist) {
+                                        if (displaySong.artistId.isNullOrBlank()) {
+                                            com.music.bitchord.data.ArtistAvatarCache.resolveInBackground(displaySong.artist)
+                                        }
+                                    }
+                                    val resolvedArtistId = remember(displaySong.artist, displaySong.artistId, avatarRevision) {
+                                        displaySong.artistId ?: com.music.bitchord.data.ArtistAvatarCache.getBrowseId(displaySong.artist)
+                                    }
+                                    val resolvedArtistDisplay = remember(displaySong.artist, avatarRevision) {
+                                        com.music.bitchord.data.ArtistAvatarCache.getDisplayName(displaySong.artist) ?: displaySong.artist
+                                    }
                                     Column {
                                         MarqueeText(
                                             text = displaySong.title,
@@ -3552,12 +3564,12 @@ fun NowPlayingScreen(
                                             modifier = Modifier.opensPage(song.albumId, onOpenAlbum),
                                         )
                                         ArtistCreditsMarquee(
-                                            text = displaySong.artist,
-                                            credits = remember(displaySong.artist, displaySong.artists, displaySong.artistId) {
+                                            text = resolvedArtistDisplay,
+                                            credits = remember(resolvedArtistDisplay, displaySong.artists, resolvedArtistId) {
                                                 artistCredits(
-                                                    displaySong.artist,
+                                                    resolvedArtistDisplay,
                                                     displaySong.artists,
-                                                    displaySong.artistId,
+                                                    resolvedArtistId,
                                                 )
                                             },
                                             style = MaterialTheme.typography.titleLarge.copy(

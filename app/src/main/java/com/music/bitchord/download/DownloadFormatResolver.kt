@@ -41,12 +41,28 @@ object DownloadFormatResolver {
         val target = TrackMatcher.targetOf(song)
         val allowAtmos = AppSettings.dolbyAtmos.value
 
-        // 1. Capture active / recently resolved playing stream immediately (zero wait)
-        val activeStream = resolveActivePlayingStream(song)
+        // Strict Group 2 (DOWNLOAD PROVIDERS) gating
+        val addonSourcesEnabled = SourceRegistry.downloadableAddonSources().isNotEmpty()
+        val extSources = SourceRegistry.downloadableExtensionSources().take(6)
+        val jioSaavnEnabled = SourceRegistry.isDownloadProviderEnabled { it.kind == SourceKind.JIOSAAVN }
+        val youtubeEnabled = SourceRegistry.isDownloadProviderEnabled { it.kind == SourceKind.YOUTUBE }
+        val losslessFallbackEnabled = addonSourcesEnabled || extSources.isNotEmpty()
+
+        // 1. Capture active / recently resolved playing stream if its provider is enabled for downloads
+        val activeStream = resolveActivePlayingStream(song)?.takeIf { stream ->
+            val cfg = stream.sourceConfigId?.let { SourceRegistry.config(it) }
+            when {
+                cfg != null -> cfg.isDownloadEnabled && !cfg.metadataOnly
+                stream.sourceName?.contains("JioSaavn", ignoreCase = true) == true -> jioSaavnEnabled
+                stream.sourceName?.contains("YouTube", ignoreCase = true) == true -> youtubeEnabled
+                else -> losslessFallbackEnabled
+            }
+        }
 
         coroutineScope {
-            // 2. Query ALL configured healthy addons (UMtify, custom servers) in parallel
+            // 2. Query ONLY enabled Group 2 custom addons (UMtify, custom servers) in parallel
             val addonsDeferred = async {
+                if (!addonSourcesEnabled) return@async emptyList()
                 runCatching {
                     withTimeoutOrNull(4500L) {
                         SourceResolver.resolveAllAddonDownloadStreams(
@@ -58,12 +74,7 @@ object DownloadFormatResolver {
                 }.getOrNull().orEmpty()
             }
 
-            // 3. Race Top-4 healthy enabled audio-capable extension sources in parallel (skipping metadata-only & errored)
-            val topDownloadSources = SourceRegistry.topDownloadSources(4)
-                .filter { it is RepoExtensionSource || (it.kind.canServeLossless && it !is AddonSource) }
-            val extSources = (topDownloadSources.filterIsInstance<RepoExtensionSource>() + SourceRegistry.downloadableExtensionSources())
-                .distinctBy { it.configId }
-                .take(4)
+            // 3. Race enabled Group 2 audio/download extension sources in parallel
             val extDeferreds = extSources.map { ext ->
                 async {
                     val startMs = System.currentTimeMillis()
@@ -97,8 +108,9 @@ object DownloadFormatResolver {
                 }
             }
 
-            // 4. Fallback benchmarked LosslessAudioProvider mirrors (Hi-Res & 16-bit)
+            // 4. Fallback benchmarked LosslessAudioProvider mirrors ONLY when lossless download providers are enabled
             val flacHiResDeferred = async {
+                if (!losslessFallbackEnabled) return@async null
                 runCatching {
                     withTimeoutOrNull(4000L) {
                         LosslessAudioProvider.resolveLosslessTrack(
@@ -113,6 +125,7 @@ object DownloadFormatResolver {
             }
 
             val flacLosslessDeferred = async {
+                if (!losslessFallbackEnabled) return@async null
                 runCatching {
                     withTimeoutOrNull(4000L) {
                         LosslessAudioProvider.resolveLosslessTrack(
@@ -126,8 +139,9 @@ object DownloadFormatResolver {
                 }.getOrNull()
             }
 
-            // 5. JioSaavn 320 kbps AAC
+            // 5. JioSaavn 320 kbps AAC (only when enabled in Group 2)
             val jioSaavnDeferred = async {
+                if (!jioSaavnEnabled) return@async null
                 runCatching {
                     withTimeoutOrNull(3500L) {
                         val jioSaavnConfig = SourceRegistry.configs.value.firstOrNull { it.kind == SourceKind.JIOSAAVN }
@@ -157,8 +171,9 @@ object DownloadFormatResolver {
                 }.getOrNull()
             }
 
-            // 6. YouTube Music (Opus High, M4A / AAC, Opus Medium)
+            // 6. YouTube Music (Opus High, M4A / AAC, Opus Medium — only when enabled in Group 2)
             val opusHighDeferred = async {
+                if (!youtubeEnabled) return@async null
                 runCatching {
                     withTimeoutOrNull(3500L) {
                         StreamResolver.resolveForDownload(song.videoId, maxKbps = 256, requireM4a = false)
@@ -167,6 +182,7 @@ object DownloadFormatResolver {
             }
 
             val m4aDeferred = async {
+                if (!youtubeEnabled) return@async null
                 runCatching {
                     withTimeoutOrNull(3500L) {
                         StreamResolver.resolveForDownload(song.videoId, maxKbps = 256, requireM4a = true)
@@ -175,6 +191,7 @@ object DownloadFormatResolver {
             }
 
             val opusMedDeferred = async {
+                if (!youtubeEnabled) return@async null
                 runCatching {
                     withTimeoutOrNull(3000L) {
                         StreamResolver.resolveForDownload(song.videoId, maxKbps = 96, requireM4a = false)

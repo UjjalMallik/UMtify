@@ -61,14 +61,28 @@ data class SourceConfig(
     val checkValidLossless: Boolean = false,
     /** True for metadata/lyrics-only extensions that do not stream audio. */
     val metadataOnly: Boolean = false,
+    /** Explicit toggle for Group 2 DOWNLOAD PROVIDERS (null inherits [enabled]). */
+    val downloadEnabled: Boolean? = null,
 ) {
     /** Whether this source is shut out right now because it needs an output that isn't connected. */
     val awaitsLosslessOutput: Boolean
         get() = checkValidLossless && !LosslessOutput.capable
 
+    /** Whether this source can directly stream audio in Group 1 (`AUDIO STREAMING`). */
+    val isStreamingCapable: Boolean
+        get() = !metadataOnly && (kind != SourceKind.EXTENSION || baseUrl.isNotBlank())
+
+    /** Whether this source is enabled in Group 2 (`DOWNLOAD PROVIDERS`). */
+    val isDownloadEnabled: Boolean
+        get() = allowDownloads && (downloadEnabled ?: enabled)
+
     /** The two manifest switches, without the parts of the config the user set. */
     internal fun withPolicyOf(other: SourceConfig) =
-        copy(allowDownloads = other.allowDownloads, checkValidLossless = other.checkValidLossless)
+        copy(
+            allowDownloads = other.allowDownloads,
+            checkValidLossless = other.checkValidLossless,
+            downloadEnabled = other.downloadEnabled,
+        )
 
     /** What the sources screen and the player show. Never blank. */
     val displayName: String
@@ -265,7 +279,7 @@ object SourceRegistry {
      */
     fun active(): List<MusicSource> =
         enabledConfigs(configs.value)
-            .filterNot { it.awaitsLosslessOutput || it.metadataOnly }
+            .filter { !it.awaitsLosslessOutput && it.isStreamingCapable }
             .mapNotNull { instances[it.id] }
 
     /** Enabled custom addons & UMtify addons, with any UMtify addon prioritized first. */
@@ -279,13 +293,13 @@ object SourceRegistry {
             }
 
     /**
-     * All enabled addons eligible for downloads (prioritizing UMtify first).
+     * All addons enabled for downloads in Group 2 (`DOWNLOAD PROVIDERS`), prioritizing UMtify first.
      * Bypasses playback output gating (`awaitsLosslessOutput`) and error cooldown
      * so explicit download format checks always query configured addons directly.
      */
     fun downloadableAddonSources(): List<AddonSource> =
-        enabledConfigs(configs.value)
-            .filter { it.kind == SourceKind.ADDON && it.allowDownloads && !it.metadataOnly }
+        configs.value
+            .filter { it.isComplete && it.kind == SourceKind.ADDON && it.isDownloadEnabled && !it.metadataOnly }
             .mapNotNull { instances[it.id] as? AddonSource }
             .sortedByDescending {
                 val cfg = config(it.configId)
@@ -294,28 +308,49 @@ object SourceRegistry {
                     cfg?.baseUrl?.contains("umtify", ignoreCase = true) == true
             }
 
-    /** All enabled synced Extension Repo audio-capable sources eligible for downloads, in list order. */
+    /** All Extension Repo audio/download sources enabled in Group 2 (`DOWNLOAD PROVIDERS`). */
     fun downloadableExtensionSources(): List<RepoExtensionSource> =
-        enabledConfigs(configs.value)
+        configs.value
             .filter {
                 it.kind == SourceKind.EXTENSION &&
                     !it.metadataOnly &&
-                    it.allowDownloads &&
+                    it.isDownloadEnabled &&
                     !SourceHealthTracker.isInErrorCooldown(it.id)
             }
             .mapNotNull { instances[it.id] as? RepoExtensionSource }
 
+    /** Group 1 (`AUDIO STREAMING`): only sources with direct audio/FLAC streaming capability. */
+    fun streamingGroupConfigs(all: List<SourceConfig> = configs.value): List<SourceConfig> =
+        all.filter { it.isStreamingCapable }
+
+    /** Group 2 (`DOWNLOAD PROVIDERS`): download-capable addons, audio/download extensions, JioSaavn & YouTube Music. */
+    fun downloadGroupConfigs(all: List<SourceConfig> = configs.value): List<SourceConfig> =
+        all.filter {
+            !it.metadataOnly &&
+                (it.kind == SourceKind.ADDON ||
+                    it.kind == SourceKind.EXTENSION ||
+                    it.kind == SourceKind.JIOSAAVN ||
+                    it.kind == SourceKind.YOUTUBE)
+        }
+
+    /** Group 3 (`METADATA & HOME DISCOVERY`): metadata, lyrics, and chart extensions. */
+    fun metadataGroupConfigs(all: List<SourceConfig> = configs.value): List<SourceConfig> =
+        all.filter { it.kind == SourceKind.EXTENSION && it.metadataOnly }
+
+    fun isDownloadProviderEnabled(predicate: (SourceConfig) -> Boolean): Boolean =
+        configs.value.any { predicate(it) && it.isDownloadEnabled }
+
     /**
-     * Top [limit] enabled healthy audio-capable sources in the user's unified `SOURCES`
-     * order, automatically skipping YouTube fallback, metadata-only extensions, and
-     * sources in 5-minute error cooldown.
+     * Top [limit] enabled healthy audio-capable sources in Group 1 (`AUDIO STREAMING`)
+     * order, automatically skipping YouTube fallback, metadata-only / no-endpoint extensions,
+     * and sources in 5-minute error cooldown.
      */
     fun topPlaybackSources(limit: Int = 4): List<MusicSource> =
         activeForPlayback()
             .filter { source ->
                 val cfg = config(source.configId)
                 source.kind != SourceKind.YOUTUBE &&
-                    cfg?.metadataOnly != true &&
+                    cfg?.isStreamingCapable == true &&
                     !SourceHealthTracker.isInErrorCooldown(source.configId)
             }
             .take(limit)
@@ -332,11 +367,12 @@ object SourceRegistry {
             .take(limit)
 
     /**
-     * [active], minus the addons whose manifest said `allowDownloads: 0`. A
-     * download walks this instead, so the next source in line serves it.
+     * Download-eligible sources respecting Group 2 (`DOWNLOAD PROVIDERS`) toggles.
      */
     fun activeForDownload(): List<MusicSource> =
-        active().filter { config(it.configId)?.allowDownloads != false }
+        configs.value
+            .filter { it.isComplete && !it.metadataOnly && it.isDownloadEnabled && !it.awaitsLosslessOutput }
+            .mapNotNull { instances[it.id] }
 
     /**
      * Records what an addon's manifest said about downloads and lossless
@@ -469,6 +505,20 @@ object SourceRegistry {
             return
         }
         publish(configs.value.map { if (it.id == configId) it.copy(enabled = enabled) else it })
+    }
+
+    /** Toggles whether [configId] is used by Group 2 (`DOWNLOAD PROVIDERS`). */
+    fun setDownloadEnabled(configId: String, enabled: Boolean) {
+        if (enabled) SourceHealthTracker.clear(configId)
+        publish(
+            configs.value.map { config ->
+                if (config.id == configId) {
+                    config.copy(downloadEnabled = enabled, allowDownloads = if (enabled) true else config.allowDownloads)
+                } else {
+                    config
+                }
+            },
+        )
     }
 
     /**

@@ -409,6 +409,8 @@ object RecommendationEngine {
         if (cachedBridgeShelf != null && System.currentTimeMillis() - cachedBridgeTimestamp < BRIDGE_CACHE_DURATION_MS) {
             cachedBridgeShelf?.let { result.add(it) }
         }
+        // 4. Charts & Discovery from enabled Group 3 Metadata extensions (cached in memory, zero shimmer lag)
+        com.music.bitchord.data.MetadataDiscoveryProvider.getCachedChartShelf()?.let { result.add(it) }
         return result
     }
 
@@ -419,6 +421,11 @@ object RecommendationEngine {
             (System.currentTimeMillis() - cachedBridgeTimestamp >= BRIDGE_CACHE_DURATION_MS)
         if (needsBridgeUpdate && !AppSettings.isOffline) {
             cachedBridgeShelf = generateLocalToOnlineBridgeShelf(context)
+        }
+        if (!AppSettings.isOffline) {
+            runCatching {
+                com.music.bitchord.data.MetadataDiscoveryProvider.refreshChartDiscoveryShelf()
+            }
         }
     }
 
@@ -516,16 +523,26 @@ object RecommendationEngine {
 
         currentTimeOfDayTracks = mixSongs
 
+        val leadTrack = mixSongs.firstOrNull()
+        val enrichment = if (leadTrack != null && !AppSettings.isOffline) {
+            runCatching {
+                com.music.bitchord.data.MetadataDiscoveryProvider.enrichTrack(leadTrack.title, leadTrack.artist)
+            }.getOrNull()
+        } else {
+            null
+        }
         val leadCover = mixSongs.firstOrNull { !it.thumbnailUrl.isNullOrBlank() }?.thumbnailUrl
-            ?: mixSongs.firstOrNull()?.thumbnailUrl
+            ?: enrichment?.artworkUrl
+            ?: leadTrack?.thumbnailUrl
+        val moodDetail = enrichment?.genre?.takeIf { it.isNotBlank() }?.let { "$it • ${slot.subtitle}" } ?: slot.subtitle
 
         HomeShelf(
             title = slot.title,
-            subtitle = slot.subtitle,
+            subtitle = moodDetail,
             items = listOf(
                 ShelfItem(
                     title = slot.title,
-                    subtitle = "${mixSongs.size} songs • ${slot.subtitle}",
+                    subtitle = "${mixSongs.size} songs • $moodDetail",
                     thumbnailUrl = leadCover,
                     videoId = mixSongs.firstOrNull()?.videoId,
                     browseId = null,
@@ -588,7 +605,8 @@ object RecommendationEngine {
             .map { it.key }
 
         val shelfItems = topKeys.map { key ->
-            val displayName = key.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+            val fallbackName = key.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+            val displayName = com.music.bitchord.data.ArtistAvatarCache.getDisplayName(key) ?: fallbackName
             val officialAvatar = com.music.bitchord.data.ArtistAvatarCache.get(key)
                 ?: com.music.bitchord.data.stats.ArtistFacts.imageFor(key)
             if (officialAvatar == null) {
@@ -658,17 +676,29 @@ object RecommendationEngine {
 
         val cleanTitle = cleanSearchTerm(topLocal.title)
         val cleanArtist = cleanSearchTerm(topLocal.artist)
-        val query = "$cleanTitle $cleanArtist".trim()
+        val metaEnrichment = runCatching {
+            com.music.bitchord.data.MetadataDiscoveryProvider.enrichTrack(cleanTitle, cleanArtist)
+        }.getOrNull()
+        val query = listOfNotNull(
+            metaEnrichment?.title ?: cleanTitle,
+            metaEnrichment?.artist ?: cleanArtist,
+            metaEnrichment?.genre?.takeIf { it.isNotBlank() },
+        ).joinToString(" ").trim()
         if (query.isBlank()) return@withContext null
 
+        val seenSignatures = HashSet<String>()
         val candidates = runCatching {
             YtMusicRepository.searchPage(query, SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
         }.getOrDefault(emptyList()).mapNotNull { sr ->
             (sr as? SearchResult.Track)?.song ?: (sr as? SearchResult.TopTrack)?.song
-        }.filter { it.title.isNotBlank() && it.videoId != topLocal.id }
+        }.filter { song ->
+            val sig = "${song.title.lowercase(Locale.ROOT).trim()}|${song.artist.lowercase(Locale.ROOT).trim()}"
+            song.title.isNotBlank() && song.videoId != topLocal.id && seenSignatures.add(sig)
+        }
 
         if (candidates.isEmpty()) return@withContext null
 
+        val bridgeSubtitle = metaEnrichment?.genre?.takeIf { it.isNotBlank() }?.let { "Local → Online • $it" } ?: "Local → Online"
         val shelfItems = candidates.take(12).map { song ->
             ShelfItem(
                 title = song.title,
@@ -680,8 +710,8 @@ object RecommendationEngine {
         }
 
         val shelf = HomeShelf(
-            title = "Because you play ${topLocal.title}",
-            subtitle = "Local → Online",
+            title = "Because you play ${metaEnrichment?.title ?: topLocal.title}",
+            subtitle = bridgeSubtitle,
             items = shelfItems,
         )
 

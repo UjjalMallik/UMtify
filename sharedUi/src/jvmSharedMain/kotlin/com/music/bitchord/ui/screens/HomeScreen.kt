@@ -457,6 +457,9 @@ private fun CircularArtistItem(
     val officialAvatar = remember(item.title, avatarRevision) {
         com.music.bitchord.data.ArtistAvatarCache.get(item.title)
     }
+    val verifiedArtistName = remember(item.title, avatarRevision) {
+        com.music.bitchord.data.ArtistAvatarCache.getDisplayName(item.title) ?: item.title
+    }
     LaunchedEffect(item.title) {
         if (officialAvatar == null) {
             com.music.bitchord.data.ArtistAvatarCache.resolveInBackground(item.title)
@@ -485,7 +488,7 @@ private fun CircularArtistItem(
                         .fillMaxSize()
                         .clip(CircleShape),
                     contentScale = ContentScale.Crop,
-                    title = item.title,
+                    title = verifiedArtistName,
                 )
             } else {
                 val context = LocalPlatformContext.current
@@ -497,7 +500,7 @@ private fun CircularArtistItem(
                 }
                 AsyncImage(
                     model = imageRequest,
-                    contentDescription = item.title,
+                    contentDescription = verifiedArtistName,
                     contentScale = ContentScale.Crop,
                     onState = { state ->
                         if (state is AsyncImagePainter.State.Error) {
@@ -512,7 +515,7 @@ private fun CircularArtistItem(
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            text = item.title,
+            text = verifiedArtistName,
             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,

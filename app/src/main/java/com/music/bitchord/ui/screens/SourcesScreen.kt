@@ -170,13 +170,13 @@ fun SourcesScreen(
     }
 
     // Probe enabled audio-capable addons and synced extensions concurrently (skip metadata-only)
-    val probeKey = configs.filter { (it.kind.needsServer || (it.kind == SourceKind.EXTENSION && it.enabled)) && !it.metadataOnly }
-        .joinToString { "${it.id}@${it.baseUrl}@${it.enabled}@${it.checkValidLossless}" } + "@${losslessOutput.capable}"
+    val probeKey = configs.filter { (it.kind.needsServer || (it.kind == SourceKind.EXTENSION && (it.enabled || it.isDownloadEnabled))) && !it.metadataOnly }
+        .joinToString { "${it.id}@${it.baseUrl}@${it.enabled}@${it.downloadEnabled}@${it.checkValidLossless}" } + "@${losslessOutput.capable}"
     LaunchedEffect(probeKey) {
         coroutineScope {
             configs.filter {
                 !it.metadataOnly &&
-                    ((it.kind.needsServer && it.isComplete) || (it.kind == SourceKind.EXTENSION && it.enabled)) &&
+                    ((it.kind.needsServer && it.isComplete) || (it.kind == SourceKind.EXTENSION && (it.enabled || it.isDownloadEnabled))) &&
                     !it.awaitsLosslessOutput
             }.forEach { config ->
                 launch {
@@ -211,7 +211,28 @@ fun SourcesScreen(
 
     val ceiling = if (metered == true) cellularQuality else wifiQuality
     val cappedByQuality = ceiling != AudioQuality.LOSSLESS
-    val anyLosslessSource = configs.any { it.enabled && it.isComplete && it.kind.canServeLossless }
+    val streamingSources = remember(configs) { SourceRegistry.streamingGroupConfigs(configs) }
+    val downloadSources = remember(configs) {
+        SourceRegistry.downloadGroupConfigs(configs).sortedWith(
+            compareBy<SourceConfig>(
+                {
+                    when {
+                        it.id == SourceRegistry.UMTIFY_HQ_ADDON_ID || it.baseUrl.contains("umtifyhq") -> 0
+                        it.kind == SourceKind.ADDON -> 1
+                        it.kind == SourceKind.EXTENSION -> 2
+                        it.kind == SourceKind.JIOSAAVN -> 3
+                        it.kind == SourceKind.YOUTUBE -> 4
+                        else -> 5
+                    }
+                },
+                { it.displayName.lowercase() },
+            ),
+        )
+    }
+    val metadataSources = remember(configs) {
+        SourceRegistry.metadataGroupConfigs(configs).sortedBy { it.displayName.lowercase() }
+    }
+    val anyLosslessSource = streamingSources.any { it.enabled && it.isComplete && it.kind.canServeLossless }
     val extensionsById = remember(allRepoExtensions) { allRepoExtensions.associateBy { it.id } }
 
     Column(
@@ -227,9 +248,9 @@ fun SourcesScreen(
             modifier = Modifier.padding(start = 72.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
         )
 
-        // Single Unified SOURCES list (Custom addons, Repo extensions, Built-in sources)
+        // Group 1 — AUDIO STREAMING (TRIED IN THIS ORDER) (Draggable; only direct audio/FLAC streaming sources)
         SettingsGroup(
-            header = stringResource(R.string.sources_order_header),
+            header = "AUDIO STREAMING (TRIED IN THIS ORDER)",
             footer = buildString {
                 append(stringResource(R.string.sources_order_footer))
                 if (cappedByQuality) {
@@ -241,70 +262,138 @@ fun SourcesScreen(
                 }
             },
         ) {
-            val row: @Composable (Int, SourceConfig, (@Composable () -> Unit)?) -> Unit =
-                { position, config, handle ->
-                    val extId = if (config.kind == SourceKind.EXTENSION) {
-                        SourceRegistry.extensionIdFor(config.id)
-                    } else null
-                    val repoExt = extId?.let { extensionsById[it] }
-                    val isInstalled = extId != null && extId in installedExtensionIds
-                    val localVer = extId?.let { installedVersions[it] }
-                    val updateAvailable = repoExt != null && isInstalled &&
-                        ExtensionRepoManager.isNewerVersion(repoExt.version, localVer ?: "1.0.0")
-                    val isUpdating = extId != null && extId in updatingExtIds
-
-                    SourceRow(
+            ReorderableSources(
+                sources = streamingSources,
+                onReorder = { SourceRegistry.reorder(it.map(SourceConfig::id)) },
+                row = { position, config, handle ->
+                    ManagedSourceRow(
                         position = position,
                         config = config,
                         health = health[config.id],
                         runtimeStatus = runtimeStates[config.id],
-                        updateVersion = repoExt?.version?.takeIf { updateAvailable },
-                        isUpdating = isUpdating,
-                        onUpdateClick = if (extId != null && repoExt != null && updateAvailable) {
-                            {
-                                if (extId !in updatingExtIds) {
-                                    updatingExtIds = updatingExtIds + extId
-                                    coroutineScope.launch {
-                                        ExtensionRepoManager.updateExtension(context, repoExt)
-                                        updatingExtIds = updatingExtIds - extId
-                                    }
-                                }
-                            }
-                        } else null,
-                        skippedByQuality = config.enabled && !ceiling.permits(config.kind),
-                        awaitingOutput = if (config.enabled && config.awaitsLosslessOutput) losslessOutput else null,
-                        onMetered = metered == true,
-                        ceiling = ceiling,
-                        onClick = if (config.kind.needsServer) ({ onEditSource(config) }) else null,
-                        onToggle = if (config.kind == SourceKind.YOUTUBE) null else { enabled ->
-                            if (config.kind == SourceKind.JIOSAAVN && enabled && !config.enabled) {
-                                onConfirmJioSaavn()
-                            } else if (config.kind == SourceKind.EXTENSION && extId != null) {
-                                ExtensionRepoManager.toggleExtension(extId, enabled, syncSourceRegistry = true)
-                            } else {
-                                SourceRegistry.setEnabled(config.id, enabled)
-                            }
+                        extensionsById = extensionsById,
+                        installedExtensionIds = installedExtensionIds,
+                        installedVersions = installedVersions,
+                        updatingExtIds = updatingExtIds,
+                        onSetUpdating = { extId, busy ->
+                            updatingExtIds = if (busy) updatingExtIds + extId else updatingExtIds - extId
                         },
+                        losslessOutput = losslessOutput,
+                        metered = metered == true,
+                        ceiling = ceiling,
+                        onEditSource = onEditSource,
+                        onConfirmJioSaavn = onConfirmJioSaavn,
                         handle = handle,
+                        applyPlaybackQualityGate = true,
                     )
-                }
-
-            ReorderableSources(
-                sources = configs,
-                onReorder = { SourceRegistry.reorder(it.map(SourceConfig::id)) },
-                row = row,
+                },
             )
 
-            val waiting = configs.any { it.enabled && it.awaitsLosslessOutput }
+            val waiting = streamingSources.any { it.enabled && it.awaitsLosslessOutput }
             if (waiting && losslessOutput.bluetoothCodecUnknown) {
-                RowDivider()
                 BluetoothCodecPermissionRow()
+                RowDivider()
             }
 
-            RowDivider()
             AddSourceRow(
                 onClick = { onEditSource(SourceConfig(kind = SourceKind.ADDON)) },
             )
+        }
+
+        // Group 2 — DOWNLOAD PROVIDERS
+        if (downloadSources.isNotEmpty()) {
+            SettingsGroup(
+                header = "DOWNLOAD PROVIDERS",
+                footer = "Select Audio Format & Size strictly queries enabled providers in this list.",
+            ) {
+                downloadSources.forEachIndexed { index, config ->
+                    val extId = if (config.kind == SourceKind.EXTENSION) {
+                        SourceRegistry.extensionIdFor(config.id)
+                    } else null
+                    ManagedSourceRow(
+                        position = index + 1,
+                        config = config,
+                        health = health[config.id],
+                        runtimeStatus = runtimeStates[config.id],
+                        extensionsById = extensionsById,
+                        installedExtensionIds = installedExtensionIds,
+                        installedVersions = installedVersions,
+                        updatingExtIds = updatingExtIds,
+                        onSetUpdating = { id, busy ->
+                            updatingExtIds = if (busy) updatingExtIds + id else updatingExtIds - id
+                        },
+                        losslessOutput = losslessOutput,
+                        metered = metered == true,
+                        ceiling = ceiling,
+                        onEditSource = onEditSource,
+                        onConfirmJioSaavn = onConfirmJioSaavn,
+                        checkedOverride = config.isDownloadEnabled,
+                        applyPlaybackQualityGate = false,
+                        allowYoutubeToggle = true,
+                        showStatusPill = true,
+                        isDownloadRow = true,
+                        onToggleOverride = { enabled ->
+                            SourceRegistry.setDownloadEnabled(config.id, enabled)
+                            if (extId != null && enabled && extId !in installedExtensionIds) {
+                                ExtensionRepoManager.toggleExtension(extId, true, syncSourceRegistry = false)
+                            }
+                        },
+                    )
+                    if (index < downloadSources.lastIndex) {
+                        RowDivider()
+                    }
+                }
+            }
+        }
+
+        // Group 3 — METADATA & HOME DISCOVERY
+        if (metadataSources.isNotEmpty()) {
+            SettingsGroup(
+                header = "METADATA & HOME DISCOVERY",
+                footer = "Enriches Home recommendations, charts, artist portraits, and lyrics",
+            ) {
+                Text(
+                    text = "Enriches Home recommendations, charts, artist portraits, and lyrics",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = ROW_INSET, vertical = 10.dp),
+                )
+                RowDivider()
+                metadataSources.forEachIndexed { index, config ->
+                    val extId = SourceRegistry.extensionIdFor(config.id) ?: config.id
+                    ManagedSourceRow(
+                        position = index + 1,
+                        config = config,
+                        health = health[config.id],
+                        runtimeStatus = runtimeStates[config.id],
+                        extensionsById = extensionsById,
+                        installedExtensionIds = installedExtensionIds,
+                        installedVersions = installedVersions,
+                        updatingExtIds = updatingExtIds,
+                        onSetUpdating = { id, busy ->
+                            updatingExtIds = if (busy) updatingExtIds + id else updatingExtIds - id
+                        },
+                        losslessOutput = losslessOutput,
+                        metered = metered == true,
+                        ceiling = ceiling,
+                        onEditSource = onEditSource,
+                        onConfirmJioSaavn = onConfirmJioSaavn,
+                        applyPlaybackQualityGate = false,
+                        showStatusPill = false,
+                        onToggleOverride = { enabled ->
+                            ExtensionRepoManager.toggleExtension(extId, enabled, syncSourceRegistry = true)
+                            if (enabled) {
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    com.music.bitchord.data.MetadataDiscoveryProvider.refreshChartDiscoveryShelf()
+                                }
+                            }
+                        },
+                    )
+                    if (index < metadataSources.lastIndex) {
+                        RowDivider()
+                    }
+                }
+            }
         }
 
         // A personal library rather than a catalogue in the order above: it
@@ -749,6 +838,85 @@ private fun BluetoothCodecPermissionRow() {
 }
 
 @Composable
+private fun ManagedSourceRow(
+    position: Int,
+    config: SourceConfig,
+    health: SourceHealth?,
+    runtimeStatus: SourceRuntimeStatus?,
+    extensionsById: Map<String, com.music.bitchord.data.RepoExtension>,
+    installedExtensionIds: Set<String>,
+    installedVersions: Map<String, String>,
+    updatingExtIds: Set<String>,
+    onSetUpdating: (String, Boolean) -> Unit,
+    losslessOutput: LosslessOutput.State,
+    metered: Boolean,
+    ceiling: AudioQuality,
+    onEditSource: (SourceConfig) -> Unit,
+    onConfirmJioSaavn: () -> Unit,
+    handle: (@Composable () -> Unit)? = null,
+    checkedOverride: Boolean? = null,
+    applyPlaybackQualityGate: Boolean = true,
+    allowYoutubeToggle: Boolean = false,
+    showStatusPill: Boolean = true,
+    isDownloadRow: Boolean = false,
+    onToggleOverride: ((Boolean) -> Unit)? = null,
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val extId = if (config.kind == SourceKind.EXTENSION) {
+        SourceRegistry.extensionIdFor(config.id)
+    } else null
+    val repoExt = extId?.let { extensionsById[it] }
+    val isInstalled = extId != null && extId in installedExtensionIds
+    val localVer = extId?.let { installedVersions[it] }
+    val updateAvailable = repoExt != null && (isInstalled || config.metadataOnly) &&
+        ExtensionRepoManager.isNewerVersion(repoExt.version, localVer ?: "1.0.0")
+    val isUpdating = extId != null && extId in updatingExtIds
+
+    SourceRow(
+        position = position,
+        config = config,
+        health = health,
+        runtimeStatus = runtimeStatus,
+        updateVersion = repoExt?.version?.takeIf { updateAvailable },
+        isUpdating = isUpdating,
+        onUpdateClick = if (extId != null && repoExt != null && updateAvailable) {
+            {
+                if (extId !in updatingExtIds) {
+                    onSetUpdating(extId, true)
+                    coroutineScope.launch {
+                        ExtensionRepoManager.updateExtension(context, repoExt)
+                        onSetUpdating(extId, false)
+                    }
+                }
+            }
+        } else null,
+        checkedOverride = checkedOverride,
+        showStatusPill = showStatusPill,
+        isDownloadRow = isDownloadRow,
+        skippedByQuality = applyPlaybackQualityGate && config.enabled && !ceiling.permits(config.kind),
+        awaitingOutput = if (applyPlaybackQualityGate && config.enabled && config.awaitsLosslessOutput) losslessOutput else null,
+        onMetered = metered,
+        ceiling = ceiling,
+        onClick = if (config.kind.needsServer) ({ onEditSource(config) }) else null,
+        onToggle = when {
+            onToggleOverride != null -> onToggleOverride
+            config.kind == SourceKind.YOUTUBE && !allowYoutubeToggle -> null
+            else -> { enabled ->
+                if (config.kind == SourceKind.JIOSAAVN && enabled && !config.enabled) {
+                    onConfirmJioSaavn()
+                } else if (config.kind == SourceKind.EXTENSION && extId != null) {
+                    ExtensionRepoManager.toggleExtension(extId, enabled, syncSourceRegistry = true)
+                } else {
+                    SourceRegistry.setEnabled(config.id, enabled)
+                }
+            }
+        },
+        handle = handle,
+    )
+}
+
+@Composable
 private fun SourceRow(
     position: Int,
     config: SourceConfig,
@@ -757,6 +925,9 @@ private fun SourceRow(
     updateVersion: String? = null,
     isUpdating: Boolean = false,
     onUpdateClick: (() -> Unit)? = null,
+    checkedOverride: Boolean? = null,
+    showStatusPill: Boolean = true,
+    isDownloadRow: Boolean = false,
     onClick: (() -> Unit)?,
     /** Null for a source that cannot be switched off, which gets a label instead. */
     onToggle: ((Boolean) -> Unit)?,
@@ -775,7 +946,8 @@ private fun SourceRow(
      */
     handle: (@Composable () -> Unit)? = null,
 ) {
-    val dimmed = !config.enabled || skippedByQuality || awaitingOutput != null
+    val isChecked = checkedOverride ?: config.enabled
+    val dimmed = !isChecked || skippedByQuality || awaitingOutput != null
     val effectiveStatus: SourceRuntimeStatus = when {
         runtimeStatus is SourceRuntimeStatus.Error -> runtimeStatus
         runtimeStatus is SourceRuntimeStatus.Ready -> runtimeStatus
@@ -877,7 +1049,7 @@ private fun SourceRow(
                         stringResource(if (onMetered) R.string.mobile_data else R.string.wifi),
                         ceiling.localizedLabel(),
                     )
-                    else -> config.statusLine(health)
+                    else -> config.statusLine(health, isDownloadRow)
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = when {
@@ -890,7 +1062,7 @@ private fun SourceRow(
             )
 
             // Live Error & Health Status Badge
-            if (config.metadataOnly) {
+            if (showStatusPill && config.metadataOnly) {
                 Spacer(Modifier.height(4.dp))
                 StatusBadgePill(
                     text = "Metadata only",
@@ -898,7 +1070,7 @@ private fun SourceRow(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
                     textColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } else if (config.enabled && awaitingOutput == null && !skippedByQuality) {
+            } else if (showStatusPill && isChecked && awaitingOutput == null && !skippedByQuality) {
                 when (effectiveStatus) {
                     is SourceRuntimeStatus.Ready -> {
                         Spacer(Modifier.height(4.dp))
@@ -941,7 +1113,7 @@ private fun SourceRow(
             )
         } else {
             Switch(
-                checked = config.enabled,
+                checked = isChecked,
                 onCheckedChange = onToggle,
                 colors = SwitchDefaults.colors(
                     checkedTrackColor = MaterialTheme.colorScheme.primary,
@@ -1002,7 +1174,7 @@ private fun AudioQuality.localizedLabel(): String = stringResource(
 
 /** The second line of a row: what this source is, or what is wrong with it. */
 @Composable
-private fun SourceConfig.statusLine(health: SourceHealth?): String = when {
+private fun SourceConfig.statusLine(health: SourceHealth?, isDownloadRow: Boolean = false): String = when {
     id == SourceRegistry.UMTIFY_HQ_ADDON_ID || baseUrl.contains("umtifyhq") -> {
         val baseDesc = "UMtify HQ · FLAC · Lossless · Hi-Res"
         if (!allowDownloads) {
@@ -1012,7 +1184,8 @@ private fun SourceConfig.statusLine(health: SourceHealth?): String = when {
         }
     }
     !isComplete -> stringResource(R.string.source_setup_required)
-    kind == SourceKind.EXTENSION && metadataOnly -> "Metadata & Lyrics only"
+    kind == SourceKind.EXTENSION && metadataOnly -> "Charts, Artist Portraits & Lyrics"
+    kind == SourceKind.EXTENSION && isDownloadRow -> "Download Provider · FLAC · Lossless"
     kind == SourceKind.EXTENSION -> "Audio Extension · FLAC · Lossless"
     kind == SourceKind.JIOSAAVN -> stringResource(R.string.jiosaavn_mismatch_warning)
     health is SourceHealth.Ok -> listOfNotNull(

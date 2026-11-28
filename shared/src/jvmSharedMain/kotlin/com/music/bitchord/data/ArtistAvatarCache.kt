@@ -26,16 +26,40 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object ArtistAvatarCache {
 
+    data class ArtistEnrichment(
+        val portraitUrl: String?,
+        val canonicalName: String? = null,
+        val browseId: String? = null,
+    )
+
     private val cache = ConcurrentHashMap<String, String>()
     private val browseIdCache = ConcurrentHashMap<String, String>()
+    private val canonicalNameCache = ConcurrentHashMap<String, String>()
     private val inFlight = ConcurrentHashMap.newKeySet<String>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var cacheFile: File? = null
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private var dirty = false
 
+    @Volatile
+    private var metadataEnricher: (suspend (String) -> ArtistEnrichment?)? = null
+
     private val _revision = MutableStateFlow(0)
     val revision: StateFlow<Int> = _revision.asStateFlow()
+
+    /**
+     * Registers an app-layer metadata enricher (backed by enabled Group 3 extensions such as
+     * Spotify Web, Apple Music, or Deezer) to supply crisp official portraits and verified names.
+     */
+    fun registerMetadataEnricher(enricher: suspend (String) -> ArtistEnrichment?) {
+        metadataEnricher = enricher
+    }
+
+    fun clearVolatilePortrait(artist: String?) {
+        val key = normalize(artist)
+        if (key.isEmpty()) return
+        cache.remove(key)
+    }
 
     fun init(cacheDir: File) {
         cacheFile = File(cacheDir, "artist_avatar_cache.json")
@@ -63,6 +87,12 @@ object ArtistAvatarCache {
         val key = normalize(artist)
         if (key.isEmpty()) return null
         return browseIdCache[key]
+    }
+
+    fun getDisplayName(artist: String?): String? {
+        val key = normalize(artist)
+        if (key.isEmpty()) return null
+        return canonicalNameCache[key]
     }
 
     fun put(artist: String?, photoUrl: String?, browseId: String? = null) {
@@ -110,6 +140,15 @@ object ArtistAvatarCache {
         cache[key]?.let { return@withContext it }
 
         val cleanName = artist.trim()
+
+        // 1. Primary: Query enabled Group 3 Metadata extensions (Spotify Web / Apple Music / Deezer)
+        val enriched = runCatching { metadataEnricher?.invoke(cleanName) }.getOrNull()
+        var photoUrl = enriched?.portraitUrl?.takeIf { it.isNotBlank() }
+        var canonicalName = enriched?.canonicalName?.takeIf { it.isNotBlank() }
+        var browseId = enriched?.browseId?.takeIf { it.isNotBlank() }
+
+        // 2. YouTube Music artist lookup (always resolves browseId so clicking opens Artist page,
+        //    and provides portrait fallback if metadata extensions returned none)
         val searchResult = runCatching {
             YtMusicRepository.search(cleanName, SearchFilter.ARTISTS).getOrNull()
         }.getOrNull()
@@ -123,8 +162,15 @@ object ArtistAvatarCache {
             }
             ?.item
 
-        var photoUrl = candidate?.thumbnailUrl?.takeIf { it.isNotBlank() }
-        var browseId = candidate?.browseId?.takeIf { it.isNotBlank() }
+        if (canonicalName.isNullOrBlank()) {
+            canonicalName = candidate?.title?.takeIf { it.isNotBlank() }
+        }
+        if (browseId.isNullOrBlank()) {
+            browseId = candidate?.browseId?.takeIf { it.isNotBlank() }
+        }
+        if (photoUrl.isNullOrBlank()) {
+            photoUrl = candidate?.thumbnailUrl?.takeIf { it.isNotBlank() }
+        }
 
         if (photoUrl.isNullOrBlank() && !browseId.isNullOrBlank()) {
             runCatching {
@@ -136,14 +182,16 @@ object ArtistAvatarCache {
             }
         }
 
-        if (photoUrl.isNullOrBlank()) {
-            val foundId = runCatching { YtMusicRepository.findArtistPageId(cleanName).getOrNull() }.getOrNull()
+        if (browseId.isNullOrBlank() || photoUrl.isNullOrBlank()) {
+            val foundId = browseId ?: runCatching { YtMusicRepository.findArtistPageId(cleanName).getOrNull() }.getOrNull()
             if (!foundId.isNullOrBlank()) {
                 browseId = foundId
-                runCatching {
-                    YtMusicRepository.artistPage(foundId).getOrNull()?.let { page ->
-                        if (!page.thumbnailUrl.isNullOrBlank()) {
-                            photoUrl = page.thumbnailUrl
+                if (photoUrl.isNullOrBlank()) {
+                    runCatching {
+                        YtMusicRepository.artistPage(foundId).getOrNull()?.let { page ->
+                            if (!page.thumbnailUrl.isNullOrBlank()) {
+                                photoUrl = page.thumbnailUrl
+                            }
                         }
                     }
                 }
@@ -175,6 +223,10 @@ object ArtistAvatarCache {
         if (!photoUrl.isNullOrBlank()) {
             cache[key] = photoUrl!!
             candidate?.title?.let { cache[normalize(it)] = photoUrl!! }
+            canonicalName?.let {
+                canonicalNameCache[key] = it
+                canonicalNameCache[normalize(it)] = it
+            }
             if (!browseId.isNullOrBlank()) {
                 browseIdCache[key] = browseId!!
                 candidate?.title?.let { browseIdCache[normalize(it)] = browseId!! }
@@ -183,6 +235,10 @@ object ArtistAvatarCache {
             _revision.value++
             photoUrl
         } else {
+            if (!browseId.isNullOrBlank()) {
+                browseIdCache[key] = browseId!!
+                dirty = true
+            }
             null
         }
     }
@@ -195,6 +251,7 @@ object ArtistAvatarCache {
             stored.entries.forEach { entry ->
                 cache[entry.key] = entry.photoUrl
                 entry.browseId?.let { browseIdCache[entry.key] = it }
+                entry.displayName?.let { canonicalNameCache[entry.key] = it }
             }
         }
     }
@@ -205,7 +262,12 @@ object ArtistAvatarCache {
         dirty = false
         runCatching {
             val entries = cache.entries.map { (k, v) ->
-                StoredAvatarEntry(key = k, photoUrl = v, browseId = browseIdCache[k])
+                StoredAvatarEntry(
+                    key = k,
+                    photoUrl = v,
+                    browseId = browseIdCache[k],
+                    displayName = canonicalNameCache[k],
+                )
             }
             val stored = StoredAvatarData(entries = entries)
             f.writeText(json.encodeToString(StoredAvatarData.serializer(), stored))
@@ -223,5 +285,6 @@ object ArtistAvatarCache {
         val key: String,
         val photoUrl: String,
         val browseId: String? = null,
+        val displayName: String? = null,
     )
 }

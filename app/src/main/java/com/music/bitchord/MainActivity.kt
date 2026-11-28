@@ -3312,12 +3312,13 @@ private fun BitChordApp(
                                             shelfTitle.equals("Top Artists", ignoreCase = true)
                                         ) {
                                             val browseId = item.browseId
+                                                ?: com.music.bitchord.data.ArtistAvatarCache.getBrowseId(item.title)
                                             if (!browseId.isNullOrBlank()) {
                                                 viewModel.openDetail(
                                                     browseId = browseId,
-                                                    title = item.title,
+                                                    title = com.music.bitchord.data.ArtistAvatarCache.getDisplayName(item.title) ?: item.title,
                                                     subtitle = "Artist",
-                                                    thumbnailUrl = item.thumbnailUrl,
+                                                    thumbnailUrl = com.music.bitchord.data.ArtistAvatarCache.get(item.title) ?: item.thumbnailUrl,
                                                     type = BrowseType.ARTIST,
                                                 )
                                             } else {
@@ -3342,6 +3343,10 @@ private fun BitChordApp(
                                                 subtitle = item.subtitle,
                                                 thumbnailUrl = item.thumbnailUrl,
                                             )
+                                            else -> {
+                                                onTabSelected(TAB_SEARCH)
+                                                viewModel.searchFor("${item.title} ${item.subtitle.substringBefore(" • ")}")
+                                            }
                                         }
                                     },
                                     onItemLongPress = onShelfLongPress,
