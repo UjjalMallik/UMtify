@@ -504,7 +504,6 @@ object DownloadFormatResolver {
         }
         val mergedFormat = candidate.format.copy(
             codec = inferredCodec,
-            isLossless = candidate.format.isLossless ?: declared?.isLossless,
             bitDepth = bestBitDepth,
             sampleRateHz = bestSampleRate,
             kbps = bestKbps,
