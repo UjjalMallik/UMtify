@@ -6847,10 +6847,10 @@ class PlaybackService : MediaLibraryService() {
      */
     private fun farBufferingLoadControl() = DefaultLoadControl.Builder()
         .setBufferDurationsMs(
-            /* minBufferMs = */ 15_000,
-            /* maxBufferMs = */ 50_000,
-            /* bufferForPlaybackMs = */ 600,
-            /* bufferForPlaybackAfterRebufferMs = */ 1_200,
+            /* minBufferMs = */ 30_000,
+            /* maxBufferMs = */ 90_000,
+            /* bufferForPlaybackMs = */ 1_200,
+            /* bufferForPlaybackAfterRebufferMs = */ 2_500,
         )
         .setPrioritizeTimeOverSizeThresholds(true)
         .setTargetBufferBytes(FAR_BUFFER_BYTES)
@@ -9751,7 +9751,7 @@ class PlaybackService : MediaLibraryService() {
         const val FAR_BUFFER_MS = 15 * 60 * 1000
 
         /** ~6 minutes at 160kbps: a whole track, for all but the longest. */
-        const val FAR_BUFFER_BYTES = 8 * 1024 * 1024
+        const val FAR_BUFFER_BYTES = 24 * 1024 * 1024
 
         /**
          * A short nudge backwards, and no more: this shares the byte ceiling

@@ -361,7 +361,7 @@ fun rememberPlayerState(controller: MediaController?): PlayerState {
             // Synced here too, so seeking while paused or buffering still moves
             // the scrubber (the poll loop only runs on play).
             position.report(currentPos.coerceAtLeast(0L))
-            state = state.copy(
+            val nextState = state.copy(
                 song = item?.toSong(),
                 isPlaying = currentIsPlaying,
                 durationMs = currentDur.coerceAtLeast(0L),
@@ -375,6 +375,9 @@ fun rememberPlayerState(controller: MediaController?): PlayerState {
                 isQualityUpgraded = item?.mediaMetadata?.extras
                     ?.getBoolean(EXTRA_QUALITY_UPGRADED) == true,
             )
+            if (nextState != state) {
+                state = nextState
+            }
         }
 
         val listener = object : Player.Listener {

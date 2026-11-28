@@ -376,8 +376,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedShelves(
                     )
                 }
                 shelf.title.equals("Your Top Artists", ignoreCase = true) ||
-                shelf.title.equals("Top Artists", ignoreCase = true) ||
-                shelf.title.equals("Trending Artists • Deezer", ignoreCase = true) -> {
+                shelf.title.equals("Top Artists", ignoreCase = true) -> {
                     CircularTopArtistsShelf(
                         shelf = shelf,
                         onItemClick = openItem,

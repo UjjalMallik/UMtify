@@ -26,12 +26,6 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object ArtistAvatarCache {
 
-    data class ArtistEnrichment(
-        val portraitUrl: String?,
-        val canonicalName: String? = null,
-        val browseId: String? = null,
-    )
-
     private val cache = ConcurrentHashMap<String, String>()
     private val browseIdCache = ConcurrentHashMap<String, String>()
     private val canonicalNameCache = ConcurrentHashMap<String, String>()
@@ -41,19 +35,8 @@ object ArtistAvatarCache {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private var dirty = false
 
-    @Volatile
-    private var metadataEnricher: (suspend (String) -> ArtistEnrichment?)? = null
-
     private val _revision = MutableStateFlow(0)
     val revision: StateFlow<Int> = _revision.asStateFlow()
-
-    /**
-     * Registers an app-layer metadata enricher (backed by enabled Group 3 extensions such as
-     * Spotify Web, Apple Music, or Deezer) to supply crisp official portraits and verified names.
-     */
-    fun registerMetadataEnricher(enricher: suspend (String) -> ArtistEnrichment?) {
-        metadataEnricher = enricher
-    }
 
     fun clearVolatilePortrait(artist: String?) {
         val key = normalize(artist)
@@ -141,14 +124,11 @@ object ArtistAvatarCache {
 
         val cleanName = artist.trim()
 
-        // 1. Primary: Query enabled Group 3 Metadata extensions (Spotify Web / Apple Music / Deezer)
-        val enriched = runCatching { metadataEnricher?.invoke(cleanName) }.getOrNull()
-        var photoUrl = enriched?.portraitUrl?.takeIf { it.isNotBlank() }
-        var canonicalName = enriched?.canonicalName?.takeIf { it.isNotBlank() }
-        var browseId = enriched?.browseId?.takeIf { it.isNotBlank() }
+        var photoUrl: String? = null
+        var canonicalName: String? = null
+        var browseId: String? = null
 
-        // 2. YouTube Music artist lookup (always resolves browseId so clicking opens Artist page,
-        //    and provides portrait fallback if metadata extensions returned none)
+        // YouTube Music artist lookup (resolves browseId so clicking opens Artist page + official portrait)
         val searchResult = runCatching {
             YtMusicRepository.search(cleanName, SearchFilter.ARTISTS).getOrNull()
         }.getOrNull()

@@ -155,9 +155,6 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
         // After AppSettings, whose switch decides whether half of it runs.
         ArtistFacts.init(this)
         com.music.bitchord.data.ArtistAvatarCache.init(filesDir)
-        com.music.bitchord.data.ArtistAvatarCache.registerMetadataEnricher { artistName ->
-            com.music.bitchord.data.MetadataDiscoveryProvider.enrichArtist(artistName)
-        }
         // One cache directory can only be opened once per process, and
         // PlaybackService shares this one — so it's opened here, not there.
         AudioCache.init(this)
@@ -166,7 +163,6 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
         // suspend call chain that reaches it (a track's canvas lookup) has
         // one to hand — see SpotifyToken's doc for why.
         SpotifyToken.init(this)
-        com.music.bitchord.data.MetadataDiscoveryProvider.init(this)
         backgroundInit.join()
         // Smart connection-aware benchmark across enabled lossless mirrors and custom addons
         CoroutineScope(Dispatchers.IO).launch {

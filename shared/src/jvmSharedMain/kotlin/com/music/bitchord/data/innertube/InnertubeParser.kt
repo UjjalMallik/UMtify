@@ -18,6 +18,7 @@ import com.music.bitchord.data.model.SearchFilter
 import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.ShelfItem
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.model.SongContentFilter
 import com.music.bitchord.data.model.SongMenu
 import com.music.bitchord.data.model.SubscriptionState
 import com.music.bitchord.data.model.UserPlaylist
@@ -113,10 +114,10 @@ object InnertubeParser {
                     parseResponsiveListItem(renderer, fallback)
                 } ?: return
 
-                val allowed = when (filter) {
-                    SearchFilter.ALL -> !song.isVideo || isAllowedListeningContent(song)
-                    SearchFilter.SONGS -> !song.isVideo || (song.isVideo && isAllowedListeningContent(song))
-                    SearchFilter.VIDEOS -> song.isVideo && isAllowedListeningContent(song)
+                val allowed = isAllowedListeningContent(song) && when (filter) {
+                    SearchFilter.ALL -> true
+                    SearchFilter.SONGS -> true
+                    SearchFilter.VIDEOS -> song.isVideo
                     SearchFilter.PODCASTS -> isPodcastOrEpisode(song, renderer)
                     SearchFilter.ALBUMS, SearchFilter.ARTISTS, SearchFilter.PLAYLISTS -> false
                 }
@@ -324,8 +325,10 @@ object InnertubeParser {
         if (VIDEO_WORD.containsMatchIn(title)) return null
         val items = carousel.a("contents").orEmpty().mapNotNull { item ->
             parseTwoRowItem(item.o("musicTwoRowItemRenderer"))
+                ?.takeIf { SongContentFilter.isAllowed(it) }
                 ?: parseResponsiveListItem(item.o("musicResponsiveListItemRenderer"))
                     ?.takeUnless { it.isVideo }
+                    ?.takeIf { isAllowedListeningContent(it) }
                     ?.let { song ->
                         ShelfItem(song.title, song.artist, song.thumbnailUrl, song.videoId, null)
                     }
@@ -343,6 +346,7 @@ object InnertubeParser {
         val items = shelf.a("contents").orEmpty().mapNotNull {
             parseResponsiveListItem(it.o("musicResponsiveListItemRenderer"))
         }.filterNot { it.isVideo }
+            .filter { isAllowedListeningContent(it) }
             .map { ShelfItem(it.title, it.artist, it.thumbnailUrl, it.videoId, null) }
         return if (items.isEmpty()) null else HomeShelf(title.ifBlank { "For you" }, items)
     }
@@ -370,6 +374,7 @@ object InnertubeParser {
             section.o("musicShelfRenderer")?.let { shelf ->
                 shelf.a("contents").orEmpty().forEach { row ->
                     parseResponsiveListItem(row.o("musicResponsiveListItemRenderer"), credit)
+                        ?.takeIf { isAllowedListeningContent(it) }
                         ?.let(songs::add)
                 }
                 if (moreSongs == null) {
@@ -522,10 +527,12 @@ object InnertubeParser {
                 is JsonObject -> {
                     node["musicResponsiveListItemRenderer"]?.let { renderer ->
                         parseResponsiveListItem(renderer as? JsonObject, pageCredit)
+                            ?.takeIf { isAllowedListeningContent(it) }
                             ?.let { out[it.videoId] = it }
                     }
                     node["musicMultiRowListItemRenderer"]?.let { renderer ->
                         parseMultiRowListItem(renderer as? JsonObject, pageCredit)
+                            ?.takeIf { isAllowedListeningContent(it) }
                             ?.let { out[it.videoId] = it }
                     }
                     node.values.forEach(::walk)
@@ -578,10 +585,14 @@ object InnertubeParser {
             when (node) {
                 is JsonObject -> {
                     node["musicResponsiveListItemRenderer"]?.let {
-                        parseResponsiveListItem(it as? JsonObject, pageCredit)?.let(songs::add)
+                        parseResponsiveListItem(it as? JsonObject, pageCredit)
+                            ?.takeIf { song -> isAllowedListeningContent(song) }
+                            ?.let(songs::add)
                     }
                     node["musicMultiRowListItemRenderer"]?.let {
-                        parseMultiRowListItem(it as? JsonObject, pageCredit)?.let(songs::add)
+                        parseMultiRowListItem(it as? JsonObject, pageCredit)
+                            ?.takeIf { song -> isAllowedListeningContent(song) }
+                            ?.let(songs::add)
                     }
                     node.values.forEach(::walk)
                 }
@@ -843,6 +854,7 @@ object InnertubeParser {
 
     fun isAllowedListeningContent(song: Song, musicVideoType: String? = null): Boolean {
         if (song.videoId.isBlank()) return false
+        if (SongContentFilter.isBlockedShortOrTeaser(song.title, song.durationText)) return false
         if (!song.isVideo) return true
         if (musicVideoType in ALLOWED_VIDEO_TYPES) return true
 
@@ -1321,7 +1333,7 @@ object InnertubeParser {
             // Those same runs link out to the artist and album pages, which is
             // how a track started from the queue knows where it came from.
             val credits = creditsOf(bylineRuns)
-            out[videoId] = Song(
+            val song = Song(
                 videoId = videoId,
                 title = title,
                 artist = artist,
@@ -1337,6 +1349,9 @@ object InnertubeParser {
                 isVideoOrigin = byline.any { it.contains("views", ignoreCase = true) },
                 isExplicit = renderer.hasExplicitBadge(),
             )
+            if (isAllowedListeningContent(song)) {
+                out[videoId] = song
+            }
         }
         return out.values.toList()
     }

@@ -42,7 +42,6 @@ import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -53,7 +52,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
@@ -150,22 +148,12 @@ fun SourcesScreen(
     val smbPassword by AppSettings.smbPassword.collectAsStateWithLifecycle()
 
     val runtimeStates by SourceHealthTracker.states.collectAsStateWithLifecycle()
-    val metadataStates by com.music.bitchord.data.MetadataDiscoveryProvider.providerStates.collectAsStateWithLifecycle()
-    val appleEnabled by com.music.bitchord.data.MetadataDiscoveryProvider.appleEnabled.collectAsStateWithLifecycle()
-    val spotifyDeezerEnabled by com.music.bitchord.data.MetadataDiscoveryProvider.spotifyDeezerEnabled.collectAsStateWithLifecycle()
 
     val coroutineScope = rememberCoroutineScope()
 
     /** Last known reachability per source, filled in as the probes come back. */
     val health = remember { mutableStateMapOf<String, SourceHealth>() }
     val losslessOutput by LosslessOutput.state.collectAsStateWithLifecycle()
-
-    // Live Metadata & Home Discovery provider probe when Sources opens or enricher toggles change
-    LaunchedEffect(appleEnabled, spotifyDeezerEnabled) {
-        withContext(Dispatchers.IO) {
-            com.music.bitchord.data.MetadataDiscoveryProvider.probeMetadataProviders()
-        }
-    }
 
     // Probe enabled audio-capable addons concurrently
     val probeKey = configs.filter { it.kind.needsServer && !it.metadataOnly }
@@ -319,46 +307,6 @@ fun SourcesScreen(
                     }
                 }
             }
-        }
-
-        // Group 3 — METADATA & HOME DISCOVERY
-        SettingsGroup(
-            header = "METADATA & HOME DISCOVERY",
-            footer = "Native keyless enrichers for Home charts, artist portraits, and lyrics.",
-        ) {
-            MetadataEnricherRow(
-                position = 1,
-                title = "Apple Music",
-                description = "High-res album art & global charts",
-                checked = appleEnabled,
-                status = metadataStates["apple"],
-                onToggle = { enabled ->
-                    com.music.bitchord.data.MetadataDiscoveryProvider.setAppleEnabled(enabled)
-                    if (enabled) {
-                        coroutineScope.launch(Dispatchers.IO) {
-                            com.music.bitchord.data.MetadataDiscoveryProvider.probeMetadataProviders(force = true)
-                            com.music.bitchord.data.MetadataDiscoveryProvider.refreshChartDiscoveryShelf()
-                        }
-                    }
-                },
-            )
-            RowDivider()
-            MetadataEnricherRow(
-                position = 2,
-                title = "Spotify & Deezer",
-                description = "Circular artist portraits, recommendations & lyrics",
-                checked = spotifyDeezerEnabled,
-                status = metadataStates["spotify"] ?: metadataStates["deezer"],
-                onToggle = { enabled ->
-                    com.music.bitchord.data.MetadataDiscoveryProvider.setSpotifyDeezerEnabled(enabled)
-                    if (enabled) {
-                        coroutineScope.launch(Dispatchers.IO) {
-                            com.music.bitchord.data.MetadataDiscoveryProvider.probeMetadataProviders(force = true)
-                            com.music.bitchord.data.MetadataDiscoveryProvider.refreshChartDiscoveryShelf()
-                        }
-                    }
-                },
-            )
         }
 
         // A personal library rather than a catalogue in the order above: it
@@ -799,99 +747,6 @@ private fun BluetoothCodecPermissionRow() {
                 maxLines = 2,
             )
         }
-    }
-}
-
-@Composable
-private fun MetadataEnricherRow(
-    position: Int,
-    title: String,
-    description: String,
-    checked: Boolean,
-    status: com.music.bitchord.data.MetadataDiscoveryProvider.MetadataProviderStatus?,
-    onToggle: (Boolean) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 60.dp)
-            .padding(horizontal = ROW_INSET, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "$position",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier
-                .width(18.dp)
-                .alpha(if (checked) 1f else 0.4f),
-        )
-        Spacer(Modifier.width(6.dp))
-        Icon(
-            imageVector = Icons.Rounded.Tune,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier
-                .size(ICON_SIZE)
-                .alpha(if (checked) 1f else 0.4f),
-        )
-        Spacer(Modifier.width(ICON_GAP))
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .alpha(if (checked) 1f else 0.4f),
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onBackground,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-            )
-            if (checked) {
-                when {
-                    status?.ready == true -> {
-                        Spacer(Modifier.height(4.dp))
-                        val enrichedPart = if (status.enrichedCount > 0) {
-                            " • Enriched ${status.enrichedCount} items"
-                        } else {
-                            ""
-                        }
-                        val latencyPart = if (status.latencyMs > 0L) " • ${status.latencyMs}ms" else ""
-                        StatusBadgePill(
-                            text = "Active$latencyPart$enrichedPart",
-                            dotColor = Color(0xFF4CAF50),
-                            containerColor = Color(0xFF4CAF50).copy(alpha = 0.14f),
-                            textColor = Color(0xFF2E7D32),
-                        )
-                    }
-                    status?.error != null -> {
-                        Spacer(Modifier.height(4.dp))
-                        StatusBadgePill(
-                            text = "Offline • ${status.error}",
-                            dotColor = MaterialTheme.colorScheme.error,
-                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
-                            textColor = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                }
-            }
-        }
-        Spacer(Modifier.width(12.dp))
-        Switch(
-            checked = checked,
-            onCheckedChange = onToggle,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                checkedTrackColor = MaterialTheme.colorScheme.primary,
-            ),
-        )
     }
 }
 

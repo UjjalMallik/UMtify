@@ -670,11 +670,9 @@ object AppSettings {
 
     /**
      * Whether Library's "On device" shelf carries the Cached songs folder —
-     * the YouTube and JioSaavn tracks the song cache is holding. Off by
-     * default: the cache is an implementation detail most people never need
-     * to look inside.
+     * the completely cached YouTube and JioSaavn tracks held on disk. Enabled by default.
      */
-    val showCacheFolder = MutableStateFlow(false)
+    val showCacheFolder = MutableStateFlow(true)
 
     // ── Library ─────────────────────────────────────────────────────────────
 
@@ -1069,7 +1067,7 @@ object AppSettings {
         paxSenixApiKey.value = prefs.getString(KEY_PAXSENIX_API_KEY, "").orEmpty()
         com.music.bitchord.data.lyrics.PaxSenix.setApiKey(paxSenixApiKey.value)
         audioCacheLimitBytes.value = clampCacheLimit(prefs.getLong(KEY_CACHE_LIMIT, DEFAULT_CACHE_LIMIT_BYTES))
-        showCacheFolder.value = prefs.getBoolean(KEY_SHOW_CACHE_FOLDER, false)
+        showCacheFolder.value = prefs.getBoolean(KEY_SHOW_CACHE_FOLDER, true)
         offlineModeEnabled.value = prefs.getBoolean(KEY_OFFLINE_MODE, false)
         listenBrainzEnabled.value = prefs.getBoolean(KEY_LISTENBRAINZ_ENABLED, false)
         listenBrainzToken.value = prefs.getString(KEY_LISTENBRAINZ_TOKEN, "").orEmpty()

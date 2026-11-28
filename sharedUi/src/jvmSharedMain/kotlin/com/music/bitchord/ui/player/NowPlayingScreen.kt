@@ -31,6 +31,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -1230,15 +1231,27 @@ fun NowPlayingScreen(
     }
     val swipeHintNext by remember { derivedStateOf { swipeSettle.value > 0f } }
 
+    // Suppress initial card zoom/settle animation during the controller-attach & cache-warm
+    // window after reopening the app so reopening never produces a 1–3s cover art shake.
+    var attachSettled by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(650L)
+        attachSettled = true
+    }
+
     // The card lets go of a little of its size while paused — less than the
     // old full-bleed sleeve did, because a photocard sits in its own space and
     // a deep shrink reads as the picture retreating rather than settling.
     val artScale by animateFloatAsState(
         targetValue = if (isPlaying) 1f else 0.92f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow,
-        ),
+        animationSpec = if (!attachSettled) {
+            snap()
+        } else {
+            spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMediumLow,
+            )
+        },
         label = "artScale",
     )
 
@@ -1370,7 +1383,10 @@ fun NowPlayingScreen(
     //
     // Carried across opens too — see [lastHeroSettled]. Settling afresh on
     // every open would be the card visibly growing into the banner each time.
-    var heroSettled by remember { mutableStateOf(lastHeroSettled) }
+    var heroSettled by remember { mutableStateOf(lastHeroSettled || art.loaded || !remoteArt.isNullOrBlank()) }
+    if (heroSettled && !lastHeroSettled) {
+        lastHeroSettled = true
+    }
     // Listened for rather than keyed on. As keys, a clip's first frame — which
     // can land in the middle of the sleeve coming back out of a panel —
     // recomposed this whole screen to run a block that, every time after the
@@ -1463,7 +1479,7 @@ fun NowPlayingScreen(
             // once the banner has settled — see [heroSettled].
             heroMode && (heroSettled || art.loaded || canvasRendered)
         ) 1f else 0f,
-        animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
+        animationSpec = if (!attachSettled) snap() else tween(durationMillis = 420, easing = FastOutSlowInEasing),
         label = "heroCanvas",
     )
     val spotifyChromeAlpha by animateFloatAsState(
@@ -2818,13 +2834,14 @@ fun NowPlayingScreen(
                         // below it not to move when it appears. Everything between the
                         // screen's top and this box's own top is fixed padding, so it
                         // can simply be added back up rather than measured.
+                        val resolvedPlayerHeightPx = if (playerBounds.height > 0) {
+                            playerBounds.height
+                        } else {
+                            with(density) { windowHeight.roundToPx() }.coerceAtLeast(1)
+                        }
                         val standardBannerBottom = statusBarTop + topStrip + ART_BOX_TOP_PAD +
                             groupTop + fullArt + ART_TITLE_GAP / 2
-                        val extendedBannerBottom = if (playerBounds.height > 0) {
-                            with(density) { (playerBounds.height * 0.68f).toDp() }
-                        } else {
-                            standardBannerBottom
-                        }
+                        val extendedBannerBottom = with(density) { (resolvedPlayerHeightPx * 0.68f).toDp() }
                         val bannerBottom = maxOf(standardBannerBottom, extendedBannerBottom)
                         // Frozen while lyrics are up. The controls now retain their full
                         // footprint across the transition, so this answer is identical
@@ -2865,11 +2882,16 @@ fun NowPlayingScreen(
                             -(statusBarTop.roundToPx() + topStrip.roundToPx() + ART_BOX_TOP_PAD.roundToPx())
                         }
                         val boxWidthPx = constraints.maxWidth
+                        val resolvedPlayerWidthPx = if (playerBounds.width > 0) {
+                            playerBounds.width
+                        } else {
+                            with(density) { windowWidth.roundToPx() }.coerceAtLeast(boxWidthPx)
+                        }
                         // How far the expanded sleeve is the banner rather than the
                         // card. Zero until there is a banner to be, which is to say
                         // until [heroHeight] and the player's width have been measured.
                         fun bannerShare(): Float =
-                            if (heroMode) 1f else if (heroHeight > 0.dp && playerBounds.width > 0) heroT.value else 0f
+                            if (heroMode) 1f else if (heroHeight > 0.dp && resolvedPlayerWidthPx > 0) heroT.value else 0f
                         // How much of the banner is on screen: its share, given up as
                         // the sleeve collapses — the same movement as the collapse
                         // rather than a fade chained after it.
@@ -2888,10 +2910,10 @@ fun NowPlayingScreen(
                         fun sleeveRect(): Rect {
                             if (heroMode) {
                                 val banner = with(density) {
-                                    val bannerH = if (heroHeight > 0.dp) heroHeight.roundToPx().toFloat() else (playerBounds.width.toFloat() * 1.35f).coerceAtLeast(300.dp.toPx())
+                                    val bannerH = (if (heroHeight > 0.dp) heroHeight else bannerBottom).roundToPx().toFloat()
                                     Rect(
-                                        offset = Offset(-(playerBounds.width - boxWidthPx) / 2f, bannerTopPx.toFloat()),
-                                        size = Size(playerBounds.width.toFloat(), bannerH),
+                                        offset = Offset(-(resolvedPlayerWidthPx - boxWidthPx) / 2f, bannerTopPx.toFloat()),
+                                        size = Size(resolvedPlayerWidthPx.toFloat(), bannerH),
                                     )
                                 }
                                 val thumbSide = with(density) { THUMB_SIZE.roundToPx().toFloat() }
@@ -2902,9 +2924,10 @@ fun NowPlayingScreen(
                             val share = bannerShare()
                             if (share == 0f) return card
                             val banner = with(density) {
+                                val bannerH = (if (heroHeight > 0.dp) heroHeight else bannerBottom).roundToPx().toFloat()
                                 Rect(
-                                    offset = Offset(-(playerBounds.width - boxWidthPx) / 2f, bannerTopPx.toFloat()),
-                                    size = Size(playerBounds.width.toFloat(), heroHeight.roundToPx().toFloat()),
+                                    offset = Offset(-(resolvedPlayerWidthPx - boxWidthPx) / 2f, bannerTopPx.toFloat()),
+                                    size = Size(resolvedPlayerWidthPx.toFloat(), bannerH),
                                 )
                             }
                             val thumbSide = with(density) { THUMB_SIZE.roundToPx().toFloat() }
@@ -2913,7 +2936,7 @@ fun NowPlayingScreen(
                         }
                         // The box's left edge in the player — the gutter, which the two
                         // widths give back between them.
-                        val boxLeftPx = ((playerBounds.width - boxWidthPx) / 2f).roundToInt()
+                        val boxLeftPx = ((resolvedPlayerWidthPx - boxWidthPx) / 2f).roundToInt()
                         // The mini player's cover in this box's own pixels, this frame,
                         // or null when the player isn't docking. The box sits a fixed
                         // padding below the player's top (see [bannerBottom]), and the

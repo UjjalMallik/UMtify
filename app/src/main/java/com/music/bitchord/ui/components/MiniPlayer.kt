@@ -469,11 +469,19 @@ fun MiniPlayer(
                 )
             } else {
                 val context = coil3.compose.LocalPlatformContext.current
-                val imageRequest = remember(remoteArt) {
+                val artData = remoteArt.artworkAt(ROW_ART_PX)
+                val cacheKey = artData?.let { "mini_art:${it}_${ROW_ART_PX}" }
+                val imageRequest = remember(song.videoId, artData) {
                     coil3.request.ImageRequest.Builder(context)
-                        .data(remoteArt.artworkAt(ROW_ART_PX))
+                        .data(artData)
                         .size(256, 256)
                         .crossfade(false)
+                        .apply {
+                            if (cacheKey != null) {
+                                memoryCacheKey(cacheKey)
+                                placeholderMemoryCacheKey(cacheKey)
+                            }
+                        }
                         .build()
                 }
                 AsyncImage(

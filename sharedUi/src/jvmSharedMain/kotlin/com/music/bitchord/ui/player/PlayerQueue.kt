@@ -267,19 +267,23 @@ internal fun InlineQueue(
         ?: nowPlaying?.song?.albumName?.takeIf { it.isNotBlank() }
 
     // Keep Now playing in view; history is available by scrolling upwards.
-    // Include the entry key because trimming history can leave the index unchanged.
+    // Snap immediately on first settle or queue reconnect so reopening doesn't shake.
     var hasScrolledOnce by remember { mutableStateOf(false) }
     LaunchedEffect(currentIndex, nowPlaying?.key, showHistory) {
+        if (nowPlaying == null) {
+            hasScrolledOnce = false
+            return@LaunchedEffect
+        }
         val nowPlayingRow = if (tracks.history.isEmpty()) 0 else tracks.history.size + 1
         val scrolledAway = listState.firstVisibleItemIndex != nowPlayingRow || listState.firstVisibleItemScrollOffset != 0
-        if (drag.held == null && nowPlaying != null && scrolledAway) {
+        if (drag.held == null && scrolledAway) {
             if (hasScrolledOnce) {
                 listState.animateScrollToItem(nowPlayingRow)
             } else {
                 listState.scrollToItem(nowPlayingRow)
-                hasScrolledOnce = true
             }
         }
+        hasScrolledOnce = true
     }
 
     Column(modifier.fillMaxWidth()) {

@@ -147,7 +147,10 @@ object RecommendationEngine {
         }
 
         // 3. Affinity scoring
-        val scoredCandidates = scoreAndRankCandidates(languageFiltered, seedArtists)
+        val filteredCandidates = languageFiltered.filter {
+            com.music.bitchord.data.model.SongContentFilter.isAllowed(it)
+        }
+        val scoredCandidates = scoreAndRankCandidates(filteredCandidates, seedArtists)
 
         // 4. Extend queue with artist caps & deduplication
         val extra = QueueBuilder.extend(existing, scoredCandidates, limit)
@@ -409,8 +412,6 @@ object RecommendationEngine {
         if (cachedBridgeShelf != null && System.currentTimeMillis() - cachedBridgeTimestamp < BRIDGE_CACHE_DURATION_MS) {
             cachedBridgeShelf?.let { result.add(it) }
         }
-        // 4. Native Apple Music Charts & Deezer/Spotify Artist Discovery shelves (cached in memory, zero shimmer lag)
-        result.addAll(com.music.bitchord.data.MetadataDiscoveryProvider.getCachedHomeDiscoveryShelves())
         return result
     }
 
@@ -421,11 +422,6 @@ object RecommendationEngine {
             (System.currentTimeMillis() - cachedBridgeTimestamp >= BRIDGE_CACHE_DURATION_MS)
         if (needsBridgeUpdate && !AppSettings.isOffline) {
             cachedBridgeShelf = generateLocalToOnlineBridgeShelf(context)
-        }
-        if (!AppSettings.isOffline) {
-            runCatching {
-                com.music.bitchord.data.MetadataDiscoveryProvider.refreshHomeDiscoveryShelves()
-            }
         }
     }
 
@@ -524,17 +520,9 @@ object RecommendationEngine {
         currentTimeOfDayTracks = mixSongs
 
         val leadTrack = mixSongs.firstOrNull()
-        val enrichment = if (leadTrack != null && !AppSettings.isOffline) {
-            runCatching {
-                com.music.bitchord.data.MetadataDiscoveryProvider.enrichTrack(leadTrack.title, leadTrack.artist)
-            }.getOrNull()
-        } else {
-            null
-        }
         val leadCover = mixSongs.firstOrNull { !it.thumbnailUrl.isNullOrBlank() }?.thumbnailUrl
-            ?: enrichment?.artworkUrl
             ?: leadTrack?.thumbnailUrl
-        val moodDetail = enrichment?.genre?.takeIf { it.isNotBlank() }?.let { "$it • ${slot.subtitle}" } ?: slot.subtitle
+        val moodDetail = slot.subtitle
 
         HomeShelf(
             title = slot.title,
@@ -676,14 +664,7 @@ object RecommendationEngine {
 
         val cleanTitle = cleanSearchTerm(topLocal.title)
         val cleanArtist = cleanSearchTerm(topLocal.artist)
-        val metaEnrichment = runCatching {
-            com.music.bitchord.data.MetadataDiscoveryProvider.enrichTrack(cleanTitle, cleanArtist)
-        }.getOrNull()
-        val query = listOfNotNull(
-            metaEnrichment?.title ?: cleanTitle,
-            metaEnrichment?.artist ?: cleanArtist,
-            metaEnrichment?.genre?.takeIf { it.isNotBlank() },
-        ).joinToString(" ").trim()
+        val query = listOf(cleanTitle, cleanArtist).filter { it.isNotBlank() }.joinToString(" ").trim()
         if (query.isBlank()) return@withContext null
 
         val seenSignatures = HashSet<String>()
@@ -693,12 +674,15 @@ object RecommendationEngine {
             (sr as? SearchResult.Track)?.song ?: (sr as? SearchResult.TopTrack)?.song
         }.filter { song ->
             val sig = "${song.title.lowercase(Locale.ROOT).trim()}|${song.artist.lowercase(Locale.ROOT).trim()}"
-            song.title.isNotBlank() && song.videoId != topLocal.id && seenSignatures.add(sig)
+            song.title.isNotBlank() &&
+                song.videoId != topLocal.id &&
+                com.music.bitchord.data.model.SongContentFilter.isAllowed(song) &&
+                seenSignatures.add(sig)
         }
 
         if (candidates.isEmpty()) return@withContext null
 
-        val bridgeSubtitle = metaEnrichment?.genre?.takeIf { it.isNotBlank() }?.let { "Local → Online • $it" } ?: "Local → Online"
+        val bridgeSubtitle = "Local → Online"
         val shelfItems = candidates.take(12).map { song ->
             ShelfItem(
                 title = song.title,
@@ -710,7 +694,7 @@ object RecommendationEngine {
         }
 
         val shelf = HomeShelf(
-            title = "Because you play ${metaEnrichment?.title ?: topLocal.title}",
+            title = "Because you play $cleanTitle",
             subtitle = bridgeSubtitle,
             items = shelfItems,
         )

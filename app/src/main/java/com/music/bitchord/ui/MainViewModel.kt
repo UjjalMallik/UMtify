@@ -3505,7 +3505,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     private suspend fun downloadedPlaylist(browseId: String): List<Song> {
         val id = Downloads.recordIdOf(browseId) ?: return emptyList()
-        return Downloads.getCollectionSongs(getApplication(), id).filter { it.durationMillis() > 30_000L }
+        return Downloads.getCollectionSongs(getApplication(), id)
+            .filter { com.music.bitchord.data.model.SongContentFilter.isAllowed(it) }
     }
 
     /**
@@ -3516,7 +3517,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun downloadedCopyOf(browseId: String): List<Song> {
         val bare = browseId.removePrefix("VL")
         val id = Downloads.collections.value.keys.firstOrNull { it.removePrefix("VL") == bare } ?: return emptyList()
-        return Downloads.getCollectionSongs(getApplication(), id).filter { it.durationMillis() > 30_000L }
+        return Downloads.getCollectionSongs(getApplication(), id)
+            .filter { com.music.bitchord.data.model.SongContentFilter.isAllowed(it) }
     }
 
     /**
@@ -3524,7 +3526,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * is holding, most recently played first. See [AudioCache.cachedSongs].
      */
     private suspend fun cachedSongsState(): UiState<List<Song>> {
-        val songs = AudioCache.cachedSongs().map { it.song }.filter { it.durationMillis() > 30_000L }
+        val songs = AudioCache.cachedSongs()
+            .map { it.song }
+            .filter { com.music.bitchord.data.model.SongContentFilter.isAllowed(it) }
         return if (songs.isEmpty()) UiState.Error(text(R.string.cached_songs_empty)) else UiState.Success(songs)
     }
 

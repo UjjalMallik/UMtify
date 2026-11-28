@@ -18,6 +18,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import coil3.PlatformContext
 import coil3.compose.LocalPlatformContext
@@ -56,7 +57,8 @@ internal fun rememberCanvasArtwork(song: Song): CanvasArtwork? {
     // clean; the same-titled-impostor case is guarded where the clip is
     // adopted, by [CanvasArtwork.matches].
     var canvas by remember(song.title, song.artist) { mutableStateOf<CanvasArtwork?>(null) }
-    LaunchedEffect(song.videoId, song.albumName, canvasAllowedNow, prioritizeSpotifyCanvas) {
+    val latestAlbumName by rememberUpdatedState(song.albumName)
+    LaunchedEffect(song.videoId, canvasAllowedNow, prioritizeSpotifyCanvas) {
         if (!canvasAllowedNow) {
             canvas = null
             return@LaunchedEffect
@@ -70,15 +72,11 @@ internal fun rememberCanvasArtwork(song: Song): CanvasArtwork? {
         // what is playing: [CanvasArtwork.matches] is what stops a preserved
         // clip from being a different song's that happens to share a title.
         canvas = PlayerPlatform.host.cachedCanvas(song)
-            ?: canvas?.takeIf { it.matches(song.title, song.artist, song.albumName) }
+            ?: canvas?.takeIf { it.matches(song.title, song.artist, latestAlbumName) }
 
         // The album name is looked up separately and lands a moment after the
-        // player opens, and it is the field that makes the catalogue searches
-        // match. Give it that moment: if it arrives, this effect restarts and
-        // all that was spent waiting is the wait. If it never does — a track
-        // with no album, or a lookup that failed — the search still goes out,
-        // just a beat later, which is imperceptible for decoration.
-        if (canvas == null && song.albumName == null) delay(ALBUM_SETTLE_MS)
+        // player opens, without cancelling/restarting this effect on backfill.
+        if (canvas == null && latestAlbumName == null) delay(ALBUM_SETTLE_MS)
         // Keep what an earlier pass found if this one comes back empty, rather
         // than pulling a playing clip out from under itself.
         canvas = PlayerPlatform.host.canvasFor(song) ?: canvas

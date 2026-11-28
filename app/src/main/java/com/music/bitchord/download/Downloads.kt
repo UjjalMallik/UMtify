@@ -16,6 +16,7 @@ import com.music.bitchord.data.LosslessAudioProvider
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.playback.AudioCache
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.model.SongContentFilter
 import com.music.bitchord.data.model.durationMillis
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.DownloadQuality
@@ -939,7 +940,8 @@ object Downloads {
 
             val uri = meta.uri.toUri()
             if (DownloadStore.exists(context, uri)) {
-                if (meta.durationText.durationMillis() in 1..30_000L || (meta.durationText != null && meta.durationText.durationMillis() <= 30_000L)) {
+                val durMs = meta.durationText.durationMillis()
+                if (SongContentFilter.isBlockedShortOrTeaser(meta.title, meta.durationText, durMs)) {
                     continue
                 }
                 val fileModifiedMillis = uri.takeIf { it.scheme == "file" }

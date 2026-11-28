@@ -197,7 +197,10 @@ object LocalMediaRepository {
                         scanned[contentUri] = tags
                         val lowerName = name.lowercase()
                         if (contentUri !in knownUris && lowerName !in knownFileNames && isAudioFileName(name)) {
-                            extraSongs.add(buildSongFromUri(context, contentUri, name, tags))
+                            val adopted = buildSongFromUri(context, contentUri, name, tags)
+                            if (com.music.bitchord.data.model.SongContentFilter.isAllowed(adopted)) {
+                                extraSongs.add(adopted)
+                            }
                         }
                     }
                 }
@@ -213,14 +216,15 @@ object LocalMediaRepository {
                                 val lowerName = file.name.lowercase()
                                 if (uriStr !in knownUris && lowerName !in knownFileNames) {
                                     val modified = file.lastModified().takeIf { it > 0 }?.div(1_000)
-                                    extraSongs.add(
-                                        buildSongFromUri(
-                                            context,
-                                            uriStr,
-                                            file.name,
-                                            ScannedTags(null, null, modified, modified),
-                                        ),
+                                    val adopted = buildSongFromUri(
+                                        context,
+                                        uriStr,
+                                        file.name,
+                                        ScannedTags(null, null, modified, modified),
                                     )
+                                    if (com.music.bitchord.data.model.SongContentFilter.isAllowed(adopted)) {
+                                        extraSongs.add(adopted)
+                                    }
                                 }
                             }
                         }
@@ -378,22 +382,22 @@ object LocalMediaRepository {
                 val folderUri = obj.optString("folderUri").takeIf { it.isNotBlank() }
                 if (isUmtifyPath(localUri) || isUmtifyPath(localPath) || isUmtifyPath(folderUri)) continue
                 if (localPath != null && localPath.startsWith("/") && !File(localPath).exists()) continue
-                list.add(
-                    Song(
-                        videoId = videoId,
-                        title = obj.optString("title", "Unknown Title"),
-                        artist = obj.optString("artist", "Unknown Artist"),
-                        thumbnailUrl = obj.optString("thumbnailUrl").takeIf { it.isNotBlank() },
-                        durationText = obj.optString("durationText").takeIf { it.isNotBlank() },
-                        albumName = obj.optString("albumName").takeIf { it.isNotBlank() },
-                        localUri = localUri,
-                        localPath = localPath,
-                        localDateAddedSeconds = if (obj.has("dateAdded")) obj.optLong("dateAdded") else null,
-                        localDateModifiedSeconds = if (obj.has("dateModified")) obj.optLong("dateModified") else null,
-                        trackNumber = if (obj.has("trackNumber")) obj.optInt("trackNumber") else null,
-                        folderUri = folderUri,
-                    )
+                val cachedSong = Song(
+                    videoId = videoId,
+                    title = obj.optString("title", "Unknown Title"),
+                    artist = obj.optString("artist", "Unknown Artist"),
+                    thumbnailUrl = obj.optString("thumbnailUrl").takeIf { it.isNotBlank() },
+                    durationText = obj.optString("durationText").takeIf { it.isNotBlank() },
+                    albumName = obj.optString("albumName").takeIf { it.isNotBlank() },
+                    localUri = localUri,
+                    localPath = localPath,
+                    localDateAddedSeconds = if (obj.has("dateAdded")) obj.optLong("dateAdded") else null,
+                    localDateModifiedSeconds = if (obj.has("dateModified")) obj.optLong("dateModified") else null,
+                    trackNumber = if (obj.has("trackNumber")) obj.optInt("trackNumber") else null,
+                    folderUri = folderUri,
                 )
+                if (!com.music.bitchord.data.model.SongContentFilter.isAllowed(cachedSong)) continue
+                list.add(cachedSong)
             }
             list
         }.getOrDefault(emptyList())
@@ -773,7 +777,9 @@ object LocalMediaRepository {
                     val current = allLocalSongsFlow.value
                     val hasChanges = current.any { batchResults.containsKey(it.videoId) && batchResults[it.videoId] != it }
                     if (hasChanges) {
-                        val updated = current.map { batchResults[it.videoId] ?: it }
+                        val updated = current
+                            .map { batchResults[it.videoId] ?: it }
+                            .filter { com.music.bitchord.data.model.SongContentFilter.isAllowed(it) }
                         allLocalSongsFlow.value = updated
                         saveCachedIndex(appContext, updated)
                     }
@@ -1356,6 +1362,8 @@ object LocalMediaRepository {
                             }
 
                             val (title, artist) = resolveTitleAndArtist(rawTitle, rawArtist, path ?: displayName)
+                            if (durationMs in 1 until MIN_LOCAL_MUSIC_DURATION_MS) continue
+                            if (com.music.bitchord.data.model.SongContentFilter.isBlockedShortOrTeaser(title, null, durationMs)) continue
                             val albumName = rawAlbum.takeUnless { it.isNullOrBlank() || it == "<unknown>" }
                             val cachedArt = getCachedLocalArtThumbUri(context, contentUri) ?: getCachedLocalArtUri(context, contentUri)
                             val artworkUrl = cachedArt ?: "local_art://$contentUri"
@@ -1594,6 +1602,9 @@ object LocalMediaRepository {
                     val relPath = if (relPathCol >= 0 && !cursor.isNull(relPathCol)) cursor.getString(relPathCol) else null
 
                     if (isUmtifyPath(path) || isUmtifyPath(relPath) || bucketName.equals("UMtify", ignoreCase = true) || bucketName.equals("BitChord", ignoreCase = true)) continue
+                    if (durationMs in 1 until MIN_LOCAL_MUSIC_DURATION_MS) continue
+                    val trackTitleFromFile = (path?.substringAfterLast('/') ?: bucketName.orEmpty()).substringBeforeLast('.')
+                    if (com.music.bitchord.data.model.SongContentFilter.isBlockedShortOrTeaser(trackTitleFromFile, null, durationMs)) continue
                     if (filterNonMusic && !isEligibleLocalMusic(durationMs, path?.substringAfterLast('/') ?: bucketName.orEmpty(), path)) continue
 
                     val folderPath = path?.let { File(it).parent }
@@ -1738,7 +1749,10 @@ object LocalMediaRepository {
      */
     internal fun isEligibleLocalMusic(durationMs: Long, displayName: String, path: String?): Boolean {
         if (isUmtifyPath(path) || displayName.equals("UMtify", ignoreCase = true) || displayName.equals("BitChord", ignoreCase = true)) return false
-        if (durationMs in 1..MIN_LOCAL_MUSIC_DURATION_MS) return false
+        if (durationMs in 1 until MIN_LOCAL_MUSIC_DURATION_MS) return false
+        val nameForFilter = path?.substringAfterLast('/')?.substringBeforeLast('.')?.takeIf { it.isNotBlank() }
+            ?: displayName.substringBeforeLast('.')
+        if (com.music.bitchord.data.model.SongContentFilter.isBlockedShortOrTeaser(nameForFilter, null, durationMs)) return false
 
         val fileName = path?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
             ?: displayName

@@ -309,7 +309,7 @@ object LosslessAudioProvider {
                 probeEndpoints.forEach { ep ->
                     launch {
                         try {
-                            val res = probeSingleMirror(ep, encodedQuery, normTitle, normArtist, durationSec, qualityTier, sourceLabel)
+                            val res = probeSingleMirror(ep, encodedQuery, normTitle, normArtist, durationSec, qualityTier, sourceLabel, cleanedTitle, cleanedArtist)
                             if (res != null && atomicFinished.compareAndSet(false, true)) {
                                 if (endpointsOverride == null) lastHealthyEndpoint = ep
                                 if (!sourceLabel.isNullOrBlank()) {
@@ -386,7 +386,7 @@ object LosslessAudioProvider {
             coroutineScope {
                 epList.take(2).map { ep ->
                     async {
-                        val candidates = searchAllCandidates(ep, encodedQuery, normTitle, normArtist, durationSec)
+                        val candidates = searchAllCandidates(ep, encodedQuery, normTitle, normArtist, durationSec, cleanedTitle, cleanedArtist)
                         if (candidates.isEmpty()) return@async emptyList<LosslessStreamResult>()
                         val best = candidates.take(2)
                         val tierJobs = mutableListOf<kotlinx.coroutines.Deferred<LosslessStreamResult?>>()
@@ -485,7 +485,7 @@ object LosslessAudioProvider {
                                         if (!resp.isSuccessful) return@use null
                                         val text = resp.body?.string()?.trim().orEmpty()
                                         if (!text.startsWith("{") && !text.startsWith("[")) return@use null
-                                        parseSearchResults(text, "blindinglights", "theweeknd", null).firstOrNull()
+                                        parseSearchResults(text, "blindinglights", "theweeknd", null, "Blinding Lights", "The Weeknd").firstOrNull()
                                     }
                                 }.getOrNull()
                                 if (candidate != null) {
@@ -553,7 +553,7 @@ object LosslessAudioProvider {
                             anyHttp200 = true
                             val body = resp.body?.string()
                             if (!body.isNullOrBlank()) {
-                                val parsed = parseSearchResults(body, normTitle, "", null)
+                                val parsed = parseSearchResults(body, normTitle, "", null, cleanTitle(query), "")
                                     .sortedByDescending { it.score }
                                     .take(limit)
                                 if (parsed.isNotEmpty()) {
@@ -604,9 +604,11 @@ object LosslessAudioProvider {
         durationSec: Int?,
         qualityTier: String,
         sourceLabel: String? = null,
+        rawTitle: String = normTitle,
+        rawArtist: String = normArtist,
     ): LosslessStreamResult? {
         val start = System.currentTimeMillis()
-        val candidate = searchCandidates(endpoint, encodedQuery, normTitle, normArtist, durationSec)
+        val candidate = searchCandidates(endpoint, encodedQuery, normTitle, normArtist, durationSec, rawTitle, rawArtist)
         if (candidate == null) {
             recordMirrorFailure(endpoint)
             return null
@@ -631,7 +633,9 @@ object LosslessAudioProvider {
         normTitle: String,
         normArtist: String,
         targetDurationSec: Int?,
-    ): TrackCandidate? = searchAllCandidates(endpoint, encodedQuery, normTitle, normArtist, targetDurationSec).firstOrNull()
+        rawTitle: String = normTitle,
+        rawArtist: String = normArtist,
+    ): TrackCandidate? = searchAllCandidates(endpoint, encodedQuery, normTitle, normArtist, targetDurationSec, rawTitle, rawArtist).firstOrNull()
 
     private fun searchAllCandidates(
         endpoint: String,
@@ -639,6 +643,8 @@ object LosslessAudioProvider {
         normTitle: String,
         normArtist: String,
         targetDurationSec: Int?,
+        rawTitle: String = normTitle,
+        rawArtist: String = normArtist,
     ): List<TrackCandidate> {
         val base = forceHttps(endpoint.trimEnd('/'))
         val searchUrls = listOf(
@@ -661,7 +667,7 @@ object LosslessAudioProvider {
             val body = response.use { if (it.isSuccessful) it.body?.string() else null } ?: continue
             val trimmed = body.trim()
             if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) continue
-            val candidates = parseSearchResults(trimmed, normTitle, normArtist, targetDurationSec)
+            val candidates = parseSearchResults(trimmed, normTitle, normArtist, targetDurationSec, rawTitle, rawArtist)
             if (candidates.isNotEmpty()) {
                 return candidates.sortedByDescending { it.score }
             }
@@ -678,7 +684,7 @@ object LosslessAudioProvider {
             val deezerResponse = runCatching { httpClient.newCall(deezerRequest).execute() }.getOrNull()
             val deezerBody = deezerResponse?.use { if (it.isSuccessful) it.body?.string() else null }
             if (deezerBody != null) {
-                val deezerCandidates = parseSearchResults(deezerBody, normTitle, normArtist, targetDurationSec)
+                val deezerCandidates = parseSearchResults(deezerBody, normTitle, normArtist, targetDurationSec, rawTitle, rawArtist)
                 if (deezerCandidates.isNotEmpty()) {
                     return deezerCandidates.sortedByDescending { it.score }
                 }
@@ -693,6 +699,8 @@ object LosslessAudioProvider {
         normTitle: String,
         normArtist: String,
         targetDurationSec: Int?,
+        rawTitle: String = normTitle,
+        rawArtist: String = normArtist,
     ): List<TrackCandidate> {
         val list = mutableListOf<TrackCandidate>()
         runCatching {
@@ -755,6 +763,9 @@ object LosslessAudioProvider {
                     rawDur > 0 -> rawDur
                     else -> (item.optInt("duration_ms", 0) / 1000).takeIf { it > 0 } ?: 0
                 }
+                if (duration > 0 && com.music.bitchord.data.model.SongContentFilter.isBlockedShortOrTeaser(title, null, duration * 1000L)) {
+                    continue
+                }
                 val isrc = item.optString("isrc").takeIf { it.isNotBlank() }
                 if (isrc != null && title.isNotBlank()) {
                     isrcCache["${normalize(cleanTitle(title))}|${normalize(cleanTitle(artist))}"] = isrc
@@ -763,20 +774,66 @@ object LosslessAudioProvider {
                     item.optString("quality", "LOSSLESS")
                 }
 
-                val cNormTitle = normalize(title)
+                val cNormTitle = normalize(cleanTitle(title))
                 val cNormArtist = normalize(artist)
 
+                val wantedParts = com.music.bitchord.data.sources.TrackMatcher.parseTitle(
+                    rawTitle.ifBlank { normTitle },
+                    rawArtist.ifBlank { normArtist },
+                )
+                val gotParts = com.music.bitchord.data.sources.TrackMatcher.parseTitle(title, artist)
+                val wantedSet = wantedParts.words.toSet()
+                val gotSet = gotParts.words.toSet()
+                val wordOverlapRatio = if (wantedSet.isNotEmpty() && gotSet.isNotEmpty()) {
+                    (2.0 * wantedSet.intersect(gotSet).size) / (wantedSet.size + gotSet.size)
+                } else 0.0
+                val exactNorm = cNormTitle == normTitle && normTitle.isNotBlank()
+                val guardedContainment = if (normTitle.length >= 4 && cNormTitle.length >= 4) {
+                    val minLen = minOf(cNormTitle.length, normTitle.length)
+                    val maxLen = maxOf(cNormTitle.length, normTitle.length)
+                    (cNormTitle.contains(normTitle) || normTitle.contains(cNormTitle)) &&
+                        (minLen.toDouble() / maxLen.toDouble()) >= 0.80
+                } else false
+                val allPrimaryWordsMatch = wantedSet.isNotEmpty() && gotSet.containsAll(wantedSet) &&
+                    gotSet.size <= wantedSet.size + 1
+                val strongTitleMatch = exactNorm || allPrimaryWordsMatch || wordOverlapRatio >= 0.80 || guardedContainment
+
+                val artistAgreed = if (normArtist.isNotBlank() && cNormArtist.isNotBlank()) {
+                    cNormArtist == normArtist ||
+                        cNormArtist.contains(normArtist) ||
+                        normArtist.contains(cNormArtist) ||
+                        com.music.bitchord.data.sources.TrackMatcher.sharesArtist(
+                            rawArtist.ifBlank { normArtist },
+                            artist,
+                        )
+                } else {
+                    normArtist.isBlank()
+                }
+
+                // When resolving a specific track (normArtist present), strictly discard any candidate
+                // that fails title match OR fails primary artist match (never match on artist + duration alone).
+                if (normArtist.isNotBlank() && (!strongTitleMatch || !artistAgreed)) {
+                    continue
+                }
+                if (normArtist.isBlank() && normTitle.isNotBlank() && !strongTitleMatch &&
+                    !cNormTitle.contains(normTitle) && !(cNormTitle.length >= 4 && normTitle.contains(cNormTitle))
+                ) {
+                    continue
+                }
+
                 var score = 0
-                if (cNormTitle == normTitle) {
-                    score += 50
-                } else if (cNormTitle.contains(normTitle) || normTitle.contains(cNormTitle)) {
+                if (exactNorm) {
+                    score += 60
+                } else if (allPrimaryWordsMatch || wordOverlapRatio >= 0.80) {
+                    score += 45
+                } else if (guardedContainment) {
                     score += 30
                 }
 
-                if (normArtist.isNotBlank()) {
+                if (normArtist.isNotBlank() && artistAgreed) {
                     if (cNormArtist == normArtist) {
                         score += 30
-                    } else if (cNormArtist.contains(normArtist) || normArtist.contains(cNormArtist)) {
+                    } else {
                         score += 20
                     }
                 }

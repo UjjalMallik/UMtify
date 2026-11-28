@@ -397,8 +397,24 @@ private fun GlassNowPlaying(
                     },
                 )
             } else {
+                val context = coil3.compose.LocalPlatformContext.current
+                val artData = artUrl?.artworkAt(ROW_ART_PX)
+                val cacheKey = artData?.let { "glass_mini_art:${it}_${ROW_ART_PX}" }
+                val artRequest = remember(song.videoId, artData) {
+                    coil3.request.ImageRequest.Builder(context)
+                        .data(artData)
+                        .size(256, 256)
+                        .crossfade(false)
+                        .apply {
+                            if (cacheKey != null) {
+                                memoryCacheKey(cacheKey)
+                                placeholderMemoryCacheKey(cacheKey)
+                            }
+                        }
+                        .build()
+                }
                 AsyncImage(
-                    model = artUrl?.artworkAt(ROW_ART_PX),
+                    model = artRequest,
                     contentDescription = null,
                     modifier = Modifier
                         .size(artSize)

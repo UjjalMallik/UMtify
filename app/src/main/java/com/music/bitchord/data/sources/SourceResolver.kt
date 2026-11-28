@@ -339,8 +339,9 @@ object SourceResolver {
             }
         }
 
-        // Give Lossless / UMtify a 5-second budget matching DownloadFormatResolver; keep 2.5s otherwise.
-        val timeoutMs = if (wantsLossless && active.any { it.kind.canServeLossless || it is AddonSource }) 5000L else 2500L
+        // Give Lossless / UMtify a 3.5-second fast-fail budget for responsive stream opening
+        // (next queue tracks are pre-fetched in background and cached for 15 minutes); keep 2.5s otherwise.
+        val timeoutMs = if (wantsLossless && active.any { it.kind.canServeLossless || it is AddonSource }) 3500L else 2500L
         val resolved = withTimeoutOrNull(timeoutMs) {
             coroutineScope {
                 val candidateSources = if (wantsLossless) {

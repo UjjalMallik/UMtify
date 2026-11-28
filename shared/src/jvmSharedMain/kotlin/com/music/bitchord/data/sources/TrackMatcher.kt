@@ -246,33 +246,10 @@ object TrackMatcher {
         val wanted = parseTitle(target.title, target.artist)
         val got = parseTitle(candidate.title, candidate.artist)
         if (wanted.core.isBlank() || got.core.isBlank()) return null
-        // Same word, different script: katakana コイコガレ vs romaji
-        // koikogare. Hepburn transliteration bridges kana; kanji has no
-        // algorithmic reading and stays exact-only (mixed titles carry their
-        // romaji tail instead, and English loans like ドア/door don't
-        // transliterate to each other either). Past that, a guarded
-        // containment absorbs minor punctuation and symbol differences.
-        val isTitleMatch = when {
-            wanted.core == got.core -> true
-            romajiOf(wanted.core) == romajiOf(got.core) -> true
-            wanted.core.length <= 3 || got.core.length <= 3 -> false
-            else -> wanted.core.contains(got.core) || got.core.contains(wanted.core)
-        }
+        val exactTitleMatch = wanted.core == got.core || romajiOf(wanted.core) == romajiOf(got.core)
+        val isTitleMatch = exactTitleMatch ||
+            hasStrictWordOverlap(wanted.words, got.words, wanted.core, got.core)
         if (!isTitleMatch) return null
-        // Direction matters both ways round: asking for the album cut must not
-        // land on the live take, and asking for the live take must not land on
-        // the album cut. Markers living on the release rather than the row come
-        // in two kinds. A wanted take found on the album completes the row
-        // (Tidal's "KALYANI" + "KALYANI (Remix)"), but only ever in that
-        // direction. The no-vocal takes are bidirectional instead: a row from
-        // an "INSTRUMENTAL EDITION" album *is* the instrumental even when its
-        // title says nothing, so it must neither stand in for the vocal nor be
-        // refused its own instrumental request. Anything else on an album
-        // ("Party Mix 2024", "Deluxe Version") is compilation naming and is
-        // rightly ignored in both directions.
-        // Only markers the request asked for are taken from the album: the
-        // rest of an album name ("Song (Remixes)", "MTV Unplugged") describes
-        // the release, and adding it would refuse the right row.
         val albumMarks = albumVersionMarkers(candidate.albumName)
         val effectiveVersions = got.versions + (albumMarks intersect NOVOCAL_TAKES) +
             (albumMarks intersect wanted.versions)
@@ -282,47 +259,45 @@ object TrackMatcher {
         val duration = durationScore(
             target.durationSec,
             secondsOf(candidate.durationText),
-            // A music video may carry a long visual intro or outro. That drift
-            // is credible only when the catalogue row names the same artist;
-            // duration must never make an unrelated artist into the song.
-            // YouTube does not reliably label official music videos as video
-            // rows (square release artwork is common), so the flag cannot be
-            // the only way through the wider window. Exact title/version plus
-            // a shared artist is strong enough; a different artist still gets
-            // the ordinary 30-second ceiling below.
             allowVideoDrift = creditedArtist != null,
         ) ?: return null
+        // Require primary/shared artist agreement whenever both sides name one; only exact
+        // normalized title matches with exact runtime agreement may bridge composer/singer credits.
         val artist = creditedArtist
-        // The credits don't merely differ in spelling, they name different
-        // people — and sometimes that is because they are describing the
-        // same recording from different ends of it. Film catalogues are
-        // full of this: YouTube Music files "Jhak Maar Ke" under Pritam,
-        // who *wrote* it, while every store files it under Neeraj
-        // Shridhar, who *sang* it. Neither is wrong and nothing in either
-        // credit hints at the other, so a matcher that insists on an
-        // overlap refuses the correct track every time.
-        //
-        // What breaks the tie is length. Two recordings that share an
-        // exact title and agree on their runtime to the second are the
-        // same master; a cover, a remix or a re-recording essentially
-        // never lands there — of the four candidates for that track, the
-        // remix ran 241s and the acoustic cover 66s against the 233s being
-        // played. So an exact runtime is allowed to stand in for a shared
-        // credit, and *only* an exact one: with no runtime on either side
-        // there is nothing corroborating anything, and the strict refusal
-        // stands. The match still scores below a genuine credit match, so
-        // it never wins where a properly-credited copy exists.
-        // A music video's runtime includes visuals and therefore cannot
-        // vouch for a catalogue row credited to completely different
-        // people. This exact exception is what admitted the 3:30 Lovely
-        // track for Yo Yo Honey Singh's 3:31 "Brown Rang" video.
             ?: CREDITS_DISAGREE.takeIf {
-                !target.isVideo && withinSeconds(candidate, target, CREDIT_OVERRIDE_SEC)
+                exactTitleMatch && !target.isVideo && withinSeconds(candidate, target, CREDIT_OVERRIDE_SEC)
             }
             ?: return null
         val explicit = explicitScore(target.isExplicit, candidate.isExplicit) ?: return null
         return BASE + artist + duration + albumScore(target.album, candidate.albumName) + explicit +
                 contextScore(wanted, got)
+    }
+
+    /**
+     * Requires all primary title words to match (with at most one non-conflicting extra word
+     * and >= 0.80 Dice word similarity), blocking partial-word/unrelated containment matches
+     * such as "Brown Rang" matching "High Heels Te Nache".
+     */
+    private fun hasStrictWordOverlap(
+        wantedWords: List<String>,
+        gotWords: List<String>,
+        wantedCore: String,
+        gotCore: String,
+    ): Boolean {
+        if (wantedCore.length <= 3 || gotCore.length <= 3) return false
+        if (wantedWords.size <= 1 || gotWords.size <= 1) {
+            val minLen = minOf(wantedCore.length, gotCore.length)
+            val maxLen = maxOf(wantedCore.length, gotCore.length)
+            return minLen >= 4 &&
+                (wantedCore.contains(gotCore) || gotCore.contains(wantedCore)) &&
+                (minLen.toDouble() / maxLen.toDouble()) >= 0.80
+        }
+        val wantedSet = wantedWords.toSet()
+        val gotSet = gotWords.toSet()
+        val common = wantedSet.intersect(gotSet).size
+        val similarity = (2.0 * common) / (wantedSet.size + gotSet.size)
+        val allPrimaryMatched = gotSet.containsAll(wantedSet) && gotSet.size <= wantedSet.size + 1
+        return similarity >= 0.80 || allPrimaryMatched
     }
 
     /**
