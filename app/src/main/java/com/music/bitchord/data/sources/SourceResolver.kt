@@ -1263,17 +1263,33 @@ object SourceResolver {
         val perAddon = addons.map { addon ->
             async(Dispatchers.IO) {
                 val results = mutableListOf<SourceStream>()
+                val bestDeferred = async {
+                    matchAndStream(addon, target, StreamRequest.Best, waitForAll = false)?.let { s ->
+                        s.copy(
+                            sourceConfigId = addon.configId,
+                            sourceName = addon.displayName,
+                        )
+                    }
+                }
                 val (atmos, flac) = querySingleAddonStreams(addon, target, wantsDolbyAtmos, wantsLossless)
                 if (atmos != null) results.add(atmos)
                 if (flac != null) results.add(flac)
-                // Fallback to the exact same matchAndStream pipeline PlaybackService uses
-                // if stereoOnly/explicit tier split missed a valid stream.
-                if (results.isEmpty()) {
+                val bestStream = bestDeferred.await()
+                if (bestStream != null && results.none { it.url == bestStream.url }) {
+                    val normalizedFormat = if (bestStream.format.codec == null && !bestStream.format.isDolbyAtmos && bestStream.format.kbps == null) {
+                        bestStream.format.copy(codec = "flac")
+                    } else {
+                        bestStream.format
+                    }
+                    results.add(bestStream.copy(format = normalizedFormat))
+                }
+                // Fallback to explicit Lossless matchAndStream if all previous attempts missed.
+                if (results.isEmpty() && wantsLossless) {
                     val startMs = System.currentTimeMillis()
                     val direct = matchAndStream(
                         addon,
                         target,
-                        if (wantsLossless) StreamRequest.Lossless else StreamRequest.Best,
+                        StreamRequest.Lossless,
                         waitForAll = false,
                     )?.let { s ->
                         SourceHealthTracker.recordReady(addon.configId, System.currentTimeMillis() - startMs)

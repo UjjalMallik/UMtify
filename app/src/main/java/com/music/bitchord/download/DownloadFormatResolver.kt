@@ -1,5 +1,6 @@
 package com.music.bitchord.download
 
+import android.util.Log
 import com.music.bitchord.data.ExtensionRepoManager
 import com.music.bitchord.data.Http
 import com.music.bitchord.data.LosslessAudioProvider
@@ -103,11 +104,16 @@ object DownloadFormatResolver {
                             else -> draft.bitrateKbps
                         }
                         val bytes = probedBytes ?: calculateEstimatedBytes(bitrateKbps = estKbps, durationSec = durationSec)
+                        val resolvedKbps = if (probedBytes != null && durationSec > 0 && (draft.isLossless || draft.bitrateKbps <= 0)) {
+                            ((probedBytes * 8L) / (durationSec * 1000L)).toInt().coerceAtLeast(64)
+                        } else {
+                            draft.bitrateKbps.takeIf { it > 0 } ?: estKbps
+                        }
                         DownloadFormatOption(
                             id = draft.id,
                             label = draft.label,
                             codec = draft.codec,
-                            bitrateKbps = draft.bitrateKbps,
+                            bitrateKbps = resolvedKbps,
                             sampleRateHz = draft.sampleRateHz,
                             bitDepth = draft.bitDepth,
                             sizeBytes = bytes,
@@ -131,8 +137,9 @@ object DownloadFormatResolver {
                     val slug = SflxRuntimeBridge.providerSlug(opt.sourceName ?: providerName ?: "source")
                     val tierKey = "${slug}_${opt.codec}_${opt.bitDepth ?: 0}_${opt.bitrateKbps ?: 0}_${opt.streamUrl}"
                     if (seenProviderFormatKeys.add(tierKey)) {
-                        // Ensure unique option ID across all providers
-                        val uniqueId = if (opt.id.startsWith(slug)) opt.id else "${slug}_${opt.id}"
+                        // Ensure globally unique option ID across all providers & LazyColumn items
+                        val baseId = if (opt.id.startsWith(slug)) opt.id else "${slug}_${opt.id}"
+                        val uniqueId = if (collected.any { it.id == baseId }) "${baseId}_${collected.size}" else baseId
                         collected.add(opt.copy(id = uniqueId))
                     }
                 }
@@ -184,18 +191,21 @@ object DownloadFormatResolver {
                     val drafts = mutableListOf<OptionDraft>()
 
                     // A. Run QuickJS .sflx extension script (6.5s timeout)
-                    val sflxOptions = runCatching {
-                        SflxRuntimeBridge.resolveDownloadFormats(
+                    val sflxRes = runCatching {
+                        SflxRuntimeBridge.resolveDownloadFormatsDetailed(
                             extensionId = extId,
                             displayName = ext.displayName,
                             title = song.title,
                             artist = song.artist,
                             album = song.albumName,
+                            isrc = LosslessAudioProvider.cachedIsrcFor(song.title, song.artist),
                             durationSec = durationSec,
                         )
-                    }.getOrNull().orEmpty()
+                    }.getOrElse { err ->
+                        SflxRuntimeBridge.SflxResolutionResult(emptyList(), err.message ?: "Runtime error")
+                    }
 
-                    sflxOptions.forEach { opt ->
+                    sflxRes.options.forEach { opt ->
                         val safeUrl = LosslessAudioProvider.forceHttps(opt.streamUrl)
                         if (safeUrl.startsWith("https://")) {
                             drafts.add(
@@ -224,82 +234,60 @@ object DownloadFormatResolver {
                             extraEndpoints = ExtensionRepoManager.getExtractedEndpointsFor(extId),
                         )
                         val pSlug = SflxRuntimeBridge.providerSlug(ext.displayName)
-                        val (hiRes, loRes) = coroutineScope {
-                            val hDef = async {
-                                runCatching {
-                                    withTimeoutOrNull(4500L) {
-                                        LosslessAudioProvider.resolveLosslessTrack(
-                                            title = cleanTitle,
-                                            artist = primaryArtist,
-                                            durationSec = durationSec,
-                                            preferredQuality = "HI_RES_LOSSLESS",
-                                            timeoutMs = 4000L,
-                                            endpointsOverride = endpoints,
-                                            sourceLabel = ext.displayName,
-                                        )
-                                    }
-                                }.getOrNull()
-                            }
-                            val lDef = async {
-                                runCatching {
-                                    withTimeoutOrNull(4500L) {
-                                        LosslessAudioProvider.resolveLosslessTrack(
-                                            title = cleanTitle,
-                                            artist = primaryArtist,
-                                            durationSec = durationSec,
-                                            preferredQuality = "LOSSLESS",
-                                            timeoutMs = 4000L,
-                                            endpointsOverride = endpoints,
-                                            sourceLabel = ext.displayName,
-                                        )
-                                    }
-                                }.getOrNull()
-                            }
-                            hDef.await() to lDef.await()
-                        }
+                        val multiTiers = runCatching {
+                            LosslessAudioProvider.resolveMultiTierForExtension(
+                                title = cleanTitle,
+                                artist = primaryArtist,
+                                durationSec = durationSec,
+                                endpointsOverride = endpoints,
+                                sourceLabel = ext.displayName,
+                                timeoutMs = 4500L,
+                            )
+                        }.getOrNull().orEmpty()
 
-                        if (hiRes != null && hiRes.streamUrl.isNotBlank()) {
-                            val khz = String.format(Locale.US, "%.1f", hiRes.sampleRate / 1000.0)
-                            val is24 = hiRes.bitDepth > 16 || hiRes.sampleRate > 48000
-                            val estKbps = if (is24) 2304 else 1411
-                            drafts.add(
-                                OptionDraft(
-                                    id = "${pSlug}_flac_${hiRes.bitDepth}",
-                                    label = "FLAC • ${hiRes.bitDepth}-bit • $khz kHz (${ext.displayName})",
-                                    codec = "flac",
-                                    bitrateKbps = estKbps,
-                                    sampleRateHz = hiRes.sampleRate,
-                                    bitDepth = hiRes.bitDepth,
-                                    streamUrl = LosslessAudioProvider.forceHttps(hiRes.streamUrl),
-                                    fileExtension = "flac",
-                                    isLossless = true,
-                                    headers = mapOf("User-Agent" to DEFAULT_UA),
-                                    sourceName = ext.displayName,
+                        multiTiers.forEachIndexed { idx, res ->
+                            val safeUrl = LosslessAudioProvider.forceHttps(res.streamUrl)
+                            if (safeUrl.startsWith("https://")) {
+                                val extLower = res.fileExtension.lowercase(Locale.ROOT)
+                                val isLossless = extLower == "flac" || extLower == "alac" || extLower == "wav"
+                                val khz = String.format(Locale.US, "%.1f", res.sampleRate / 1000.0)
+                                val is24 = res.bitDepth > 16 || res.sampleRate > 48000
+                                val estKbps = when {
+                                    isLossless && is24 -> 2304
+                                    isLossless -> 1411
+                                    else -> 320
+                                }
+                                val tierTag = if (isLossless) "flac_${res.bitDepth}" else "${extLower}_$estKbps"
+                                val tierLabel = when {
+                                    isLossless && is24 -> "FLAC • ${res.bitDepth}-bit Hi-Res • $khz kHz (${ext.displayName})"
+                                    isLossless -> "FLAC • ${res.bitDepth}-bit Lossless • $khz kHz (${ext.displayName})"
+                                    else -> "${extLower.uppercase(Locale.ROOT)} • $estKbps kbps (${ext.displayName})"
+                                }
+                                drafts.add(
+                                    OptionDraft(
+                                        id = "${pSlug}_${tierTag}_$idx",
+                                        label = tierLabel,
+                                        codec = if (isLossless) "flac" else extLower,
+                                        bitrateKbps = estKbps,
+                                        sampleRateHz = res.sampleRate,
+                                        bitDepth = res.bitDepth,
+                                        streamUrl = safeUrl,
+                                        fileExtension = extLower,
+                                        isLossless = isLossless,
+                                        headers = mapOf("User-Agent" to DEFAULT_UA),
+                                        sourceName = ext.displayName,
+                                    )
                                 )
-                            )
-                        }
-                        if (loRes != null && loRes.streamUrl.isNotBlank() && loRes.streamUrl != hiRes?.streamUrl) {
-                            val khz = String.format(Locale.US, "%.1f", loRes.sampleRate / 1000.0)
-                            drafts.add(
-                                OptionDraft(
-                                    id = "${pSlug}_flac_${loRes.bitDepth}_16",
-                                    label = "FLAC • ${loRes.bitDepth}-bit • $khz kHz (${ext.displayName})",
-                                    codec = "flac",
-                                    bitrateKbps = 1411,
-                                    sampleRateHz = loRes.sampleRate,
-                                    bitDepth = loRes.bitDepth,
-                                    streamUrl = LosslessAudioProvider.forceHttps(loRes.streamUrl),
-                                    fileExtension = "flac",
-                                    isLossless = true,
-                                    headers = mapOf("User-Agent" to DEFAULT_UA),
-                                    sourceName = ext.displayName,
-                                )
-                            )
+                            }
                         }
                     }
 
                     if (drafts.isNotEmpty()) {
                         SourceHealthTracker.recordReady(ext.configId, System.currentTimeMillis() - startMs)
+                    } else {
+                        val diag = sflxRes.failureReason ?: "No matching streams"
+                        Log.w("SflxBridge", "${ext.displayName} ($extId) returned 0 downloadable formats: $diag")
+                        SourceHealthTracker.recordError(ext.configId, diag)
                     }
                     finalizeDraftsAndEmit(ext.displayName, drafts)
                 }

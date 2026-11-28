@@ -208,6 +208,11 @@ object SflxRuntimeBridge {
         }
     }
 
+    data class SflxResolutionResult(
+        val options: List<DownloadFormatOption>,
+        val failureReason: String? = null,
+    )
+
     /**
      * Executes the `.sflx` JavaScript extension inside QuickJS (up to 6.5s budget on `Dispatchers.IO`)
      * to search using normalized track/artist/ISRC queries & await all supported download tiers.
@@ -220,9 +225,21 @@ object SflxRuntimeBridge {
         album: String?,
         durationSec: Int,
         isrc: String? = null,
-    ): List<DownloadFormatOption> = withContext(Dispatchers.IO) {
-        if (title.isBlank()) return@withContext emptyList()
-        val indexJs = ExtensionRepoManager.getExtractedIndexJs(extensionId) ?: return@withContext emptyList()
+    ): List<DownloadFormatOption> =
+        resolveDownloadFormatsDetailed(extensionId, displayName, title, artist, album, durationSec, isrc).options
+
+    suspend fun resolveDownloadFormatsDetailed(
+        extensionId: String,
+        displayName: String,
+        title: String,
+        artist: String,
+        album: String?,
+        durationSec: Int,
+        isrc: String? = null,
+    ): SflxResolutionResult = withContext(Dispatchers.IO) {
+        if (title.isBlank()) return@withContext SflxResolutionResult(emptyList(), "Empty title")
+        val indexJs = ExtensionRepoManager.getExtractedIndexJs(extensionId)
+            ?: return@withContext SflxResolutionResult(emptyList(), "Not installed")
         val manifestJson = ExtensionRepoManager.getExtractedManifestJson(extensionId)
 
         val cleanedTitle = cleanTrackTitle(title)
@@ -383,6 +400,7 @@ object SflxRuntimeBridge {
 
                                 var tiers = $tiersJson;
                                 var resolved = [];
+                                var diagErrors = [];
                                 for (var j = 0; j < tiers.length; j++) {
                                     if (utils.getResolutionRemainingMs() < 350) break;
                                     var q = tiers[j];
@@ -396,7 +414,9 @@ object SflxRuntimeBridge {
                                                 directUrl = gdu.url;
                                             }
                                         } catch (eGdu) {
-                                            __host.logMsg("warn", "getDownloadUrl(" + q + ") error: " + (eGdu && eGdu.message ? eGdu.message : String(eGdu)));
+                                            var msgGdu = eGdu && eGdu.message ? eGdu.message : String(eGdu);
+                                            diagErrors.push(msgGdu);
+                                            __host.logMsg("warn", "getDownloadUrl(" + q + ") error: " + msgGdu);
                                         }
                                     }
                                     if (directUrl) {
@@ -416,11 +436,13 @@ object SflxRuntimeBridge {
                                         var dlRes = null;
                                         try {
                                             dlRes = await ext.download(trackId, q, "/virtual/" + extensionId + "_" + q + ".flac", null, {
-                                                allowFallback: true,
+                                                allowFallback: false,
                                                 preparedContext: preparedContext || (bestTrack ? { track_id: trackId, raw_track: bestTrack, formatted_track: bestTrack, track: bestTrack, host_track: bestTrack } : {})
                                             });
                                         } catch (eDl) {
-                                            __host.logMsg("warn", "download(" + q + ") error: " + (eDl && eDl.message ? eDl.message : String(eDl)));
+                                            var msgDl = eDl && eDl.message ? eDl.message : String(eDl);
+                                            diagErrors.push(msgDl);
+                                            __host.logMsg("warn", "download(" + q + ") error: " + msgDl);
                                         }
                                         var capAfter = globalThis.__sflx_captures ? globalThis.__sflx_captures.length : 0;
                                         if (capAfter > capBefore) {
@@ -436,13 +458,20 @@ object SflxRuntimeBridge {
                                                     actual_extension: String((dlRes && (dlRes.actual_extension || dlRes.output_extension)) || (q === "DOLBY_ATMOS" || q === "HIGH" ? "m4a" : "flac")).replace(/^\./, "")
                                                 });
                                             }
+                                        } else if (dlRes && dlRes.error_message) {
+                                            diagErrors.push(String(dlRes.error_message));
                                         }
                                     }
                                 }
-                                __sflx_resolved_json = JSON.stringify({ ok: resolved.length > 0, formats: resolved });
+                                __sflx_resolved_json = JSON.stringify({
+                                    ok: resolved.length > 0,
+                                    reason: diagErrors.length ? diagErrors[0] : "",
+                                    formats: resolved
+                                });
                             } catch (eTop) {
-                                __host.logMsg("error", "resolveDownloadFormats exception: " + (eTop && eTop.message ? eTop.message : String(eTop)));
-                                __sflx_resolved_json = JSON.stringify({ ok: false, error: eTop && eTop.message ? eTop.message : String(eTop), formats: [] });
+                                var topMsg = eTop && eTop.message ? eTop.message : String(eTop);
+                                __host.logMsg("error", "resolveDownloadFormats exception: " + topMsg);
+                                __sflx_resolved_json = JSON.stringify({ ok: false, reason: topMsg, error: topMsg, formats: [] });
                             }
                         })();
                         """.trimIndent(),
@@ -451,6 +480,7 @@ object SflxRuntimeBridge {
                     val resultJson = qjs.evaluate<String>("__sflx_resolved_json || '{\"ok\":false,\"formats\":[]}'")
                     val root = JSONObject(resultJson)
                     val formatsArr = root.optJSONArray("formats") ?: JSONArray()
+                    val reason = root.optString("reason").takeIf { it.isNotBlank() }
                     val latencyMs = (System.currentTimeMillis() - startMs).coerceAtLeast(1L)
 
                     val out = mutableListOf<DownloadFormatOption>()
@@ -579,15 +609,20 @@ object SflxRuntimeBridge {
 
                     if (out.isNotEmpty()) {
                         SourceHealthTracker.recordReady(configId, latencyMs)
+                    } else if (reason != null) {
+                        android.util.Log.w("SflxBridge", "$extensionId returned 0 formats: $reason")
                     }
-                    out
+                    SflxResolutionResult(out, reason)
                 } finally {
                     runCatching { qjs.close() }
                 }
             }.onFailure { err ->
+                android.util.Log.w("SflxBridge", "SflxRuntimeBridge($extensionId) failed: ${err.message}")
                 TrackLog.w(TAG, "SflxRuntimeBridge($extensionId) failed: ${err.message}", err)
-            }.getOrElse { emptyList() }
-        }.orEmpty()
+            }.getOrElse { err ->
+                SflxResolutionResult(emptyList(), err.message ?: "Runtime error")
+            }
+        } ?: SflxResolutionResult(emptyList(), "Timeout")
     }
 
     private suspend fun bindHostApis(
@@ -873,6 +908,41 @@ object SflxRuntimeBridge {
                 delete: function() { return true; },
                 transformPatternedBlocks: function() { return { success: false }; }
             };
+
+            var gobridge = gobackend;
+            var mornye = {
+                http: http,
+                session: session,
+                utils: utils,
+                settings: settings,
+                storage: storage,
+                file: file,
+                log: log,
+                gobackend: gobackend,
+                ffmpeg: ffmpeg,
+                registerExtension: registerExtension
+            };
+
+            if (typeof fetch === 'undefined') {
+                var fetch = function(url, opts) {
+                    opts = opts || {};
+                    var res = http.request({
+                        method: String(opts.method || "GET"),
+                        url: String(url || ""),
+                        body: opts.body,
+                        headers: opts.headers || {}
+                    });
+                    var statusCode = Number(res.statusCode || res.status || 0);
+                    var bodyText = String(res.body || "");
+                    return Promise.resolve({
+                        ok: statusCode >= 200 && statusCode < 300,
+                        status: statusCode,
+                        headers: res.headers || {},
+                        text: function() { return Promise.resolve(bodyText); },
+                        json: function() { return Promise.resolve(JSON.parse(bodyText || "{}")); }
+                    });
+                };
+            }
             """.trimIndent()
         )
     }
