@@ -169,14 +169,23 @@ object Downloader {
         sink: OutputStream,
         onProgress: (written: Long, total: Long) -> Unit,
     ): Long = withContext(Dispatchers.IO) {
-        val request = Request.Builder().url(url)
-            .apply { headers.forEach { (name, value) -> header(name, value) } }
+        fun buildRequest(reqHeaders: Map<String, String>) = Request.Builder().url(url)
+            .apply { reqHeaders.forEach { (name, value) -> header(name, value) } }
             .build()
 
-        Http.client.newCall(request).execute().use { response ->
-            if (response.code !in 200..299) error("Download failed (HTTP ${response.code})")
-            val body = response.body ?: error("Download failed: empty response")
-            val total = response.header("Content-Length")?.toLongOrNull()?.takeIf { it > 0 }
+        var response = Http.client.newCall(buildRequest(headers)).execute()
+        if ((response.code == 403 || response.code == 401) &&
+            headers.none { it.key.equals("User-Agent", ignoreCase = true) }
+        ) {
+            response.close()
+            val retryHeaders = headers + ("User-Agent" to com.music.bitchord.data.LosslessAudioProvider.BROWSER_USER_AGENT)
+            response = Http.client.newCall(buildRequest(retryHeaders)).execute()
+        }
+
+        response.use { resp ->
+            if (resp.code !in 200..299) error("Download failed (HTTP ${resp.code})")
+            val body = resp.body ?: error("Download failed: empty response")
+            val total = resp.header("Content-Length")?.toLongOrNull()?.takeIf { it > 0 }
             val source = body.byteStream()
             val buffer = ByteArray(BUFFER_BYTES)
             var written = 0L

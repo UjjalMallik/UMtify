@@ -191,9 +191,16 @@ class AddonSource(
             if (query.isBlank()) return@withContext emptyList()
             if (!admitted("a search")) return@withContext emptyList()
             val tier = request?.tier ?: AddonClient.TIER_LOSSLESS
+            val startMs = System.currentTimeMillis()
             val tracks = client.search(query, tier).getOrElse { failure ->
+                if (failure !is AddonNotFound) {
+                    SourceHealthTracker.recordError(config.id, failure.message ?: "Search failed")
+                }
                 TrackLog.w(TAG, "${config.displayName}: search failed — ${failure.message}")
                 return@withContext emptyList()
+            }
+            if (tracks.isNotEmpty()) {
+                SourceHealthTracker.recordReady(config.id, System.currentTimeMillis() - startMs)
             }
             tracks.asSequence()
                 .filter { it.id.isNotBlank() && it.title.isNotBlank() }

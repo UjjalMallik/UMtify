@@ -59,6 +59,8 @@ data class SourceConfig(
      * already break that. Refreshed whenever the manifest is next read.
      */
     val checkValidLossless: Boolean = false,
+    /** True for metadata/lyrics-only extensions that do not stream audio. */
+    val metadataOnly: Boolean = false,
 ) {
     /** Whether this source is shut out right now because it needs an output that isn't connected. */
     val awaitsLosslessOutput: Boolean
@@ -263,7 +265,7 @@ object SourceRegistry {
      */
     fun active(): List<MusicSource> =
         enabledConfigs(configs.value)
-            .filterNot { it.awaitsLosslessOutput }
+            .filterNot { it.awaitsLosslessOutput || it.metadataOnly }
             .mapNotNull { instances[it.id] }
 
     /** Enabled custom addons & UMtify addons, with any UMtify addon prioritized first. */
@@ -278,12 +280,12 @@ object SourceRegistry {
 
     /**
      * All enabled addons eligible for downloads (prioritizing UMtify first).
-     * Bypasses playback output gating (`awaitsLosslessOutput`) so downloads can
-     * still save FLAC files even when listening over a non-lossless output.
+     * Bypasses playback output gating (`awaitsLosslessOutput`) and error cooldown
+     * so explicit download format checks always query configured addons directly.
      */
     fun downloadableAddonSources(): List<AddonSource> =
         enabledConfigs(configs.value)
-            .filter { it.kind == SourceKind.ADDON && it.allowDownloads && !SourceHealthTracker.isInErrorCooldown(it.id) }
+            .filter { it.kind == SourceKind.ADDON && it.allowDownloads && !it.metadataOnly }
             .mapNotNull { instances[it.id] as? AddonSource }
             .sortedByDescending {
                 val cfg = config(it.configId)
@@ -292,41 +294,49 @@ object SourceRegistry {
                     cfg?.baseUrl?.contains("umtify", ignoreCase = true) == true
             }
 
-    /** All enabled synced Extension Repo sources eligible for downloads, in list order. */
+    /** All enabled synced Extension Repo audio-capable sources eligible for downloads, in list order. */
     fun downloadableExtensionSources(): List<RepoExtensionSource> =
         enabledConfigs(configs.value)
-            .filter { it.kind == SourceKind.EXTENSION && it.allowDownloads && !SourceHealthTracker.isInErrorCooldown(it.id) }
+            .filter {
+                it.kind == SourceKind.EXTENSION &&
+                    !it.metadataOnly &&
+                    it.allowDownloads &&
+                    !SourceHealthTracker.isInErrorCooldown(it.id)
+            }
             .mapNotNull { instances[it.id] as? RepoExtensionSource }
 
     /**
-     * Top [limit] enabled non-YouTube sources in the user's unified `SOURCES`
-     * list for parallel streaming race, skipping any source in error cooldown.
+     * Top [limit] enabled healthy audio-capable sources in the user's unified `SOURCES`
+     * order, automatically skipping YouTube fallback, metadata-only extensions, and
+     * sources in 5-minute error cooldown.
      */
-    fun topPlaybackSources(limit: Int = 3): List<MusicSource> =
+    fun topPlaybackSources(limit: Int = 4): List<MusicSource> =
         activeForPlayback()
-            .filter { it.kind != SourceKind.YOUTUBE && !SourceHealthTracker.isInErrorCooldown(it.configId) }
+            .filter { source ->
+                val cfg = config(source.configId)
+                source.kind != SourceKind.YOUTUBE &&
+                    cfg?.metadataOnly != true &&
+                    !SourceHealthTracker.isInErrorCooldown(source.configId)
+            }
             .take(limit)
 
-    /** Top [limit] enabled non-YouTube sources eligible for download racing. */
-    fun topDownloadSources(limit: Int = 3): List<MusicSource> =
+    /** Top [limit] enabled healthy audio-capable sources eligible for download racing. */
+    fun topDownloadSources(limit: Int = 4): List<MusicSource> =
         activeForDownload()
-            .filter { it.kind != SourceKind.YOUTUBE && !SourceHealthTracker.isInErrorCooldown(it.configId) }
+            .filter { source ->
+                val cfg = config(source.configId)
+                source.kind != SourceKind.YOUTUBE &&
+                    cfg?.metadataOnly != true &&
+                    !SourceHealthTracker.isInErrorCooldown(source.configId)
+            }
             .take(limit)
 
     /**
      * [active], minus the addons whose manifest said `allowDownloads: 0`. A
      * download walks this instead, so the next source in line serves it.
      */
-    fun activeForDownload(): List<MusicSource> {
-        val base = active().filter { config(it.configId)?.allowDownloads != false }
-        val keepsLossless = runCatching { AppSettings.downloadQuality.value.keepsLossless }.getOrDefault(false)
-        return if (keepsLossless) {
-            val (hq, others) = base.partition { it.configId == UMTIFY_HQ_ADDON_ID || config(it.configId)?.baseUrl?.contains("umtifyhq") == true }
-            hq + others
-        } else {
-            base
-        }
-    }
+    fun activeForDownload(): List<MusicSource> =
+        active().filter { config(it.configId)?.allowDownloads != false }
 
     /**
      * Records what an addon's manifest said about downloads and lossless
@@ -385,13 +395,7 @@ object SourceRegistry {
      */
     fun activeForPlayback(): List<MusicSource> {
         val ceiling = AppSettings.effectiveAudioQuality
-        val list = active().filter { ceiling.permits(it.kind) }
-        return if (ceiling == AudioQuality.LOSSLESS) {
-            val (hq, others) = list.partition { it.configId == UMTIFY_HQ_ADDON_ID || config(it.configId)?.baseUrl?.contains("umtifyhq") == true }
-            hq + others
-        } else {
-            list
-        }
+        return active().filter { ceiling.permits(it.kind) }
     }
 
     fun instance(configId: String): MusicSource? = instances[configId]
@@ -615,6 +619,7 @@ object SourceRegistry {
         val displayName: String,
         val enabled: Boolean,
         val endpointUrl: String = "",
+        val metadataOnly: Boolean = false,
     )
 
     fun repoExtensionConfigId(extensionId: String): String = "$REPO_EXT_PREFIX$extensionId"
@@ -637,6 +642,7 @@ object SourceRegistry {
                 label = entry.displayName,
                 baseUrl = entry.endpointUrl.ifBlank { config.baseUrl },
                 enabled = entry.enabled,
+                metadataOnly = entry.metadataOnly,
             )
         }
 
@@ -649,6 +655,7 @@ object SourceRegistry {
                     label = entry.displayName,
                     baseUrl = entry.endpointUrl,
                     enabled = entry.enabled,
+                    metadataOnly = entry.metadataOnly,
                 )
             }
 

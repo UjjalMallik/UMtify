@@ -1753,7 +1753,7 @@ object Downloads {
         val effectiveHeaders = when {
             option.headers.isNotEmpty() -> option.headers
             streamUrl.contains("googlevideo.com") -> StreamResolver.mediaHeadersFor(streamUrl)
-            else -> mapOf("User-Agent" to LosslessAudioProvider.BROWSER_USER_AGENT)
+            else -> emptyMap()
         }
         if (packaged) {
             return Route(

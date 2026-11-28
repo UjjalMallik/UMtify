@@ -59,7 +59,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -170,13 +169,14 @@ fun SourcesScreen(
         }
     }
 
-    // Probe enabled server-backed addons and synced extensions concurrently to populate live latency/error badges
-    val probeKey = configs.filter { it.kind.needsServer || (it.kind == SourceKind.EXTENSION && it.enabled) }
+    // Probe enabled audio-capable addons and synced extensions concurrently (skip metadata-only)
+    val probeKey = configs.filter { (it.kind.needsServer || (it.kind == SourceKind.EXTENSION && it.enabled)) && !it.metadataOnly }
         .joinToString { "${it.id}@${it.baseUrl}@${it.enabled}@${it.checkValidLossless}" } + "@${losslessOutput.capable}"
     LaunchedEffect(probeKey) {
         coroutineScope {
             configs.filter {
-                ((it.kind.needsServer && it.isComplete) || (it.kind == SourceKind.EXTENSION && it.enabled)) &&
+                !it.metadataOnly &&
+                    ((it.kind.needsServer && it.isComplete) || (it.kind == SourceKind.EXTENSION && it.enabled)) &&
                     !it.awaitsLosslessOutput
             }.forEach { config ->
                 launch {
@@ -490,48 +490,57 @@ private fun ReorderableSources(
     if (sources.isEmpty()) return
     if (sources.size == 1) {
         row(1, sources.first(), null)
-        // The same trailing rule the reorderable rows below emit, so the row
-        // that follows this block is separated whichever branch drew it.
         RowDivider()
         return
     }
 
-    var liveOrder by remember(sources) { mutableStateOf(sources) }
+    var liveOrder by remember { mutableStateOf(sources) }
     var dragged by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(sources) {
+        if (dragged == null) {
+            liveOrder = sources
+        }
+    }
 
-    /** Distance the finger has covered since this gesture began, in pixels. */
     var totalDrag by remember { mutableFloatStateOf(0f) }
+    var startTopPx by remember { mutableFloatStateOf(0f) }
+    val rowHeights = remember { mutableStateMapOf<String, Float>() }
+    val defaultHeightPx = with(androidx.compose.ui.platform.LocalDensity.current) { 72.dp.toPx() }
 
-    /** Which slot of [liveOrder] it began on. */
-    var startIndex by remember { mutableIntStateOf(0) }
+    fun heightOf(id: String): Float = rowHeights[id] ?: defaultHeightPx
 
-    // The distance from one row's top to the next — the row plus the hairline
-    // above it, measured off the wrapper holding both. Frozen for the duration
-    // of a gesture so a relayout mid-drag cannot move the boundaries the drag
-    // is being measured against underneath it.
-    var pitchPx by remember { mutableFloatStateOf(0f) }
-    var lockedPitchPx by remember { mutableFloatStateOf(0f) }
+    fun topOf(list: List<SourceConfig>, idx: Int): Float {
+        var sum = 0f
+        for (i in 0 until idx.coerceIn(0, list.size)) {
+            sum += heightOf(list[i].id)
+        }
+        return sum
+    }
+
+    fun moveItem(list: List<SourceConfig>, fromIndex: Int, toIndex: Int): List<SourceConfig> {
+        val clampedTo = toIndex.coerceIn(0, list.lastIndex)
+        if (fromIndex == clampedTo || fromIndex !in list.indices) return list
+        val updated = list.toMutableList()
+        val movedItem = updated.removeAt(fromIndex)
+        updated.add(clampedTo, movedItem)
+        return updated
+    }
 
     liveOrder.forEachIndexed { index, config ->
-        // Keyed on the config's id so this composable — gesture and all —
-        // follows that addon from slot to slot. Matched by position instead,
-        // the first swap would change the key under the finger, restart the
-        // `pointerInput` coroutine mid-gesture, and stall the drag one swap
-        // after it started.
         key(config.id) {
             val isDragging = config.id == dragged
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .zIndex(if (isDragging) 5f else 0f)
-                    .onSizeChanged { pitchPx = it.height.toFloat() }
+                    .onSizeChanged { rowHeights[config.id] = it.height.toFloat() }
                     .graphicsLayer {
                         scaleX = if (isDragging) 1.03f else 1f
                         scaleY = if (isDragging) 1.03f else 1f
                         shadowElevation = if (isDragging) 16f else 0f
                         translationY = if (isDragging) {
-                            totalDrag -
-                                (liveOrder.indexOfFirst { it.id == config.id } - startIndex) * lockedPitchPx
+                            val currentIdx = liveOrder.indexOfFirst { it.id == config.id }.coerceAtLeast(0)
+                            (startTopPx + totalDrag) - topOf(liveOrder, currentIdx)
                         } else {
                             0f
                         }
@@ -541,36 +550,45 @@ private fun ReorderableSources(
                     Box(
                         modifier = Modifier
                             .size(44.dp)
-                            .pointerInput(Unit) {
+                            .pointerInput(config.id) {
                                 detectDragGestures(
                                     onDragStart = {
+                                        val startIdx = liveOrder.indexOfFirst { it.id == config.id }.coerceAtLeast(0)
                                         dragged = config.id
                                         totalDrag = 0f
-                                        startIndex = liveOrder.indexOfFirst { it.id == config.id }
-                                        lockedPitchPx = pitchPx
+                                        startTopPx = topOf(liveOrder, startIdx)
                                     },
                                     onDrag = { change, delta ->
                                         change.consume()
-                                        val pitch = lockedPitchPx
-                                        if (pitch <= 0f) return@detectDragGestures
-                                        var at = liveOrder.indexOfFirst { it.id == config.id }
-                                        if (at < 0) return@detectDragGestures
+                                        val fromIdx = liveOrder.indexOfFirst { it.id == config.id }
+                                        if (fromIdx < 0) return@detectDragGestures
 
-                                        totalDrag = (totalDrag + delta.y).coerceIn(
-                                             -startIndex * pitch,
-                                             (liveOrder.lastIndex - startIndex) * pitch,
-                                        )
+                                        val totalListHeight = topOf(liveOrder, liveOrder.size)
+                                        val draggedH = heightOf(config.id)
+                                        val minTop = 0f
+                                        val maxTop = (totalListHeight - draggedH).coerceAtLeast(0f)
+                                        val minDrag = minTop - startTopPx
+                                        val maxDrag = maxTop - startTopPx
+                                        totalDrag = (totalDrag + delta.y).coerceIn(minDrag, maxDrag)
 
-                                        while (true) {
-                                            val travelled = totalDrag / pitch
-                                            val moved = (at - startIndex).toFloat()
-                                            if (travelled > moved + SWAP_THRESHOLD && at < liveOrder.lastIndex) {
-                                                liveOrder = liveOrder.toMutableList()
-                                                    .apply { add(at + 1, removeAt(at)) }
+                                        val draggedCenterY = startTopPx + totalDrag + draggedH * 0.5f
+                                        var at = fromIdx
+                                        while (at < liveOrder.lastIndex) {
+                                            val nextH = heightOf(liveOrder[at + 1].id)
+                                            val nextThreshold = topOf(liveOrder, at) + draggedH + nextH * 0.5f
+                                            if (draggedCenterY > nextThreshold) {
+                                                liveOrder = moveItem(liveOrder, at, at + 1)
                                                 at++
-                                            } else if (travelled < moved - SWAP_THRESHOLD && at > 0) {
-                                                liveOrder = liveOrder.toMutableList()
-                                                    .apply { add(at - 1, removeAt(at)) }
+                                            } else {
+                                                break
+                                            }
+                                        }
+                                        while (at > 0) {
+                                            val prevTop = topOf(liveOrder, at - 1)
+                                            val prevH = heightOf(liveOrder[at - 1].id)
+                                            val prevThreshold = prevTop + prevH * 0.5f
+                                            if (draggedCenterY < prevThreshold) {
+                                                liveOrder = moveItem(liveOrder, at, at - 1)
                                                 at--
                                             } else {
                                                 break
@@ -599,28 +617,11 @@ private fun ReorderableSources(
                         )
                     }
                 }
-                // After the row, not before it, so every wrapper is exactly one
-                // row plus one hairline — the pitch the drag measures against.
-                // With the divider leading, the first wrapper was short by a
-                // rule and whichever row reported its size last decided the
-                // pitch for all of them.
                 RowDivider()
             }
         }
     }
 }
-
-/**
- * How far past a neighbour the finger has to carry a row before the two trade
- * places, as a share of one row's pitch.
- *
- * Deliberately more than half, for the reason spelled out in
- * [LyricsSourcesDialog][com.music.bitchord.ui.components.LyricsSourcesDialog]:
- * at exactly half, a row that has just swapped lands precisely on the boundary
- * of swapping back, so the shake in any real finger flips it back and forth for
- * as long as it is held near a crossing.
- */
-private const val SWAP_THRESHOLD = 0.6f
 
 /**
  * The one row on this screen that adds something rather than describing
@@ -889,7 +890,15 @@ private fun SourceRow(
             )
 
             // Live Error & Health Status Badge
-            if (config.enabled && awaitingOutput == null && !skippedByQuality) {
+            if (config.metadataOnly) {
+                Spacer(Modifier.height(4.dp))
+                StatusBadgePill(
+                    text = "Metadata only",
+                    dotColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                    textColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else if (config.enabled && awaitingOutput == null && !skippedByQuality) {
                 when (effectiveStatus) {
                     is SourceRuntimeStatus.Ready -> {
                         Spacer(Modifier.height(4.dp))
@@ -907,8 +916,13 @@ private fun SourceRow(
                     }
                     is SourceRuntimeStatus.Error -> {
                         Spacer(Modifier.height(4.dp))
+                        val errText = if (effectiveStatus.reason.startsWith("Offline", ignoreCase = true)) {
+                            effectiveStatus.reason
+                        } else {
+                            "Offline • ${effectiveStatus.reason}"
+                        }
                         StatusBadgePill(
-                            text = "Error: ${effectiveStatus.reason}",
+                            text = errText,
                             dotColor = MaterialTheme.colorScheme.error,
                             containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
                             textColor = MaterialTheme.colorScheme.error,
@@ -998,7 +1012,8 @@ private fun SourceConfig.statusLine(health: SourceHealth?): String = when {
         }
     }
     !isComplete -> stringResource(R.string.source_setup_required)
-    kind == SourceKind.EXTENSION -> "Extension Repo · FLAC · Lossless"
+    kind == SourceKind.EXTENSION && metadataOnly -> "Metadata & Lyrics only"
+    kind == SourceKind.EXTENSION -> "Audio Extension · FLAC · Lossless"
     kind == SourceKind.JIOSAAVN -> stringResource(R.string.jiosaavn_mismatch_warning)
     health is SourceHealth.Ok -> listOfNotNull(
         health.detail,

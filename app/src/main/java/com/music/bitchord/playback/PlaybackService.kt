@@ -1670,6 +1670,7 @@ class PlaybackService : MediaLibraryService() {
                     ?: upgraded.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
                     ?: "Upgrade"
                 if (!proving) {
+                    StreamChoice.remember(videoId, upgraded.copy(sourceName = sourceName), substituted = true)
                     NerdStats.onSourceStream(videoId, upgraded.format, sourceName)
                     NerdStats.recordSource(videoId, sourceName)
                 }
@@ -1738,7 +1739,7 @@ class PlaybackService : MediaLibraryService() {
                                         target = target,
                                         wantsDolbyAtmos = wantsDolbyAtmos,
                                         wantsLossless = wantsLossless,
-                                        timeoutMs = 1800L,
+                                        timeoutMs = 2000L,
                                     )
                                 }.getOrNull()
                             }
@@ -1748,7 +1749,7 @@ class PlaybackService : MediaLibraryService() {
                             } else {
                                 async {
                                     runCatching {
-                                        withTimeoutOrNull(1800L) {
+                                        withTimeoutOrNull(2000L) {
                                             SourceResolver.substituteForYouTube(target)
                                         }
                                     }.getOrNull()

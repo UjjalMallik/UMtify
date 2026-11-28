@@ -23,10 +23,13 @@ class RepoExtensionSource(
         get() = SourceRegistry.extensionIdFor(config.id) ?: config.id
 
     override suspend fun health(): SourceHealth = withContext(Dispatchers.IO) {
+        if (config.metadataOnly) {
+            return@withContext SourceHealth.Ok("Metadata & Lyrics only")
+        }
         val endpoints = resolveEndpoints()
         if (endpoints.isEmpty()) {
-            SourceHealthTracker.recordError(config.id, "No streaming endpoint")
-            return@withContext SourceHealth.Unreachable("No streaming endpoint")
+            SourceHealthTracker.recordError(config.id, "No audio endpoint")
+            return@withContext SourceHealth.Unreachable("No audio endpoint")
         }
         val probed = LosslessAudioProvider.probeEndpointHealth(endpoints)
         probed.fold(
@@ -35,7 +38,7 @@ class RepoExtensionSource(
                 SourceHealth.Ok("${latencyMs}ms · FLAC")
             },
             onFailure = { failure ->
-                val reason = failure.message ?: "Server unreachable"
+                val reason = failure.message ?: "Unreachable"
                 SourceHealthTracker.recordError(config.id, reason)
                 SourceHealth.Unreachable(reason)
             },
@@ -48,10 +51,10 @@ class RepoExtensionSource(
         waitForAll: Boolean,
         request: StreamRequest?,
     ): List<Song> = withContext(Dispatchers.IO) {
-        if (query.isBlank()) return@withContext emptyList()
+        if (config.metadataOnly || query.isBlank()) return@withContext emptyList()
         val endpoints = resolveEndpoints()
         if (endpoints.isEmpty()) {
-            SourceHealthTracker.recordError(config.id, "No streaming endpoint")
+            SourceHealthTracker.recordError(config.id, "No audio endpoint")
             return@withContext emptyList()
         }
         val (tracks, errorReason) = LosslessAudioProvider.searchTracksForExtensionChecked(

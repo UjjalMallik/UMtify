@@ -1061,23 +1061,22 @@ object SourceResolver {
     private fun atmosWanted(): Boolean = AppSettings.dolbyAtmos.value
 
     /**
-     * Races the top 2–3 healthy enabled sources from the unified `SOURCES` list concurrently
-     * within [timeoutMs] (strict 1.8s cap), preferring Dolby Atmos (if enabled) or Lossless FLAC
-     * from the fastest healthy source. Skips sources in error cooldown and records live health
-     * metrics in [SourceHealthTracker].
+     * Races the top 4 healthy enabled audio-capable sources from the unified `SOURCES` list
+     * concurrently within [timeoutMs] (2.0s cap), automatically skipping metadata-only and
+     * errored sources. Prioritizes Dolby Atmos (if enabled) -> Lossless FLAC -> High-Bitrate AAC -> Opus.
      */
     suspend fun raceTopPlaybackSources(
         target: TrackMatcher.Target,
         wantsDolbyAtmos: Boolean,
         wantsLossless: Boolean,
-        timeoutMs: Long = 1800L,
+        timeoutMs: Long = 2000L,
     ): SourceStream? {
         if (target.title.isBlank() || target.isVideo) return null
-        val topSources = SourceRegistry.topPlaybackSources(3)
+        val topSources = SourceRegistry.topPlaybackSources(4)
         val hasRankOneLossless = topSources.firstOrNull()?.let {
             it.kind.canServeLossless || it is AddonSource
         } == true
-        val needBackupMirrors = wantsLossless && topSources.count { it.kind.canServeLossless } < 3
+        val needBackupMirrors = wantsLossless && topSources.count { it.kind.canServeLossless } < 4
         if (topSources.isEmpty() && !needBackupMirrors) return null
 
         val request = if (wantsLossless) StreamRequest.Lossless else requestForNow()
@@ -1248,8 +1247,9 @@ object SourceResolver {
     }
 
     /**
-     * Queries all download-eligible configured addons (e.g., UMtify and custom addons)
-     * in parallel and returns every valid Dolby Atmos and Lossless FLAC stream found.
+     * Queries ALL enabled custom addons (e.g., UMtify regardless of rank) concurrently using
+     * the same playback stream-resolution pipeline, returning every Dolby Atmos, FLAC/Lossless,
+     * and high-bitrate stream found.
      */
     suspend fun resolveAllAddonDownloadStreams(
         target: TrackMatcher.Target,
@@ -1261,15 +1261,40 @@ object SourceResolver {
         if (addons.isEmpty()) return@coroutineScope emptyList()
 
         val perAddon = addons.map { addon ->
-            async { querySingleAddonStreams(addon, target, wantsDolbyAtmos, wantsLossless) }
+            async(Dispatchers.IO) {
+                val results = mutableListOf<SourceStream>()
+                val (atmos, flac) = querySingleAddonStreams(addon, target, wantsDolbyAtmos, wantsLossless)
+                if (atmos != null) results.add(atmos)
+                if (flac != null) results.add(flac)
+                // Fallback to the exact same matchAndStream pipeline PlaybackService uses
+                // if stereoOnly/explicit tier split missed a valid stream.
+                if (results.isEmpty()) {
+                    val startMs = System.currentTimeMillis()
+                    val direct = matchAndStream(
+                        addon,
+                        target,
+                        if (wantsLossless) StreamRequest.Lossless else StreamRequest.Best,
+                        waitForAll = false,
+                    )?.let { s ->
+                        SourceHealthTracker.recordReady(addon.configId, System.currentTimeMillis() - startMs)
+                        val normalizedFormat = if (s.format.codec == null && !s.format.isDolbyAtmos && s.format.kbps == null) {
+                            s.format.copy(codec = "flac")
+                        } else {
+                            s.format
+                        }
+                        s.copy(
+                            format = normalizedFormat,
+                            sourceConfigId = addon.configId,
+                            sourceName = addon.displayName,
+                        )
+                    }
+                    if (direct != null) results.add(direct)
+                }
+                results
+            }
         }.awaitAll()
 
-        buildList {
-            for ((atmos, flac) in perAddon) {
-                if (atmos != null) add(atmos)
-                if (flac != null) add(flac)
-            }
-        }
+        perAddon.flatten()
     }
 
     private suspend fun querySingleAddonStreams(

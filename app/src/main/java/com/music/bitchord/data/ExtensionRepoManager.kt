@@ -157,26 +157,56 @@ object ExtensionRepoManager {
             val ext = catalogById[extId]
             if (ext != null) {
                 if (!isAudioDownloadExtension(ext)) return@mapNotNull null
+                val metadataOnly = isMetadataOnlyExtension(extId, ext)
                 SourceRegistry.RepoSyncEntry(
                     extensionId = extId,
                     displayName = ext.displayName,
                     enabled = extId in installed && extId in enabled,
                     endpointUrl = getExtractedEndpointsFor(extId).firstOrNull().orEmpty(),
+                    metadataOnly = metadataOnly,
                 )
             } else {
                 if (isDuplicateBuiltIn(extId)) return@mapNotNull null
                 val endpoints = getExtractedEndpointsFor(extId)
                 if (extId !in CORE_DEFAULT_IDS && endpoints.isEmpty()) return@mapNotNull null
+                val metadataOnly = isMetadataOnlyExtension(extId, null)
                 SourceRegistry.RepoSyncEntry(
                     extensionId = extId,
                     displayName = fallbackDisplayName(extId),
                     enabled = extId in installed && extId in enabled,
                     endpointUrl = endpoints.firstOrNull().orEmpty(),
+                    metadataOnly = metadataOnly,
                 )
             }
         }.sortedBy { it.displayName.lowercase(Locale.ROOT) }
 
         SourceRegistry.syncRepoExtensions(entries)
+    }
+
+    fun isMetadataOnlyExtension(extensionId: String, ext: RepoExtension? = null): Boolean {
+        val idLower = extensionId.lowercase(Locale.ROOT)
+        val nameLower = (ext?.displayName ?: ext?.name ?: "").lowercase(Locale.ROOT)
+        val combined = "$idLower $nameLower"
+        val metadataProviders = listOf(
+            "spotify", "apple", "bugs", "genie", "melon",
+            "musicbrainz", "lastfm", "discogs", "genius", "lrclib", "musixmatch",
+        )
+        if (metadataProviders.any { it in combined }) return true
+
+        val audioProviders = listOf("tidal", "qobuz", "deezer", "amazon", "beatport", "bandcamp")
+        if (audioProviders.any { it in combined }) return false
+
+        if (ext != null) {
+            val cat = ext.category.lowercase(Locale.ROOT)
+            val tags = ext.tags.map { it.lowercase(Locale.ROOT) }
+            val hasAudioTag = tags.any {
+                it in setOf("download", "audio", "flac", "lossless", "streaming", "hifi")
+            }
+            if ((cat == "metadata" || cat == "utility") && !hasAudioTag) {
+                return true
+            }
+        }
+        return false
     }
 
     private fun isDuplicateBuiltIn(raw: String): Boolean {

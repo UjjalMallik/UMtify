@@ -58,12 +58,12 @@ object DownloadFormatResolver {
                 }.getOrNull().orEmpty()
             }
 
-            // 3. Race Top-3 healthy enabled lossless/extension sources in parallel (skipping errored ones)
-            val topDownloadSources = SourceRegistry.topDownloadSources(3)
+            // 3. Race Top-4 healthy enabled audio-capable extension sources in parallel (skipping metadata-only & errored)
+            val topDownloadSources = SourceRegistry.topDownloadSources(4)
                 .filter { it is RepoExtensionSource || (it.kind.canServeLossless && it !is AddonSource) }
             val extSources = (topDownloadSources.filterIsInstance<RepoExtensionSource>() + SourceRegistry.downloadableExtensionSources())
                 .distinctBy { it.configId }
-                .take(3)
+                .take(4)
             val extDeferreds = extSources.map { ext ->
                 async {
                     val startMs = System.currentTimeMillis()
@@ -203,7 +203,7 @@ object DownloadFormatResolver {
                 val srcName = stream.sourceName?.takeIf { it.isNotBlank() }
                     ?: stream.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
                     ?: fallbackSourceName
-                val headers = stream.headers.ifEmpty { mapOf("User-Agent" to DEFAULT_UA) }
+                val headers = stream.headers
 
                 when {
                     stream.format.isDolbyAtmos -> {
@@ -463,22 +463,33 @@ object DownloadFormatResolver {
             ?: return null
         if (candidate.url.isBlank()) return null
 
+        val declared = NerdStats.declaredFormat(id)
+        val recordedSource = NerdStats.sourceFor(id)
         val urlLower = candidate.url.substringBefore('?').lowercase(Locale.ROOT)
+        val isManifest = com.music.bitchord.playback.StreamContainer.isManifest(candidate.url)
         val isLosslessOrPremium = candidate.format.isLossless == true ||
             candidate.format.isDolbyAtmos ||
+            declared?.isLossless == true ||
+            declared?.isDolbyAtmos == true ||
             urlLower.endsWith(".flac") ||
+            isManifest ||
             (candidate.format.kbps ?: 0) >= 256
         if (!isLosslessOrPremium) return null
 
-        val declared = NerdStats.declaredFormat(id)
-        val recordedSource = NerdStats.sourceFor(id)
         val resolvedName = candidate.sourceName?.takeIf { it.isNotBlank() }
             ?: candidate.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
             ?: recordedSource
-            ?: if (candidate.format.isDolbyAtmos) "Dolby Atmos" else "UMtify"
+            ?: if (candidate.format.isDolbyAtmos || declared?.isDolbyAtmos == true) "Dolby Atmos" else "UMtify"
 
+        val inferredCodec = candidate.format.codec
+            ?: declared?.codec
+            ?: when {
+                urlLower.endsWith(".flac") -> "flac"
+                declared?.isLossless == true -> "flac"
+                else -> null
+            }
         val mergedFormat = candidate.format.copy(
-            codec = candidate.format.codec ?: declared?.codec ?: if (urlLower.endsWith(".flac")) "flac" else null,
+            codec = inferredCodec,
             bitDepth = candidate.format.bitDepth ?: declared?.bitDepth,
             sampleRateHz = candidate.format.sampleRateHz ?: declared?.sampleRateHz,
             kbps = candidate.format.kbps ?: declared?.kbps,
