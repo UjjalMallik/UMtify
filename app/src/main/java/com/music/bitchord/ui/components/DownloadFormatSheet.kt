@@ -74,16 +74,23 @@ fun DownloadFormatSheet(
     val display = rememberEditedSong(song)
     val art = rememberRemoteArtworkUrl(song)
 
-    var formats by remember { mutableStateOf<List<DownloadFormatOption>?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
+    var formats by remember { mutableStateOf<List<DownloadFormatOption>>(emptyList()) }
+    var pendingProviders by remember { mutableStateOf<List<String>>(emptyList()) }
+    var isComplete by remember { mutableStateOf(false) }
 
     LaunchedEffect(song.videoId) {
-        isLoading = true
-        val resolved = runCatching {
-            DownloadFormatResolver.resolveFormats(song)
-        }.getOrDefault(emptyList())
-        formats = resolved
-        isLoading = false
+        formats = emptyList()
+        pendingProviders = emptyList()
+        isComplete = false
+        runCatching {
+            DownloadFormatResolver.resolveFormatsFlow(song).collect { progress ->
+                formats = progress.formats
+                pendingProviders = progress.pendingProviders
+                isComplete = progress.isComplete
+            }
+        }
+        isComplete = true
+        pendingProviders = emptyList()
     }
 
     ModalBottomSheet(
@@ -226,7 +233,7 @@ fun DownloadFormatSheet(
             )
 
             // Formats list or loading
-            if (isLoading) {
+            if (formats.isEmpty() && !isComplete) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -243,47 +250,88 @@ fun DownloadFormatSheet(
                             strokeWidth = 3.dp,
                         )
                         Text(
-                            text = "Checking available formats & sizes...",
+                            text = if (pendingProviders.isNotEmpty()) {
+                                "Checking ${pendingProviders.take(4).joinToString(", ")}..."
+                            } else {
+                                "Checking available formats & sizes..."
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
+            } else if (formats.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 28.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "No downloadable formats found for this track.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             } else {
-                val availableFormats = formats.orEmpty()
-                if (availableFormats.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 28.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = "No downloadable formats found for this track.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // Sort workable formats first, failed formats last
+                val sortedFormats = remember(formats, failedFormatIds) {
+                    formats.sortedBy { if (it.id in failedFormatIds) 1 else 0 }
+                }
+
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false),
+                ) {
+                    items(sortedFormats, key = { it.id }) { option ->
+                        val isFailed = option.id in failedFormatIds
+                        FormatOptionRow(
+                            option = option,
+                            isFailed = isFailed,
+                            onClick = {
+                                onSelectFormat(option)
+                                onDismiss()
+                            },
                         )
                     }
-                } else {
-                    // Sort workable formats first, failed formats last
-                    val sortedFormats = remember(availableFormats, failedFormatIds) {
-                        availableFormats.sortedBy { if (it.id in failedFormatIds) 1 else 0 }
-                    }
+                }
 
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth(),
+                AnimatedVisibility(
+                    visible = !isComplete && pendingProviders.isNotEmpty(),
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
                     ) {
-                        items(sortedFormats, key = { it.id }) { option ->
-                            val isFailed = option.id in failedFormatIds
-                            FormatOptionRow(
-                                option = option,
-                                isFailed = isFailed,
-                                onClick = {
-                                    onSelectFormat(option)
-                                    onDismiss()
-                                },
-                            )
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(12.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                Text(
+                                    text = "Checking ${pendingProviders.take(4).joinToString(", ")}...",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                 }
@@ -361,10 +409,20 @@ private fun FormatOptionRow(
 
             Spacer(Modifier.width(12.dp))
 
-            // Label & Specs
+            // Line 1 (Bold quality title) & Line 2 (Clean specs + Provider)
             Column(modifier = Modifier.weight(1f)) {
+                val bitDepth = option.bitDepth ?: 16
+                val qualityTitle = when {
+                    option.isDolbyAtmos || option.id.startsWith("dolby_atmos") -> "Dolby Atmos • E-AC-3"
+                    option.isLossless && (bitDepth > 16 || (option.sampleRateHz ?: 44100) > 48000) ->
+                        "FLAC • $bitDepth-bit Hi-Res"
+                    option.isLossless -> "FLAC • $bitDepth-bit Lossless"
+                    option.codec.equals("opus", ignoreCase = true) ->
+                        "Opus • ${option.bitrateKbps ?: 160} kbps"
+                    else -> "M4A / AAC • ${option.bitrateKbps ?: 320} kbps"
+                }
                 Text(
-                    text = option.label,
+                    text = qualityTitle,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha),
@@ -372,25 +430,13 @@ private fun FormatOptionRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(2.dp))
-                val sourceLabel = option.sourceName?.takeIf { it.isNotBlank() }
-                val subtext = buildString {
-                    when {
-                        option.isDolbyAtmos || option.id.startsWith("dolby_atmos") -> {
-                            append("Dolby Atmos • ")
-                            append(sourceLabel ?: "E-AC-3 JOC")
-                        }
-                        option.isLossless -> {
-                            append("FLAC • ")
-                            append(sourceLabel ?: if ((option.bitDepth ?: 16) > 16) "Hi-Res Audio" else "Lossless Audio")
-                        }
-                        option.id == "jiosaavn_320" || sourceLabel.equals("JioSaavn", ignoreCase = true) || option.label.contains("JioSaavn", ignoreCase = true) -> {
-                            append("AAC • ${sourceLabel ?: "JioSaavn"}")
-                        }
-                        else -> {
-                            append("${option.codec.uppercase()} • ${sourceLabel ?: "YouTube Music"}")
-                        }
-                    }
+                val sourceLabel = option.sourceName?.takeIf { it.isNotBlank() } ?: "YouTube Music"
+                val khzPart = option.sampleRateHz?.takeIf { it > 0 }?.let { sr ->
+                    val khzVal = sr / 1000.0
+                    if (sr % 1000 == 0) "${sr / 1000} kHz" else java.lang.String.format(java.util.Locale.US, "%.1f kHz", khzVal)
                 }
+                val kbpsPart = option.bitrateKbps?.takeIf { it > 0 }?.let { "$it kbps" }
+                val subtext = listOfNotNull(khzPart, kbpsPart, sourceLabel).joinToString(" • ")
                 Text(
                     text = subtext,
                     style = MaterialTheme.typography.bodySmall,

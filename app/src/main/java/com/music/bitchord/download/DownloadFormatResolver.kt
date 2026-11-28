@@ -11,14 +11,12 @@ import com.music.bitchord.data.model.durationMillis
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.sources.AddonSource
 import com.music.bitchord.data.sources.JioSaavnSource
-import com.music.bitchord.data.sources.RepoExtensionSource
 import com.music.bitchord.data.sources.SourceConfig
 import com.music.bitchord.data.sources.SourceHealthTracker
 import com.music.bitchord.data.sources.SourceKind
 import com.music.bitchord.data.sources.SourceRegistry
 import com.music.bitchord.data.sources.SourceResolver
 import com.music.bitchord.data.sources.SourceStream
-import com.music.bitchord.data.sources.StreamFormat
 import com.music.bitchord.data.sources.StreamRequest
 import com.music.bitchord.data.sources.TrackMatcher
 import com.music.bitchord.playback.QualityUpgrade
@@ -27,491 +25,499 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.last
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Request
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
+data class DownloadFormatProgress(
+    val formats: List<DownloadFormatOption>,
+    val pendingProviders: List<String>,
+    val isComplete: Boolean,
+)
+
 object DownloadFormatResolver {
 
     private const val DEFAULT_UA = LosslessAudioProvider.BROWSER_USER_AGENT
 
     suspend fun resolveFormats(song: Song): List<DownloadFormatOption> = withContext(Dispatchers.IO) {
+        resolveFormatsFlow(song).last().formats
+    }
+
+    /**
+     * Progressively resolves downloadable formats across ALL active Group 2 Download Providers.
+     * Fast sources (active playing stream, UMtify/addons, JioSaavn, YouTube Music) emit right away (<1s),
+     * while `.sflx` QuickJS providers (Tidal, Qobuz, Deezer, Amazon Music, Beatport) stream in as they complete.
+     */
+    fun resolveFormatsFlow(song: Song): Flow<DownloadFormatProgress> = channelFlow {
         val durationSec = (song.durationMillis() / 1000).toInt().takeIf { it > 0 } ?: 210
+        val cleanTitle = SflxRuntimeBridge.cleanTrackTitle(song.title)
+        val primaryArtist = SflxRuntimeBridge.primaryArtistName(SflxRuntimeBridge.cleanTrackTitle(song.artist))
         val target = TrackMatcher.targetOf(song)
         val allowAtmos = AppSettings.dolbyAtmos.value
 
-        // Strict Group 2 (DOWNLOAD PROVIDERS) gating
         val addonSourcesEnabled = SourceRegistry.downloadableAddonSources().isNotEmpty()
         val extSources = SourceRegistry.downloadableExtensionSources()
         val jioSaavnEnabled = SourceRegistry.isDownloadProviderEnabled { it.kind == SourceKind.JIOSAAVN }
         val youtubeEnabled = SourceRegistry.isDownloadProviderEnabled { it.kind == SourceKind.YOUTUBE }
         val losslessFallbackEnabled = addonSourcesEnabled || extSources.isNotEmpty()
 
-        // 1. Always capture active / recently cached playing FLAC / Hi-Res / Dolby stream (zero wait)
-        val activeStream = resolveActivePlayingStream(song)
+        val pendingNames = linkedSetOf<String>()
+        if (addonSourcesEnabled) pendingNames.add("UMtify")
+        extSources.forEach { pendingNames.add(it.displayName) }
+        if (jioSaavnEnabled) pendingNames.add("JioSaavn")
+        if (youtubeEnabled) pendingNames.add("YouTube Music")
 
-        coroutineScope {
-            // 2. Query ONLY enabled Group 2 custom addons (UMtify, custom servers) in parallel
-            val addonsDeferred = async {
-                if (!addonSourcesEnabled) return@async emptyList()
-                runCatching {
-                    withTimeoutOrNull(4500L) {
-                        SourceResolver.resolveAllAddonDownloadStreams(
-                            target = target,
-                            wantsDolbyAtmos = allowAtmos,
-                            wantsLossless = true,
-                        )
-                    }
-                }.getOrNull().orEmpty()
-            }
+        val stateMutex = Mutex()
+        val collected = mutableListOf<DownloadFormatOption>()
+        val seenProviderFormatKeys = HashSet<String>()
 
-            // 3. Execute QuickJS .sflx Runtime Bridge + lossless mirror fallback concurrently for all enabled extensions
-            val extDeferreds = extSources.map { ext ->
-                async {
-                    val startMs = System.currentTimeMillis()
-                    val extId = SourceRegistry.extensionIdFor(ext.configId) ?: ext.configId
-                    val sflxOptions = runCatching {
-                        withTimeoutOrNull(4000L) {
-                            SflxRuntimeBridge.resolveDownloadFormats(
-                                extensionId = extId,
-                                displayName = ext.displayName,
-                                title = song.title,
-                                artist = song.artist,
-                                album = song.albumName,
-                                durationSec = durationSec,
-                            )
-                        }
-                    }.getOrNull().orEmpty()
-                    if (sflxOptions.isNotEmpty()) {
-                        SourceHealthTracker.recordReady(ext.configId, System.currentTimeMillis() - startMs)
-                        return@async sflxOptions to null
-                    }
-
-                    val mirrorRes = runCatching {
-                        withTimeoutOrNull(3000L) {
-                            val endpoints = LosslessAudioProvider.getPreferredEndpointsForExtension(
-                                extensionId = extId,
-                                extraEndpoints = ExtensionRepoManager.getExtractedEndpointsFor(extId),
-                            )
-                            val res = LosslessAudioProvider.resolveLosslessTrack(
-                                title = song.title,
-                                artist = song.artist,
-                                durationSec = durationSec,
-                                preferredQuality = "HI_RES_LOSSLESS",
-                                timeoutMs = 2500L,
-                                endpointsOverride = endpoints,
-                                sourceLabel = ext.displayName,
-                            )
-                            if (res != null) {
-                                SourceHealthTracker.recordReady(ext.configId, System.currentTimeMillis() - startMs)
-                                ext.displayName to res
-                            } else {
-                                null
-                            }
-                        }
-                    }.getOrNull()
-                    emptyList<DownloadFormatOption>() to mirrorRes
-                }
-            }
-
-            // 4. Fallback benchmarked LosslessAudioProvider mirrors ONLY when lossless download providers are enabled
-            val flacHiResDeferred = async {
-                if (!losslessFallbackEnabled) return@async null
-                runCatching {
-                    withTimeoutOrNull(4000L) {
-                        LosslessAudioProvider.resolveLosslessTrack(
-                            title = song.title,
-                            artist = song.artist,
-                            durationSec = durationSec,
-                            preferredQuality = "HI_RES_LOSSLESS",
-                            timeoutMs = 3500L,
-                        )
-                    }
-                }.getOrNull()
-            }
-
-            val flacLosslessDeferred = async {
-                if (!losslessFallbackEnabled) return@async null
-                runCatching {
-                    withTimeoutOrNull(4000L) {
-                        LosslessAudioProvider.resolveLosslessTrack(
-                            title = song.title,
-                            artist = song.artist,
-                            durationSec = durationSec,
-                            preferredQuality = "LOSSLESS",
-                            timeoutMs = 3500L,
-                        )
-                    }
-                }.getOrNull()
-            }
-
-            // 5. JioSaavn 320 kbps AAC (only when enabled in Group 2)
-            val jioSaavnDeferred = async {
-                if (!jioSaavnEnabled) return@async null
-                runCatching {
-                    withTimeoutOrNull(3500L) {
-                        val jioSaavnConfig = SourceRegistry.configs.value.firstOrNull { it.kind == SourceKind.JIOSAAVN }
-                            ?: SourceConfig(kind = SourceKind.JIOSAAVN, enabled = true)
-                        val source = JioSaavnSource(jioSaavnConfig)
-                        val queries = TrackMatcher.queries(target)
-                        var bestMatch: Song? = null
-                        for (q in queries) {
-                            val candidates = source.search(q, limit = 10)
-                            if (candidates.isEmpty()) continue
-                            val ranked = TrackMatcher.ranked(candidates, target)
-                            val close = ranked.firstOrNull { TrackMatcher.withinSeconds(it, target, 3) }
-                                ?: ranked.firstOrNull()
-                            if (close != null) {
-                                bestMatch = close
-                                break
-                            }
-                        }
-                        if (bestMatch != null) {
-                            val trackId = SourceRegistry.parseTrackKey(bestMatch.videoId)?.second ?: bestMatch.videoId
-                            val stream = source.stream(trackId, StreamRequest.Best)
-                            if (stream != null && stream.url.isNotBlank() && (stream.format.kbps ?: 0) >= 160) {
-                                stream.copy(sourceName = "JioSaavn")
-                            } else null
-                        } else null
-                    }
-                }.getOrNull()
-            }
-
-            // 6. YouTube Music (Opus High, M4A / AAC, Opus Medium — only when enabled in Group 2)
-            val opusHighDeferred = async {
-                if (!youtubeEnabled) return@async null
-                runCatching {
-                    withTimeoutOrNull(3500L) {
-                        StreamResolver.resolveForDownload(song.videoId, maxKbps = 256, requireM4a = false)
-                    }
-                }.getOrNull()
-            }
-
-            val m4aDeferred = async {
-                if (!youtubeEnabled) return@async null
-                runCatching {
-                    withTimeoutOrNull(3500L) {
-                        StreamResolver.resolveForDownload(song.videoId, maxKbps = 256, requireM4a = true)
-                    }
-                }.getOrNull()
-            }
-
-            val opusMedDeferred = async {
-                if (!youtubeEnabled) return@async null
-                runCatching {
-                    withTimeoutOrNull(3000L) {
-                        StreamResolver.resolveForDownload(song.videoId, maxKbps = 96, requireM4a = false)
-                    }
-                }.getOrNull()
-            }
-
-            val addonStreams = addonsDeferred.await()
-            val extPairs = extDeferreds.awaitAll()
-            val sflxDirectOptions = extPairs.flatMap { it.first }
-            val extResults = extPairs.mapNotNull { it.second }
-            val flacHiRes = flacHiResDeferred.await()
-            val flacLossless = flacLosslessDeferred.await()
-            val jioSaavnStream = jioSaavnDeferred.await()
-            val opusHigh = opusHighDeferred.await()
-            val m4a = m4aDeferred.await()
-            val opusMed = opusMedDeferred.await()
-
-            val rawDrafts = mutableListOf<OptionDraft>()
-            val seenUrls = mutableSetOf<String>()
-
-            fun addStreamDraft(
-                idPrefix: String,
-                stream: SourceStream,
-                fallbackSourceName: String,
-            ) {
-                val safeUrl = LosslessAudioProvider.forceHttps(stream.url)
-                if (safeUrl.isBlank() || !seenUrls.add(safeUrl)) return
-                val srcName = stream.sourceName?.takeIf { it.isNotBlank() }
-                    ?: stream.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
-                    ?: fallbackSourceName
-                val headers = if (stream.headers.any { it.key.equals("User-Agent", ignoreCase = true) }) {
-                    stream.headers
-                } else {
-                    stream.headers + ("User-Agent" to DEFAULT_UA)
-                }
-
-                when {
-                    stream.format.isDolbyAtmos -> {
-                        val kbps = stream.format.kbps ?: 768
-                        rawDrafts.add(
-                            OptionDraft(
-                                id = "${idPrefix}_atmos_${rawDrafts.size}",
-                                label = "Dolby Atmos • E-AC-3 JOC ($srcName)",
-                                codec = stream.format.codec ?: "eac3-joc",
-                                bitrateKbps = kbps,
-                                sampleRateHz = stream.format.sampleRateHz ?: 48000,
-                                bitDepth = 16,
-                                streamUrl = safeUrl,
-                                fileExtension = "m4a",
-                                isLossless = false,
-                                isDolbyAtmos = true,
-                                headers = headers,
-                                sourceName = srcName,
-                            )
-                        )
-                    }
-                    stream.format.isLossless == true || safeUrl.substringBefore('?').endsWith(".flac", ignoreCase = true) -> {
-                        val bd = stream.format.bitDepth ?: 16
-                        val sr = stream.format.sampleRateHz ?: if (bd > 16) 96000 else 44100
-                        val khz = String.format(Locale.US, "%.1f", sr / 1000.0)
-                        val isHiRes = bd > 16 || sr > 48000
-                        val estKbps = stream.format.kbps ?: if (isHiRes) 2304 else 1411
-                        val id = if (isHiRes) "${idPrefix}_hires_${rawDrafts.size}" else "${idPrefix}_16_${rawDrafts.size}"
-                        rawDrafts.add(
-                            OptionDraft(
-                                id = id,
-                                label = "FLAC • $bd-bit • $khz kHz • $estKbps kbps ($srcName)",
-                                codec = "flac",
-                                bitrateKbps = estKbps,
-                                sampleRateHz = sr,
-                                bitDepth = bd,
-                                streamUrl = safeUrl,
-                                fileExtension = "flac",
-                                isLossless = true,
-                                isDolbyAtmos = false,
-                                headers = headers,
-                                sourceName = srcName,
-                            )
-                        )
-                    }
-                    (stream.format.kbps ?: 0) >= 256 -> {
-                        val kbps = stream.format.kbps ?: 320
-                        rawDrafts.add(
-                            OptionDraft(
-                                id = "${idPrefix}_hq_${rawDrafts.size}",
-                                label = "M4A / AAC • $kbps kbps ($srcName)",
-                                codec = stream.format.codec ?: "aac",
-                                bitrateKbps = kbps,
-                                sampleRateHz = stream.format.sampleRateHz ?: 44100,
-                                bitDepth = 16,
-                                streamUrl = safeUrl,
-                                fileExtension = "m4a",
-                                isLossless = false,
-                                isDolbyAtmos = false,
-                                headers = headers,
-                                sourceName = srcName,
-                            )
-                        )
-                    }
-                }
-            }
-
-            // A. Active playing / cached stream first (instant!)
-            if (activeStream != null) {
-                addStreamDraft("flac_active", activeStream, "UMtify")
-            }
-
-            // B. Addon streams (UMtify + custom addons)
-            addonStreams.forEach { stream ->
-                addStreamDraft("flac_addon", stream, "UMtify")
-            }
-
-            // B2. QuickJS .sflx Runtime Bridge options
-            sflxDirectOptions.forEach { opt ->
-                val safeUrl = LosslessAudioProvider.forceHttps(opt.streamUrl)
-                if (safeUrl.isNotBlank() && seenUrls.add(safeUrl)) {
-                    rawDrafts.add(
-                        OptionDraft(
-                            id = opt.id,
-                            label = opt.label,
-                            codec = opt.codec,
-                            bitrateKbps = opt.bitrateKbps ?: if (opt.isLossless) 1411 else 320,
-                            sampleRateHz = opt.sampleRateHz ?: 44100,
-                            bitDepth = opt.bitDepth ?: 16,
-                            streamUrl = safeUrl,
-                            fileExtension = opt.fileExtension,
-                            isLossless = opt.isLossless,
-                            isDolbyAtmos = opt.isDolbyAtmos,
-                            headers = opt.headers,
-                            sourceName = opt.sourceName,
-                        )
-                    )
-                }
-            }
-
-            // C. Enabled Repo Extensions (Tidal, Qobuz, Deezer, etc.)
-            extResults.forEach { (extName, res) ->
-                if (res.streamUrl.isNotBlank() && seenUrls.add(res.streamUrl)) {
-                    val isHiRes = res.bitDepth > 16 || res.sampleRate > 48000
-                    val khz = String.format(Locale.US, "%.1f", res.sampleRate / 1000.0)
-                    rawDrafts.add(
-                        OptionDraft(
-                            id = if (isHiRes) "flac_hires_ext_${rawDrafts.size}" else "flac_16_ext_${rawDrafts.size}",
-                            label = "FLAC • ${res.bitDepth}-bit / $khz kHz ($extName)",
-                            codec = "flac",
-                            bitrateKbps = if (isHiRes) 2200 else 1411,
-                            sampleRateHz = res.sampleRate,
-                            bitDepth = res.bitDepth,
-                            streamUrl = res.streamUrl,
-                            fileExtension = "flac",
-                            isLossless = true,
-                            isDolbyAtmos = false,
-                            headers = mapOf("User-Agent" to DEFAULT_UA),
-                            sourceName = extName,
-                        )
-                    )
-                }
-            }
-
-            // D. LosslessAudioProvider Hi-Res & 16-bit mirrors
-            if (flacHiRes != null && flacHiRes.streamUrl.isNotBlank() && flacHiRes.bitDepth > 16 && seenUrls.add(flacHiRes.streamUrl)) {
-                val khz = String.format(Locale.US, "%.1f", flacHiRes.sampleRate / 1000.0)
-                val src = flacHiRes.sourceName.takeIf { it.isNotBlank() } ?: "Lossless"
-                rawDrafts.add(
-                    OptionDraft(
-                        id = "flac_hires",
-                        label = "FLAC • ${flacHiRes.bitDepth}-bit / $khz kHz",
-                        codec = "flac",
-                        bitrateKbps = 2200,
-                        sampleRateHz = flacHiRes.sampleRate,
-                        bitDepth = flacHiRes.bitDepth,
-                        streamUrl = flacHiRes.streamUrl,
-                        fileExtension = "flac",
-                        isLossless = true,
-                        headers = mapOf("User-Agent" to DEFAULT_UA),
-                        sourceName = src,
-                    )
-                )
-            }
-
-            val losslessCandidate = when {
-                flacLossless != null && flacLossless.streamUrl.isNotBlank() && flacLossless.streamUrl !in seenUrls -> flacLossless
-                flacHiRes != null && flacHiRes.streamUrl.isNotBlank() && flacHiRes.bitDepth <= 16 && flacHiRes.streamUrl !in seenUrls -> flacHiRes
-                else -> null
-            }
-            if (losslessCandidate != null && seenUrls.add(losslessCandidate.streamUrl)) {
-                val khz = String.format(Locale.US, "%.1f", losslessCandidate.sampleRate / 1000.0)
-                val src = losslessCandidate.sourceName.takeIf { it.isNotBlank() } ?: "Lossless"
-                rawDrafts.add(
-                    OptionDraft(
-                        id = "flac_16",
-                        label = "FLAC • ${losslessCandidate.bitDepth}-bit Lossless ($khz kHz)",
-                        codec = "flac",
-                        bitrateKbps = 1411,
-                        sampleRateHz = losslessCandidate.sampleRate,
-                        bitDepth = losslessCandidate.bitDepth,
-                        streamUrl = losslessCandidate.streamUrl,
-                        fileExtension = "flac",
-                        isLossless = true,
-                        headers = mapOf("User-Agent" to DEFAULT_UA),
-                        sourceName = src,
-                    )
-                )
-            }
-
-            // E. JioSaavn 320 kbps
-            if (jioSaavnStream != null && jioSaavnStream.url.isNotBlank() && seenUrls.add(jioSaavnStream.url)) {
-                val kbps = jioSaavnStream.format.kbps ?: 320
-                rawDrafts.add(
-                    OptionDraft(
-                        id = "jiosaavn_320",
-                        label = "M4A / AAC • $kbps kbps (JioSaavn)",
-                        codec = "aac",
-                        bitrateKbps = kbps,
-                        sampleRateHz = 44100,
-                        bitDepth = 16,
-                        streamUrl = jioSaavnStream.url,
-                        fileExtension = "m4a",
-                        isLossless = false,
-                        headers = jioSaavnStream.headers,
-                        sourceName = "JioSaavn",
-                    )
-                )
-            }
-
-            // F. YouTube Music options
-            if (opusHigh != null && opusHigh.url.isNotBlank() && seenUrls.add(opusHigh.url)) {
-                rawDrafts.add(
-                    OptionDraft(
-                        id = "opus_high",
-                        label = "Opus • High (${opusHigh.kbps} kbps)",
-                        codec = "opus",
-                        bitrateKbps = opusHigh.kbps,
-                        sampleRateHz = 48000,
-                        bitDepth = 16,
-                        streamUrl = opusHigh.url,
-                        fileExtension = "opus",
-                        isLossless = false,
-                        sourceName = "YouTube Music",
-                    )
-                )
-            }
-
-            if (m4a != null && m4a.url.isNotBlank() && seenUrls.add(m4a.url)) {
-                rawDrafts.add(
-                    OptionDraft(
-                        id = "m4a_high",
-                        label = "M4A / AAC • Standard (${m4a.kbps} kbps)",
-                        codec = "aac",
-                        bitrateKbps = m4a.kbps,
-                        sampleRateHz = 44100,
-                        bitDepth = 16,
-                        streamUrl = m4a.url,
-                        fileExtension = "m4a",
-                        isLossless = false,
-                        sourceName = "YouTube Music",
-                    )
-                )
-            }
-
-            if (opusMed != null && opusMed.url.isNotBlank() && seenUrls.add(opusMed.url) && (opusHigh == null || opusMed.kbps < opusHigh.kbps)) {
-                rawDrafts.add(
-                    OptionDraft(
-                        id = "opus_med",
-                        label = "Opus • Medium (${opusMed.kbps} kbps)",
-                        codec = "opus",
-                        bitrateKbps = opusMed.kbps,
-                        sampleRateHz = 48000,
-                        bitDepth = 16,
-                        streamUrl = opusMed.url,
-                        fileExtension = "opus",
-                        isLossless = false,
-                        sourceName = "YouTube Music",
-                    )
-                )
-            }
-
-            // Probe all stream Content-Lengths concurrently & sort highest quality first
-            rawDrafts.map { draft ->
-                async {
-                    val probedBytes = probeContentLength(draft.streamUrl, draft.headers)
-                    val isEst = probedBytes == null
-                    val estKbps = when {
-                        draft.isLossless -> draft.bitrateKbps.takeIf { it > 0 } ?: if ((draft.bitDepth ?: 16) > 16) 2304 else 1411
-                        else -> draft.bitrateKbps
-                    }
-                    val bytes = probedBytes ?: calculateEstimatedBytes(bitrateKbps = estKbps, durationSec = durationSec)
-                    DownloadFormatOption(
-                        id = draft.id,
-                        label = draft.label,
-                        codec = draft.codec,
-                        bitrateKbps = draft.bitrateKbps,
-                        sampleRateHz = draft.sampleRateHz,
-                        bitDepth = draft.bitDepth,
-                        sizeBytes = bytes,
-                        formattedSize = formatSize(bytes, isEst),
-                        streamUrl = draft.streamUrl,
-                        fileExtension = draft.fileExtension,
-                        isLossless = draft.isLossless,
-                        isDolbyAtmos = draft.isDolbyAtmos,
-                        headers = draft.headers,
-                        sourceName = draft.sourceName,
-                    )
-                }
-            }.awaitAll().sortedWith(
+        fun sortOptions(list: List<DownloadFormatOption>): List<DownloadFormatOption> =
+            list.sortedWith(
                 compareByDescending<DownloadFormatOption> { it.isDolbyAtmos }
                     .thenByDescending { it.isLossless && (it.bitDepth ?: 16) > 16 }
                     .thenByDescending { it.isLossless }
                     .thenByDescending { it.fileExtension.equals("m4a", ignoreCase = true) && (it.bitrateKbps ?: 0) >= 256 }
                     .thenByDescending { it.bitrateKbps ?: 0 },
             )
+
+        suspend fun finalizeDraftsAndEmit(
+            providerName: String?,
+            drafts: List<OptionDraft>,
+            markDone: Boolean = true,
+        ) {
+            val finalized = coroutineScope {
+                drafts.map { draft ->
+                    async(Dispatchers.IO) {
+                        val probedBytes = probeContentLength(draft.streamUrl, draft.headers)
+                        val isEst = probedBytes == null
+                        val estKbps = when {
+                            draft.isLossless -> draft.bitrateKbps.takeIf { it > 0 } ?: if ((draft.bitDepth ?: 16) > 16) 2304 else 1411
+                            else -> draft.bitrateKbps
+                        }
+                        val bytes = probedBytes ?: calculateEstimatedBytes(bitrateKbps = estKbps, durationSec = durationSec)
+                        DownloadFormatOption(
+                            id = draft.id,
+                            label = draft.label,
+                            codec = draft.codec,
+                            bitrateKbps = draft.bitrateKbps,
+                            sampleRateHz = draft.sampleRateHz,
+                            bitDepth = draft.bitDepth,
+                            sizeBytes = bytes,
+                            formattedSize = formatSize(bytes, isEst),
+                            streamUrl = draft.streamUrl,
+                            fileExtension = draft.fileExtension,
+                            isLossless = draft.isLossless,
+                            isDolbyAtmos = draft.isDolbyAtmos,
+                            headers = draft.headers,
+                            sourceName = draft.sourceName,
+                        )
+                    }
+                }.awaitAll()
+            }
+
+            val snapshot = stateMutex.withLock {
+                if (markDone && providerName != null) {
+                    pendingNames.remove(providerName)
+                }
+                finalized.forEach { opt ->
+                    val slug = SflxRuntimeBridge.providerSlug(opt.sourceName ?: providerName ?: "source")
+                    val tierKey = "${slug}_${opt.codec}_${opt.bitDepth ?: 0}_${opt.bitrateKbps ?: 0}_${opt.streamUrl}"
+                    if (seenProviderFormatKeys.add(tierKey)) {
+                        // Ensure unique option ID across all providers
+                        val uniqueId = if (opt.id.startsWith(slug)) opt.id else "${slug}_${opt.id}"
+                        collected.add(opt.copy(id = uniqueId))
+                    }
+                }
+                DownloadFormatProgress(
+                    formats = sortOptions(collected),
+                    pendingProviders = pendingNames.toList(),
+                    isComplete = pendingNames.isEmpty(),
+                )
+            }
+            send(snapshot)
+        }
+
+        // 1. Emit active playing FLAC / Hi-Res / Dolby Atmos stream immediately (<100ms)
+        val activeStream = resolveActivePlayingStream(song)
+        if (activeStream != null) {
+            val srcName = activeStream.sourceName?.takeIf { it.isNotBlank() } ?: "UMtify"
+            val draft = draftFromStream("active", activeStream, srcName)
+            if (draft != null) {
+                finalizeDraftsAndEmit(null, listOf(draft), markDone = false)
+            }
+        }
+
+        // Launch all providers concurrently on Dispatchers.IO
+        coroutineScope {
+            // 2. UMtify / Custom Addons
+            if (addonSourcesEnabled) {
+                launch(Dispatchers.IO) {
+                    val addonStreams = runCatching {
+                        withTimeoutOrNull(4500L) {
+                            SourceResolver.resolveAllAddonDownloadStreams(
+                                target = target,
+                                wantsDolbyAtmos = allowAtmos,
+                                wantsLossless = true,
+                            )
+                        }
+                    }.getOrNull().orEmpty()
+                    val drafts = addonStreams.mapIndexedNotNull { idx, stream ->
+                        draftFromStream("addon_$idx", stream, "UMtify")
+                    }
+                    finalizeDraftsAndEmit("UMtify", drafts)
+                }
+            }
+
+            // 3. Enabled .sflx QuickJS Download Providers (Tidal, Qobuz, Deezer, Amazon Music, Beatport)
+            extSources.forEach { ext ->
+                launch(Dispatchers.IO) {
+                    val startMs = System.currentTimeMillis()
+                    val extId = SourceRegistry.extensionIdFor(ext.configId) ?: ext.configId
+                    val drafts = mutableListOf<OptionDraft>()
+
+                    // A. Run QuickJS .sflx extension script (6.5s timeout)
+                    val sflxOptions = runCatching {
+                        SflxRuntimeBridge.resolveDownloadFormats(
+                            extensionId = extId,
+                            displayName = ext.displayName,
+                            title = song.title,
+                            artist = song.artist,
+                            album = song.albumName,
+                            durationSec = durationSec,
+                        )
+                    }.getOrNull().orEmpty()
+
+                    sflxOptions.forEach { opt ->
+                        val safeUrl = LosslessAudioProvider.forceHttps(opt.streamUrl)
+                        if (safeUrl.startsWith("https://")) {
+                            drafts.add(
+                                OptionDraft(
+                                    id = opt.id,
+                                    label = opt.label,
+                                    codec = opt.codec,
+                                    bitrateKbps = opt.bitrateKbps ?: if (opt.isLossless) 1411 else 320,
+                                    sampleRateHz = opt.sampleRateHz ?: 44100,
+                                    bitDepth = opt.bitDepth ?: 16,
+                                    streamUrl = safeUrl,
+                                    fileExtension = opt.fileExtension,
+                                    isLossless = opt.isLossless,
+                                    isDolbyAtmos = opt.isDolbyAtmos,
+                                    headers = opt.headers,
+                                    sourceName = ext.displayName,
+                                )
+                            )
+                        }
+                    }
+
+                    // B. If .sflx returned no direct URL (or partial tiers), query verified HTTPS lossless mirrors for this provider
+                    if (drafts.isEmpty()) {
+                        val endpoints = LosslessAudioProvider.getPreferredEndpointsForExtension(
+                            extensionId = extId,
+                            extraEndpoints = ExtensionRepoManager.getExtractedEndpointsFor(extId),
+                        )
+                        val pSlug = SflxRuntimeBridge.providerSlug(ext.displayName)
+                        val (hiRes, loRes) = coroutineScope {
+                            val hDef = async {
+                                runCatching {
+                                    withTimeoutOrNull(4500L) {
+                                        LosslessAudioProvider.resolveLosslessTrack(
+                                            title = cleanTitle,
+                                            artist = primaryArtist,
+                                            durationSec = durationSec,
+                                            preferredQuality = "HI_RES_LOSSLESS",
+                                            timeoutMs = 4000L,
+                                            endpointsOverride = endpoints,
+                                            sourceLabel = ext.displayName,
+                                        )
+                                    }
+                                }.getOrNull()
+                            }
+                            val lDef = async {
+                                runCatching {
+                                    withTimeoutOrNull(4500L) {
+                                        LosslessAudioProvider.resolveLosslessTrack(
+                                            title = cleanTitle,
+                                            artist = primaryArtist,
+                                            durationSec = durationSec,
+                                            preferredQuality = "LOSSLESS",
+                                            timeoutMs = 4000L,
+                                            endpointsOverride = endpoints,
+                                            sourceLabel = ext.displayName,
+                                        )
+                                    }
+                                }.getOrNull()
+                            }
+                            hDef.await() to lDef.await()
+                        }
+
+                        if (hiRes != null && hiRes.streamUrl.isNotBlank()) {
+                            val khz = String.format(Locale.US, "%.1f", hiRes.sampleRate / 1000.0)
+                            val is24 = hiRes.bitDepth > 16 || hiRes.sampleRate > 48000
+                            val estKbps = if (is24) 2304 else 1411
+                            drafts.add(
+                                OptionDraft(
+                                    id = "${pSlug}_flac_${hiRes.bitDepth}",
+                                    label = "FLAC • ${hiRes.bitDepth}-bit • $khz kHz (${ext.displayName})",
+                                    codec = "flac",
+                                    bitrateKbps = estKbps,
+                                    sampleRateHz = hiRes.sampleRate,
+                                    bitDepth = hiRes.bitDepth,
+                                    streamUrl = LosslessAudioProvider.forceHttps(hiRes.streamUrl),
+                                    fileExtension = "flac",
+                                    isLossless = true,
+                                    headers = mapOf("User-Agent" to DEFAULT_UA),
+                                    sourceName = ext.displayName,
+                                )
+                            )
+                        }
+                        if (loRes != null && loRes.streamUrl.isNotBlank() && loRes.streamUrl != hiRes?.streamUrl) {
+                            val khz = String.format(Locale.US, "%.1f", loRes.sampleRate / 1000.0)
+                            drafts.add(
+                                OptionDraft(
+                                    id = "${pSlug}_flac_${loRes.bitDepth}_16",
+                                    label = "FLAC • ${loRes.bitDepth}-bit • $khz kHz (${ext.displayName})",
+                                    codec = "flac",
+                                    bitrateKbps = 1411,
+                                    sampleRateHz = loRes.sampleRate,
+                                    bitDepth = loRes.bitDepth,
+                                    streamUrl = LosslessAudioProvider.forceHttps(loRes.streamUrl),
+                                    fileExtension = "flac",
+                                    isLossless = true,
+                                    headers = mapOf("User-Agent" to DEFAULT_UA),
+                                    sourceName = ext.displayName,
+                                )
+                            )
+                        }
+                    }
+
+                    if (drafts.isNotEmpty()) {
+                        SourceHealthTracker.recordReady(ext.configId, System.currentTimeMillis() - startMs)
+                    }
+                    finalizeDraftsAndEmit(ext.displayName, drafts)
+                }
+            }
+
+            // 4. JioSaavn 320 kbps AAC
+            if (jioSaavnEnabled) {
+                launch(Dispatchers.IO) {
+                    val stream = runCatching {
+                        withTimeoutOrNull(3500L) {
+                            val jioSaavnConfig = SourceRegistry.configs.value.firstOrNull { it.kind == SourceKind.JIOSAAVN }
+                                ?: SourceConfig(kind = SourceKind.JIOSAAVN, enabled = true)
+                            val source = JioSaavnSource(jioSaavnConfig)
+                            val queries = TrackMatcher.queries(target)
+                            var bestMatch: Song? = null
+                            for (q in queries) {
+                                val candidates = source.search(q, limit = 10)
+                                if (candidates.isEmpty()) continue
+                                val ranked = TrackMatcher.ranked(candidates, target)
+                                val close = ranked.firstOrNull { TrackMatcher.withinSeconds(it, target, 3) }
+                                    ?: ranked.firstOrNull()
+                                if (close != null) {
+                                    bestMatch = close
+                                    break
+                                }
+                            }
+                            if (bestMatch != null) {
+                                val trackId = SourceRegistry.parseTrackKey(bestMatch.videoId)?.second ?: bestMatch.videoId
+                                val st = source.stream(trackId, StreamRequest.Best)
+                                if (st != null && st.url.isNotBlank() && (st.format.kbps ?: 0) >= 160) {
+                                    st.copy(sourceName = "JioSaavn")
+                                } else null
+                            } else null
+                        }
+                    }.getOrNull()
+
+                    val drafts = if (stream != null) {
+                        val kbps = stream.format.kbps ?: 320
+                        listOf(
+                            OptionDraft(
+                                id = "jiosaavn_m4a_$kbps",
+                                label = "M4A / AAC • $kbps kbps (JioSaavn)",
+                                codec = "aac",
+                                bitrateKbps = kbps,
+                                sampleRateHz = 44100,
+                                bitDepth = 16,
+                                streamUrl = LosslessAudioProvider.forceHttps(stream.url),
+                                fileExtension = "m4a",
+                                isLossless = false,
+                                headers = stream.headers,
+                                sourceName = "JioSaavn",
+                            )
+                        )
+                    } else emptyList()
+                    finalizeDraftsAndEmit("JioSaavn", drafts)
+                }
+            }
+
+            // 5. YouTube Music (Opus High, M4A / AAC, Opus Medium)
+            if (youtubeEnabled) {
+                launch(Dispatchers.IO) {
+                    val (opusHigh, m4a, opusMed) = coroutineScope {
+                        val oH = async {
+                            runCatching { withTimeoutOrNull(3500L) { StreamResolver.resolveForDownload(song.videoId, maxKbps = 256, requireM4a = false) } }.getOrNull()
+                        }
+                        val m = async {
+                            runCatching { withTimeoutOrNull(3500L) { StreamResolver.resolveForDownload(song.videoId, maxKbps = 256, requireM4a = true) } }.getOrNull()
+                        }
+                        val oM = async {
+                            runCatching { withTimeoutOrNull(3000L) { StreamResolver.resolveForDownload(song.videoId, maxKbps = 96, requireM4a = false) } }.getOrNull()
+                        }
+                        Triple(oH.await(), m.await(), oM.await())
+                    }
+                    val drafts = mutableListOf<OptionDraft>()
+                    if (opusHigh != null && opusHigh.url.isNotBlank()) {
+                        drafts.add(
+                            OptionDraft(
+                                id = "youtube_music_opus_high",
+                                label = "Opus • High (${opusHigh.kbps} kbps)",
+                                codec = "opus",
+                                bitrateKbps = opusHigh.kbps,
+                                sampleRateHz = 48000,
+                                bitDepth = 16,
+                                streamUrl = LosslessAudioProvider.forceHttps(opusHigh.url),
+                                fileExtension = "opus",
+                                isLossless = false,
+                                sourceName = "YouTube Music",
+                            )
+                        )
+                    }
+                    if (m4a != null && m4a.url.isNotBlank()) {
+                        drafts.add(
+                            OptionDraft(
+                                id = "youtube_music_m4a_high",
+                                label = "M4A / AAC • Standard (${m4a.kbps} kbps)",
+                                codec = "aac",
+                                bitrateKbps = m4a.kbps,
+                                sampleRateHz = 44100,
+                                bitDepth = 16,
+                                streamUrl = LosslessAudioProvider.forceHttps(m4a.url),
+                                fileExtension = "m4a",
+                                isLossless = false,
+                                sourceName = "YouTube Music",
+                            )
+                        )
+                    }
+                    if (opusMed != null && opusMed.url.isNotBlank() && (opusHigh == null || opusMed.kbps < opusHigh.kbps)) {
+                        drafts.add(
+                            OptionDraft(
+                                id = "youtube_music_opus_med",
+                                label = "Opus • Medium (${opusMed.kbps} kbps)",
+                                codec = "opus",
+                                bitrateKbps = opusMed.kbps,
+                                sampleRateHz = 48000,
+                                bitDepth = 16,
+                                streamUrl = LosslessAudioProvider.forceHttps(opusMed.url),
+                                fileExtension = "opus",
+                                isLossless = false,
+                                sourceName = "YouTube Music",
+                            )
+                        )
+                    }
+                    finalizeDraftsAndEmit("YouTube Music", drafts)
+                }
+            }
+
+            // If zero providers were enabled at all, emit empty completed state immediately
+            if (pendingNames.isEmpty() && activeStream == null) {
+                send(DownloadFormatProgress(emptyList(), emptyList(), isComplete = true))
+            }
+        }
+
+        // Ensure final completed state is emitted when coroutineScope completes
+        val finalState = stateMutex.withLock {
+            pendingNames.clear()
+            DownloadFormatProgress(
+                formats = sortOptions(collected),
+                pendingProviders = emptyList(),
+                isComplete = true,
+            )
+        }
+        send(finalState)
+    }
+
+    private fun draftFromStream(
+        idSuffix: String,
+        stream: SourceStream,
+        fallbackSourceName: String,
+    ): OptionDraft? {
+        val safeUrl = LosslessAudioProvider.forceHttps(stream.url)
+        if (!safeUrl.startsWith("https://")) return null
+        val srcName = stream.sourceName?.takeIf { it.isNotBlank() }
+            ?: stream.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
+            ?: fallbackSourceName
+        val pSlug = SflxRuntimeBridge.providerSlug(srcName)
+        val headers = if (stream.headers.any { it.key.equals("User-Agent", ignoreCase = true) }) {
+            stream.headers
+        } else {
+            stream.headers + ("User-Agent" to DEFAULT_UA)
+        }
+
+        return when {
+            stream.format.isDolbyAtmos -> {
+                val kbps = stream.format.kbps ?: 768
+                OptionDraft(
+                    id = "${pSlug}_atmos_$idSuffix",
+                    label = "Dolby Atmos • E-AC-3 ($srcName)",
+                    codec = stream.format.codec ?: "eac3-joc",
+                    bitrateKbps = kbps,
+                    sampleRateHz = stream.format.sampleRateHz ?: 48000,
+                    bitDepth = 16,
+                    streamUrl = safeUrl,
+                    fileExtension = "m4a",
+                    isLossless = false,
+                    isDolbyAtmos = true,
+                    headers = headers,
+                    sourceName = srcName,
+                )
+            }
+            stream.format.isLossless == true || safeUrl.substringBefore('?').endsWith(".flac", ignoreCase = true) -> {
+                val bd = stream.format.bitDepth ?: 16
+                val sr = stream.format.sampleRateHz ?: if (bd > 16) 96000 else 44100
+                val khz = String.format(Locale.US, "%.1f", sr / 1000.0)
+                val isHiRes = bd > 16 || sr > 48000
+                val estKbps = stream.format.kbps ?: if (isHiRes) 2304 else 1411
+                OptionDraft(
+                    id = "${pSlug}_flac_${bd}_$idSuffix",
+                    label = "FLAC • $bd-bit • $khz kHz • $estKbps kbps ($srcName)",
+                    codec = "flac",
+                    bitrateKbps = estKbps,
+                    sampleRateHz = sr,
+                    bitDepth = bd,
+                    streamUrl = safeUrl,
+                    fileExtension = "flac",
+                    isLossless = true,
+                    isDolbyAtmos = false,
+                    headers = headers,
+                    sourceName = srcName,
+                )
+            }
+            (stream.format.kbps ?: 0) >= 256 -> {
+                val kbps = stream.format.kbps ?: 320
+                OptionDraft(
+                    id = "${pSlug}_aac_${kbps}_$idSuffix",
+                    label = "M4A / AAC • $kbps kbps ($srcName)",
+                    codec = stream.format.codec ?: "aac",
+                    bitrateKbps = kbps,
+                    sampleRateHz = stream.format.sampleRateHz ?: 44100,
+                    bitDepth = 16,
+                    streamUrl = safeUrl,
+                    fileExtension = "m4a",
+                    isLossless = false,
+                    isDolbyAtmos = false,
+                    headers = headers,
+                    sourceName = srcName,
+                )
+            }
+            else -> null
         }
     }
 
@@ -627,16 +633,17 @@ object DownloadFormatResolver {
     }
 
     private fun calculateEstimatedBytes(bitrateKbps: Int, durationSec: Int): Long {
-        return (bitrateKbps.toLong() * 1000L / 8L) * durationSec.coerceAtLeast(1)
+        val kbps = bitrateKbps.coerceAtLeast(64).toLong()
+        return (kbps * 1000L / 8L) * durationSec.coerceAtLeast(30)
     }
 
-    private fun formatSize(bytes: Long, isEstimate: Boolean): String {
-        val mb = bytes.toDouble() / (1024.0 * 1024.0)
-        val prefix = if (isEstimate) "~" else ""
+    private fun formatSize(bytes: Long, isEstimated: Boolean): String {
+        val prefix = if (isEstimated) "~" else ""
+        val mb = bytes / (1024.0 * 1024.0)
         return if (mb >= 1.0) {
             String.format(Locale.US, "%s%.1f MB", prefix, mb)
         } else {
-            val kb = bytes.toDouble() / 1024.0
+            val kb = bytes / 1024.0
             String.format(Locale.US, "%s%.0f KB", prefix, kb)
         }
     }

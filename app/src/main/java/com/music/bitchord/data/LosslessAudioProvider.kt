@@ -223,13 +223,11 @@ object LosslessAudioProvider {
         return endpoints.sortedBy { mirrorLatencies[it] ?: 400L }
     }
 
-    private fun cleanTitle(raw: String): String {
-        return raw
-            .replace(Regex("""\((?:official|music|lyric|audio|video|visualizer|remastered|deluxe|explicit|clean).*?\)|\[.*?\]""", RegexOption.IGNORE_CASE), "")
+    private fun cleanTitle(raw: String): String =
+        SflxRuntimeBridge.cleanTrackTitle(raw)
             .replace(Regex("""[-_]"""), " ")
             .replace(Regex("""\s+"""), " ")
             .trim()
-    }
 
     private fun normalize(s: String): String {
         return s.lowercase(Locale.ROOT).replace(Regex("""[^a-z0-9]"""), "")
@@ -265,7 +263,7 @@ object LosslessAudioProvider {
         }
 
         val cleanedTitle = cleanTitle(title)
-        val cleanedArtist = cleanTitle(artist)
+        val cleanedArtist = SflxRuntimeBridge.primaryArtistName(cleanTitle(artist))
         val query = "$cleanedTitle $cleanedArtist".trim()
         val encodedQuery = runCatching { URLEncoder.encode(query, "UTF-8") }.getOrDefault(query)
 

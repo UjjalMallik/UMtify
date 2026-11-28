@@ -71,6 +71,14 @@ object MetadataDiscoveryProvider {
     @Volatile
     private var cachedProviderSignature: String = ""
 
+    @Volatile
+    private var lastProbeTimestampMs: Long = 0L
+
+    @Volatile
+    private var lastProbeSignature: String = ""
+
+    private const val HEALTH_CACHE_TTL_MS = 10 * 60 * 1000L
+
     private val httpClient by lazy {
         Http.client.newBuilder()
             .connectTimeout(3500, TimeUnit.MILLISECONDS)
@@ -131,7 +139,15 @@ object MetadataDiscoveryProvider {
      * Probes enabled Group 3 Metadata & Home Discovery providers concurrently on [Dispatchers.IO]
      * using lightweight keyless public endpoints so `Sources` displays real-time status & counters.
      */
-    suspend fun probeMetadataProviders() = withContext(Dispatchers.IO) {
+    suspend fun probeMetadataProviders(force: Boolean = false) = withContext(Dispatchers.IO) {
+        val sig = providerSignature()
+        val now = System.currentTimeMillis()
+        if (!force && sig == lastProbeSignature && (now - lastProbeTimestampMs) < HEALTH_CACHE_TTL_MS && _providerStates.value.isNotEmpty()) {
+            return@withContext
+        }
+        lastProbeSignature = sig
+        lastProbeTimestampMs = now
+
         coroutineScope {
             val jobs = mutableListOf<Deferred<Unit>>()
             if (ExtensionRepoManager.isMetadataProviderEnabled("apple")) {

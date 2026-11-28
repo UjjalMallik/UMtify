@@ -188,7 +188,8 @@ fun SourcesScreen(
             configs.filter {
                 !it.metadataOnly &&
                     ((it.kind.needsServer && it.isComplete) || (it.kind == SourceKind.EXTENSION && (it.enabled || it.isDownloadEnabled))) &&
-                    !it.awaitsLosslessOutput
+                    !it.awaitsLosslessOutput &&
+                    !SourceHealthTracker.isHealthFresh(it.id)
             }.forEach { config ->
                 launch {
                     val source = SourceRegistry.instance(config.id) ?: return@launch
@@ -367,13 +368,6 @@ fun SourcesScreen(
                 header = "METADATA & HOME DISCOVERY",
                 footer = "Enriches Home recommendations, charts, artist portraits, and lyrics",
             ) {
-                Text(
-                    text = "Enriches Home recommendations, charts, artist portraits, and lyrics",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = ROW_INSET, vertical = 10.dp),
-                )
-                RowDivider()
                 metadataSources.forEachIndexed { index, config ->
                     val extId = SourceRegistry.extensionIdFor(config.id) ?: config.id
                     ManagedSourceRow(
@@ -401,7 +395,7 @@ fun SourcesScreen(
                             ExtensionRepoManager.toggleExtension(extId, enabled, syncSourceRegistry = true)
                             if (enabled) {
                                 coroutineScope.launch(Dispatchers.IO) {
-                                    com.music.bitchord.data.MetadataDiscoveryProvider.probeMetadataProviders()
+                                    com.music.bitchord.data.MetadataDiscoveryProvider.probeMetadataProviders(force = true)
                                     com.music.bitchord.data.MetadataDiscoveryProvider.refreshChartDiscoveryShelf()
                                 }
                             }

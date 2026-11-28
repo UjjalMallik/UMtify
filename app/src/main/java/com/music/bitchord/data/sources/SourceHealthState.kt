@@ -21,9 +21,20 @@ sealed interface SourceRuntimeStatus {
  */
 object SourceHealthTracker {
     private const val HARD_ERROR_COOLDOWN_MS = 5 * 60 * 1000L
+    const val HEALTH_CACHE_TTL_MS = 10 * 60 * 1000L
 
     private val _states = MutableStateFlow<Map<String, SourceRuntimeStatus>>(emptyMap())
     val states: StateFlow<Map<String, SourceRuntimeStatus>> = _states.asStateFlow()
+
+    fun isHealthFresh(configId: String, nowMs: Long = System.currentTimeMillis()): Boolean {
+        val status = _states.value[configId] ?: return false
+        val ts = when (status) {
+            SourceRuntimeStatus.Idle -> return false
+            is SourceRuntimeStatus.Ready -> status.timestampMs
+            is SourceRuntimeStatus.Error -> status.timestampMs
+        }
+        return (nowMs - ts) < HEALTH_CACHE_TTL_MS
+    }
 
     fun recordReady(configId: String, latencyMs: Long) {
         if (configId.isBlank()) return

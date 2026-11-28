@@ -21,7 +21,6 @@ import java.security.MessageDigest
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
-import kotlin.math.abs
 
 /**
  * QuickJS Host Runtime Bridge for executing extracted Mornye `.sflx` packages
@@ -30,12 +29,16 @@ import kotlin.math.abs
 object SflxRuntimeBridge {
     private const val TAG = "SflxRuntimeBridge"
     private const val PREFS_NAME = "sflx_ext_storage"
-    private const val DEFAULT_RESOLUTION_BUDGET_MS = 4000L
+    private const val DEFAULT_RESOLUTION_BUDGET_MS = 6500L
+    private const val HEALTH_CACHE_TTL_MS = 10 * 60 * 1000L
 
     @Volatile
     private var appContext: Context? = null
     private var storagePrefs: SharedPreferences? = null
     private val cookieJar = ConcurrentHashMap<String, String>()
+
+    private data class CachedHealthResponse(val code: Int, val body: String, val timestampMs: Long)
+    private val sharedHealthResponses = ConcurrentHashMap<String, CachedHealthResponse>()
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -44,9 +47,9 @@ object SflxRuntimeBridge {
 
     private val syncHttpClient by lazy {
         Http.client.newBuilder()
-            .connectTimeout(2500, TimeUnit.MILLISECONDS)
-            .readTimeout(3500, TimeUnit.MILLISECONDS)
-            .callTimeout(4000, TimeUnit.MILLISECONDS)
+            .connectTimeout(3500, TimeUnit.MILLISECONDS)
+            .readTimeout(5500, TimeUnit.MILLISECONDS)
+            .callTimeout(6000, TimeUnit.MILLISECONDS)
             .followRedirects(true)
             .build()
     }
@@ -57,9 +60,29 @@ object SflxRuntimeBridge {
         val isManifest: Boolean,
     )
 
+    fun cleanTrackTitle(raw: String): String =
+        raw.replace(
+            Regex("""\s*[\(\[](?:[^)\]]*(?:version|ver\.?|official|video|audio|lyric|lyrics|visualizer|remaster|deluxe|explicit|clean|from|edit|mix|ost|soundtrack|live|acoustic|bonus|feat\.?|ft\.?)[^)\]]*)[\)\]]""", RegexOption.IGNORE_CASE),
+            "",
+        )
+            .replace(Regex("""\s+(?:feat\.?|ft\.?|featuring)\s+.*$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s+[-–—]\s+(?:official|lyric|audio|video|remastered|from).*$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+            .ifBlank { raw.trim() }
+
+    fun primaryArtistName(raw: String): String =
+        raw.split(Regex("""\s*(?:,|&|/|;|\bfeat\.?\b|\bft\.?\b|\bx\b)\s*""", RegexOption.IGNORE_CASE))
+            .firstOrNull { it.isNotBlank() }
+            ?.trim()
+            ?: raw.trim()
+
+    fun providerSlug(raw: String): String =
+        raw.lowercase(Locale.ROOT).replace(Regex("""[^a-z0-9]+"""), "_").trim('_').ifBlank { "ext" }
+
     /**
      * Verifies `.sflx` extraction, loads `index.js` inside QuickJS, checks manifest `serviceHealth`
-     * + registered provider exports, and returns latency on success.
+     * (with 10-minute shared endpoint cache to prevent HTTP 429 bursts) + registered exports.
      */
     suspend fun probeHealth(extensionId: String, configId: String): Result<Long> = withContext(Dispatchers.IO) {
         val start = System.currentTimeMillis()
@@ -72,7 +95,6 @@ object SflxRuntimeBridge {
             return@withContext Result.failure(IllegalStateException(reason))
         }
 
-        // Verify serviceHealth endpoint from manifest.json when declared
         val serviceHealthUrl = runCatching {
             if (manifestJson.isNullOrBlank()) return@runCatching null
             val arr = JSONObject(manifestJson).optJSONArray("serviceHealth") ?: return@runCatching null
@@ -82,54 +104,70 @@ object SflxRuntimeBridge {
         var healthEndpointOk = false
         var serviceHealthError: String? = null
         if (serviceHealthUrl != null) {
-            runCatching {
-                val safeUrl = LosslessAudioProvider.forceHttps(serviceHealthUrl)
-                val req = Request.Builder()
-                    .url(safeUrl)
-                    .header("User-Agent", LosslessAudioProvider.BROWSER_USER_AGENT)
-                    .header("Accept", "application/json")
-                    .build()
-                syncHttpClient.newCall(req).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        val text = resp.body?.string().orEmpty()
-                        val services = runCatching { JSONObject(text).optJSONObject("services") }.getOrNull()
-                        if (services != null) {
-                            val svcKey = manifestJson?.let {
-                                runCatching {
-                                    JSONObject(it).optJSONArray("serviceHealth")?.optJSONObject(0)?.optString("serviceKey")
-                                }.getOrNull()
-                            }?.takeIf { it.isNotBlank() } ?: extensionId.substringBefore('-')
-                            val svcObj = services.optJSONObject(svcKey)
-                            if (svcObj != null) {
-                                healthEndpointOk = svcObj.optBoolean("ok", true)
-                                if (!healthEndpointOk) {
-                                    serviceHealthError = svcObj.optString("error").ifBlank { "Auth required" }
-                                }
-                            } else {
-                                healthEndpointOk = true
+            val safeUrl = LosslessAudioProvider.forceHttps(serviceHealthUrl)
+            val cached = sharedHealthResponses[safeUrl]
+                ?.takeIf { System.currentTimeMillis() - it.timestampMs < HEALTH_CACHE_TTL_MS }
+
+            val codeAndBody = if (cached != null) {
+                cached.code to cached.body
+            } else {
+                runCatching {
+                    val req = Request.Builder()
+                        .url(safeUrl)
+                        .header("User-Agent", LosslessAudioProvider.BROWSER_USER_AGENT)
+                        .header("Accept", "application/json")
+                        .build()
+                    syncHttpClient.newCall(req).execute().use { resp ->
+                        val b = resp.body?.string().orEmpty()
+                        if (resp.isSuccessful) {
+                            sharedHealthResponses[safeUrl] = CachedHealthResponse(resp.code, b, System.currentTimeMillis())
+                        }
+                        resp.code to b
+                    }
+                }.getOrNull()
+            }
+
+            if (codeAndBody == null) {
+                serviceHealthError = "Timeout"
+            } else {
+                val (code, text) = codeAndBody
+                if (code in 200..299) {
+                    val services = runCatching { JSONObject(text).optJSONObject("services") }.getOrNull()
+                    if (services != null) {
+                        val svcKey = manifestJson?.let {
+                            runCatching {
+                                JSONObject(it).optJSONArray("serviceHealth")?.optJSONObject(0)?.optString("serviceKey")
+                            }.getOrNull()
+                        }?.takeIf { it.isNotBlank() } ?: extensionId.substringBefore('-')
+                        val svcObj = services.optJSONObject(svcKey)
+                        if (svcObj != null) {
+                            healthEndpointOk = svcObj.optBoolean("ok", true)
+                            if (!healthEndpointOk) {
+                                serviceHealthError = svcObj.optString("error").ifBlank { "Auth required" }
                             }
                         } else {
                             healthEndpointOk = true
                         }
-                    } else if (resp.code == 429) {
-                        serviceHealthError = "Rate limited"
                     } else {
-                        serviceHealthError = "HTTP ${resp.code}"
+                        healthEndpointOk = true
                     }
+                } else if (code == 429) {
+                    // Treat rate-limit transiently only if QuickJS script itself checks out,
+                    // keeping cached ready/fallback cleanly without falsely flagging healthy bridges.
+                    serviceHealthError = "Rate limited"
+                } else {
+                    serviceHealthError = "HTTP $code"
                 }
-            }.onFailure {
-                serviceHealthError = "Timeout"
             }
         }
 
-        // Verify script loads cleanly inside QuickJS and exports extension handlers
-        val loadCheck = withTimeoutOrNull(2500L) {
+        val loadCheck = withTimeoutOrNull(3000L) {
             runCatching {
                 val qjs = QuickJs.create(Dispatchers.IO)
                 qjs.maxStackSize = 1024 * 1024L
                 try {
                     val captured = mutableListOf<CapturedDownload>()
-                    bindHostApis(qjs, extensionId, manifestJson, System.currentTimeMillis() + 2200L, captured)
+                    bindHostApis(qjs, extensionId, manifestJson, System.currentTimeMillis() + 2500L, captured)
                     evaluateScriptWithBridge(qjs, manifestJson, indexJs)
                     val summaryJson = qjs.evaluate<String>(
                         """
@@ -143,13 +181,15 @@ object SflxRuntimeBridge {
                             }
                             return JSON.stringify({ hasSearch: hasSearch, hasDownload: hasDownload, initOk: initOk });
                         })();
-                        """.trimIndent()
+                        """.trimIndent(),
                     )
                     val obj = JSONObject(summaryJson)
                     obj.optBoolean("hasSearch") || obj.optBoolean("hasDownload")
                 } finally {
                     runCatching { qjs.close() }
                 }
+            }.onFailure { err ->
+                TrackLog.w(TAG, "probeHealth script load error for $extensionId: ${err.message}")
             }.getOrElse { false }
         } ?: false
 
@@ -169,8 +209,8 @@ object SflxRuntimeBridge {
     }
 
     /**
-     * Executes the `.sflx` JavaScript extension inside QuickJS to search & resolve
-     * real downloadable [DownloadFormatOption] candidates (Hi-Res FLAC / 16-bit FLAC / M4A / Atmos).
+     * Executes the `.sflx` JavaScript extension inside QuickJS (up to 6.5s budget on `Dispatchers.IO`)
+     * to search using normalized track/artist/ISRC queries & await all supported download tiers.
      */
     suspend fun resolveDownloadFormats(
         extensionId: String,
@@ -179,18 +219,24 @@ object SflxRuntimeBridge {
         artist: String,
         album: String?,
         durationSec: Int,
+        isrc: String? = null,
     ): List<DownloadFormatOption> = withContext(Dispatchers.IO) {
         if (title.isBlank()) return@withContext emptyList()
         val indexJs = ExtensionRepoManager.getExtractedIndexJs(extensionId) ?: return@withContext emptyList()
         val manifestJson = ExtensionRepoManager.getExtractedManifestJson(extensionId)
 
+        val cleanedTitle = cleanTrackTitle(title)
+        val cleanArtist = cleanTrackTitle(artist)
+        val primaryArtist = primaryArtistName(cleanArtist)
+
         withTimeoutOrNull(DEFAULT_RESOLUTION_BUDGET_MS) {
             runCatching {
-                val deadlineMs = System.currentTimeMillis() + DEFAULT_RESOLUTION_BUDGET_MS - 150L
+                val deadlineMs = System.currentTimeMillis() + DEFAULT_RESOLUTION_BUDGET_MS - 200L
                 val qjs = QuickJs.create(Dispatchers.IO)
                 qjs.maxStackSize = 1024 * 1024L
                 val capturedDownloads = mutableListOf<CapturedDownload>()
                 val configId = SourceRegistry.repoExtensionConfigId(extensionId)
+                val pSlug = providerSlug(extensionId)
                 val startMs = System.currentTimeMillis()
 
                 try {
@@ -205,163 +251,212 @@ object SflxRuntimeBridge {
                         if (manifestTiers != null && manifestTiers.length() > 0) {
                             for (i in 0 until manifestTiers.length()) {
                                 val id = manifestTiers.optJSONObject(i)?.optString("id").orEmpty()
-                                if (id.isNotBlank() && id != "LOW" && arr.length() < 3) arr.put(id)
+                                if (id.isNotBlank() && !id.equals("LOW", ignoreCase = true) && arr.length() < 4) {
+                                    arr.put(id)
+                                }
                             }
                         }
                         if (arr.length() == 0) {
                             arr.put("HI_RES_LOSSLESS")
                             arr.put("LOSSLESS")
+                            arr.put("HIGH")
                         }
                         append(arr.toString())
                     }
 
-                    val queryTitle = JSONObject.quote(title.trim())
-                    val queryArtist = JSONObject.quote(artist.trim())
-                    val queryAlbum = JSONObject.quote((album ?: "").trim())
+                    val queriesArr = JSONArray().apply {
+                        val qFull = "$cleanedTitle $cleanArtist".trim()
+                        val qPrimary = "$cleanedTitle $primaryArtist".trim()
+                        if (qFull.isNotBlank()) put(qFull)
+                        if (qPrimary.isNotBlank() && !qPrimary.equals(qFull, ignoreCase = true)) put(qPrimary)
+                        if (cleanedTitle.isNotBlank() && primaryArtist.isBlank()) put(cleanedTitle)
+                    }
+
+                    val qTitle = JSONObject.quote(cleanedTitle)
+                    val qArtist = JSONObject.quote(primaryArtist.ifBlank { cleanArtist })
+                    val qAlbum = JSONObject.quote((album ?: "").trim())
+                    val qIsrc = JSONObject.quote((isrc ?: "").trim())
                     val durationMs = durationSec.coerceAtLeast(0) * 1000L
 
-                    val resultJson = qjs.evaluate<String>(
+                    qjs.evaluate<Unit>(
                         """
-                        (function() {
-                            var ext = globalThis.__sflx_ext || {};
-                            if (typeof ext.initialize === 'function') {
-                                try { ext.initialize(globalThis.settings || {}); } catch (_) {}
-                            }
-                            var tTitle = $queryTitle;
-                            var tArtist = $queryArtist;
-                            var tAlbum = $queryAlbum;
-                            var tDurationMs = $durationMs;
-                            var searchQuery = (tTitle + " " + tArtist).trim();
-                            var candidates = [];
-
+                        var __sflx_resolved_json = undefined;
+                        (async function() {
                             try {
-                                if (typeof ext.customSearch === 'function') {
-                                    var cs = ext.customSearch(searchQuery, { filter: "track", limit: 6 });
-                                    if (Array.isArray(cs)) candidates = cs;
-                                    else if (cs && Array.isArray(cs.tracks)) candidates = cs.tracks;
-                                    else if (cs && Array.isArray(cs.items)) candidates = cs.items;
-                                }
-                            } catch (_) {}
-
-                            if (!candidates.length && typeof ext.searchTracks === 'function') {
-                                try {
-                                    var st = ext.searchTracks(searchQuery, 6);
-                                    if (Array.isArray(st)) candidates = st;
-                                    else if (st && Array.isArray(st.tracks)) candidates = st.tracks;
-                                    else if (st && Array.isArray(st.items)) candidates = st.items;
-                                } catch (_) {}
-                            }
-
-                            var bestTrack = null;
-                            var normTargetTitle = tTitle.toLowerCase().replace(/[^a-z0-9]/g, "");
-                            var normTargetArtist = tArtist.toLowerCase().replace(/[^a-z0-9]/g, "");
-                            var bestScore = -999999;
-
-                            for (var i = 0; i < candidates.length; i++) {
-                                var c = candidates[i] || {};
-                                var cTitle = String(c.name || c.title || "");
-                                var cArtist = String(c.artists || c.artist || c.artistName || "");
-                                var nTitle = cTitle.toLowerCase().replace(/[^a-z0-9]/g, "");
-                                var nArtist = cArtist.toLowerCase().replace(/[^a-z0-9]/g, "");
-                                var score = 0;
-                                if (nTitle === normTargetTitle) score += 100;
-                                else if (nTitle.indexOf(normTargetTitle) >= 0 || normTargetTitle.indexOf(nTitle) >= 0) score += 50;
-                                if (normTargetArtist && (nArtist === normTargetArtist || nArtist.indexOf(normTargetArtist) >= 0 || normTargetArtist.indexOf(nArtist) >= 0)) score += 60;
-                                var cDur = Number(c.duration_ms || (c.duration ? Number(c.duration) * 1000 : 0) || 0);
-                                if (tDurationMs > 0 && cDur > 0) {
-                                    var diffSec = Math.abs(cDur - tDurationMs) / 1000;
-                                    if (diffSec <= 4) score += 40;
-                                    else if (diffSec > 20) score -= 50;
-                                }
-                                if (score > bestScore) {
-                                    bestScore = score;
-                                    bestTrack = c;
-                                }
-                            }
-
-                            var trackId = bestTrack ? String(bestTrack.id || bestTrack.track_id || bestTrack.provider_id || "") : "";
-                            var preparedContext = null;
-
-                            if (!trackId && typeof ext.checkAvailability === 'function') {
-                                try {
-                                    var avail = ext.checkAvailability("", tTitle, tArtist, { duration_ms: tDurationMs, album: tAlbum });
-                                    if (avail && avail.available && avail.track_id) {
-                                        trackId = String(avail.track_id);
-                                        preparedContext = avail.prepared_context || null;
+                                var ext = globalThis.__sflx_ext || {};
+                                if (typeof ext.initialize === 'function') {
+                                    try { await ext.initialize(globalThis.settings || {}); } catch (eInit) {
+                                        __host.logMsg("warn", "initialize failed: " + (eInit && eInit.message ? eInit.message : String(eInit)));
                                     }
-                                } catch (_) {}
-                            }
+                                }
+                                var tTitle = $qTitle;
+                                var tArtist = $qArtist;
+                                var tAlbum = $qAlbum;
+                                var tIsrc = $qIsrc;
+                                var tDurationMs = $durationMs;
+                                var queries = $queriesArr;
 
-                            if (!trackId) {
-                                return JSON.stringify({ ok: false, reason: "No matching track", formats: [] });
-                            }
-
-                            var tiers = $tiersJson;
-                            var resolved = [];
-                            for (var j = 0; j < tiers.length; j++) {
-                                var q = tiers[j];
-                                var directUrl = null;
-                                if (typeof ext.getDownloadUrl === 'function') {
-                                    try {
-                                        var gdu = ext.getDownloadUrl(trackId, q);
-                                        if (typeof gdu === 'string' && gdu.indexOf('http') === 0) {
-                                            directUrl = gdu;
-                                        } else if (gdu && typeof gdu.url === 'string') {
-                                            directUrl = gdu.url;
+                                async function extractCandidates(q) {
+                                    var found = [];
+                                    if (typeof ext.customSearch === 'function') {
+                                        try {
+                                            var cs = await ext.customSearch(q, { filter: "track", limit: 8 });
+                                            if (Array.isArray(cs)) found = cs;
+                                            else if (cs && Array.isArray(cs.tracks)) found = cs.tracks;
+                                            else if (cs && Array.isArray(cs.items)) found = cs.items;
+                                        } catch (eCs) {
+                                            __host.logMsg("warn", "customSearch error: " + (eCs && eCs.message ? eCs.message : String(eCs)));
                                         }
-                                    } catch (_) {}
+                                    }
+                                    if (!found.length && typeof ext.searchTracks === 'function') {
+                                        try {
+                                            var st = await ext.searchTracks(q, 8);
+                                            if (Array.isArray(st)) found = st;
+                                            else if (st && Array.isArray(st.tracks)) found = st.tracks;
+                                            else if (st && Array.isArray(st.items)) found = st.items;
+                                        } catch (eSt) {
+                                            __host.logMsg("warn", "searchTracks error: " + (eSt && eSt.message ? eSt.message : String(eSt)));
+                                        }
+                                    }
+                                    return found;
                                 }
-                                if (directUrl) {
-                                    resolved.push({
-                                        quality: q,
-                                        url: directUrl,
-                                        headers: {},
-                                        bit_depth: q === "HI_RES_LOSSLESS" ? 24 : 16,
-                                        sample_rate: q === "HI_RES_LOSSLESS" ? 96000 : 44100,
-                                        audio_codec: "flac",
-                                        actual_extension: "flac"
-                                    });
-                                    continue;
+
+                                var candidates = [];
+                                if (tIsrc) {
+                                    candidates = await extractCandidates(tIsrc);
                                 }
-                                if (typeof ext.download === 'function') {
-                                    var capBefore = globalThis.__sflx_captures ? globalThis.__sflx_captures.length : 0;
-                                    var dlRes = null;
+                                for (var qi = 0; !candidates.length && qi < queries.length; qi++) {
+                                    candidates = await extractCandidates(queries[qi]);
+                                }
+
+                                var bestTrack = null;
+                                var normTargetTitle = tTitle.toLowerCase().replace(/[^a-z0-9]/g, "");
+                                var normTargetArtist = tArtist.toLowerCase().replace(/[^a-z0-9]/g, "");
+                                var bestScore = -999999;
+
+                                for (var i = 0; i < candidates.length; i++) {
+                                    var c = candidates[i] || {};
+                                    var cTitle = String(c.name || c.title || "");
+                                    var cArtist = String(c.artists || c.artist || c.artistName || "");
+                                    var nTitle = cTitle.toLowerCase().replace(/[^a-z0-9]/g, "");
+                                    var nArtist = cArtist.toLowerCase().replace(/[^a-z0-9]/g, "");
+                                    var score = 0;
+                                    if (tIsrc && String(c.isrc || "").toLowerCase() === tIsrc.toLowerCase()) score += 200;
+                                    if (nTitle === normTargetTitle) score += 100;
+                                    else if (nTitle.indexOf(normTargetTitle) >= 0 || normTargetTitle.indexOf(nTitle) >= 0) score += 50;
+                                    if (normTargetArtist && (nArtist === normTargetArtist || nArtist.indexOf(normTargetArtist) >= 0 || normTargetArtist.indexOf(nArtist) >= 0)) score += 60;
+                                    var cDur = Number(c.duration_ms || (c.duration ? Number(c.duration) * 1000 : 0) || 0);
+                                    if (tDurationMs > 0 && cDur > 0) {
+                                        var diffSec = Math.abs(cDur - tDurationMs) / 1000;
+                                        if (diffSec <= 4) score += 40;
+                                        else if (diffSec > 20) score -= 50;
+                                    }
+                                    if (score > bestScore) {
+                                        bestScore = score;
+                                        bestTrack = c;
+                                    }
+                                }
+
+                                var trackId = bestTrack ? String(bestTrack.id || bestTrack.track_id || bestTrack.provider_id || "") : "";
+                                var preparedContext = null;
+
+                                if (typeof ext.checkAvailability === 'function') {
                                     try {
-                                        dlRes = ext.download(trackId, q, "/virtual/" + extensionId + "_" + q + ".flac", null, {
-                                            allowFallback: true,
-                                            preparedContext: preparedContext || (bestTrack ? { track_id: trackId, raw_track: bestTrack, formatted_track: bestTrack, track: bestTrack, host_track: bestTrack } : {})
+                                        var availOpts = { duration_ms: tDurationMs, album: tAlbum };
+                                        if (trackId) availOpts[extensionId.replace(/-web$/, "") + "_id"] = trackId;
+                                        if (!trackId || bestTrack) {
+                                            var avail = await ext.checkAvailability(tIsrc, tTitle, tArtist, availOpts);
+                                            if (avail && avail.available && avail.track_id) {
+                                                trackId = String(avail.track_id);
+                                                preparedContext = avail.prepared_context || null;
+                                            }
+                                        }
+                                    } catch (eAv) {
+                                        __host.logMsg("warn", "checkAvailability error: " + (eAv && eAv.message ? eAv.message : String(eAv)));
+                                    }
+                                }
+
+                                if (!trackId) {
+                                    __sflx_resolved_json = JSON.stringify({ ok: false, reason: "No matching track", formats: [] });
+                                    return;
+                                }
+
+                                var tiers = $tiersJson;
+                                var resolved = [];
+                                for (var j = 0; j < tiers.length; j++) {
+                                    if (utils.getResolutionRemainingMs() < 350) break;
+                                    var q = tiers[j];
+                                    var directUrl = null;
+                                    if (typeof ext.getDownloadUrl === 'function') {
+                                        try {
+                                            var gdu = await ext.getDownloadUrl(trackId, q);
+                                            if (typeof gdu === 'string' && gdu.indexOf('http') === 0) {
+                                                directUrl = gdu;
+                                            } else if (gdu && typeof gdu.url === 'string') {
+                                                directUrl = gdu.url;
+                                            }
+                                        } catch (eGdu) {
+                                            __host.logMsg("warn", "getDownloadUrl(" + q + ") error: " + (eGdu && eGdu.message ? eGdu.message : String(eGdu)));
+                                        }
+                                    }
+                                    if (directUrl) {
+                                        resolved.push({
+                                            quality: q,
+                                            url: directUrl,
+                                            headers: {},
+                                            bit_depth: q === "HI_RES_LOSSLESS" ? 24 : 16,
+                                            sample_rate: q === "HI_RES_LOSSLESS" ? 96000 : 44100,
+                                            audio_codec: q === "DOLBY_ATMOS" ? "eac3-joc" : (q === "HIGH" ? "aac" : "flac"),
+                                            actual_extension: (q === "DOLBY_ATMOS" || q === "HIGH") ? "m4a" : "flac"
                                         });
-                                    } catch (_) {}
-                                    var capAfter = globalThis.__sflx_captures ? globalThis.__sflx_captures.length : 0;
-                                    if (capAfter > capBefore) {
-                                        var latest = globalThis.__sflx_captures[capAfter - 1];
-                                        if (latest && latest.url) {
-                                            resolved.push({
-                                                quality: q,
-                                                url: latest.url,
-                                                headers: latest.headers || {},
-                                                bit_depth: Number((dlRes && (dlRes.bit_depth || dlRes.bitDepth)) || (q === "HI_RES_LOSSLESS" ? 24 : 16)),
-                                                sample_rate: Number((dlRes && (dlRes.sample_rate || dlRes.sampleRate)) || (q === "HI_RES_LOSSLESS" ? 96000 : 44100)),
-                                                audio_codec: String((dlRes && (dlRes.audio_codec || dlRes.codec)) || (q === "DOLBY_ATMOS" ? "eac3-joc" : "flac")),
-                                                actual_extension: String((dlRes && (dlRes.actual_extension || dlRes.output_extension)) || (q === "DOLBY_ATMOS" || q === "HIGH" ? "m4a" : "flac")).replace(/^\./, "")
+                                        continue;
+                                    }
+                                    if (typeof ext.download === 'function') {
+                                        var capBefore = globalThis.__sflx_captures ? globalThis.__sflx_captures.length : 0;
+                                        var dlRes = null;
+                                        try {
+                                            dlRes = await ext.download(trackId, q, "/virtual/" + extensionId + "_" + q + ".flac", null, {
+                                                allowFallback: true,
+                                                preparedContext: preparedContext || (bestTrack ? { track_id: trackId, raw_track: bestTrack, formatted_track: bestTrack, track: bestTrack, host_track: bestTrack } : {})
                                             });
+                                        } catch (eDl) {
+                                            __host.logMsg("warn", "download(" + q + ") error: " + (eDl && eDl.message ? eDl.message : String(eDl)));
+                                        }
+                                        var capAfter = globalThis.__sflx_captures ? globalThis.__sflx_captures.length : 0;
+                                        if (capAfter > capBefore) {
+                                            var latest = globalThis.__sflx_captures[capAfter - 1];
+                                            if (latest && latest.url) {
+                                                resolved.push({
+                                                    quality: q,
+                                                    url: latest.url,
+                                                    headers: latest.headers || {},
+                                                    bit_depth: Number((dlRes && (dlRes.bit_depth || dlRes.bitDepth)) || (q === "HI_RES_LOSSLESS" ? 24 : 16)),
+                                                    sample_rate: Number((dlRes && (dlRes.sample_rate || dlRes.sampleRate)) || (q === "HI_RES_LOSSLESS" ? 96000 : 44100)),
+                                                    audio_codec: String((dlRes && (dlRes.audio_codec || dlRes.codec)) || (q === "DOLBY_ATMOS" ? "eac3-joc" : (q === "HIGH" ? "aac" : "flac"))),
+                                                    actual_extension: String((dlRes && (dlRes.actual_extension || dlRes.output_extension)) || (q === "DOLBY_ATMOS" || q === "HIGH" ? "m4a" : "flac")).replace(/^\./, "")
+                                                });
+                                            }
                                         }
                                     }
                                 }
+                                __sflx_resolved_json = JSON.stringify({ ok: resolved.length > 0, formats: resolved });
+                            } catch (eTop) {
+                                __host.logMsg("error", "resolveDownloadFormats exception: " + (eTop && eTop.message ? eTop.message : String(eTop)));
+                                __sflx_resolved_json = JSON.stringify({ ok: false, error: eTop && eTop.message ? eTop.message : String(eTop), formats: [] });
                             }
-                            return JSON.stringify({ ok: resolved.length > 0, formats: resolved });
                         })();
-                        """.trimIndent()
+                        """.trimIndent(),
                     )
 
+                    val resultJson = qjs.evaluate<String>("__sflx_resolved_json || '{\"ok\":false,\"formats\":[]}'")
                     val root = JSONObject(resultJson)
                     val formatsArr = root.optJSONArray("formats") ?: JSONArray()
                     val latencyMs = (System.currentTimeMillis() - startMs).coerceAtLeast(1L)
 
                     val out = mutableListOf<DownloadFormatOption>()
-                    val seen = HashSet<String>()
+                    val seenProviderTiers = HashSet<String>()
 
-                    fun mapUrlToOption(
+                    fun addMappedOption(
                         url: String,
                         headersMap: Map<String, String>,
                         quality: String,
@@ -372,7 +467,7 @@ object SflxRuntimeBridge {
                         idx: Int,
                     ) {
                         val safeUrl = LosslessAudioProvider.forceHttps(url)
-                        if (!safeUrl.startsWith("https://") || !seen.add(safeUrl)) return
+                        if (!safeUrl.startsWith("https://")) return
 
                         val isAtmos = quality.contains("ATMOS", ignoreCase = true) ||
                             codecRaw.contains("eac3", ignoreCase = true) ||
@@ -405,11 +500,15 @@ object SflxRuntimeBridge {
                             bitDepth > 16 || sampleRate > 48000 -> 2304
                             else -> 1411
                         }
+                        val tierDedupKey = "${pSlug}_${if (isAtmos) "atmos" else if (isLossy) "lossy_$fileExt" else "flac_$bitDepth"}_$safeUrl"
+                        if (!seenProviderTiers.add(tierDedupKey)) return
+
                         val khz = String.format(Locale.US, "%.1f", sampleRate / 1000.0)
                         val label = when {
-                            isAtmos -> "Dolby Atmos • E-AC-3 JOC ($displayName)"
-                            isLossy -> "M4A / AAC • $estKbps kbps ($displayName)"
-                            else -> "FLAC • $bitDepth-bit • $khz kHz • $estKbps kbps ($displayName)"
+                            isAtmos -> "Dolby Atmos • E-AC-3 ($displayName)"
+                            isLossy -> "${fileExt.uppercase(Locale.ROOT)} • $estKbps kbps ($displayName)"
+                            bitDepth > 16 || sampleRate > 48000 -> "FLAC • $bitDepth-bit Hi-Res • $khz kHz ($displayName)"
+                            else -> "FLAC • $bitDepth-bit Lossless • $khz kHz ($displayName)"
                         }
                         val estBytes = (estKbps * 1000L / 8L) * durationSec.coerceAtLeast(30)
                         val mb = estBytes / (1024.0 * 1024.0)
@@ -419,12 +518,14 @@ object SflxRuntimeBridge {
                         } else {
                             headersMap + ("User-Agent" to LosslessAudioProvider.BROWSER_USER_AGENT)
                         }
+                        val codecSlug = if (isAtmos) "atmos" else if (isLossy) fileExt else "flac"
+                        val tierTag = if (isLossless) "${codecSlug}_$bitDepth" else "${codecSlug}_$estKbps"
 
                         out.add(
                             DownloadFormatOption(
-                                id = "sflx_${extensionId}_${quality.lowercase(Locale.ROOT)}_$idx",
+                                id = "${pSlug}_${tierTag}_$idx",
                                 label = label,
-                                codec = if (isAtmos) "eac3-joc" else if (isLossy) "aac" else "flac",
+                                codec = if (isAtmos) "eac3-joc" else if (isLossy) fileExt else "flac",
                                 bitrateKbps = estKbps,
                                 sampleRateHz = sampleRate,
                                 bitDepth = bitDepth,
@@ -451,7 +552,7 @@ object SflxRuntimeBridge {
                                 if (v.isNotBlank()) put(k, v)
                             }
                         }
-                        mapUrlToOption(
+                        addMappedOption(
                             url = url,
                             headersMap = hMap,
                             quality = obj.optString("quality", "LOSSLESS"),
@@ -463,9 +564,8 @@ object SflxRuntimeBridge {
                         )
                     }
 
-                    // Include any direct URLs captured by file.download / downloadSegments if download() threw late
                     capturedDownloads.forEachIndexed { idx, cap ->
-                        mapUrlToOption(
+                        addMappedOption(
                             url = cap.url,
                             headersMap = cap.headers,
                             quality = "LOSSLESS",
@@ -484,6 +584,8 @@ object SflxRuntimeBridge {
                 } finally {
                     runCatching { qjs.close() }
                 }
+            }.onFailure { err ->
+                TrackLog.w(TAG, "SflxRuntimeBridge($extensionId) failed: ${err.message}", err)
             }.getOrElse { emptyList() }
         }.orEmpty()
     }
@@ -824,9 +926,9 @@ object SflxRuntimeBridge {
             }.toString()
         }
 
-        val remainingMs = (deadlineMs - System.currentTimeMillis()).coerceIn(600L, 4000L)
+        val remainingMs = (deadlineMs - System.currentTimeMillis()).coerceIn(600L, 6000L)
         val client = syncHttpClient.newBuilder()
-            .connectTimeout(minOf(remainingMs, 2500L), TimeUnit.MILLISECONDS)
+            .connectTimeout(minOf(remainingMs, 3500L), TimeUnit.MILLISECONDS)
             .readTimeout(remainingMs, TimeUnit.MILLISECONDS)
             .callTimeout(remainingMs, TimeUnit.MILLISECONDS)
             .build()
