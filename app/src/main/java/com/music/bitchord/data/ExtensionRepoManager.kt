@@ -3,6 +3,7 @@ package com.music.bitchord.data
 import android.content.Context
 import android.content.SharedPreferences
 import com.music.bitchord.data.DebugLog as Log
+import com.music.bitchord.data.sources.SourceRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -15,6 +16,7 @@ import okhttp3.Request
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 data class RepoExtension(
@@ -141,6 +143,91 @@ object ExtensionRepoManager {
         }
     }
 
+    fun syncWithSourceRegistry() {
+        val installed = _installedIds.value
+        val enabled = _enabledIds.value
+        val catalogById = _extensions.value.associateBy { it.id }
+
+        val entries = installed.mapNotNull { extId ->
+            val ext = catalogById[extId]
+            if (ext != null) {
+                if (!isAudioDownloadExtension(ext)) return@mapNotNull null
+                SourceRegistry.RepoSyncEntry(
+                    extensionId = extId,
+                    displayName = ext.displayName,
+                    enabled = extId in enabled,
+                    endpointUrl = getExtractedEndpointsFor(extId).firstOrNull().orEmpty(),
+                )
+            } else {
+                if (isDuplicateBuiltIn(extId)) return@mapNotNull null
+                val endpoints = getExtractedEndpointsFor(extId)
+                if (extId !in CORE_DEFAULT_IDS && endpoints.isEmpty()) return@mapNotNull null
+                SourceRegistry.RepoSyncEntry(
+                    extensionId = extId,
+                    displayName = fallbackDisplayName(extId),
+                    enabled = extId in enabled,
+                    endpointUrl = endpoints.firstOrNull().orEmpty(),
+                )
+            }
+        }.sortedBy { it.displayName.lowercase(Locale.ROOT) }
+
+        SourceRegistry.syncRepoExtensions(entries)
+    }
+
+    private fun isDuplicateBuiltIn(raw: String): Boolean {
+        val lower = raw.lowercase(Locale.ROOT)
+        return lower.contains("jiosaavn") ||
+            lower.contains("soundcloud") ||
+            lower.contains("youtube") ||
+            lower.contains("ytmusic") ||
+            lower.contains("jamendo") ||
+            lower.contains("internet-archive") ||
+            lower.contains("internetarchive") ||
+            lower.contains("archive.org") ||
+            lower.contains("umtify")
+    }
+
+    private fun isAudioDownloadExtension(ext: RepoExtension): Boolean {
+        if (isDuplicateBuiltIn(ext.id) || isDuplicateBuiltIn(ext.name) || isDuplicateBuiltIn(ext.displayName)) {
+            return false
+        }
+        val cat = ext.category.lowercase(Locale.ROOT)
+        val tags = ext.tags.map { it.lowercase(Locale.ROOT) }
+        val combined = "${ext.id} ${ext.name} ${ext.displayName} ${ext.description}".lowercase(Locale.ROOT)
+        val audioKeywords = listOf(
+            "audio", "download", "music", "stream", "flac", "lossless", "hifi",
+            "tidal", "qobuz", "deezer", "amazon", "spotify", "apple", "beatport", "bandcamp",
+        )
+        if (cat in setOf("metadata", "utility") &&
+            tags.none { t -> audioKeywords.any { k -> t.contains(k) } } &&
+            audioKeywords.none { k -> combined.contains(k) }
+        ) {
+            return false
+        }
+        return ext.id in CORE_DEFAULT_IDS ||
+            cat in setOf("integration", "download", "audio", "music", "streaming", "general", "") ||
+            tags.any { t -> audioKeywords.any { k -> t.contains(k) } } ||
+            audioKeywords.any { k -> combined.contains(k) } ||
+            getExtractedEndpointsFor(ext.id).isNotEmpty()
+    }
+
+    private fun fallbackDisplayName(id: String): String = when (id.lowercase(Locale.ROOT)) {
+        "tidal-web", "tidal" -> "Tidal"
+        "qobuz-web", "qobuz" -> "Qobuz"
+        "deezer" -> "Deezer"
+        "amazon", "amazon-music" -> "Amazon Music"
+        "spotify-web", "spotify" -> "Spotify"
+        "apple-music", "apple" -> "Apple Music"
+        "beatport" -> "Beatport"
+        else -> id.removeSuffix("-web")
+            .split('-', '_')
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { part ->
+                part.replaceFirstChar { c -> if (c.isLowerCase()) c.titlecase(Locale.ROOT) else c.toString() }
+            }
+            .ifBlank { id }
+    }
+
     suspend fun refreshRegistry(context: Context, autoUpdate: Boolean = true): List<RepoExtension> = withContext(Dispatchers.IO) {
         _isLoading.value = true
         try {
@@ -167,6 +254,7 @@ object ExtensionRepoManager {
                     if (autoUpdate) {
                         checkForUpdatesAndApply(context, parsed)
                     }
+                    syncWithSourceRegistry()
                     Log.i(TAG, "Successfully refreshed extension repo: ${parsed.size} extensions loaded")
                     return@withContext parsed
                 }
@@ -290,6 +378,7 @@ object ExtensionRepoManager {
                 ?.apply()
 
             persistVersions(newVersions)
+            syncWithSourceRegistry()
             Log.i(TAG, "Installed extension ${extension.displayName} (${extension.id}) v${extension.version}")
             true
         } else {
@@ -321,9 +410,10 @@ object ExtensionRepoManager {
             val file = File(context.filesDir, "extensions/$extensionId.sflx")
             if (file.exists()) file.delete()
         }
+        syncWithSourceRegistry()
     }
 
-    fun toggleExtension(extensionId: String, enabled: Boolean) {
+    fun toggleExtension(extensionId: String, enabled: Boolean, syncSourceRegistry: Boolean = true) {
         val newEnabled = if (enabled) {
             _enabledIds.value + extensionId
         } else {
@@ -331,6 +421,9 @@ object ExtensionRepoManager {
         }
         _enabledIds.value = newEnabled
         prefs?.edit()?.putStringSet(KEY_ENABLED_IDS, newEnabled)?.apply()
+        if (syncSourceRegistry) {
+            SourceRegistry.syncRepoExtensionEnabled(extensionId, enabled)
+        }
     }
 
     private fun persistVersions(versions: Map<String, String>) {
@@ -375,29 +468,43 @@ object ExtensionRepoManager {
         if (!extDir.exists() || !extDir.isDirectory) return emptyList()
 
         val files = extDir.listFiles { _, name -> name.endsWith(".sflx") } ?: return emptyList()
-        val urlRegex = Regex("""https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?::[0-9]+)?(?:/[a-zA-Z0-9._~-]+)*""")
-
         for (file in files) {
             val extId = file.nameWithoutExtension
             if (enabled.isNotEmpty() && extId !in enabled) continue
-            runCatching {
-                java.util.zip.ZipFile(file).use { zip ->
-                    val entries = listOfNotNull(zip.getEntry("index.js"), zip.getEntry("manifest.json"))
-                    for (entry in entries) {
-                        val text = zip.getInputStream(entry).bufferedReader().readText()
-                        urlRegex.findAll(text).forEach { match ->
-                            val url = match.value.trimEnd('/')
-                            if (url.startsWith("http") &&
-                                !url.contains("github.com") &&
-                                !url.contains("w3.org") &&
-                                !url.contains("schema.org") &&
-                                !url.contains("google.com") &&
-                                (url.contains("api") || url.contains("zarz") || url.contains("qqdl") ||
-                                 url.contains("tidal") || url.contains("qobuz") || url.contains("hifi") ||
-                                 url.contains("yeet.su") || url.contains("spotisaver") || url.contains("kinoko"))
-                            ) {
-                                if (url !in endpoints) endpoints.add(url)
-                            }
+            extractEndpointsFromFile(file).forEach { url ->
+                if (url !in endpoints) endpoints.add(url)
+            }
+        }
+        return endpoints
+    }
+
+    fun getExtractedEndpointsFor(extensionId: String): List<String> {
+        val ctx = appContext ?: return emptyList()
+        val file = File(ctx.filesDir, "extensions/$extensionId.sflx")
+        if (!file.exists()) return emptyList()
+        return extractEndpointsFromFile(file)
+    }
+
+    private fun extractEndpointsFromFile(file: File): List<String> {
+        val endpoints = mutableListOf<String>()
+        val urlRegex = Regex("""https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?::[0-9]+)?(?:/[a-zA-Z0-9._~-]+)*""")
+        runCatching {
+            java.util.zip.ZipFile(file).use { zip ->
+                val entries = listOfNotNull(zip.getEntry("index.js"), zip.getEntry("manifest.json"))
+                for (entry in entries) {
+                    val text = zip.getInputStream(entry).bufferedReader().readText()
+                    urlRegex.findAll(text).forEach { match ->
+                        val url = match.value.trimEnd('/')
+                        if (url.startsWith("http") &&
+                            !url.contains("github.com") &&
+                            !url.contains("w3.org") &&
+                            !url.contains("schema.org") &&
+                            !url.contains("google.com") &&
+                            (url.contains("api") || url.contains("zarz") || url.contains("qqdl") ||
+                             url.contains("tidal") || url.contains("qobuz") || url.contains("hifi") ||
+                             url.contains("yeet.su") || url.contains("spotisaver") || url.contains("kinoko"))
+                        ) {
+                            if (url !in endpoints) endpoints.add(url)
                         }
                     }
                 }

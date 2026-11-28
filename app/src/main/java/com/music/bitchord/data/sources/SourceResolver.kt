@@ -2,6 +2,7 @@ package com.music.bitchord.data.sources
 
 import android.net.Uri
 import android.util.Log
+import com.music.bitchord.data.LosslessAudioProvider
 import com.music.bitchord.data.TrackLog
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.settings.AppSettings
@@ -14,7 +15,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -1057,8 +1061,156 @@ object SourceResolver {
     private fun atmosWanted(): Boolean = AppSettings.dolbyAtmos.value
 
     /**
+     * Races the top 2–3 enabled sources from `SOURCES, TRIED IN THIS ORDER` concurrently
+     * within [timeoutMs] (default 2.5s), preferring Dolby Atmos (if enabled) or Lossless FLAC
+     * from the highest-ranked healthy source. If #1 is slow or offline, immediately returns
+     * the fastest healthy stream from #2 or #3 so playback starts smoothly with zero lag.
+     */
+    suspend fun raceTopPlaybackSources(
+        target: TrackMatcher.Target,
+        wantsDolbyAtmos: Boolean,
+        wantsLossless: Boolean,
+        timeoutMs: Long = 2500L,
+    ): SourceStream? {
+        if (target.title.isBlank() || target.isVideo) return null
+        val topSources = SourceRegistry.topPlaybackSources(3)
+        val hasRankOneLossless = topSources.firstOrNull()?.let {
+            it.kind.canServeLossless || it is AddonSource
+        } == true
+        val needBackupMirrors = wantsLossless && topSources.count { it.kind.canServeLossless } < 3
+        if (topSources.isEmpty() && !needBackupMirrors) return null
+
+        val request = if (wantsLossless) StreamRequest.Lossless else requestForNow()
+        val totalSlots = topSources.size + if (needBackupMirrors) 1 else 0
+        val results = arrayOfNulls<SourceStream>(totalSlots)
+        val done = BooleanArray(totalSlots)
+        val signal = Channel<Unit>(Channel.CONFLATED)
+        var bestSeen: SourceStream? = null
+
+        fun isIdealTier(s: SourceStream): Boolean = when {
+            wantsDolbyAtmos && s.format.isDolbyAtmos -> true
+            wantsLossless && s.format.isLossless == true -> true
+            !wantsDolbyAtmos && !wantsLossless -> true
+            else -> false
+        }
+
+        fun bestAvailableLocked(): Pair<Int, SourceStream>? {
+            var best: Pair<Int, SourceStream>? = null
+            for (i in results.indices) {
+                val s = results[i] ?: continue
+                val cur = best?.second
+                if (cur == null) {
+                    best = i to s
+                } else {
+                    val sIdeal = isIdealTier(s)
+                    val curIdeal = isIdealTier(cur)
+                    if (sIdeal != curIdeal) {
+                        if (sIdeal) best = i to s
+                    } else if (isBetter(s.format, cur.format)) {
+                        best = i to s
+                    }
+                }
+            }
+            return best
+        }
+
+        val raceResult = withTimeoutOrNull(timeoutMs) {
+            coroutineScope {
+                topSources.forEachIndexed { rank, source ->
+                    launch(Dispatchers.IO) {
+                        val stream = runCatching {
+                            matchAndStream(source, target, request, waitForAll = false)
+                        }.getOrNull()?.let { s ->
+                            s.copy(
+                                sourceConfigId = s.sourceConfigId ?: source.configId,
+                                sourceName = s.sourceName ?: source.displayName,
+                            )
+                        }
+                        synchronized(results) {
+                            results[rank] = stream
+                            done[rank] = true
+                        }
+                        signal.trySend(Unit)
+                    }
+                }
+
+                if (needBackupMirrors) {
+                    val mirrorRank = topSources.size
+                    launch(Dispatchers.IO) {
+                        val lossless = runCatching {
+                            LosslessAudioProvider.resolveLosslessTrack(
+                                title = target.title,
+                                artist = target.artist,
+                                durationSec = target.durationSec,
+                                timeoutMs = timeoutMs,
+                            )
+                        }.getOrNull()
+                        val stream = lossless?.takeIf { it.streamUrl.isNotBlank() }?.let {
+                            SourceStream(
+                                url = it.streamUrl,
+                                format = StreamFormat(
+                                    codec = "flac",
+                                    bitDepth = it.bitDepth,
+                                    sampleRateHz = it.sampleRate,
+                                ),
+                                headers = mapOf("User-Agent" to LosslessAudioProvider.BROWSER_USER_AGENT),
+                                sourceName = it.sourceName,
+                            )
+                        }
+                        synchronized(results) {
+                            results[mirrorRank] = stream
+                            done[mirrorRank] = true
+                        }
+                        signal.trySend(Unit)
+                    }
+                }
+
+                var graceDeadlineMs = 0L
+                while (true) {
+                    val snapshot = synchronized(results) {
+                        val allDone = done.all { it }
+                        val best = bestAvailableLocked()
+                        if (best != null) bestSeen = best.second
+                        val rank0Done = totalSlots == 0 || done[0]
+                        Triple(allDone, best, rank0Done)
+                    }
+                    val (allDone, best, rank0Done) = snapshot
+                    if (allDone) {
+                        return@coroutineScope best?.second
+                    }
+                    if (best != null) {
+                        val (bestRank, bestStream) = best
+                        if (isIdealTier(bestStream)) {
+                            if (bestRank == 0 || rank0Done || !hasRankOneLossless) {
+                                return@coroutineScope bestStream
+                            }
+                            val now = System.currentTimeMillis()
+                            if (graceDeadlineMs == 0L) {
+                                graceDeadlineMs = now + 300L
+                            } else if (now >= graceDeadlineMs) {
+                                return@coroutineScope bestStream
+                            }
+                        }
+                    }
+                    if (graceDeadlineMs > 0L) {
+                        val remaining = (graceDeadlineMs - System.currentTimeMillis()).coerceAtLeast(1L)
+                        withTimeoutOrNull(remaining) { signal.receive() }
+                            ?: synchronized(results) { return@coroutineScope bestAvailableLocked()?.second }
+                    } else {
+                        signal.receive()
+                    }
+                }
+                @Suppress("UNREACHABLE_CODE")
+                null
+            }
+        }
+
+        return raceResult ?: synchronized(results) { bestAvailableLocked()?.second ?: bestSeen }
+    }
+
+    /**
      * Resolves both (Dolby Atmos stream, Stereo Lossless FLAC stream) from enabled addons
-     * (prioritizing the user's custom UMtify addon first).
+     * concurrently (prioritizing the user's custom UMtify addon first).
      */
     suspend fun resolveAddonStreamsFor(
         target: TrackMatcher.Target,
@@ -1069,66 +1221,113 @@ object SourceResolver {
         val addons = SourceRegistry.activeAddonSources()
         if (addons.isEmpty()) return@coroutineScope Pair(null, null)
 
+        val perAddon = addons.map { addon ->
+            async { querySingleAddonStreams(addon, target, wantsDolbyAtmos, wantsLossless) }
+        }.awaitAll()
+
         var atmosWinner: SourceStream? = null
         var losslessWinner: SourceStream? = null
-
-        val request = if (wantsLossless) StreamRequest.Lossless else StreamRequest.Best
-        for (addon in addons) {
-            for (query in TrackMatcher.queries(target)) {
-                val candidates = attempt(addon) {
-                    addon.search(query, limit = MATCH_CANDIDATES, waitForAll = false, request = request)
-                } ?: break
-                val ranked = TrackMatcher.ranked(candidates, target)
-                val sameLength = ranked.filter { TrackMatcher.withinSeconds(it, target, SAME_RECORDING_SEC) }
-                val eligible = sameLength.ifEmpty { ranked }
-                if (eligible.isEmpty()) continue
-
-                val atmosDeferred = if (wantsDolbyAtmos && atmosWinner == null) {
-                    async {
-                        val atmosRow = eligible.firstOrNull { it.sourceQuality == ModuleSource.DOLBY } ?: eligible.first()
-                        val trackId = SourceRegistry.parseTrackKey(atmosRow.videoId)?.second ?: atmosRow.videoId
-                        val opened = attempt(addon) { addon.stream(trackId, request, stereoOnly = false) }
-                        if (opened != null && opened.format.isDolbyAtmos) {
-                            opened.copy(
-                                sourceConfigId = addon.configId,
-                                sourceName = addon.displayName,
-                                durationSec = TrackMatcher.secondsOf(atmosRow.durationText),
-                            )
-                        } else null
-                    }
-                } else null
-
-                val flacDeferred = if (wantsLossless && losslessWinner == null) {
-                    async {
-                        val flacRow = eligible.firstOrNull {
-                            it.sourceQuality != ModuleSource.DOLBY &&
-                                (it.sourceHiRes || it.sourceQuality == ModuleSource.LOSSLESS)
-                        } ?: eligible.firstOrNull { it.sourceQuality != ModuleSource.DOLBY } ?: eligible.first()
-                        val trackId = SourceRegistry.parseTrackKey(flacRow.videoId)?.second ?: flacRow.videoId
-                        val opened = attempt(addon) { addon.stream(trackId, StreamRequest.Lossless, stereoOnly = true) }
-                        if (opened != null && opened.format.isLossless == true) {
-                            opened.copy(
-                                sourceConfigId = addon.configId,
-                                sourceName = addon.displayName,
-                                durationSec = TrackMatcher.secondsOf(flacRow.durationText),
-                            )
-                        } else null
-                    }
-                } else null
-
-                atmosDeferred?.await()?.let { if (atmosWinner == null) atmosWinner = it }
-                flacDeferred?.await()?.let { candidate ->
-                    if (losslessWinner == null || isBetter(candidate.format, losslessWinner?.format)) {
-                        losslessWinner = candidate
-                    }
-                }
-                if ((!wantsDolbyAtmos || atmosWinner != null) && (!wantsLossless || losslessWinner != null)) {
-                    return@coroutineScope Pair(atmosWinner, losslessWinner)
-                }
-                break
+        for ((atmos, flac) in perAddon) {
+            if (atmosWinner == null && atmos != null) atmosWinner = atmos
+            if (flac != null && (losslessWinner == null || isBetter(flac.format, losslessWinner.format))) {
+                losslessWinner = flac
             }
         }
         Pair(atmosWinner, losslessWinner)
+    }
+
+    /**
+     * Queries all download-eligible configured addons (e.g., UMtify and custom addons)
+     * in parallel and returns every valid Dolby Atmos and Lossless FLAC stream found.
+     */
+    suspend fun resolveAllAddonDownloadStreams(
+        target: TrackMatcher.Target,
+        wantsDolbyAtmos: Boolean,
+        wantsLossless: Boolean,
+    ): List<SourceStream> = coroutineScope {
+        if (target.title.isBlank() || target.isVideo) return@coroutineScope emptyList()
+        val addons = SourceRegistry.downloadableAddonSources()
+        if (addons.isEmpty()) return@coroutineScope emptyList()
+
+        val perAddon = addons.map { addon ->
+            async { querySingleAddonStreams(addon, target, wantsDolbyAtmos, wantsLossless) }
+        }.awaitAll()
+
+        buildList {
+            for ((atmos, flac) in perAddon) {
+                if (atmos != null) add(atmos)
+                if (flac != null) add(flac)
+            }
+        }
+    }
+
+    private suspend fun querySingleAddonStreams(
+        addon: AddonSource,
+        target: TrackMatcher.Target,
+        wantsDolbyAtmos: Boolean,
+        wantsLossless: Boolean,
+    ): Pair<SourceStream?, SourceStream?> = coroutineScope {
+        val request = if (wantsLossless) StreamRequest.Lossless else StreamRequest.Best
+        for (query in TrackMatcher.queries(target)) {
+            val candidates = attempt(addon) {
+                addon.search(query, limit = MATCH_CANDIDATES, waitForAll = false, request = request)
+            } ?: break
+            val ranked = TrackMatcher.ranked(candidates, target)
+            val sameLength = ranked.filter { TrackMatcher.withinSeconds(it, target, SAME_RECORDING_SEC) }
+            val eligible = sameLength.ifEmpty { ranked }
+            if (eligible.isEmpty()) continue
+
+            val atmosDeferred = if (wantsDolbyAtmos) {
+                async {
+                    val atmosRow = eligible.firstOrNull { it.sourceQuality == ModuleSource.DOLBY } ?: eligible.first()
+                    val trackId = SourceRegistry.parseTrackKey(atmosRow.videoId)?.second ?: atmosRow.videoId
+                    val opened = attempt(addon) { addon.stream(trackId, request, stereoOnly = false) }
+                    if (opened != null && opened.format.isDolbyAtmos) {
+                        opened.copy(
+                            sourceConfigId = addon.configId,
+                            sourceName = addon.displayName,
+                            durationSec = TrackMatcher.secondsOf(atmosRow.durationText),
+                        )
+                    } else null
+                }
+            } else null
+
+            val flacDeferred = if (wantsLossless) {
+                async {
+                    val flacRow = eligible.firstOrNull {
+                        it.sourceQuality != ModuleSource.DOLBY &&
+                            (it.sourceHiRes || it.sourceQuality == ModuleSource.LOSSLESS)
+                    } ?: eligible.firstOrNull { it.sourceQuality != ModuleSource.DOLBY } ?: eligible.first()
+                    val trackId = SourceRegistry.parseTrackKey(flacRow.videoId)?.second ?: flacRow.videoId
+                    val opened = attempt(addon) { addon.stream(trackId, StreamRequest.Lossless, stereoOnly = true) }
+                    val looksLossless = opened != null && !opened.format.isDolbyAtmos && (
+                        opened.format.isLossless == true ||
+                            (opened.format.isLossless == null && opened.format.kbps == null &&
+                                (flacRow.sourceHiRes || flacRow.sourceQuality == ModuleSource.LOSSLESS))
+                        )
+                    if (looksLossless && opened != null) {
+                        val normalizedFormat = if (opened.format.codec == null) {
+                            opened.format.copy(codec = "flac")
+                        } else {
+                            opened.format
+                        }
+                        opened.copy(
+                            format = normalizedFormat,
+                            sourceConfigId = addon.configId,
+                            sourceName = addon.displayName,
+                            durationSec = TrackMatcher.secondsOf(flacRow.durationText),
+                        )
+                    } else null
+                }
+            } else null
+
+            val atmos = atmosDeferred?.await()
+            val flac = flacDeferred?.await()
+            if (atmos != null || flac != null) {
+                return@coroutineScope Pair(atmos, flac)
+            }
+        }
+        Pair(null, null)
     }
 
     private suspend fun streamBest(

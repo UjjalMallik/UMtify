@@ -1247,43 +1247,49 @@ object Downloads {
             }
         }
 
-        // 0. Check if track is 100% cached in AudioCache -> export directly without network!
+        val explicitOption = chosenFormatForTrack[song.videoId]
+
+        // 0. Check if track is 100% cached in AudioCache -> export directly without network,
+        // unless the user explicitly picked a different format (e.g. FLAC over cached Opus).
         val cachedEntry = AudioCache.findFullyCachedEntry(song.videoId)
         if (cachedEntry != null && cachedEntry.spans.isNotEmpty()) {
             val format = detectAudioFormat(cachedEntry.spans.first())
-            val effectiveTrack = track.copy(
-                title = track.title.takeIf { it.isNotBlank() && it != "Unknown Title" } ?: cachedEntry.title ?: track.title,
-                artist = track.artist.takeIf { it.isNotBlank() && it != "Unknown Artist" } ?: cachedEntry.artist ?: track.artist,
-                albumName = track.albumName ?: cachedEntry.album,
-                thumbnailUrl = track.thumbnailUrl ?: cachedEntry.artUri,
-            )
-            val route = Route(
-                extension = format.extension,
-                mimeType = format.mimeType,
-                describe = "Offline cache export (${cachedEntry.totalBytes / 1024} KB)",
-                downloadFormat = "OFFLINE",
-                taggable = true,
-                write = { sink, onProgress ->
-                    var written = 0L
-                    val total = cachedEntry.totalBytes.coerceAtLeast(1L)
-                    val buffer = ByteArray(64 * 1024)
-                    for (file in cachedEntry.spans) {
-                        file.inputStream().use { input ->
-                            while (true) {
-                                val read = input.read(buffer)
-                                if (read <= 0) break
-                                sink.write(buffer, 0, read)
-                                written += read
-                                onProgress(written, total)
+            val matchesExplicit = explicitOption == null ||
+                (explicitOption.isLossless == (format.extension == "flac"))
+            if (matchesExplicit) {
+                val effectiveTrack = track.copy(
+                    title = track.title.takeIf { it.isNotBlank() && it != "Unknown Title" } ?: cachedEntry.title ?: track.title,
+                    artist = track.artist.takeIf { it.isNotBlank() && it != "Unknown Artist" } ?: cachedEntry.artist ?: track.artist,
+                    albumName = track.albumName ?: cachedEntry.album,
+                    thumbnailUrl = track.thumbnailUrl ?: cachedEntry.artUri,
+                )
+                val route = Route(
+                    extension = format.extension,
+                    mimeType = format.mimeType,
+                    describe = "Offline cache export (${cachedEntry.totalBytes / 1024} KB)",
+                    downloadFormat = "OFFLINE",
+                    taggable = true,
+                    write = { sink, onProgress ->
+                        var written = 0L
+                        val total = cachedEntry.totalBytes.coerceAtLeast(1L)
+                        val buffer = ByteArray(64 * 1024)
+                        for (file in cachedEntry.spans) {
+                            file.inputStream().use { input ->
+                                while (true) {
+                                    val read = input.read(buffer)
+                                    if (read <= 0) break
+                                    sink.write(buffer, 0, read)
+                                    written += read
+                                    onProgress(written, total)
+                                }
                             }
                         }
                     }
-                }
-            )
-            return@withContext Prepared(song.videoId, effectiveTrack, route = route, alreadyAt = null, isFromCache = true)
+                )
+                return@withContext Prepared(song.videoId, effectiveTrack, route = route, alreadyAt = null, isFromCache = true)
+            }
         }
 
-        val explicitOption = chosenFormatForTrack[song.videoId]
         val route = if (explicitOption != null) {
             routeForOption(context, track, explicitOption)
         } else {
@@ -1725,8 +1731,10 @@ object Downloads {
 
     private fun routeForOption(context: Context, track: Song, option: DownloadFormatOption): Route {
         val streamUrl = option.streamUrl
-        val dash = OfflineDash.handles(streamUrl)
-        val hls = streamUrl.substringBefore('?').endsWith(".m3u8", ignoreCase = true)
+        val manifestMime = com.music.bitchord.playback.StreamContainer.manifestMimeOf(streamUrl)
+        val dash = OfflineDash.handles(streamUrl) || manifestMime == androidx.media3.common.MimeTypes.APPLICATION_MPD
+        val hls = streamUrl.substringBefore('?').endsWith(".m3u8", ignoreCase = true) ||
+            manifestMime == androidx.media3.common.MimeTypes.APPLICATION_M3U8
         val packaged = hls || dash
         val ext = option.fileExtension
         val mime = when (ext) {
@@ -1736,11 +1744,16 @@ object Downloads {
             else -> "audio/webm"
         }
         val badge = when {
-            option.isDolbyAtmos || option.id == "dolby_atmos" -> "Dolby Atmos"
+            option.isDolbyAtmos || option.id.startsWith("dolby_atmos") -> "Dolby Atmos"
             option.isLossless && (option.bitDepth ?: 16) > 16 -> "FLAC ${option.bitDepth}-bit"
             option.isLossless -> "FLAC"
             ext == "m4a" -> "AAC ${option.bitrateKbps ?: 128}k"
             else -> "OPUS ${option.bitrateKbps ?: 160}k"
+        }
+        val effectiveHeaders = when {
+            option.headers.isNotEmpty() -> option.headers
+            streamUrl.contains("googlevideo.com") -> StreamResolver.mediaHeadersFor(streamUrl)
+            else -> mapOf("User-Agent" to LosslessAudioProvider.BROWSER_USER_AGENT)
         }
         if (packaged) {
             return Route(
@@ -1750,7 +1763,7 @@ object Downloads {
                 downloadFormat = badge,
                 write = { sink, onProgress ->
                     ManifestFile.write(
-                        context.cacheDir, streamUrl, option.headers, dash,
+                        context.cacheDir, streamUrl, effectiveHeaders, dash,
                         ext, sink, onProgress,
                     )
                 },
@@ -1763,12 +1776,7 @@ object Downloads {
                 downloadFormat = badge,
                 taggable = true,
                 write = { sink, onProgress ->
-                    val headers = when {
-                        option.headers.isNotEmpty() -> option.headers
-                        streamUrl.contains("googlevideo.com") -> StreamResolver.mediaHeadersFor(streamUrl)
-                        else -> mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                    }
-                    Downloader.fetchDirect(streamUrl, headers, sink, onProgress)
+                    Downloader.fetchDirect(streamUrl, effectiveHeaders, sink, onProgress)
                 },
             )
         }

@@ -36,6 +36,17 @@ data class LosslessStreamResult(
 object LosslessAudioProvider {
     private const val TAG = "LosslessAudioProvider"
 
+    const val BROWSER_USER_AGENT =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+    data class ExtensionTrackSummary(
+        val encodedId: String,
+        val title: String,
+        val artist: String,
+        val durationSec: Int,
+        val quality: String,
+    )
+
     val BUILTIN_ENDPOINTS = listOf(
         "https://api.zarz.moe",
         "https://dab.yeet.su",
@@ -224,10 +235,14 @@ object LosslessAudioProvider {
         artist: String,
         durationSec: Int? = null,
         preferredQuality: String? = null,
+        timeoutMs: Long = 2500L,
+        endpointsOverride: List<String>? = null,
+        sourceLabel: String? = null,
     ): LosslessStreamResult? = withContext(Dispatchers.IO) {
         if (title.isBlank()) return@withContext null
         val qualityTier = preferredQuality ?: if (AppSettings.losslessQualityTier.value == "LOSSLESS") "LOSSLESS" else "HI_RES_LOSSLESS"
-        val cacheKey = "${title.trim().lowercase(Locale.ROOT)}|${artist.trim().lowercase(Locale.ROOT)}|$qualityTier"
+        val scopeTag = sourceLabel ?: endpointsOverride?.firstOrNull() ?: "auto"
+        val cacheKey = "${title.trim().lowercase(Locale.ROOT)}|${artist.trim().lowercase(Locale.ROOT)}|$qualityTier|$scopeTag"
         synchronized(memoryCache) {
             val cached = memoryCache.get(cacheKey)
             if (cached != null && System.currentTimeMillis() - cached.timestamp < CACHE_TTL_MS) {
@@ -243,13 +258,17 @@ object LosslessAudioProvider {
         val normTitle = normalize(cleanedTitle)
         val normArtist = normalize(cleanedArtist)
 
-        val endpoints = getCandidateEndpoints()
-        val topBenchmarked = getTopBenchmarkedServers(3)
+        val endpoints = endpointsOverride?.takeIf { it.isNotEmpty() } ?: getCandidateEndpoints()
+        val topBenchmarked = if (endpointsOverride != null) endpoints.take(3) else getTopBenchmarkedServers(3)
 
-        // 1. Fast Parallel Racing over the Top 3 benchmarked fastest servers (plus cached winner)
-        val probeEndpoints = (listOfNotNull(lastHealthyEndpoint) + topBenchmarked + endpoints)
-            .distinct()
-            .take(4)
+        // 1. Fast Parallel Racing over the Top 3 fastest servers
+        val probeEndpoints = if (endpointsOverride != null) {
+            endpoints.distinct().take(3)
+        } else {
+            (listOfNotNull(lastHealthyEndpoint) + topBenchmarked + endpoints)
+                .distinct()
+                .take(3)
+        }
         val resultDeferred = CompletableDeferred<LosslessStreamResult?>()
         val atomicFinished = AtomicBoolean(false)
 
@@ -258,9 +277,9 @@ object LosslessAudioProvider {
                 probeEndpoints.forEach { ep ->
                     launch {
                         try {
-                            val res = probeSingleMirror(ep, encodedQuery, normTitle, normArtist, durationSec, qualityTier)
+                            val res = probeSingleMirror(ep, encodedQuery, normTitle, normArtist, durationSec, qualityTier, sourceLabel)
                             if (res != null && atomicFinished.compareAndSet(false, true)) {
-                                lastHealthyEndpoint = ep
+                                if (endpointsOverride == null) lastHealthyEndpoint = ep
                                 resultDeferred.complete(res)
                                 coroutineContext.cancelChildren() // Cancel all slower in-flight mirror requests immediately
                             }
@@ -270,14 +289,13 @@ object LosslessAudioProvider {
                     }
                 }
 
-                // Race timeout of 3500ms
-                withTimeoutOrNull(3500L) {
+                withTimeoutOrNull(timeoutMs) {
                     resultDeferred.await()
                 }?.let { winningResult ->
                     synchronized(memoryCache) {
                         memoryCache.put(cacheKey, CacheEntry(winningResult, System.currentTimeMillis()))
                     }
-                    Log.d(TAG, "Race won by $lastHealthyEndpoint: ${winningResult.streamUrl}")
+                    Log.d(TAG, "Race won by ${sourceLabel ?: lastHealthyEndpoint}: ${winningResult.streamUrl}")
                     return@coroutineScope winningResult
                 }
             }
@@ -298,6 +316,90 @@ object LosslessAudioProvider {
         null
     }
 
+    fun endpointsForExtension(extensionId: String): List<String> {
+        val id = extensionId.lowercase(Locale.ROOT)
+        return when {
+            "tidal" in id -> listOf(
+                "https://tidal.kinoko.eu.org",
+                "https://hifi-api.vercel.app",
+                "https://api.monochrome.tf",
+                "https://hifi.monochrome.tf",
+                "https://trident.monochrome.tf",
+                "https://wolf.qqdl.site",
+                "https://maus.qqdl.site",
+                "https://katze.qqdl.site",
+                "https://hund.qqdl.site",
+                "https://vogel.qqdl.site",
+            )
+            "qobuz" in id -> listOf(
+                "https://dab.yeet.su",
+                "https://squid.wtf",
+                "https://api.zarz.moe",
+            )
+            "deezer" in id -> listOf(
+                "https://api.zarz.moe",
+                "https://squid.wtf",
+                "https://dab.yeet.su",
+            )
+            else -> getTopBenchmarkedServers(4)
+        }
+    }
+
+    suspend fun searchTracksForExtension(
+        query: String,
+        endpointsOverride: List<String>,
+        limit: Int = 10,
+    ): List<ExtensionTrackSummary> = withContext(Dispatchers.IO) {
+        if (query.isBlank() || endpointsOverride.isEmpty()) return@withContext emptyList()
+        val encodedQuery = runCatching { URLEncoder.encode(query.trim(), "UTF-8") }.getOrDefault(query.trim())
+        val normTitle = normalize(cleanTitle(query))
+        for (ep in endpointsOverride.take(2)) {
+            val base = ep.trimEnd('/')
+            val searchUrls = listOf(
+                "$base/v1/search?q=$encodedQuery",
+                "$base/search/?s=$encodedQuery",
+                "$base/search?q=$encodedQuery",
+                "$base/api/search?q=$encodedQuery",
+            )
+            for (url in searchUrls) {
+                val request = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", BROWSER_USER_AGENT)
+                    .header("Accept", "application/json")
+                    .build()
+                val response = runCatching { httpClient.newCall(request).execute() }.getOrNull() ?: continue
+                val body = response.use { if (it.isSuccessful) it.body?.string() else null } ?: continue
+                val parsed = parseSearchResults(body, normTitle, "", null)
+                    .sortedByDescending { it.score }
+                    .take(limit)
+                if (parsed.isNotEmpty()) {
+                    return@withContext parsed.map { c ->
+                        ExtensionTrackSummary(
+                            encodedId = "$base|${c.id}",
+                            title = c.title,
+                            artist = c.artist,
+                            durationSec = c.durationSec,
+                            quality = c.quality,
+                        )
+                    }
+                }
+            }
+        }
+        emptyList()
+    }
+
+    suspend fun fetchStreamForExtension(
+        encodedTrackId: String,
+        fallbackEndpoints: List<String>,
+        qualityTier: String,
+        sourceLabel: String,
+    ): LosslessStreamResult? = withContext(Dispatchers.IO) {
+        val parts = encodedTrackId.split('|', limit = 2)
+        val endpoint = if (parts.size == 2) parts[0] else fallbackEndpoints.firstOrNull() ?: return@withContext null
+        val trackId = if (parts.size == 2) parts[1] else encodedTrackId
+        fetchStream(endpoint, trackId, qualityTier, sourceLabel)
+    }
+
     private fun probeSingleMirror(
         endpoint: String,
         encodedQuery: String,
@@ -305,6 +407,7 @@ object LosslessAudioProvider {
         normArtist: String,
         durationSec: Int?,
         qualityTier: String,
+        sourceLabel: String? = null,
     ): LosslessStreamResult? {
         val start = System.currentTimeMillis()
         val candidate = searchCandidates(endpoint, encodedQuery, normTitle, normArtist, durationSec)
@@ -312,7 +415,7 @@ object LosslessAudioProvider {
             recordMirrorFailure(endpoint)
             return null
         }
-        val streamResult = fetchStream(endpoint, candidate.id, qualityTier)
+        val streamResult = fetchStream(endpoint, candidate.id, qualityTier, sourceLabel)
         if (streamResult == null) {
             recordMirrorFailure(endpoint)
             return null
@@ -487,6 +590,7 @@ object LosslessAudioProvider {
         endpoint: String,
         trackId: String,
         qualityTier: String,
+        sourceLabel: String? = null,
     ): LosslessStreamResult? {
         val base = endpoint.trimEnd('/')
         val trackUrls = listOf(
@@ -502,20 +606,24 @@ object LosslessAudioProvider {
         for (url in trackUrls) {
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .header("User-Agent", BROWSER_USER_AGENT)
                 .header("Accept", "application/json")
                 .build()
 
             val response = runCatching { httpClient.newCall(request).execute() }.getOrNull() ?: continue
             val body = response.use { if (it.isSuccessful) it.body?.string() else null } ?: continue
 
-            val result = parseTrackResponse(body, qualityTier)
+            val result = parseTrackResponse(body, qualityTier, sourceLabel)
             if (result != null && isStreamUrlPlayable(result.streamUrl)) return result
         }
         return null
     }
 
-    private fun parseTrackResponse(body: String, qualityTier: String): LosslessStreamResult? {
+    private fun parseTrackResponse(
+        body: String,
+        qualityTier: String,
+        sourceLabel: String? = null,
+    ): LosslessStreamResult? {
         return runCatching {
             val root = JSONObject(body)
             val dataObj = root.optJSONObject("data") ?: root
@@ -613,7 +721,8 @@ object LosslessAudioProvider {
                     return@runCatching null
                 }
 
-                val sourceName = if (bitDepth > 16 || sampleRate > 48000) "Hi-Res FLAC" else "FLAC Lossless"
+                val sourceName = sourceLabel?.takeIf { it.isNotBlank() }
+                    ?: if (bitDepth > 16 || sampleRate > 48000) "Hi-Res FLAC" else "FLAC Lossless"
                 LosslessStreamResult(
                     streamUrl = streamUrl,
                     mimeType = "audio/flac",

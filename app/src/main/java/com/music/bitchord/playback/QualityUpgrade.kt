@@ -163,6 +163,9 @@ object QualityUpgrade {
     /** The upgrade already proved for [mediaId], if one ran out of track. */
     fun shelvedFor(mediaId: String): SourceStream? = shelved[mediaId]
 
+    /** Returns an active or shelved upgraded stream for [mediaId], if any. */
+    fun forcedForMediaId(mediaId: String): SourceStream? = forced[mediaId] ?: shelved[mediaId]
+
     /**
      * Takes [mediaId]'s upgrade off the shelf — it has happened.
      *

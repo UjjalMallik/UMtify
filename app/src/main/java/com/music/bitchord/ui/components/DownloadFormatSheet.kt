@@ -300,16 +300,16 @@ private fun FormatOptionRow(
     modifier: Modifier = Modifier,
 ) {
     val badgeColor = when {
-        option.isDolbyAtmos || option.id == "dolby_atmos" -> Color(0xFF9C27B0) // Deep Spatial Purple
-        option.id == "flac_hires" -> Color(0xFFFFB300) // Amber / Gold
+        option.isDolbyAtmos || option.id.startsWith("dolby_atmos") -> Color(0xFF9C27B0) // Deep Spatial Purple
+        option.isLossless && ((option.bitDepth ?: 16) > 16 || option.id.startsWith("flac_hires")) -> Color(0xFFFFB300) // Amber / Gold
         option.isLossless -> Color(0xFF26C6DA) // Cyan / Teal
         option.codec == "opus" -> Color(0xFFAB47BC) // Violet
         else -> Color(0xFF42A5F5) // Blue
     }
 
     val badgeText = when {
-        option.isDolbyAtmos || option.id == "dolby_atmos" -> "ATMOS"
-        option.id == "flac_hires" -> "HI-RES"
+        option.isDolbyAtmos || option.id.startsWith("dolby_atmos") -> "ATMOS"
+        option.isLossless && ((option.bitDepth ?: 16) > 16 || option.id.startsWith("flac_hires")) -> "HI-RES"
         option.isLossless -> "LOSSLESS"
         option.codec == "opus" -> "OPUS"
         else -> "M4A"
@@ -372,13 +372,23 @@ private fun FormatOptionRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(2.dp))
+                val sourceLabel = option.sourceName?.takeIf { it.isNotBlank() }
                 val subtext = buildString {
                     when {
-                        option.isDolbyAtmos || option.id == "dolby_atmos" -> append("Dolby Atmos • E-AC-3 JOC Spatial Audio")
-                        option.id == "flac_hires" -> append("FLAC • 24-bit Hi-Res Audio")
-                        option.isLossless -> append("FLAC • 16-bit Lossless Audio")
-                        option.id == "jiosaavn_320" || option.label.contains("JioSaavn", ignoreCase = true) -> append("AAC • JioSaavn")
-                        else -> append("${option.codec.uppercase()} • YouTube Music")
+                        option.isDolbyAtmos || option.id.startsWith("dolby_atmos") -> {
+                            append("Dolby Atmos • ")
+                            append(sourceLabel ?: "E-AC-3 JOC")
+                        }
+                        option.isLossless -> {
+                            append("FLAC • ")
+                            append(sourceLabel ?: if ((option.bitDepth ?: 16) > 16) "Hi-Res Audio" else "Lossless Audio")
+                        }
+                        option.id == "jiosaavn_320" || sourceLabel.equals("JioSaavn", ignoreCase = true) || option.label.contains("JioSaavn", ignoreCase = true) -> {
+                            append("AAC • ${sourceLabel ?: "JioSaavn"}")
+                        }
+                        else -> {
+                            append("${option.codec.uppercase()} • ${sourceLabel ?: "YouTube Music"}")
+                        }
                     }
                 }
                 Text(

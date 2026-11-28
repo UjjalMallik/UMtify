@@ -82,6 +82,22 @@ enum class SourceKind(
     ),
 
     /**
+     * An audio/download extension synced from the live Extension Repo.
+     *
+     * Automatically injected into the draggable Sources list when installed and
+     * enabled, and cleanly removed or disabled when uninstalled or toggled off.
+     */
+    EXTENSION(
+        label = "Extension",
+        detail = "Installed audio/download extension from the Extension Repo.",
+        labels = listOf("FLAC", "Lossless", "Extension"),
+        needsServer = false,
+        canServeLossless = true,
+        worthPrefetching = false,
+        rank = 0,
+    ),
+
+    /**
      * A module index the user pointed at themselves.
      *
      * Legacy, and no longer offered: the sources screen has no way to add one

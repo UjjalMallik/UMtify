@@ -483,7 +483,8 @@ internal fun NerdStatsBadge(song: Song, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(50)
     Row(
         modifier = modifier
-            .widthIn(max = 320.dp)
+            .padding(horizontal = 12.dp)
+            .widthIn(max = 360.dp)
             .wrapContentWidth()
             .heightIn(min = NERD_STATS_BADGE_HEIGHT)
             .clip(shape)
@@ -501,7 +502,7 @@ internal fun NerdStatsBadge(song: Song, modifier: Modifier = Modifier) {
             modifier = Modifier.size(12.dp),
         )
         Spacer(Modifier.width(5.dp))
-        Text(
+        MarqueeText(
             text = line,
             style = MaterialTheme.typography.labelSmall.copy(
                 fontFamily = FontFamily.Monospace,
@@ -510,16 +511,7 @@ internal fun NerdStatsBadge(song: Song, modifier: Modifier = Modifier) {
                 letterSpacing = 0.3.sp,
             ),
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
-            // One still line, and the pill is sized to it rather than the other
-            // way round: no wrap (which the reserved slot has no room for) and no
-            // scroll (which turned a figure you meant to read into one you had to
-            // wait for). Only a line longer than any track's stats can be — the
-            // Automix wording — reaches the 320dp ceiling, and there it is cut
-            // rather than moved.
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Clip,
-            textAlign = TextAlign.Start,
+            modifier = Modifier.weight(1f, fill = false),
         )
     }
 }
@@ -2357,18 +2349,11 @@ private fun NerdStats.Snapshot.describe(): String? {
         bitDepth?.let { add(stringResource(Res.string.bit_depth, it)) }
         sampleRateHz?.let { add(NerdStats.megahertzLabel(it) ?: "%.1f kHz".format(Locale.ROOT, it / 1000f)) }
         bitrateKbps?.let { add("$it kbps") }
-        channels?.let {
-            add(
-                when (it) {
-                    1 -> stringResource(Res.string.mono)
-                    2 -> stringResource(Res.string.stereo)
-                    else -> stringResource(Res.string.channel_count, it)
-                },
-            )
-        }
-        sourceName?.takeIf { it.isNotBlank() && it != "YouTube" && it != "Local" }?.let { name ->
-            add(if (name.startsWith("via ", ignoreCase = true)) name else "via $name")
-        }
+        sourceName?.trim()
+            ?.removePrefix("via ")
+            ?.removePrefix("Via ")
+            ?.takeIf { it.isNotBlank() }
+            ?.let(::add)
     }
     return parts.joinToString(" · ").takeIf { it.isNotEmpty() }
 }

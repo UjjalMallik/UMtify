@@ -255,6 +255,11 @@ fun SourcesScreen(
                                 onConfirmJioSaavn()
                             } else {
                                 SourceRegistry.setEnabled(config.id, enabled)
+                                if (config.kind == SourceKind.EXTENSION) {
+                                    SourceRegistry.extensionIdFor(config.id)?.let { extId ->
+                                        ExtensionRepoManager.toggleExtension(extId, enabled, syncSourceRegistry = false)
+                                    }
+                                }
                             }
                         },
                         handle = handle,
@@ -886,7 +891,7 @@ private fun SourceRow(
         Spacer(Modifier.width(6.dp))
         Icon(
             imageVector = when (config.kind) {
-                SourceKind.ADDON, SourceKind.CUSTOM_MODULE, SourceKind.MODULE -> Icons.Rounded.Extension
+                SourceKind.ADDON, SourceKind.EXTENSION, SourceKind.CUSTOM_MODULE, SourceKind.MODULE -> Icons.Rounded.Extension
                 SourceKind.INTERNET_ARCHIVE -> Icons.Rounded.Cloud
                 SourceKind.JAMENDO -> Icons.Rounded.GraphicEq
                 SourceKind.SOUNDCLOUD -> Icons.Rounded.GraphicEq
@@ -999,6 +1004,7 @@ private fun SourceConfig.statusLine(health: SourceHealth?): String = when {
         }
     }
     !isComplete -> stringResource(R.string.source_setup_required)
+    kind == SourceKind.EXTENSION -> "Extension Repo · FLAC · Lossless"
     kind == SourceKind.JIOSAAVN -> stringResource(R.string.jiosaavn_mismatch_warning)
     health is SourceHealth.Ok -> listOfNotNull(
         health.detail,

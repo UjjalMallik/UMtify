@@ -127,7 +127,6 @@ import com.music.bitchord.data.Http
 import com.music.bitchord.auth.SignedIn
 import com.music.bitchord.data.LikeState
 import com.music.bitchord.data.LosslessAudioProvider
-import com.music.bitchord.data.LosslessStreamResult
 import com.music.bitchord.data.NerdStats
 import com.music.bitchord.data.TrackLog
 import com.music.bitchord.data.discord.DiscordRPC
@@ -1588,6 +1587,14 @@ class PlaybackService : MediaLibraryService() {
                 }
                 val trackParam = dataSpec.uri.getQueryParameter("t")
                 val fullMediaId = mediaIdIn(dataSpec.uri)
+                val rememberedKey = fullMediaId ?: trackParam
+                val rememberedStream = stream.copy(
+                    sourceConfigId = stream.sourceConfigId ?: configId,
+                    sourceName = sourceName,
+                )
+                if (!rememberedKey.isNullOrBlank()) {
+                    StreamChoice.remember(rememberedKey, rememberedStream, substituted = false)
+                }
                 NerdStats.onSourceStream(fullMediaId ?: trackParam, stream.format, sourceName)
                 if (fullMediaId != null) {
                     NerdStats.recordSource(fullMediaId, sourceName)
@@ -1718,39 +1725,22 @@ class PlaybackService : MediaLibraryService() {
                     .build()
             }
 
-            // Priority 1: Dolby Atmos (when ON) -> Priority 2: Lossless FLAC (when active network is Lossless)
-            // -> Priority 3: Smooth High-Bitrate Fallback (JioSaavn 320 kbps / YouTube Music)
+            // Priority 1: Race Top 2–3 enabled sources concurrently (2.5s cap) for Atmos / Lossless FLAC
+            // -> Priority 2: Smooth High-Bitrate Fallback (JioSaavn 320 kbps / YouTube Music)
             if (wantsDolbyAtmos || wantsLossless) {
                 val target = SourceResolver.targetIn(dataSpec.uri)
                 if (target.title.isNotBlank()) {
                     val (winnerStream: SourceStream?, fallbackResult: SourceStream?) = runBlocking(about) {
                         coroutineScope {
-                            val addonDeferred = async {
+                            val raceDeferred = async {
                                 runCatching {
-                                    withTimeoutOrNull(1800L) {
-                                        SourceResolver.resolveAddonStreamsFor(
-                                            target = target,
-                                            wantsDolbyAtmos = wantsDolbyAtmos,
-                                            wantsLossless = wantsLossless,
-                                        )
-                                    }
+                                    SourceResolver.raceTopPlaybackSources(
+                                        target = target,
+                                        wantsDolbyAtmos = wantsDolbyAtmos,
+                                        wantsLossless = wantsLossless,
+                                        timeoutMs = 2500L,
+                                    )
                                 }.getOrNull()
-                            }
-
-                            val losslessMirrorDeferred = if (wantsLossless) {
-                                async {
-                                    runCatching {
-                                        withTimeoutOrNull(1800L) {
-                                            LosslessAudioProvider.resolveLosslessTrack(
-                                                title = target.title,
-                                                artist = target.artist,
-                                                durationSec = target.durationSec,
-                                            )
-                                        }
-                                    }.getOrNull()
-                                }
-                            } else {
-                                CompletableDeferred<LosslessStreamResult?>(null)
                             }
 
                             val fallbackDeferred: Deferred<SourceStream?> = if (existingServing != null) {
@@ -1758,54 +1748,22 @@ class PlaybackService : MediaLibraryService() {
                             } else {
                                 async {
                                     runCatching {
-                                        withTimeoutOrNull(1500L) {
+                                        withTimeoutOrNull(2500L) {
                                             SourceResolver.substituteForYouTube(target)
                                         }
                                     }.getOrNull()
                                 }
                             }
 
-                            val addonResult = addonDeferred.await()
-                            val addonAtmos = addonResult?.first
-                            val addonLossless = addonResult?.second
-                            val mirrorFlac = losslessMirrorDeferred.await()
-
-                            // Priority 1: Dolby Atmos
-                            val atmosWinner = if (wantsDolbyAtmos && addonAtmos != null && addonAtmos.url.isNotBlank()) {
-                                addonAtmos
-                            } else null
-
-                            // Priority 2: Lossless FLAC (Custom UMtify addon FLAC or fastest benchmarked mirror)
-                            val flacHeaders = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                            val mirrorStream = if (wantsLossless && mirrorFlac != null && mirrorFlac.streamUrl.isNotBlank()) {
-                                SourceStream(
-                                    url = mirrorFlac.streamUrl,
-                                    format = StreamFormat(
-                                        codec = "flac",
-                                        bitDepth = mirrorFlac.bitDepth,
-                                        sampleRateHz = mirrorFlac.sampleRate,
-                                    ),
-                                    headers = flacHeaders,
-                                    sourceName = mirrorFlac.sourceName,
-                                )
-                            } else null
-
-                            val losslessWinner = if (wantsLossless) {
-                                when {
-                                    addonLossless != null && addonLossless.url.isNotBlank() &&
-                                        (mirrorStream == null || (addonLossless.format.bitDepth ?: 16) >= (mirrorStream.format.bitDepth ?: 16)) ->
-                                        addonLossless
-                                    mirrorStream != null -> mirrorStream
-                                    else -> null
-                                }
-                            } else null
-
-                            val priorityWinner = atmosWinner ?: losslessWinner
-                            if (priorityWinner != null) {
-                                Pair<SourceStream?, SourceStream?>(priorityWinner, null)
+                            val raced = raceDeferred.await()
+                            if (raced != null && raced.url.isNotBlank() &&
+                                ((wantsDolbyAtmos && raced.format.isDolbyAtmos) ||
+                                    (wantsLossless && raced.format.isLossless == true))
+                            ) {
+                                Pair<SourceStream?, SourceStream?>(raced, null)
                             } else {
-                                // Only wait on fallback if network quality isn't purely bypassing it
-                                Pair<SourceStream?, SourceStream?>(null, fallbackDeferred.await())
+                                val fb = fallbackDeferred.await() ?: raced
+                                Pair<SourceStream?, SourceStream?>(null, fb)
                             }
                         }
                     }
@@ -6032,7 +5990,8 @@ class PlaybackService : MediaLibraryService() {
         val uri = mediaItem?.localConfiguration?.uri
         if (uri != null) {
             QualityUpgrade.forcedStream(uri)?.let { upgraded ->
-                val name = upgraded.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
+                val name = upgraded.sourceName
+                    ?: upgraded.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
                 if (!name.isNullOrBlank()) return name
             }
         }

@@ -165,6 +165,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
         SpotifyToken.init(this)
         com.music.bitchord.data.ExtensionRepoManager.init(this)
         backgroundInit.join()
+        com.music.bitchord.data.ExtensionRepoManager.syncWithSourceRegistry()
         // Smart connection-aware benchmark across enabled lossless mirrors and custom addons
         CoroutineScope(Dispatchers.IO).launch {
             com.music.bitchord.data.LosslessAudioProvider.benchmarkTopServers("startup")

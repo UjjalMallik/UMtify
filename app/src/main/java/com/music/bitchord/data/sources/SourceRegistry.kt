@@ -277,6 +277,37 @@ object SourceRegistry {
             }
 
     /**
+     * All enabled addons eligible for downloads (prioritizing UMtify first).
+     * Bypasses playback output gating (`awaitsLosslessOutput`) so downloads can
+     * still save FLAC files even when listening over a non-lossless output.
+     */
+    fun downloadableAddonSources(): List<AddonSource> =
+        enabledConfigs(configs.value)
+            .filter { it.kind == SourceKind.ADDON && it.allowDownloads }
+            .mapNotNull { instances[it.id] as? AddonSource }
+            .sortedByDescending {
+                val cfg = config(it.configId)
+                it.configId == UMTIFY_HQ_ADDON_ID ||
+                    cfg?.label?.contains("umtify", ignoreCase = true) == true ||
+                    cfg?.baseUrl?.contains("umtify", ignoreCase = true) == true
+            }
+
+    /** All enabled synced Extension Repo sources eligible for downloads, in list order. */
+    fun downloadableExtensionSources(): List<RepoExtensionSource> =
+        enabledConfigs(configs.value)
+            .filter { it.kind == SourceKind.EXTENSION && it.allowDownloads }
+            .mapNotNull { instances[it.id] as? RepoExtensionSource }
+
+    /**
+     * Top [limit] enabled non-YouTube sources in the user's `SOURCES, TRIED IN THIS ORDER`
+     * list for parallel streaming race.
+     */
+    fun topPlaybackSources(limit: Int = 3): List<MusicSource> =
+        activeForPlayback()
+            .filter { it.kind != SourceKind.YOUTUBE }
+            .take(limit)
+
+    /**
      * [active], minus the addons whose manifest said `allowDownloads: 0`. A
      * download walks this instead, so the next source in line serves it.
      */
@@ -560,6 +591,7 @@ object SourceRegistry {
 
     private fun build(config: SourceConfig): MusicSource = when (config.kind) {
         SourceKind.ADDON -> AddonSource(config)
+        SourceKind.EXTENSION -> RepoExtensionSource(config)
         SourceKind.CUSTOM_MODULE -> ModuleSource(config)
         SourceKind.MODULE -> ModuleSource(config)
         SourceKind.INTERNET_ARCHIVE -> InternetArchiveSource(config)
@@ -567,6 +599,73 @@ object SourceRegistry {
         SourceKind.SOUNDCLOUD -> SoundCloudSource(config)
         SourceKind.JIOSAAVN -> JioSaavnSource(config)
         SourceKind.YOUTUBE -> YouTubeSource(config)
+    }
+
+    data class RepoSyncEntry(
+        val extensionId: String,
+        val displayName: String,
+        val enabled: Boolean,
+        val endpointUrl: String = "",
+    )
+
+    fun repoExtensionConfigId(extensionId: String): String = "$REPO_EXT_PREFIX$extensionId"
+
+    fun extensionIdFor(configId: String): String? =
+        configId.takeIf { it.startsWith(REPO_EXT_PREFIX) }?.removePrefix(REPO_EXT_PREFIX)
+
+    @Synchronized
+    fun syncRepoExtensions(entries: List<RepoSyncEntry>) {
+        val current = configs.value
+        val byExtId = entries.associateBy { it.extensionId }
+        val existingExtIds = mutableSetOf<String>()
+
+        val updatedExisting = current.mapNotNull { config ->
+            if (config.kind != SourceKind.EXTENSION) return@mapNotNull config
+            val extId = extensionIdFor(config.id) ?: return@mapNotNull null
+            val entry = byExtId[extId] ?: return@mapNotNull null
+            existingExtIds.add(extId)
+            config.copy(
+                label = entry.displayName,
+                baseUrl = entry.endpointUrl.ifBlank { config.baseUrl },
+                enabled = entry.enabled,
+            )
+        }
+
+        val toAdd = entries
+            .filter { it.extensionId !in existingExtIds }
+            .map { entry ->
+                SourceConfig(
+                    id = repoExtensionConfigId(entry.extensionId),
+                    kind = SourceKind.EXTENSION,
+                    label = entry.displayName,
+                    baseUrl = entry.endpointUrl,
+                    enabled = entry.enabled,
+                )
+            }
+
+        val next = if (toAdd.isEmpty()) {
+            updatedExisting
+        } else {
+            val insertAt = updatedExisting.indexOfFirst {
+                it.kind !in setOf(SourceKind.ADDON, SourceKind.EXTENSION, SourceKind.CUSTOM_MODULE)
+            }.let { if (it < 0) updatedExisting.size else it }
+            updatedExisting.subList(0, insertAt) + toAdd + updatedExisting.subList(insertAt, updatedExisting.size)
+        }
+
+        if (next != current) {
+            publish(next)
+        }
+    }
+
+    @Synchronized
+    fun syncRepoExtensionEnabled(extensionId: String, enabled: Boolean) {
+        val cfgId = repoExtensionConfigId(extensionId)
+        val current = configs.value
+        if (current.none { it.id == cfgId }) return
+        val next = current.map { if (it.id == cfgId) it.copy(enabled = enabled) else it }
+        if (next != current) {
+            publish(next)
+        }
     }
 
     /**
@@ -637,4 +736,5 @@ object SourceRegistry {
     private const val KEY_DEFAULT_SOURCES_V4 = "default_sources_v4"
     private const val PREFIX = "src:"
     private const val SEPARATOR = "::"
+    private const val REPO_EXT_PREFIX = "repo_ext:"
 }
