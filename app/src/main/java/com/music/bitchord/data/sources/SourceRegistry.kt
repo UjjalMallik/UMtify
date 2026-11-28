@@ -205,6 +205,7 @@ object SourceRegistry {
 
         var list = stored.filterNot {
             it.kind == SourceKind.MODULE ||
+                it.kind == SourceKind.EXTENSION ||
                 (it.id.contains("jellyfin", ignoreCase = true) && it.baseUrl.isBlank()) ||
                 (it.label.contains("jellyfin", ignoreCase = true) && it.baseUrl.isBlank())
         }
@@ -336,36 +337,20 @@ object SourceRegistry {
                     cfg?.baseUrl?.contains("umtify", ignoreCase = true) == true
             }
 
-    /** All Extension Repo audio/download sources enabled in Group 2 (`DOWNLOAD PROVIDERS`). */
-    fun downloadableExtensionSources(): List<RepoExtensionSource> =
-        configs.value
-            .filter {
-                it.kind == SourceKind.EXTENSION &&
-                    !it.metadataOnly &&
-                    it.isDownloadEnabled &&
-                    !SourceHealthTracker.isInErrorCooldown(it.id)
-            }
-            .mapNotNull { instances[it.id] as? RepoExtensionSource }
-
     /** Group 1 (`AUDIO STREAMING`): only sources with direct audio/FLAC streaming capability. */
     fun streamingGroupConfigs(all: List<SourceConfig> = configs.value): List<SourceConfig> =
         all.filter { it.isStreamingCapable }
 
-    /** Group 2 (`DOWNLOAD PROVIDERS`): download-capable addons, audio/download extensions, JioSaavn & YouTube Music. */
+    /** Group 2 (`DOWNLOAD PROVIDERS`): download-capable custom addons, JioSaavn & YouTube Music. */
     fun downloadGroupConfigs(all: List<SourceConfig> = configs.value): List<SourceConfig> =
         all.filter {
             !it.metadataOnly &&
                 !(it.id.contains("jellyfin", ignoreCase = true) && it.baseUrl.isBlank()) &&
                 !(it.label.contains("jellyfin", ignoreCase = true) && it.baseUrl.isBlank()) &&
                 (it.kind == SourceKind.ADDON ||
-                    it.kind == SourceKind.EXTENSION ||
                     it.kind == SourceKind.JIOSAAVN ||
                     it.kind == SourceKind.YOUTUBE)
         }
-
-    /** Group 3 (`METADATA & HOME DISCOVERY`): metadata, lyrics, and chart extensions. */
-    fun metadataGroupConfigs(all: List<SourceConfig> = configs.value): List<SourceConfig> =
-        all.filter { it.kind == SourceKind.EXTENSION && it.metadataOnly }
 
     fun isDownloadProviderEnabled(predicate: (SourceConfig) -> Boolean): Boolean =
         configs.value.any { predicate(it) && it.isDownloadEnabled }
@@ -684,7 +669,7 @@ object SourceRegistry {
 
     private fun build(config: SourceConfig): MusicSource = when (config.kind) {
         SourceKind.ADDON -> AddonSource(config)
-        SourceKind.EXTENSION -> RepoExtensionSource(config)
+        SourceKind.EXTENSION -> YouTubeSource(config)
         SourceKind.CUSTOM_MODULE -> ModuleSource(config)
         SourceKind.MODULE -> ModuleSource(config)
         SourceKind.INTERNET_ARCHIVE -> InternetArchiveSource(config)
@@ -692,76 +677,6 @@ object SourceRegistry {
         SourceKind.SOUNDCLOUD -> SoundCloudSource(config)
         SourceKind.JIOSAAVN -> JioSaavnSource(config)
         SourceKind.YOUTUBE -> YouTubeSource(config)
-    }
-
-    data class RepoSyncEntry(
-        val extensionId: String,
-        val displayName: String,
-        val enabled: Boolean,
-        val endpointUrl: String = "",
-        val metadataOnly: Boolean = false,
-    )
-
-    fun repoExtensionConfigId(extensionId: String): String = "$REPO_EXT_PREFIX$extensionId"
-
-    fun extensionIdFor(configId: String): String? =
-        configId.takeIf { it.startsWith(REPO_EXT_PREFIX) }?.removePrefix(REPO_EXT_PREFIX)
-
-    @Synchronized
-    fun syncRepoExtensions(entries: List<RepoSyncEntry>) {
-        val current = configs.value
-        val byExtId = entries.associateBy { it.extensionId }
-        val existingExtIds = mutableSetOf<String>()
-
-        val updatedExisting = current.mapNotNull { config ->
-            if (config.kind != SourceKind.EXTENSION) return@mapNotNull config
-            val extId = extensionIdFor(config.id) ?: return@mapNotNull null
-            val entry = byExtId[extId] ?: return@mapNotNull null
-            existingExtIds.add(extId)
-            config.copy(
-                label = entry.displayName,
-                baseUrl = entry.endpointUrl.ifBlank { config.baseUrl },
-                enabled = entry.enabled,
-                metadataOnly = entry.metadataOnly,
-            )
-        }
-
-        val toAdd = entries
-            .filter { it.extensionId !in existingExtIds }
-            .map { entry ->
-                SourceConfig(
-                    id = repoExtensionConfigId(entry.extensionId),
-                    kind = SourceKind.EXTENSION,
-                    label = entry.displayName,
-                    baseUrl = entry.endpointUrl,
-                    enabled = entry.enabled,
-                    metadataOnly = entry.metadataOnly,
-                )
-            }
-
-        val next = if (toAdd.isEmpty()) {
-            updatedExisting
-        } else {
-            val insertAt = updatedExisting.indexOfFirst {
-                it.kind !in setOf(SourceKind.ADDON, SourceKind.EXTENSION, SourceKind.CUSTOM_MODULE)
-            }.let { if (it < 0) updatedExisting.size else it }
-            updatedExisting.subList(0, insertAt) + toAdd + updatedExisting.subList(insertAt, updatedExisting.size)
-        }
-
-        if (next != current) {
-            publish(next)
-        }
-    }
-
-    @Synchronized
-    fun syncRepoExtensionEnabled(extensionId: String, enabled: Boolean) {
-        val cfgId = repoExtensionConfigId(extensionId)
-        val current = configs.value
-        if (current.none { it.id == cfgId }) return
-        val next = current.map { if (it.id == cfgId) it.copy(enabled = enabled) else it }
-        if (next != current) {
-            publish(next)
-        }
     }
 
     /**

@@ -132,13 +132,11 @@
 }
 
 # ---- WebView bridges ------------------------------------------------------------
-# PoToken minting, Spotify token minting, and the Headless WebView V8 .sflx runtime
-# call back into Kotlin methods from JavaScript.
+# PoToken minting and the Spotify token page call back into these from JavaScript.
 -keepattributes JavascriptInterface
 -keepclassmembers class * {
     @android.webkit.JavascriptInterface <methods>;
 }
--keep class com.music.bitchord.data.WebViewSflxRuntime$* { *; }
 
 # ---- JVM-only APIs ------------------------------------------------------------
 # Referenced by desktop-only paths in Rhino (JSR-223, java.beans, dynalink),

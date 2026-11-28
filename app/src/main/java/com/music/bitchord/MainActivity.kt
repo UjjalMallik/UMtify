@@ -217,7 +217,6 @@ import com.music.bitchord.playback.upgradeQuality
 import com.music.bitchord.playback.revertToOriginal
 import com.music.bitchord.playback.swapToVersion
 import com.music.bitchord.playback.smart.VersionAudioAligner
-import com.music.bitchord.data.CloudflareSessionManager
 import com.music.bitchord.download.DownloadSession
 import com.music.bitchord.download.DownloadStore
 import com.music.bitchord.download.MediaTagger
@@ -225,7 +224,6 @@ import com.music.bitchord.download.DownloadTarget
 import com.music.bitchord.download.Downloads
 import com.music.bitchord.ui.components.BrowseActionsSheet
 import com.music.bitchord.ui.components.BrowseTarget
-import com.music.bitchord.ui.components.CloudflareVerifyDialog
 import com.music.bitchord.ui.components.ConfirmationAlert
 import com.music.bitchord.ui.components.DownloadFormatSheet
 import com.music.bitchord.ui.components.DownloadManagerSheet
@@ -4797,14 +4795,6 @@ private fun BitChordApp(
                         Downloads.enqueue(context, song, from = null, formatOption = option)
                     }
                 },
-            )
-        }
-
-        val cfVerifyRequest by CloudflareSessionManager.pendingVerification.collectAsStateWithLifecycle()
-        cfVerifyRequest?.let { req ->
-            CloudflareVerifyDialog(
-                request = req,
-                onDismiss = { CloudflareSessionManager.dismissVerification() },
             )
         }
 

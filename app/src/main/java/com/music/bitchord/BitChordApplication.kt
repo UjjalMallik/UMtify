@@ -166,12 +166,8 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
         // suspend call chain that reaches it (a track's canvas lookup) has
         // one to hand — see SpotifyToken's doc for why.
         SpotifyToken.init(this)
-        com.music.bitchord.data.ExtensionRepoManager.init(this)
-        com.music.bitchord.data.CloudflareSessionManager.init(this)
-        com.music.bitchord.data.SflxRuntimeBridge.init(this)
-        com.music.bitchord.data.WebViewSflxRuntime.init(this)
+        com.music.bitchord.data.MetadataDiscoveryProvider.init(this)
         backgroundInit.join()
-        com.music.bitchord.data.ExtensionRepoManager.syncWithSourceRegistry()
         // Smart connection-aware benchmark across enabled lossless mirrors and custom addons
         CoroutineScope(Dispatchers.IO).launch {
             com.music.bitchord.data.LosslessAudioProvider.benchmarkTopServers("startup")

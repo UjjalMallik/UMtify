@@ -1,5 +1,7 @@
 package com.music.bitchord.data
 
+import android.content.Context
+import android.content.SharedPreferences
 import com.music.bitchord.data.ArtistAvatarCache.ArtistEnrichment
 import com.music.bitchord.data.canvas.AppleArtistArtRepository
 import com.music.bitchord.data.canvas.SpotifyToken
@@ -55,6 +57,35 @@ object MetadataDiscoveryProvider {
     )
 
     private const val CHART_CACHE_TTL_MS = 30 * 60 * 1000L
+    private const val PREFS_NAME = "metadata_discovery_prefs"
+    private const val KEY_APPLE_ENABLED = "apple_enabled"
+    private const val KEY_SPOTIFY_DEEZER_ENABLED = "spotify_deezer_enabled"
+
+    @Volatile
+    private var prefs: SharedPreferences? = null
+
+    private val _appleEnabled = MutableStateFlow(true)
+    val appleEnabled: StateFlow<Boolean> = _appleEnabled.asStateFlow()
+
+    private val _spotifyDeezerEnabled = MutableStateFlow(true)
+    val spotifyDeezerEnabled: StateFlow<Boolean> = _spotifyDeezerEnabled.asStateFlow()
+
+    fun init(context: Context) {
+        val p = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs = p
+        _appleEnabled.value = p.getBoolean(KEY_APPLE_ENABLED, true)
+        _spotifyDeezerEnabled.value = p.getBoolean(KEY_SPOTIFY_DEEZER_ENABLED, true)
+    }
+
+    fun setAppleEnabled(enabled: Boolean) {
+        _appleEnabled.value = enabled
+        prefs?.edit()?.putBoolean(KEY_APPLE_ENABLED, enabled)?.apply()
+    }
+
+    fun setSpotifyDeezerEnabled(enabled: Boolean) {
+        _spotifyDeezerEnabled.value = enabled
+        prefs?.edit()?.putBoolean(KEY_SPOTIFY_DEEZER_ENABLED, enabled)?.apply()
+    }
 
     private val trackCache = ConcurrentHashMap<String, TrackEnrichment>()
     private val resolvedVideoIds = ConcurrentHashMap<String, String>()
@@ -93,9 +124,6 @@ object MetadataDiscoveryProvider {
             "apple" in lower -> "apple"
             "spotify" in lower -> "spotify"
             "deezer" in lower -> "deezer"
-            "bugs" in lower -> "bugs"
-            "genie" in lower -> "genie"
-            "melon" in lower -> "melon"
             else -> lower
         }
     }
@@ -150,7 +178,7 @@ object MetadataDiscoveryProvider {
 
         coroutineScope {
             val jobs = mutableListOf<Deferred<Unit>>()
-            if (ExtensionRepoManager.isMetadataProviderEnabled("apple")) {
+            if (_appleEnabled.value) {
                 jobs += async {
                     val start = System.currentTimeMillis()
                     val ok = runCatching {
@@ -164,27 +192,18 @@ object MetadataDiscoveryProvider {
                     else recordProviderError("apple", "Timeout")
                 }
             }
-            if (ExtensionRepoManager.isMetadataProviderEnabled("spotify")) {
+            if (_spotifyDeezerEnabled.value) {
                 jobs += async {
                     val start = System.currentTimeMillis()
-                    val ok = runCatching { querySpotifyKeylessStatus() }.getOrDefault(false)
-                    if (ok) recordProviderReady("spotify", System.currentTimeMillis() - start)
-                    else recordProviderError("spotify", "Timeout")
-                }
-            }
-            listOf("bugs", "genie", "melon").forEach { kr ->
-                if (ExtensionRepoManager.isMetadataProviderEnabled(kr)) {
-                    jobs += async {
-                        val start = System.currentTimeMillis()
-                        val ok = runCatching {
-                            val req = Request.Builder()
-                                .url("https://lrclib.net/api/search?track_name=APT&artist_name=ROSE")
-                                .header("User-Agent", "UMtify/1.0")
-                                .build()
-                            httpClient.newCall(req).execute().use { it.isSuccessful }
-                        }.getOrDefault(false)
-                        if (ok) recordProviderReady(kr, System.currentTimeMillis() - start)
-                        else recordProviderError(kr, "Timeout")
+                    val ok = runCatching {
+                        querySpotifyKeylessStatus() || queryDeezerArtist("The Weeknd")?.portraitUrl?.isNotBlank() == true
+                    }.getOrDefault(false)
+                    val latency = System.currentTimeMillis() - start
+                    if (ok) {
+                        recordProviderReady("spotify", latency)
+                        recordProviderReady("deezer", latency)
+                    } else {
+                        recordProviderError("spotify", "Timeout")
                     }
                 }
             }
@@ -193,25 +212,21 @@ object MetadataDiscoveryProvider {
     }
 
     private fun providerSignature(): String = buildString {
-        if (ExtensionRepoManager.isMetadataProviderEnabled("spotify")) append("sp,")
-        if (ExtensionRepoManager.isMetadataProviderEnabled("apple")) append("am,")
-        if (ExtensionRepoManager.isMetadataProviderEnabled("deezer")) append("dz,")
-        if (ExtensionRepoManager.isMetadataProviderEnabled("bugs")) append("bg,")
-        if (ExtensionRepoManager.isMetadataProviderEnabled("genie")) append("gn,")
-        if (ExtensionRepoManager.isMetadataProviderEnabled("melon")) append("ml,")
+        if (_spotifyDeezerEnabled.value) append("sp,dz,")
+        if (_appleEnabled.value) append("am,")
     }
 
     /**
-     * Fetches official artist portrait & canonical artist name from enabled metadata providers
+     * Fetches official artist portrait & canonical artist name from enabled native metadata providers
      * (Spotify Web -> Apple Music -> Deezer) in parallel on [Dispatchers.IO].
      */
     suspend fun enrichArtist(artistName: String): ArtistEnrichment? = withContext(Dispatchers.IO) {
         val clean = artistName.trim()
         if (clean.isEmpty()) return@withContext null
 
-        val useSpotify = ExtensionRepoManager.isMetadataProviderEnabled("spotify")
-        val useApple = ExtensionRepoManager.isMetadataProviderEnabled("apple")
-        val useDeezer = ExtensionRepoManager.isMetadataProviderEnabled("deezer")
+        val useSpotify = _spotifyDeezerEnabled.value
+        val useApple = _appleEnabled.value
+        val useDeezer = _spotifyDeezerEnabled.value
 
         if (!useSpotify && !useApple && !useDeezer) return@withContext null
 
@@ -231,15 +246,15 @@ object MetadataDiscoveryProvider {
     }
 
     /**
-     * Enriches track title/artist/album/genre/cover via enabled metadata providers.
+     * Enriches track title/artist/album/genre/cover via enabled native metadata providers.
      */
     suspend fun enrichTrack(title: String, artist: String): TrackEnrichment? = withContext(Dispatchers.IO) {
         val key = "${title.trim().lowercase(Locale.ROOT)}|${artist.trim().lowercase(Locale.ROOT)}"
         if (key == "|") return@withContext null
         trackCache[key]?.let { return@withContext it }
 
-        val useApple = ExtensionRepoManager.isMetadataProviderEnabled("apple")
-        val useDeezer = ExtensionRepoManager.isMetadataProviderEnabled("deezer")
+        val useApple = _appleEnabled.value
+        val useDeezer = _spotifyDeezerEnabled.value
         if (!useApple && !useDeezer) return@withContext null
 
         val hit = withTimeoutOrNull(2500L) {
@@ -263,8 +278,8 @@ object MetadataDiscoveryProvider {
     }
 
     /**
-     * Refreshes the cached Charts & Discovery shelf asynchronously from enabled Group 3
-     * metadata/chart providers (Apple Music, Deezer, Spotify Web, Melon, Bugs, Genie).
+     * Refreshes the cached Charts & Discovery shelf asynchronously from enabled native
+     * metadata/chart providers (Apple Music, Spotify & Deezer).
      */
     suspend fun refreshChartDiscoveryShelf(): HomeShelf? = withContext(Dispatchers.IO) {
         val sig = providerSignature()
@@ -279,11 +294,8 @@ object MetadataDiscoveryProvider {
             return@withContext existing
         }
 
-        val useApple = ExtensionRepoManager.isMetadataProviderEnabled("apple")
-        val useDeezer = ExtensionRepoManager.isMetadataProviderEnabled("deezer")
-        val useKoreanCharts = ExtensionRepoManager.isMetadataProviderEnabled("melon") ||
-            ExtensionRepoManager.isMetadataProviderEnabled("bugs") ||
-            ExtensionRepoManager.isMetadataProviderEnabled("genie")
+        val useApple = _appleEnabled.value
+        val useDeezer = _spotifyDeezerEnabled.value
 
         val rawTracks: List<ChartCandidate> = coroutineScope {
             val tasks = mutableListOf<Deferred<List<ChartCandidate>>>()
@@ -292,9 +304,6 @@ object MetadataDiscoveryProvider {
             }
             if (useDeezer) {
                 tasks += async<List<ChartCandidate>> { runCatching { fetchDeezerCharts() }.getOrDefault(emptyList()) }
-            }
-            if (useKoreanCharts) {
-                tasks += async<List<ChartCandidate>> { runCatching { fetchKoreanChartSuggestions() }.getOrDefault(emptyList()) }
             }
             tasks.awaitAll().flatten()
         }
@@ -333,11 +342,7 @@ object MetadataDiscoveryProvider {
 
         val sourcesUsed = buildList {
             if (useApple) add("Apple Music")
-            if (useDeezer) add("Deezer")
-            if (ExtensionRepoManager.isMetadataProviderEnabled("spotify")) add("Spotify Web")
-            if (ExtensionRepoManager.isMetadataProviderEnabled("melon")) add("Melon")
-            if (ExtensionRepoManager.isMetadataProviderEnabled("bugs")) add("Bugs")
-            if (ExtensionRepoManager.isMetadataProviderEnabled("genie")) add("Genie")
+            if (useDeezer) add("Spotify & Deezer")
         }
 
         val subtitle = if (sourcesUsed.isNotEmpty()) {
@@ -647,36 +652,11 @@ object MetadataDiscoveryProvider {
         }
         if (list.isNotEmpty()) {
             recordProviderReady("deezer", System.currentTimeMillis() - start, itemsDelta = list.size)
-            if (ExtensionRepoManager.isMetadataProviderEnabled("spotify")) {
+            if (_spotifyDeezerEnabled.value) {
                 recordProviderReady("spotify", System.currentTimeMillis() - start, itemsDelta = list.size)
             }
         }
         return list
-    }
-
-    private suspend fun fetchKoreanChartSuggestions(): List<ChartCandidate> {
-        val start = System.currentTimeMillis()
-        val rows = runCatching {
-            YtMusicRepository.searchPage("K-Pop Top 100 Melon Bugs Genie", SearchFilter.SONGS).getOrNull()?.rows.orEmpty()
-        }.getOrDefault(emptyList())
-        val parsed = rows.mapNotNull { sr ->
-            val song = (sr as? SearchResult.Track)?.song ?: (sr as? SearchResult.TopTrack)?.song ?: return@mapNotNull null
-            ChartCandidate(
-                title = song.title,
-                artist = song.artist,
-                artworkUrl = song.thumbnailUrl,
-                genre = "K-Pop Charts",
-                videoId = song.videoId,
-            )
-        }.take(10)
-        val latency = System.currentTimeMillis() - start
-        listOf("bugs", "genie", "melon").forEach { key ->
-            if (ExtensionRepoManager.isMetadataProviderEnabled(key)) {
-                if (parsed.isNotEmpty()) recordProviderReady(key, latency, itemsDelta = parsed.size)
-                else recordProviderError(key, "Unavailable")
-            }
-        }
-        return parsed
     }
 
     private fun findBestJsonArtist(items: JSONArray, wanted: String): JSONObject? {

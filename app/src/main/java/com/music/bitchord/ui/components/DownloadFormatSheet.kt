@@ -250,11 +250,7 @@ fun DownloadFormatSheet(
                             strokeWidth = 3.dp,
                         )
                         Text(
-                            text = if (pendingProviders.isNotEmpty()) {
-                                "Checking ${pendingProviders.take(4).joinToString(", ")}..."
-                            } else {
-                                "Checking available formats & sizes..."
-                            },
+                            text = "Loading audio formats...",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -295,44 +291,6 @@ fun DownloadFormatSheet(
                                 onDismiss()
                             },
                         )
-                    }
-                }
-
-                AnimatedVisibility(
-                    visible = !isComplete && pendingProviders.isNotEmpty(),
-                    enter = fadeIn(),
-                    exit = fadeOut(),
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center,
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(50),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(12.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                                Text(
-                                    text = "Checking ${pendingProviders.take(4).joinToString(", ")}...",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
                     }
                 }
             }

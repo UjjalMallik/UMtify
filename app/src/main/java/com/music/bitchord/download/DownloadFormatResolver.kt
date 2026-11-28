@@ -1,12 +1,9 @@
 package com.music.bitchord.download
 
 import android.util.Log
-import com.music.bitchord.data.ExtensionRepoManager
 import com.music.bitchord.data.Http
 import com.music.bitchord.data.LosslessAudioProvider
-import com.music.bitchord.data.NativeDownloadProviders
 import com.music.bitchord.data.NerdStats
-import com.music.bitchord.data.WebViewSflxRuntime
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.durationMillis
@@ -49,31 +46,31 @@ object DownloadFormatResolver {
 
     private const val DEFAULT_UA = LosslessAudioProvider.BROWSER_USER_AGENT
 
+    private fun providerSlug(raw: String): String =
+        raw.lowercase(Locale.ROOT).replace(Regex("""[^a-z0-9]+"""), "_").trim('_').ifBlank { "src" }
+
     suspend fun resolveFormats(song: Song): List<DownloadFormatOption> = withContext(Dispatchers.IO) {
         resolveFormatsFlow(song).last().formats
     }
 
     /**
-     * Progressively resolves downloadable formats across ALL active Group 2 Download Providers.
-     * Fast sources (active playing stream, UMtify/addons, JioSaavn, YouTube Music) emit right away (<1s),
-     * while `.sflx` QuickJS providers (Tidal, Qobuz, Deezer, Amazon Music, Beatport) stream in as they complete.
+     * Progressively resolves downloadable formats across ALL active Group 2 Download Providers
+     * (active playing stream, UMtify / custom addons, JioSaavn, YouTube Music).
      */
     fun resolveFormatsFlow(song: Song): Flow<DownloadFormatProgress> = channelFlow {
         val durationSec = (song.durationMillis() / 1000).toInt().takeIf { it > 0 } ?: 210
-        val cleanTitle = NativeDownloadProviders.cleanTrackTitle(song.title)
-        val primaryArtist = NativeDownloadProviders.primaryArtistName(NativeDownloadProviders.cleanTrackTitle(song.artist))
+        val cleanTitle = LosslessAudioProvider.cleanTrackTitle(song.title)
+        val primaryArtist = LosslessAudioProvider.primaryArtistName(LosslessAudioProvider.cleanTrackTitle(song.artist))
         val target = TrackMatcher.targetOf(song)
         val allowAtmos = AppSettings.dolbyAtmos.value
 
         val addonSourcesEnabled = SourceRegistry.downloadableAddonSources().isNotEmpty()
-        val extSources = SourceRegistry.downloadableExtensionSources()
         val jioSaavnEnabled = SourceRegistry.isDownloadProviderEnabled { it.kind == SourceKind.JIOSAAVN }
         val youtubeEnabled = SourceRegistry.isDownloadProviderEnabled { it.kind == SourceKind.YOUTUBE }
-        val losslessFallbackEnabled = addonSourcesEnabled || extSources.isNotEmpty()
+        val losslessFallbackEnabled = addonSourcesEnabled
 
         val pendingNames = linkedSetOf<String>()
         if (addonSourcesEnabled) pendingNames.add("UMtify")
-        extSources.forEach { pendingNames.add(it.displayName) }
         if (jioSaavnEnabled) pendingNames.add("JioSaavn")
         if (youtubeEnabled) pendingNames.add("YouTube Music")
 
@@ -143,7 +140,7 @@ object DownloadFormatResolver {
                     pendingNames.remove(providerName)
                 }
                 finalized.forEach { opt ->
-                    val slug = NativeDownloadProviders.providerSlug(opt.sourceName ?: providerName ?: "source")
+                    val slug = providerSlug(opt.sourceName ?: providerName ?: "source")
                     // Dedup by (provider, codec, bitDepth, kbps, url) AND (provider, url)
                     // so active 24-bit UMtify stream emitted in step 1 prevents step 2 from
                     // adding a duplicate 16-bit copy of the exact same URL.
@@ -198,98 +195,7 @@ object DownloadFormatResolver {
                 }
             }
 
-            // 3. Enabled .sflx Download Providers via Headless WebView V8 + Native Kotlin lossless fallback
-            extSources.forEach { ext ->
-                launch(Dispatchers.IO) {
-                    val startMs = System.currentTimeMillis()
-                    val extId = SourceRegistry.extensionIdFor(ext.configId) ?: ext.configId
-                    val isrc = LosslessAudioProvider.cachedIsrcFor(song.title, song.artist)
-                    val drafts = mutableListOf<OptionDraft>()
-
-                    // A. Execute real Mornye `.sflx` (index.js) inside Chromium V8 WebView
-                    val v8Res = runCatching {
-                        WebViewSflxRuntime.resolveDownloadFormatsDetailed(
-                            extensionId = extId,
-                            displayName = ext.displayName,
-                            title = song.title,
-                            artist = song.artist,
-                            album = song.albumName,
-                            durationSec = durationSec,
-                            isrc = isrc,
-                        )
-                    }.getOrElse { err ->
-                        WebViewSflxRuntime.SflxResolutionResult(emptyList(), err.message ?: "V8 runtime error")
-                    }
-
-                    v8Res.options.forEach { opt ->
-                        val safeUrl = LosslessAudioProvider.forceHttps(opt.streamUrl)
-                        if (safeUrl.startsWith("https://")) {
-                            drafts.add(
-                                OptionDraft(
-                                    id = opt.id,
-                                    label = opt.label,
-                                    codec = opt.codec,
-                                    bitrateKbps = opt.bitrateKbps ?: if (opt.isLossless) 1411 else 320,
-                                    sampleRateHz = opt.sampleRateHz ?: 44100,
-                                    bitDepth = opt.bitDepth ?: 16,
-                                    streamUrl = safeUrl,
-                                    fileExtension = opt.fileExtension,
-                                    isLossless = opt.isLossless,
-                                    isDolbyAtmos = opt.isDolbyAtmos,
-                                    headers = opt.headers,
-                                    sourceName = ext.displayName,
-                                ),
-                            )
-                        }
-                    }
-
-                    // B. Native Kotlin lossless mirror fallback when upstream .sflx API (e.g. zarz) throttles or returns partial tiers
-                    if (drafts.isEmpty() || drafts.none { it.isLossless }) {
-                        val nativeRes = runCatching {
-                            NativeDownloadProviders.resolveFormats(
-                                extensionId = extId,
-                                displayName = ext.displayName,
-                                title = song.title,
-                                artist = song.artist,
-                                album = song.albumName,
-                                durationSec = durationSec,
-                                isrc = isrc,
-                            )
-                        }.getOrNull()
-
-                        nativeRes?.options?.forEach { opt ->
-                            val safeUrl = LosslessAudioProvider.forceHttps(opt.streamUrl)
-                            if (safeUrl.startsWith("https://")) {
-                                drafts.add(
-                                    OptionDraft(
-                                        id = opt.id,
-                                        label = opt.label,
-                                        codec = opt.codec,
-                                        bitrateKbps = opt.bitrateKbps ?: if (opt.isLossless) 1411 else 320,
-                                        sampleRateHz = opt.sampleRateHz ?: 44100,
-                                        bitDepth = opt.bitDepth ?: 16,
-                                        streamUrl = safeUrl,
-                                        fileExtension = opt.fileExtension,
-                                        isLossless = opt.isLossless,
-                                        isDolbyAtmos = opt.isDolbyAtmos,
-                                        headers = opt.headers,
-                                        sourceName = ext.displayName,
-                                    ),
-                                )
-                            }
-                        }
-                    }
-
-                    if (drafts.isNotEmpty()) {
-                        SourceHealthTracker.recordReady(ext.configId, System.currentTimeMillis() - startMs)
-                    } else {
-                        val diag = v8Res.failureReason ?: "No matching streams"
-                        Log.w("WebViewSflxRuntime", "${ext.displayName} ($extId) returned 0 downloadable formats: $diag")
-                        SourceHealthTracker.recordError(ext.configId, diag)
-                    }
-                    finalizeDraftsAndEmit(ext.displayName, drafts)
-                }
-            }
+            // 3. Built-in JioSaavn 320 kbps AAC (runs concurrently in step 4)
 
             // 4. JioSaavn 320 kbps AAC
             if (jioSaavnEnabled) {
@@ -440,7 +346,7 @@ object DownloadFormatResolver {
         val srcName = stream.sourceName?.takeIf { it.isNotBlank() }
             ?: stream.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
             ?: fallbackSourceName
-        val pSlug = NativeDownloadProviders.providerSlug(srcName)
+        val pSlug = providerSlug(srcName)
         val headers = if (stream.headers.any { it.key.equals("User-Agent", ignoreCase = true) }) {
             stream.headers
         } else {

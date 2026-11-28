@@ -216,10 +216,6 @@ object LosslessAudioProvider {
         if (healthy != null && healthy !in endpoints) {
             endpoints.add(healthy)
         }
-        ExtensionRepoManager.getExtractedEndpoints().forEach { raw ->
-            val ep = forceHttps(raw)
-            if (ep.startsWith("https://") && ep !in endpoints) endpoints.add(ep)
-        }
         BUILTIN_ENDPOINTS.forEach { raw ->
             val ep = forceHttps(raw)
             if (ep !in endpoints) endpoints.add(ep)
@@ -227,8 +223,28 @@ object LosslessAudioProvider {
         return endpoints.sortedBy { mirrorLatencies[it] ?: 400L }
     }
 
+    internal fun cleanTrackTitle(raw: String): String =
+        raw.replace(
+            Regex(
+                """\s*[\(\[](?:[^)\]]*(?:version|ver\.?|official|video|audio|lyric|lyrics|visualizer|remaster|deluxe|explicit|clean|from|edit|mix|ost|soundtrack|live|acoustic|bonus|feat\.?|ft\.?)[^)\]]*)[\)\]]""",
+                RegexOption.IGNORE_CASE,
+            ),
+            "",
+        )
+            .replace(Regex("""\s+(?:feat\.?|ft\.?|featuring)\s+.*$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s+[-–—]\s+(?:official|lyric|audio|video|remastered|from).*$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+            .ifBlank { raw.trim() }
+
+    internal fun primaryArtistName(raw: String): String =
+        raw.split(Regex("""\s*(?:,|&|/|;|\bfeat\.?\b|\bft\.?\b|\bx\b)\s*""", RegexOption.IGNORE_CASE))
+            .firstOrNull { it.isNotBlank() }
+            ?.trim()
+            ?: raw.trim()
+
     private fun cleanTitle(raw: String): String =
-        NativeDownloadProviders.cleanTrackTitle(raw)
+        cleanTrackTitle(raw)
             .replace(Regex("""[-_]"""), " ")
             .replace(Regex("""\s+"""), " ")
             .trim()
@@ -267,7 +283,7 @@ object LosslessAudioProvider {
         }
 
         val cleanedTitle = cleanTitle(title)
-        val cleanedArtist = NativeDownloadProviders.primaryArtistName(cleanTitle(artist))
+        val cleanedArtist = primaryArtistName(cleanTitle(artist))
         val query = "$cleanedTitle $cleanedArtist".trim()
         val encodedQuery = runCatching { URLEncoder.encode(query, "UTF-8") }.getOrDefault(query)
 
@@ -355,7 +371,7 @@ object LosslessAudioProvider {
     ): List<LosslessStreamResult> = withContext(Dispatchers.IO) {
         if (title.isBlank()) return@withContext emptyList()
         val cleanedTitle = cleanTitle(title)
-        val cleanedArtist = NativeDownloadProviders.primaryArtistName(cleanTitle(artist))
+        val cleanedArtist = primaryArtistName(cleanTitle(artist))
         val query = "$cleanedTitle $cleanedArtist".trim()
         val encodedQuery = runCatching { URLEncoder.encode(query, "UTF-8") }.getOrDefault(query)
         val normTitle = normalize(cleanedTitle)
