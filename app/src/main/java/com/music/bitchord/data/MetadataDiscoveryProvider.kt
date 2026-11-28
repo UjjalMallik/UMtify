@@ -7,6 +7,7 @@ import com.music.bitchord.data.model.HomeShelf
 import com.music.bitchord.data.model.SearchFilter
 import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.ShelfItem
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -89,9 +90,9 @@ object MetadataDiscoveryProvider {
 
         withTimeoutOrNull(3000L) {
             coroutineScope {
-                val spotifyJob = if (useSpotify) async { runCatching { querySpotifyArtist(clean) }.getOrNull() } else null
-                val appleJob = if (useApple) async { runCatching { queryAppleArtist(clean) }.getOrNull() } else null
-                val deezerJob = if (useDeezer) async { runCatching { queryDeezerArtist(clean) }.getOrNull() } else null
+                val spotifyJob: Deferred<ArtistEnrichment?>? = if (useSpotify) async<ArtistEnrichment?> { runCatching { querySpotifyArtist(clean) }.getOrNull() } else null
+                val appleJob: Deferred<ArtistEnrichment?>? = if (useApple) async<ArtistEnrichment?> { runCatching { queryAppleArtist(clean) }.getOrNull() } else null
+                val deezerJob: Deferred<ArtistEnrichment?>? = if (useDeezer) async<ArtistEnrichment?> { runCatching { queryDeezerArtist(clean) }.getOrNull() } else null
 
                 spotifyJob?.await()?.takeIf { !it.portraitUrl.isNullOrBlank() }
                     ?: appleJob?.await()?.takeIf { !it.portraitUrl.isNullOrBlank() }
@@ -116,8 +117,8 @@ object MetadataDiscoveryProvider {
 
         val hit = withTimeoutOrNull(2500L) {
             coroutineScope {
-                val apple = if (useApple) async { runCatching { queryAppleTrack(title, artist) }.getOrNull() } else null
-                val deezer = if (useDeezer) async { runCatching { queryDeezerTrack(title, artist) }.getOrNull() } else null
+                val apple: Deferred<TrackEnrichment?>? = if (useApple) async<TrackEnrichment?> { runCatching { queryAppleTrack(title, artist) }.getOrNull() } else null
+                val deezer: Deferred<TrackEnrichment?>? = if (useDeezer) async<TrackEnrichment?> { runCatching { queryDeezerTrack(title, artist) }.getOrNull() } else null
                 apple?.await() ?: deezer?.await()
             }
         }
@@ -156,16 +157,18 @@ object MetadataDiscoveryProvider {
             ExtensionRepoManager.isMetadataProviderEnabled("bugs") ||
             ExtensionRepoManager.isMetadataProviderEnabled("genie")
 
-        val rawTracks = coroutineScope {
-            val appleDeferred = if (useApple) async { runCatching { fetchAppleTopCharts() }.getOrDefault(emptyList()) } else null
-            val deezerDeferred = if (useDeezer) async { runCatching { fetchDeezerCharts() }.getOrDefault(emptyList()) } else null
-            val koreanDeferred = if (useKoreanCharts) async { runCatching { fetchKoreanChartSuggestions() }.getOrDefault(emptyList()) } else null
-
-            val combined = mutableListOf<ChartCandidate>()
-            appleDeferred?.await()?.let(combined::addAll)
-            deezerDeferred?.await()?.let(combined::addAll)
-            koreanDeferred?.await()?.let(combined::addAll)
-            combined
+        val rawTracks: List<ChartCandidate> = coroutineScope {
+            val tasks = mutableListOf<Deferred<List<ChartCandidate>>>()
+            if (useApple) {
+                tasks += async<List<ChartCandidate>> { runCatching { fetchAppleTopCharts() }.getOrDefault(emptyList()) }
+            }
+            if (useDeezer) {
+                tasks += async<List<ChartCandidate>> { runCatching { fetchDeezerCharts() }.getOrDefault(emptyList()) }
+            }
+            if (useKoreanCharts) {
+                tasks += async<List<ChartCandidate>> { runCatching { fetchKoreanChartSuggestions() }.getOrDefault(emptyList()) }
+            }
+            tasks.awaitAll().flatten()
         }
 
         val deduped = deduplicateTracks(rawTracks).take(15)
