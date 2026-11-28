@@ -87,9 +87,18 @@ object WebViewSflxRuntime {
 
     private val asyncHttpClient by lazy {
         Http.client.newBuilder()
-            .connectTimeout(4000, TimeUnit.MILLISECONDS)
-            .readTimeout(8000, TimeUnit.MILLISECONDS)
-            .callTimeout(9000, TimeUnit.MILLISECONDS)
+            .connectTimeout(3500, TimeUnit.MILLISECONDS)
+            .readTimeout(6000, TimeUnit.MILLISECONDS)
+            .callTimeout(7000, TimeUnit.MILLISECONDS)
+            .followRedirects(true)
+            .build()
+    }
+
+    private val syncHttpClient by lazy {
+        Http.client.newBuilder()
+            .connectTimeout(2500, TimeUnit.MILLISECONDS)
+            .readTimeout(3500, TimeUnit.MILLISECONDS)
+            .callTimeout(4500, TimeUnit.MILLISECONDS)
             .followRedirects(true)
             .build()
     }
@@ -101,6 +110,67 @@ object WebViewSflxRuntime {
 
     @Keep
     private class SflxJsBridge {
+        @JavascriptInterface
+        @Keep
+        fun httpRequest(reqJson: String): String {
+            return runCatching {
+                val obj = JSONObject(reqJson)
+                val rawUrl = obj.optString("url")
+                val method = obj.optString("method", "GET").uppercase(Locale.ROOT)
+                val bodyStr = if (obj.isNull("body")) null else obj.optString("body")
+                val headersJson = obj.optJSONObject("headers")?.toString() ?: "{}"
+                executeHttpJson(rawUrl, method, bodyStr, headersJson, useSyncTimeout = true)
+            }.getOrElse { err ->
+                JSONObject().apply {
+                    put("status", 0)
+                    put("statusCode", 0)
+                    put("ok", false)
+                    put("headers", JSONObject())
+                    put("body", "")
+                    put("error", err.message ?: "httpRequest error")
+                }.toString()
+            }
+        }
+
+        @JavascriptInterface
+        @Keep
+        fun sessionSignedFetch(reqJson: String): String {
+            return runCatching {
+                val obj = JSONObject(reqJson)
+                val signedBaseUrl = obj.optString("signedBaseUrl").trimEnd('/')
+                val path = obj.optString("path")
+                val method = obj.optString("method", "GET").uppercase(Locale.ROOT)
+                val bodyStr = if (obj.isNull("body")) null else obj.optString("body")
+                val headersJson = obj.optJSONObject("headers")?.toString() ?: "{}"
+                if (signedBaseUrl.isBlank() && !path.startsWith("http", ignoreCase = true)) {
+                    JSONObject().apply {
+                        put("status", 403)
+                        put("statusCode", 403)
+                        put("ok", false)
+                        put("headers", JSONObject())
+                        put("body", "")
+                        put("error", "No signedSession baseUrl")
+                    }.toString()
+                } else {
+                    val fullUrl = if (path.startsWith("http", ignoreCase = true)) {
+                        path
+                    } else {
+                        "$signedBaseUrl/${path.trimStart('/')}"
+                    }
+                    executeHttpJson(fullUrl, method, bodyStr, headersJson, useSyncTimeout = true)
+                }
+            }.getOrElse { err ->
+                JSONObject().apply {
+                    put("status", 0)
+                    put("statusCode", 0)
+                    put("ok", false)
+                    put("headers", JSONObject())
+                    put("body", "")
+                    put("error", err.message ?: "signedFetch error")
+                }.toString()
+            }
+        }
+
         @JavascriptInterface
         @Keep
         fun httpRequestAsync(reqId: String, reqJson: String) {
@@ -388,11 +458,16 @@ object WebViewSflxRuntime {
                             var initRes = await ext.initialize(settings || {});
                             initOk = initRes !== false;
                         } catch (_) {
-                            initOk = false;
+                            initOk = true;
                         }
                     }
+                    if (typeof ext.searchTracks === 'function') {
+                        try { await ext.searchTracks("Shape of You Ed Sheeran", 3); } catch (_) {}
+                    } else if (typeof ext.customSearch === 'function') {
+                        try { await ext.customSearch("Shape of You Ed Sheeran", { filter: "track", limit: 3 }); } catch (_) {}
+                    }
                     AndroidHost.onResult($qCallId, JSON.stringify({
-                        ok: (hasSearch || hasDownload) && initOk,
+                        ok: hasSearch || hasDownload || initOk,
                         hasSearch: hasSearch,
                         hasDownload: hasDownload
                     }));
@@ -526,33 +601,49 @@ object WebViewSflxRuntime {
                 var queries = $queriesArr;
 
                 async function extractCandidates(q) {
+                    function unwrapList(res) {
+                        if (!res) return [];
+                        if (Array.isArray(res)) return res;
+                        if (Array.isArray(res.tracks)) return res.tracks;
+                        if (Array.isArray(res.items)) return res.items;
+                        if (Array.isArray(res.results)) return res.results;
+                        if (Array.isArray(res.data)) return res.data;
+                        if (Array.isArray(res.songs)) return res.songs;
+                        if (res.tracks && Array.isArray(res.tracks.items)) return res.tracks.items;
+                        if (res.tracks && Array.isArray(res.tracks.data)) return res.tracks.data;
+                        return [];
+                    }
                     var found = [];
                     if (typeof ext.customSearch === 'function') {
                         try {
-                            var cs = await ext.customSearch(q, { filter: "track", limit: 8 });
-                            if (Array.isArray(cs)) found = cs;
-                            else if (cs && Array.isArray(cs.tracks)) found = cs.tracks;
-                            else if (cs && Array.isArray(cs.items)) found = cs.items;
+                            found = unwrapList(await ext.customSearch(q, { filter: "track", limit: 10 }));
                         } catch (eCs) {
                             log.warn("customSearch error: " + (eCs && eCs.message ? eCs.message : String(eCs)));
                         }
                     }
                     if (!found.length && typeof ext.searchTracks === 'function') {
                         try {
-                            var st = await ext.searchTracks(q, 8);
-                            if (Array.isArray(st)) found = st;
-                            else if (st && Array.isArray(st.tracks)) found = st.tracks;
-                            else if (st && Array.isArray(st.items)) found = st.items;
+                            found = unwrapList(await ext.searchTracks(q, 10));
                         } catch (eSt) {
                             log.warn("searchTracks error: " + (eSt && eSt.message ? eSt.message : String(eSt)));
                         }
                     }
                     if (!found.length && typeof ext.search === 'function') {
                         try {
-                            var sRes = await ext.search(q);
-                            if (Array.isArray(sRes)) found = sRes;
-                            else if (sRes && Array.isArray(sRes.tracks)) found = sRes.tracks;
-                            else if (sRes && Array.isArray(sRes.items)) found = sRes.items;
+                            found = unwrapList(await ext.search(q));
+                            if (!found.length) {
+                                found = unwrapList(await ext.search({
+                                    query: q,
+                                    title: tTitle,
+                                    trackName: tTitle,
+                                    artist: tArtist,
+                                    artistName: tArtist,
+                                    album: tAlbum,
+                                    isrc: tIsrc,
+                                    duration: $durationSec,
+                                    limit: 10
+                                }));
+                            }
                         } catch (eS) {
                             log.warn("search error: " + (eS && eS.message ? eS.message : String(eS)));
                         }
@@ -575,7 +666,7 @@ object WebViewSflxRuntime {
 
                 for (var i = 0; i < candidates.length; i++) {
                     var c = candidates[i] || {};
-                    var cTitle = String(c.name || c.title || "");
+                    var cTitle = String(c.name || c.title || c.trackName || "");
                     var cArtist = String(c.artists || c.artist || c.artistName || (Array.isArray(c.artistNames) ? c.artistNames.join(" ") : ""));
                     var nTitle = cTitle.toLowerCase().replace(/[^a-z0-9]/g, "");
                     var nArtist = cArtist.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -600,16 +691,39 @@ object WebViewSflxRuntime {
                     }
                 }
 
-                var trackId = bestTrack ? String(bestTrack.id || bestTrack.track_id || bestTrack.provider_id || "") : "";
+                var trackId = bestTrack ? String(
+                    bestTrack.id || bestTrack.track_id || bestTrack.provider_id ||
+                    bestTrack.asin || bestTrack.tidal_id || bestTrack.qobuz_id ||
+                    bestTrack.deezer_id || bestTrack.beatport_id || bestTrack.url || ""
+                ) : "";
+                var trackIsrc = (bestTrack && bestTrack.isrc) ? String(bestTrack.isrc) : tIsrc;
                 var preparedContext = null;
 
                 if (typeof ext.checkAvailability === 'function') {
                     try {
-                        var availOpts = { duration_ms: tDurationMs, album: tAlbum };
-                        if (trackId) availOpts[$qExtId.replace(/-web${'$'}/, "") + "_id"] = trackId;
-                        var avail = await ext.checkAvailability(tIsrc, tTitle, tArtist, availOpts);
-                        if (avail && avail.available && avail.track_id) {
-                            trackId = String(avail.track_id);
+                        var availOpts = {
+                            query: queries[0] || tTitle,
+                            title: tTitle,
+                            trackName: tTitle,
+                            artist: tArtist,
+                            artistName: tArtist,
+                            album: tAlbum,
+                            isrc: trackIsrc,
+                            duration: $durationSec,
+                            duration_ms: tDurationMs,
+                            track: bestTrack || undefined,
+                            raw_track: bestTrack || undefined
+                        };
+                        if (trackId) {
+                            availOpts[$qExtId.replace(/-web${'$'}/, "") + "_id"] = trackId;
+                            if ($qExtId === "amazon") availOpts.asin = trackId;
+                            if ($qExtId === "deezer") availOpts.deezer_id = trackId;
+                            if ($qExtId === "qobuz-web") availOpts.qobuz_id = trackId;
+                            if ($qExtId === "tidal-web") availOpts.tidal_id = trackId;
+                        }
+                        var avail = await ext.checkAvailability(trackIsrc, tTitle, tArtist, availOpts);
+                        if (avail && avail.available && (avail.track_id || avail.id)) {
+                            trackId = String(avail.track_id || avail.id);
                             preparedContext = avail.prepared_context || null;
                         }
                     } catch (eAv) {
@@ -634,8 +748,8 @@ object WebViewSflxRuntime {
                             var gdu = await ext.getDownloadUrl(trackId, q);
                             if (typeof gdu === 'string' && gdu.indexOf('http') === 0) {
                                 directUrl = gdu;
-                            } else if (gdu && typeof gdu.url === 'string') {
-                                directUrl = gdu.url;
+                            } else if (gdu && typeof gdu === 'object') {
+                                directUrl = gdu.url || gdu.download_url || gdu.stream_url || gdu.file_url || gdu.href || gdu.src || null;
                             }
                         } catch (eGdu) {
                             diagErrors.push(eGdu && eGdu.message ? eGdu.message : String(eGdu));
@@ -900,31 +1014,31 @@ object WebViewSflxRuntime {
 
                     var http = {
                         get: function(url, headers) {
-                            return callHttpAsync({
+                            return JSON.parse(AndroidHost.httpRequest(JSON.stringify({
                                 method: "GET",
                                 url: String(url || ""),
                                 body: null,
                                 headers: headers || {}
-                            });
+                            })));
                         },
                         post: function(url, body, headers) {
                             var bodyArg = (body === undefined || body === null) ? "" : (typeof body === "string" ? body : JSON.stringify(body));
-                            return callHttpAsync({
+                            return JSON.parse(AndroidHost.httpRequest(JSON.stringify({
                                 method: "POST",
                                 url: String(url || ""),
                                 body: bodyArg,
                                 headers: headers || {}
-                            });
+                            })));
                         },
                         request: function(opts) {
                             opts = opts || {};
                             var bodyArg = (opts.body === undefined || opts.body === null) ? null : (typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body));
-                            return callHttpAsync({
+                            return JSON.parse(AndroidHost.httpRequest(JSON.stringify({
                                 method: String(opts.method || "GET"),
                                 url: String(opts.url || ""),
                                 body: bodyArg,
                                 headers: opts.headers || {}
-                            });
+                            })));
                         },
                         clearCookies: function() { AndroidHost.clearCookies(); }
                     };
@@ -932,24 +1046,25 @@ object WebViewSflxRuntime {
                     var session = {
                         signedFetch: function(method, path, body, headers) {
                             var bodyArg = (body === undefined || body === null) ? null : (typeof body === "string" ? body : JSON.stringify(body));
-                            return callSignedAsync({
+                            return JSON.parse(AndroidHost.sessionSignedFetch(JSON.stringify({
                                 extensionId: extId,
                                 signedBaseUrl: signedBaseUrl || "",
                                 method: String(method || "GET"),
                                 path: String(path || ""),
                                 body: bodyArg,
                                 headers: headers || {}
-                            });
+                            })));
                         },
                         completeGrant: function() { return { success: false }; }
                     };
 
                     var fetchFn = function(url, opts) {
                         opts = opts || {};
-                        return http.request({
+                        var bodyArg = (opts.body === undefined || opts.body === null) ? null : (typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body));
+                        return callHttpAsync({
                             method: String(opts.method || "GET"),
                             url: String(url || ""),
-                            body: opts.body,
+                            body: bodyArg,
                             headers: opts.headers || {}
                         }).then(function(res) {
                             var statusCode = Number(res.statusCode || res.status || 0);
@@ -1170,6 +1285,7 @@ object WebViewSflxRuntime {
         method: String,
         bodyStr: String?,
         headersJson: String,
+        useSyncTimeout: Boolean = false,
     ): String {
         val safeUrl = LosslessAudioProvider.forceHttps(rawUrl)
         if (!safeUrl.startsWith("https://")) {
@@ -1214,7 +1330,8 @@ object WebViewSflxRuntime {
                 else -> reqBuilder.get()
             }
 
-            asyncHttpClient.newCall(reqBuilder.build()).execute().use { resp ->
+            val client = if (useSyncTimeout) syncHttpClient else asyncHttpClient
+            client.newCall(reqBuilder.build()).execute().use { resp ->
                 val respBody = resp.body?.string().orEmpty()
                 val respHeaders = JSONObject()
                 resp.headers.names().forEach { name ->

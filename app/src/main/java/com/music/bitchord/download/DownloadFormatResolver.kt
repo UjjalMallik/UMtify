@@ -113,6 +113,11 @@ object DownloadFormatResolver {
                         } else {
                             draft.bitrateKbps.takeIf { it > 0 } ?: estKbps
                         }
+                        // Guard against mislabeling lossy YouTube Opus/AAC (~146-164 kbps / ~3.2 MB)
+                        // fallback streams as FLAC Lossless.
+                        if (draft.isLossless && probedBytes != null && resolvedKbps in 1..449) {
+                            return@async null
+                        }
                         DownloadFormatOption(
                             id = draft.id,
                             label = draft.label,
@@ -130,7 +135,7 @@ object DownloadFormatResolver {
                             sourceName = draft.sourceName,
                         )
                     }
-                }.awaitAll()
+                }.awaitAll().filterNotNull()
             }
 
             val snapshot = stateMutex.withLock {
@@ -442,6 +447,17 @@ object DownloadFormatResolver {
             stream.headers + ("User-Agent" to DEFAULT_UA)
         }
 
+        val codecLower = stream.format.codec?.lowercase(Locale.ROOT).orEmpty()
+        val isKnownLossyCodec = codecLower.contains("opus") ||
+            codecLower.contains("vorbis") ||
+            codecLower.contains("aac") ||
+            codecLower.contains("mp4a") ||
+            codecLower.contains("mp3")
+        val looksLikeFlacUrl = safeUrl.substringBefore('?').endsWith(".flac", ignoreCase = true) ||
+            codecLower.contains("flac") ||
+            codecLower.contains("alac") ||
+            codecLower.contains("wav")
+
         return when {
             stream.format.isDolbyAtmos -> {
                 val kbps = stream.format.kbps ?: 768
@@ -460,7 +476,9 @@ object DownloadFormatResolver {
                     sourceName = srcName,
                 )
             }
-            stream.format.isLossless == true || safeUrl.substringBefore('?').endsWith(".flac", ignoreCase = true) -> {
+            !isKnownLossyCodec &&
+                (stream.format.isLossless == true || looksLikeFlacUrl) &&
+                (stream.format.kbps == null || stream.format.kbps!! >= 450) -> {
                 val bd = stream.format.bitDepth ?: 16
                 val sr = stream.format.sampleRateHz ?: if (bd > 16) 96000 else 44100
                 val khz = String.format(Locale.US, "%.1f", sr / 1000.0)
@@ -518,28 +536,54 @@ object DownloadFormatResolver {
         val measured = NerdStats.measuredFormat(id)
         val recordedSource = NerdStats.sourceFor(id)
         val urlLower = candidate.url.substringBefore('?').lowercase(Locale.ROOT)
-        val isManifest = com.music.bitchord.playback.StreamContainer.isManifest(candidate.url)
-        val isLosslessOrPremium = candidate.format.isLossless == true ||
-            candidate.format.isDolbyAtmos ||
-            declared?.isLossless == true ||
-            measured?.isLossless == true ||
-            declared?.isDolbyAtmos == true ||
-            urlLower.endsWith(".flac") ||
-            isManifest ||
-            (candidate.format.kbps ?: 0) >= 256
-        if (!isLosslessOrPremium) return null
+        // Never misclassify YouTube / JioSaavn CDNs as UMtify lossless streams
+        if (urlLower.contains("googlevideo.com") ||
+            urlLower.contains("youtube.com") ||
+            urlLower.contains("saavncdn") ||
+            urlLower.contains("jiosaavn")
+        ) {
+            return null
+        }
 
         val resolvedName = candidate.sourceName?.takeIf { it.isNotBlank() }
             ?: candidate.sourceConfigId?.let { SourceRegistry.config(it)?.displayName }
             ?: recordedSource
-            ?: if (candidate.format.isDolbyAtmos || declared?.isDolbyAtmos == true) "Dolby Atmos" else "UMtify"
+            ?: return null
+        if (resolvedName.equals("YouTube", ignoreCase = true) ||
+            resolvedName.equals("YouTube Music", ignoreCase = true) ||
+            resolvedName.equals("JioSaavn", ignoreCase = true)
+        ) {
+            return null
+        }
+
+        val effectiveCodec = (candidate.format.codec ?: measured?.codec ?: declared?.codec)?.lowercase(Locale.ROOT).orEmpty()
+        if (effectiveCodec.contains("opus") ||
+            effectiveCodec.contains("vorbis") ||
+            effectiveCodec.contains("aac") ||
+            effectiveCodec.contains("mp4a") ||
+            effectiveCodec.contains("mp3")
+        ) {
+            return null
+        }
+
+        val knownKbps = candidate.format.kbps ?: measured?.kbps ?: declared?.kbps
+        val isAtmos = candidate.format.isDolbyAtmos || declared?.isDolbyAtmos == true
+        val isGenuinelyLossless = candidate.format.isLossless == true ||
+            declared?.isLossless == true ||
+            measured?.isLossless == true ||
+            urlLower.endsWith(".flac") ||
+            effectiveCodec.contains("flac") ||
+            effectiveCodec.contains("alac") ||
+            effectiveCodec.contains("wav")
+        if (!isAtmos && !isGenuinelyLossless) return null
+        if (!isAtmos && knownKbps != null && knownKbps < 450) return null
 
         val inferredCodec = candidate.format.codec
             ?: measured?.codec
             ?: declared?.codec
             ?: when {
-                urlLower.endsWith(".flac") -> "flac"
-                measured?.isLossless == true || declared?.isLossless == true -> "flac"
+                isAtmos -> "eac3-joc"
+                urlLower.endsWith(".flac") || isGenuinelyLossless -> "flac"
                 else -> null
             }
         val bestBitDepth = maxOf(
